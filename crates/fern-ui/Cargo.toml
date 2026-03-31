@@ -1,0 +1,25 @@
+[package]
+name = "fern-ui"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["widgets", "text", "i18n"]
+widgets = ["dep:fern-widgets"]
+text = ["dep:fern-text", "fern-app/text"]
+i18n = ["dep:fern-i18n"]
+rich-text = ["widgets", "fern-widgets/rich-text"]
+
+[dependencies]
+fern-tokens = { workspace = true }
+fern-canvas = { workspace = true }
+fern-core = { workspace = true }
+fern-render = { workspace = true }
+fern-platform = { workspace = true }
+fern-app = { workspace = true }
+fern-widgets = { workspace = true, optional = true }
+fern-text = { workspace = true, optional = true }
+fern-i18n = { workspace = true, optional = true }

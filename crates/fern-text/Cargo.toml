@@ -1,0 +1,12 @@
+[package]
+name = "fern-text"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+fern-canvas = { workspace = true }
+fern-tokens = { workspace = true }
+text-typeset = { path = "../../../text-typeset" }

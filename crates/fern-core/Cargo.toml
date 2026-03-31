@@ -1,0 +1,13 @@
+[package]
+name = "fern-core"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+fern-tokens = { workspace = true }
+fern-canvas = { workspace = true }
+accesskit = { workspace = true }
+slotmap = "1"

@@ -1,0 +1,16 @@
+[package]
+name = "fern-platform"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+fern-core = { workspace = true }
+fern-canvas = { workspace = true }
+fern-render = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+accesskit = { workspace = true }
+accesskit_winit = "0.32"

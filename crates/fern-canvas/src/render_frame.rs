@@ -1,0 +1,244 @@
+use crate::geometry::Rect;
+
+/// The complete render output for one frame. This is the boundary between
+/// platform-independent widget code and GPU-specific rendering code.
+#[derive(Debug, Clone, Default)]
+pub struct RenderFrame {
+    pub glyphs: Vec<GlyphQuad>,
+    pub images: Vec<ImageQuad>,
+    pub decorations: Vec<DecorationRect>,
+    pub shapes: Vec<ShapeQuad>,
+    pub rasterized: Vec<RasterizedQuad>,
+    pub paths: Vec<PathEntry>,
+    pub draw_order: Vec<DrawCommand>,
+}
+
+impl RenderFrame {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.draw_order.is_empty()
+    }
+
+    /// Merge another frame into this one, appending all entries
+    /// and adjusting draw_order indices.
+    pub fn merge(&mut self, other: &RenderFrame) {
+        let glyph_offset = self.glyphs.len();
+        let image_offset = self.images.len();
+        let decoration_offset = self.decorations.len();
+        let shape_offset = self.shapes.len();
+        let rasterized_offset = self.rasterized.len();
+        let path_offset = self.paths.len();
+
+        self.glyphs.extend_from_slice(&other.glyphs);
+        self.images.extend_from_slice(&other.images);
+        self.decorations.extend_from_slice(&other.decorations);
+        self.shapes.extend_from_slice(&other.shapes);
+        self.rasterized.extend_from_slice(&other.rasterized);
+        self.paths.extend_from_slice(&other.paths);
+
+        for cmd in &other.draw_order {
+            let shifted = match *cmd {
+                DrawCommand::Glyph(i) => DrawCommand::Glyph(i + glyph_offset),
+                DrawCommand::Image(i) => DrawCommand::Image(i + image_offset),
+                DrawCommand::Decoration(i) => DrawCommand::Decoration(i + decoration_offset),
+                DrawCommand::Shape(i) => DrawCommand::Shape(i + shape_offset),
+                DrawCommand::Rasterized(i) => DrawCommand::Rasterized(i + rasterized_offset),
+                DrawCommand::Path(i) => DrawCommand::Path(i + path_offset),
+                other => other,
+            };
+            self.draw_order.push(shifted);
+        }
+    }
+}
+
+/// A positioned glyph to render as a textured rectangle from the glyph atlas.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlyphQuad {
+    /// Screen position and size: [x, y, width, height] in logical pixels.
+    pub screen: [f32; 4],
+    /// Atlas position and size: [x, y, width, height] in atlas texture coordinates.
+    pub atlas: [f32; 4],
+    /// Text color: [r, g, b, a].
+    pub color: [f32; 4],
+}
+
+/// An image quad to render as a textured rectangle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageQuad {
+    /// Screen position and size: [x, y, width, height] in logical pixels.
+    pub screen: [f32; 4],
+    /// Resource name of the image.
+    pub name: String,
+}
+
+/// A colored rectangle for decorations (selections, cursors, underlines, borders, etc.).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DecorationRect {
+    /// Position and size: [x, y, width, height] in logical pixels.
+    pub rect: [f32; 4],
+    /// Color: [r, g, b, a].
+    pub color: [f32; 4],
+    /// What kind of decoration this is.
+    pub kind: DecorationKind,
+}
+
+/// The kind of decoration a DecorationRect represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecorationKind {
+    WidgetBackground,
+    Selection,
+    Cursor,
+    Underline,
+    Strikeout,
+    FocusRing,
+    DropIndicator,
+    TableBorder,
+}
+
+/// A shape rendered via SDF (signed distance field) shaders.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapeQuad {
+    /// Screen position and size: [x, y, width, height] in logical pixels.
+    pub screen: [f32; 4],
+    /// Fill color: [r, g, b, a].
+    pub color: [f32; 4],
+    /// What shape to render.
+    pub shape: ShapeKind,
+    /// Stroke width (0.0 for filled shapes).
+    pub stroke_width: f32,
+    /// Corner radii: [top_left, top_right, bottom_right, bottom_left].
+    pub corner_radii: [f32; 4],
+    /// Paint type for the shape.
+    pub paint_data: PaintData,
+}
+
+/// The kind of SDF shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShapeKind {
+    RoundedRect,
+    Circle,
+    Ellipse,
+}
+
+/// A CPU-rasterized path result, stored in the shape atlas.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RasterizedQuad {
+    /// Screen position and size: [x, y, width, height] in logical pixels.
+    pub screen: [f32; 4],
+    /// Shape atlas position and size: [x, y, width, height] in atlas coordinates.
+    pub atlas: [f32; 4],
+    /// Tint color: [r, g, b, a].
+    pub color: [f32; 4],
+}
+
+/// A path to be rasterized on the CPU (Tier 3). Stored in the RenderFrame
+/// until the renderer rasterizes it into the shape atlas and converts it
+/// to a [`RasterizedQuad`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PathEntry {
+    /// The path commands to rasterize.
+    pub path: crate::path::Path,
+    /// Fill color: [r, g, b, a].
+    pub color: [f32; 4],
+    /// Stroke width (0.0 for filled paths).
+    pub stroke_width: f32,
+    /// Bounding rect in logical pixels (computed from path bounds).
+    pub bounds: [f32; 4],
+}
+
+/// Paint data for SDF shapes, passed to the GPU shader.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PaintData {
+    Solid,
+    LinearGradient {
+        start: [f32; 2],
+        end: [f32; 2],
+        stops: Vec<crate::paint::GradientStop>,
+    },
+    RadialGradient {
+        center: [f32; 2],
+        radius: f32,
+        stops: Vec<crate::paint::GradientStop>,
+    },
+}
+
+impl Default for PaintData {
+    fn default() -> Self {
+        Self::Solid
+    }
+}
+
+/// A draw command referencing an entry in one of the RenderFrame arrays.
+/// Commands are recorded in painter's order (back-to-front).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DrawCommand {
+    Glyph(usize),
+    Image(usize),
+    Decoration(usize),
+    Shape(usize),
+    Rasterized(usize),
+    Path(usize),
+    SetClip(Rect),
+    ClearClip,
+    SetOpacity(f32),
+    RestoreOpacity,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_render_frame() {
+        let frame = RenderFrame::new();
+        assert!(frame.is_empty());
+        assert!(frame.glyphs.is_empty());
+        assert!(frame.images.is_empty());
+        assert!(frame.decorations.is_empty());
+        assert!(frame.shapes.is_empty());
+        assert!(frame.rasterized.is_empty());
+    }
+
+    #[test]
+    fn merge_frames() {
+        let mut a = RenderFrame::new();
+        a.shapes.push(ShapeQuad {
+            screen: [0.0, 0.0, 10.0, 10.0],
+            color: [1.0, 0.0, 0.0, 1.0],
+            shape: ShapeKind::RoundedRect,
+            stroke_width: 0.0,
+            corner_radii: [0.0; 4],
+            paint_data: PaintData::Solid,
+        });
+        a.draw_order.push(DrawCommand::Shape(0));
+
+        let mut b = RenderFrame::new();
+        b.decorations.push(DecorationRect {
+            rect: [0.0, 0.0, 5.0, 5.0],
+            color: [0.0, 0.0, 1.0, 1.0],
+            kind: DecorationKind::FocusRing,
+        });
+        b.draw_order.push(DrawCommand::Decoration(0));
+
+        a.merge(&b);
+        assert_eq!(a.shapes.len(), 1);
+        assert_eq!(a.decorations.len(), 1);
+        assert_eq!(a.draw_order.len(), 2);
+        assert_eq!(a.draw_order[1], DrawCommand::Decoration(0));
+    }
+
+    #[test]
+    fn merge_preserves_state_commands() {
+        let mut a = RenderFrame::new();
+        a.draw_order.push(DrawCommand::SetOpacity(0.5));
+        let mut b = RenderFrame::new();
+        b.draw_order.push(DrawCommand::RestoreOpacity);
+        a.merge(&b);
+        assert_eq!(a.draw_order.len(), 2);
+        assert_eq!(a.draw_order[0], DrawCommand::SetOpacity(0.5));
+        assert_eq!(a.draw_order[1], DrawCommand::RestoreOpacity);
+    }
+}

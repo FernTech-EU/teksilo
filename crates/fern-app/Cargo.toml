@@ -1,0 +1,24 @@
+[package]
+name = "fern-app"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["text"]
+text = ["dep:fern-text"]
+
+[dependencies]
+fern-core = { workspace = true }
+fern-canvas = { workspace = true }
+fern-tokens = { workspace = true }
+fern-render = { workspace = true }
+fern-platform = { workspace = true }
+fern-text = { workspace = true, optional = true }
+winit = { workspace = true }
+pollster = "0.4"
+
+[dev-dependencies]
+fern-widgets = { workspace = true }
