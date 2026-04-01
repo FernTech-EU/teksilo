@@ -5,9 +5,9 @@ use crate::gesture::{GestureArena, GestureEvent};
 use crate::widget::Widget;
 use crate::widget_id::WidgetId;
 
-/// Minimal placeholder widget used during composite rebuild.
+/// Minimal placeholder widget used during composite rebuild and ID reservation.
 #[derive(Debug)]
-struct PlaceholderWidget;
+pub(crate) struct PlaceholderWidget;
 
 impl Widget for PlaceholderWidget {
     fn size_that_fits(

@@ -232,10 +232,20 @@ pub struct State<T> {
     inner: Rc<RefCell<StateInner<T>>>,
 }
 
+/// Opaque ID for an observer callback, used to remove it later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ObserverId(u64);
+
+struct ObserverEntry<T> {
+    id: ObserverId,
+    callback: Rc<dyn Fn(&T)>,
+}
+
 struct StateInner<T> {
     value: T,
     dirty: bool,
-    observers: Vec<Rc<dyn Fn(&T)>>,
+    observers: Vec<ObserverEntry<T>>,
+    next_observer_id: u64,
 }
 
 impl<T: 'static> State<T> {
@@ -245,6 +255,7 @@ impl<T: 'static> State<T> {
                 value,
                 dirty: false,
                 observers: Vec::new(),
+                next_observer_id: 1,
             })),
         }
     }
@@ -257,20 +268,32 @@ impl<T: 'static> State<T> {
         let mut inner = self.inner.borrow_mut();
         inner.value = value;
         inner.dirty = true;
-        // Notify observers (clone the list to avoid borrow conflicts)
-        let observers: Vec<_> = inner.observers.iter().cloned().collect();
-        drop(inner); // release borrow before calling observers
+        // Notify observers (clone the callback list to avoid borrow conflicts)
+        let callbacks: Vec<_> = inner.observers.iter().map(|e| e.callback.clone()).collect();
+        drop(inner);
         let inner_ref = self.inner.borrow();
-        for observer in &observers {
-            observer(&inner_ref.value);
+        for cb in &callbacks {
+            cb(&inner_ref.value);
         }
     }
 
     /// Register an observer callback. Called with a reference to the new value
-    /// whenever `set()` is called. For application-layer notifications, not
-    /// for widget bindings (use `bind_to` for those).
-    pub fn observe(&self, callback: impl Fn(&T) + 'static) {
-        self.inner.borrow_mut().observers.push(Rc::new(callback));
+    /// whenever `set()` is called. Returns an `ObserverId` for later removal.
+    /// For application-layer notifications, not for widget bindings (use `bind_to` for those).
+    pub fn observe(&self, callback: impl Fn(&T) + 'static) -> ObserverId {
+        let mut inner = self.inner.borrow_mut();
+        let id = ObserverId(inner.next_observer_id);
+        inner.next_observer_id += 1;
+        inner.observers.push(ObserverEntry {
+            id,
+            callback: Rc::new(callback),
+        });
+        id
+    }
+
+    /// Remove a previously registered observer by its ID.
+    pub fn remove_observer(&self, id: ObserverId) {
+        self.inner.borrow_mut().observers.retain(|e| e.id != id);
     }
 
     pub fn is_dirty(&self) -> bool {

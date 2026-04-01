@@ -169,8 +169,8 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 }
 
 /// Trait for anything that can be added to a WidgetTree via `add_widget()`.
-/// Blanket-implemented for all `Widget` types. Composite widgets implement
-/// this manually to route through the composite build path.
+/// Blanket-implemented for all `Widget` types. Composite widgets use the
+/// `impl_composite_into_widget_tree!` macro to generate the implementation.
 pub trait IntoWidgetTree: 'static {
     fn register(self: Box<Self>, tree: &mut crate::widget_tree::WidgetTree) -> WidgetId;
 }
@@ -179,6 +179,27 @@ impl<W: Widget + 'static> IntoWidgetTree for W {
     fn register(self: Box<Self>, tree: &mut crate::widget_tree::WidgetTree) -> WidgetId {
         tree.add_widget_direct(self)
     }
+}
+
+/// Implement `IntoWidgetTree` for a `CompositeWidget` type, routing it
+/// through the composite build path. Use this instead of writing the
+/// boilerplate manually.
+///
+/// ```ignore
+/// impl_composite_into_widget_tree!(MyWidget);
+/// ```
+#[macro_export]
+macro_rules! impl_composite_into_widget_tree {
+    ($t:ty) => {
+        impl $crate::widget::IntoWidgetTree for $t {
+            fn register(
+                self: Box<Self>,
+                tree: &mut $crate::widget_tree::WidgetTree,
+            ) -> $crate::widget_id::WidgetId {
+                tree.add_composite_inner(self)
+            }
+        }
+    };
 }
 
 /// Context available during event handling.

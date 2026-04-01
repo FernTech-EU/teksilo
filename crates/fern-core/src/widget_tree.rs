@@ -44,6 +44,9 @@ pub struct WidgetTree {
     layout_direction: crate::environment::LayoutDirection,
     /// IDs of composite widget adapters (for rebuild on theme/environment change).
     composite_ids: Vec<WidgetId>,
+    /// Observer cleanup: functions to remove observers registered during build().
+    /// Keyed by composite adapter ID. Cleared and re-populated on each rebuild.
+    observer_cleanups: std::collections::HashMap<WidgetId, Vec<Box<dyn Fn()>>>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -78,6 +81,7 @@ impl WidgetTree {
             tooltips: Vec::new(),
             layout_direction: crate::environment::LayoutDirection::default(),
             composite_ids: Vec::new(),
+            observer_cleanups: std::collections::HashMap::new(),
         }
     }
 
@@ -123,6 +127,13 @@ impl WidgetTree {
     fn rebuild_composites(&mut self) {
         let ids: Vec<WidgetId> = self.composite_ids.clone();
         for adapter_id in ids {
+            // Run observer cleanup for this composite before rebuilding
+            if let Some(cleanups) = self.observer_cleanups.remove(&adapter_id) {
+                for cleanup in cleanups {
+                    cleanup();
+                }
+            }
+
             // Get the old root child for destruction
             let old_root = {
                 let node = match self.arena.get(adapter_id) {
@@ -160,7 +171,10 @@ impl WidgetTree {
                         continue;
                     }
                 };
-                let mut build_ctx = crate::composite_widget::BuildContext { tree: self };
+                let mut build_ctx = crate::composite_widget::BuildContext {
+                    tree: self,
+                    composite_id: Some(adapter_id),
+                };
                 let (_old, new_root) = adapter.rebuild(&mut build_ctx);
                 new_root
             };
@@ -192,6 +206,19 @@ impl WidgetTree {
     /// Set a per-child alignment override on a widget.
     pub fn set_alignment(&mut self, id: WidgetId, alignment: fern_tokens::Alignment) {
         self.arena.set_alignment_override(id, alignment);
+    }
+
+    /// Register an observer cleanup function for a composite.
+    /// Called during build() when ctx.observe() is used.
+    pub(crate) fn register_observer_cleanup(
+        &mut self,
+        composite_id: WidgetId,
+        cleanup: Box<dyn Fn()>,
+    ) {
+        self.observer_cleanups
+            .entry(composite_id)
+            .or_default()
+            .push(cleanup);
     }
 
     /// Get the binding registry for registering State→Widget bindings.
@@ -294,8 +321,13 @@ impl WidgetTree {
     }
 
     /// Insert a pre-boxed Widget directly. Used by the `IntoWidgetTree` blanket impl.
+    /// Automatically registers reactive bindings.
     pub fn add_widget_direct(&mut self, widget: Box<dyn Widget>) -> WidgetId {
-        self.arena.insert(widget)
+        let id = self.arena.insert(widget);
+        if let Some(node) = self.arena.get(id) {
+            node.widget.register_bindings(id, &self.binding_registry);
+        }
+        id
     }
 
     /// Insert a boxed CompositeWidget. Used by `IntoWidgetTree` impls on composites.
@@ -306,10 +338,19 @@ impl WidgetTree {
         use crate::composite_adapter::CompositeWidgetAdapter;
         let mut adapter = CompositeWidgetAdapter::new(composite);
 
-        let mut build_ctx = crate::composite_widget::BuildContext { tree: self };
+        // Insert a placeholder to reserve the adapter's ID before build().
+        // This allows BuildContext::self_id() to return the composite's own ID.
+        use crate::arena::PlaceholderWidget;
+        let adapter_id = self.arena.insert(Box::new(PlaceholderWidget));
+
+        let mut build_ctx = crate::composite_widget::BuildContext {
+            tree: self,
+            composite_id: Some(adapter_id),
+        };
         let root_child = adapter.build(&mut build_ctx);
 
-        let adapter_id = self.arena.insert(Box::new(adapter));
+        // Replace the placeholder with the real adapter
+        self.arena.restore_widget(adapter_id, Box::new(adapter));
 
         if let Some(child_node) = self.arena.get_mut(root_child) {
             child_node.parent = Some(adapter_id);
@@ -322,14 +363,9 @@ impl WidgetTree {
         adapter_id
     }
 
-    /// Add a Level 2 (Widget) to the tree. Alias for `add_widget()`.
+    /// Add a Level 2 (Widget) to the tree.
     pub fn add(&mut self, widget: impl Widget + 'static) -> WidgetId {
-        let id = self.arena.insert(Box::new(widget));
-        // Auto-register reactive bindings
-        if let Some(node) = self.arena.get(id) {
-            node.widget.register_bindings(id, &self.binding_registry);
-        }
-        id
+        self.add_widget_direct(Box::new(widget))
     }
 
     /// Add a widget as a child of another widget.

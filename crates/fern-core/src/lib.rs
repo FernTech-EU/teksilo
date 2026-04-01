@@ -37,7 +37,7 @@ pub use gesture::{
 };
 pub use focus::{FocusOrigin, FocusPolicy};
 pub use shortcut::{Shortcut, ShortcutMap, ShortcutScope};
-pub use state::{BindingLevel, BindingRegistry, DerivedState, Reactive, ReadableState, State, StateHandle};
+pub use state::{BindingLevel, BindingRegistry, DerivedState, ObserverId, Reactive, ReadableState, State, StateHandle};
 pub use widget::{CursorIcon, EventContext, IntoWidgetTree, LayoutContext, PaintContext, Widget, WidgetPlacement};
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;

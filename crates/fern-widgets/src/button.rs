@@ -253,7 +253,11 @@ impl CompositeWidget for Button {
             .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
         let rect_id = ctx.add(rect);
 
-        let root = ZStack::new().add_child(rect_id).add_child(padding_id);
+        let zstack = ZStack::new().add_child(rect_id).add_child(padding_id);
+        let zstack_id = ctx.add(zstack);
+
+        // Enforce minimum touch target size per architecture
+        let root = crate::primitives::MinSize::new(48.0, 48.0).set_child(zstack_id);
         let root_id = ctx.add(root);
 
         // Attach tooltip if configured
@@ -365,14 +369,7 @@ impl CompositeWidget for Button {
 
 }
 
-impl fern_core::widget::IntoWidgetTree for Button {
-    fn register(
-        self: Box<Self>,
-        tree: &mut fern_core::widget_tree::WidgetTree,
-    ) -> fern_core::widget_id::WidgetId {
-        tree.add_composite_inner(self)
-    }
-}
+fern_core::impl_composite_into_widget_tree!(Button);
 
 #[cfg(test)]
 mod tests {

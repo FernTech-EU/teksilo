@@ -51,7 +51,7 @@ impl CompositeWidget for RootContent {
         );
 
         // --- Section: theme toggle button ---
-        let toggle_btn = ctx.add_widget(
+        let toggle_btn = ctx.add(
             Button::new("Toggle Dark Mode")
                 .style(ButtonStyle::Outlined)
                 .on_click(Cmd::ToggleDarkMode),
@@ -171,14 +171,7 @@ impl CompositeWidget for RootContent {
     }
 }
 
-impl fern_ui::core::IntoWidgetTree for RootContent {
-    fn register(
-        self: Box<Self>,
-        tree: &mut fern_ui::core::WidgetTree,
-    ) -> WidgetId {
-        tree.add_composite_inner(self)
-    }
-}
+fern_ui::core::impl_composite_into_widget_tree!(RootContent);
 
 /// Helper: a small colored box with a centered label.
 fn build_color_box(

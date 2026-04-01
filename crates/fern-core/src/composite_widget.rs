@@ -8,45 +8,30 @@ use crate::widget_id::WidgetId;
 /// Context available during CompositeWidget::build().
 pub struct BuildContext<'a> {
     pub(crate) tree: &'a mut crate::widget_tree::WidgetTree,
+    pub(crate) composite_id: Option<WidgetId>,
 }
 
 impl<'a> BuildContext<'a> {
-    /// Add a widget to the tree and return its ID.
-    /// Automatically registers any reactive property bindings.
-    pub fn add(&mut self, widget: impl crate::widget::Widget + 'static) -> WidgetId {
-        let id = self.tree.add(widget);
-        // Auto-register reactive bindings now that the widget has an ID
-        if let Some(node) = self.tree.arena_get(id) {
-            node.widget.register_bindings(id, self.tree.binding_registry());
-        }
-        id
+    /// The WidgetId of the composite adapter being built.
+    /// Available during `build()` so the composite can reference itself
+    /// (e.g. for tooltip anchoring, clips_children, or self-referencing bindings).
+    pub fn self_id(&self) -> Option<WidgetId> {
+        self.composite_id
     }
 
-    /// Add a nested composite widget and return its adapter ID.
-    pub fn add_composite(
-        &mut self,
-        composite: impl CompositeWidget + 'static,
-    ) -> WidgetId {
-        self.tree.add_composite_inner(Box::new(composite))
-    }
-
-    /// Add any widget (Level 1 or Level 2) via the unified `IntoWidgetTree` trait.
-    pub fn add_widget(&mut self, widget: impl crate::widget::IntoWidgetTree) -> WidgetId {
+    /// Add any widget (Level 1 composite or Level 2 direct) to the tree.
+    /// Binding registration is handled automatically.
+    pub fn add(&mut self, widget: impl crate::widget::IntoWidgetTree) -> WidgetId {
         self.tree.add_widget(widget)
     }
 
-    /// Add a widget as a child of another widget.
-    /// Automatically registers any reactive property bindings.
+    /// Add a Level 2 widget as a child of another widget.
     pub fn add_child(
         &mut self,
         parent: WidgetId,
         widget: impl crate::widget::Widget + 'static,
     ) -> WidgetId {
-        let id = self.tree.add_child(parent, widget);
-        if let Some(node) = self.tree.arena_get(id) {
-            node.widget.register_bindings(id, self.tree.binding_registry());
-        }
-        id
+        self.tree.add_child(parent, widget)
     }
 
     /// Create a new reactive state value.
@@ -58,11 +43,19 @@ impl<'a> BuildContext<'a> {
     /// This is for notifying the application layer, not for widget bindings
     /// (use `.bind_to()` or `.visible_when()` for those).
     pub fn observe<T: 'static>(
-        &self,
+        &mut self,
         state: &State<T>,
         callback: impl Fn(&T) + 'static,
     ) {
-        state.observe(callback);
+        let observer_id = state.observe(callback);
+        // Register cleanup so the observer is removed when the composite rebuilds
+        if let Some(composite_id) = self.composite_id {
+            let state_clone = state.clone();
+            self.tree.register_observer_cleanup(
+                composite_id,
+                Box::new(move || state_clone.remove_observer(observer_id)),
+            );
+        }
     }
 
     /// Get the binding registry for registering State→Widget bindings.
@@ -73,6 +66,16 @@ impl<'a> BuildContext<'a> {
     /// Get the current theme (for resolving colors during build).
     pub fn theme(&self) -> &fern_tokens::Theme {
         self.tree.theme()
+    }
+
+    /// Bind a widget's visibility to a boolean state.
+    pub fn visible_when(&mut self, id: WidgetId, state: &State<bool>) {
+        self.tree.visible_when(id, state);
+    }
+
+    /// Bind a widget's enabled state to a boolean state.
+    pub fn enabled_when(&mut self, id: WidgetId, state: &State<bool>) {
+        self.tree.enabled_when(id, state);
     }
 
     /// Attach a tooltip to a widget. The content widget should have been
