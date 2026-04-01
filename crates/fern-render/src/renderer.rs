@@ -177,11 +177,22 @@ impl Renderer {
                     fern_canvas::DrawCommand::Glyph(idx) => {
                         self.draw_quad(&mut pass, &frame.glyphs[*idx], scale_factor, viewport_width, viewport_height);
                     }
+                    fern_canvas::DrawCommand::SetClip(rect) => {
+                        let x = (rect.x * scale_factor) as u32;
+                        let y = (rect.y * scale_factor) as u32;
+                        let w = (rect.width * scale_factor).ceil() as u32;
+                        let h = (rect.height * scale_factor).ceil() as u32;
+                        // Clamp to surface bounds
+                        let w = w.min(viewport_width.saturating_sub(x));
+                        let h = h.min(viewport_height.saturating_sub(y));
+                        pass.set_scissor_rect(x, y, w, h);
+                    }
+                    fern_canvas::DrawCommand::ClearClip => {
+                        pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+                    }
                     // TODO: implement these when their rendering pipelines are ready
                     fern_canvas::DrawCommand::Image(_) => {}
                     fern_canvas::DrawCommand::Rasterized(_) => {}
-                    fern_canvas::DrawCommand::SetClip(_) => {}
-                    fern_canvas::DrawCommand::ClearClip => {}
                     fern_canvas::DrawCommand::SetOpacity(_) => {}
                     fern_canvas::DrawCommand::RestoreOpacity => {}
                     fern_canvas::DrawCommand::Path(_) => {}

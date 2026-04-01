@@ -184,6 +184,11 @@ impl WidgetTree {
         self.arena.mark_all_dirty();
     }
 
+    /// Mark a widget as clipping its children to its bounds (scroll areas).
+    pub fn set_clips_children(&mut self, id: WidgetId, clips: bool) {
+        self.arena.set_clips_children(id, clips);
+    }
+
     /// Set a per-child alignment override on a widget.
     pub fn set_alignment(&mut self, id: WidgetId, alignment: fern_tokens::Alignment) {
         self.arena.set_alignment_override(id, alignment);
@@ -640,6 +645,10 @@ impl WidgetTree {
             }
             // PointerEnter/Leave and Focus events are synthesized internally,
             // not dispatched from outside.
+            WidgetEvent::ScrollIntoView { .. } => {
+                // ScrollIntoView is dispatched directly to specific clipping ancestors
+                // by scroll_focused_into_view, not through the general dispatch path.
+            }
             WidgetEvent::PointerEnter
             | WidgetEvent::PointerLeave
             | WidgetEvent::FocusGained { .. }
@@ -698,6 +707,10 @@ impl WidgetTree {
         }
 
         // Bubble pass: target → root
+        let needs_layout_on_handle = matches!(
+            event,
+            WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. }
+        );
         let mut current = Some(target);
         while let Some(id) = current {
             let mut ctx = EventContext::new();
@@ -708,7 +721,11 @@ impl WidgetTree {
             };
             self.collect_from_ctx(ctx);
             if response == EventResponse::Handled {
-                self.arena.mark_needs_paint(id);
+                if needs_layout_on_handle {
+                    self.arena.mark_needs_layout(id);
+                } else {
+                    self.arena.mark_needs_paint(id);
+                }
                 break;
             }
             current = self.arena.parent(id);
@@ -770,7 +787,7 @@ impl WidgetTree {
         }
     }
 
-    fn hit_test(&self, point: Point) -> Option<WidgetId> {
+    pub fn hit_test(&self, point: Point) -> Option<WidgetId> {
         let roots = self.arena.roots();
         for &root in roots.iter().rev() {
             if let Some(hit) = self.hit_test_recursive(root, point) {
@@ -810,7 +827,38 @@ impl WidgetTree {
         self.focused = Some(id);
         self.focus_origin = Some(origin);
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin });
+        self.scroll_focused_into_view(id);
         self.flush_commands();
+    }
+
+    /// After setting focus, ensure the focused widget is visible inside
+    /// any ancestor scroll area (clips_children container).
+    fn scroll_focused_into_view(&mut self, focused_id: WidgetId) {
+        let focused_bounds = self.arena.bounds(focused_id);
+
+        let mut current = self.arena.parent(focused_id);
+        while let Some(ancestor_id) = current {
+            if let Some(node) = self.arena.get(ancestor_id) {
+                if node.clips_children {
+                    let viewport = node.bounds;
+                    let needs_scroll = focused_bounds.y < viewport.y
+                        || focused_bounds.bottom() > viewport.bottom()
+                        || focused_bounds.x < viewport.x
+                        || focused_bounds.right() > viewport.right();
+
+                    if needs_scroll {
+                        self.dispatch_to_widget(
+                            ancestor_id,
+                            &WidgetEvent::ScrollIntoView {
+                                target_bounds: focused_bounds,
+                            },
+                        );
+                    }
+                    break; // Only scroll the nearest clipping ancestor
+                }
+            }
+            current = self.arena.parent(ancestor_id);
+        }
     }
 
     /// Set focus to a specific widget (programmatic origin).
@@ -990,8 +1038,20 @@ impl WidgetTree {
         let widget_frame = canvas.into_render_frame();
         frame.merge(&widget_frame);
 
+        // Clip children to this widget's bounds if it clips (scroll areas)
+        let clips = node.clips_children;
+        if clips {
+            frame
+                .draw_order
+                .push(fern_canvas::DrawCommand::SetClip(bounds));
+        }
+
         for &child_id in &node.children {
             self.paint_widget(child_id, frame, base_theme);
+        }
+
+        if clips {
+            frame.draw_order.push(fern_canvas::DrawCommand::ClearClip);
         }
     }
 

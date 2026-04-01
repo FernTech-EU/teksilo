@@ -53,6 +53,9 @@ pub struct WidgetNode {
     pub(crate) visible_state: Option<crate::state::State<bool>>,
     pub(crate) enabled_state: Option<crate::state::State<bool>>,
     pub(crate) alignment_override: Option<fern_tokens::Alignment>,
+    /// When true, the paint pass clips child rendering to this widget's bounds.
+    /// Set by scroll areas and overflow-hidden containers.
+    pub clips_children: bool,
 }
 
 impl std::fmt::Debug for WidgetNode {
@@ -112,6 +115,7 @@ impl WidgetArena {
             visible_state: None,
             enabled_state: None,
             alignment_override: None,
+            clips_children: false,
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -144,6 +148,7 @@ impl WidgetArena {
             visible_state: None,
             enabled_state: None,
             alignment_override: None,
+            clips_children: false,
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -337,6 +342,13 @@ impl WidgetArena {
     pub fn set_alignment_override(&mut self, id: WidgetId, alignment: fern_tokens::Alignment) {
         if let Some(node) = self.get_mut(id) {
             node.alignment_override = Some(alignment);
+        }
+    }
+
+    /// Mark a widget as clipping its children (scroll area, overflow hidden).
+    pub fn set_clips_children(&mut self, id: WidgetId, clips: bool) {
+        if let Some(node) = self.get_mut(id) {
+            node.clips_children = clips;
         }
     }
 

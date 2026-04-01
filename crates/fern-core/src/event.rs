@@ -1,4 +1,4 @@
-use fern_canvas::Point;
+use fern_canvas::{Point, Rect};
 
 use crate::gesture::GestureEvent;
 
@@ -130,6 +130,12 @@ pub enum WidgetEvent {
     AccessAction {
         action: accesskit::Action,
         target: Option<crate::widget_id::WidgetId>,
+    },
+    /// Dispatched by the framework to a clipping ancestor when a child
+    /// gains focus but is outside the viewport. The scroll area adjusts
+    /// its offset to make the target bounds visible.
+    ScrollIntoView {
+        target_bounds: Rect,
     },
     /// A recognized gesture event, routed through the same preview/bubble system.
     Gesture {
