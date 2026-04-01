@@ -616,6 +616,7 @@ impl WidgetTree {
             WidgetEvent::KeyDown { key, modifiers, .. } => {
                 if *key == Key::Tab {
                     self.cycle_focus(modifiers.shift());
+                    // Tab is consumed — don't dispatch to the focused widget
                 } else if let Some(focused) = self.focused {
                     self.dispatch_to_widget(focused, &event);
                 }
@@ -888,6 +889,19 @@ impl WidgetTree {
         if focusable.is_empty() {
             return;
         }
+
+        // Sort by tab_index if specified: widgets with a tab_index come first
+        // (sorted by their index), then widgets without (in tree order).
+        focusable.sort_by(|&a, &b| {
+            let ta = self.arena.get(a).and_then(|n| n.widget.tab_index());
+            let tb = self.arena.get(b).and_then(|n| n.widget.tab_index());
+            match (ta, tb) {
+                (Some(ia), Some(ib)) => ia.cmp(&ib),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal, // preserve tree order
+            }
+        });
 
         let current_idx = self
             .focused
@@ -1676,6 +1690,78 @@ mod tests {
         assert_eq!(tree.focused(), Some(a));
         tree.focus(b);
         assert_eq!(tree.focused(), Some(b));
+    }
+
+    #[test]
+    fn tab_cycles_through_focusable_widgets() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let c = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert_eq!(tree.focused(), None);
+
+        // First Tab → focuses first focusable
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+
+        // Second Tab → next
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(b));
+
+        // Third Tab → next
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(c));
+
+        // Fourth Tab → wraps to first
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+    }
+
+    #[test]
+    fn shift_tab_cycles_backwards() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let c = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Tab to first, then Shift+Tab wraps to last
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(tree.focused(), Some(c));
+
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(tree.focused(), Some(b));
+    }
+
+    #[test]
+    fn tab_skips_non_focusable_widgets() {
+        let mut tree = WidgetTree::new();
+        let _not_focusable = tree.add(FillWidget::new());
+        let a = tree.add(FillWidget::new().focusable());
+        let _also_not = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(b));
+    }
+
+    #[test]
+    fn tab_focus_has_keyboard_origin() {
+        let mut tree = WidgetTree::new();
+        let _a = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focus_origin(), Some(crate::focus::FocusOrigin::Keyboard));
     }
 
     #[test]

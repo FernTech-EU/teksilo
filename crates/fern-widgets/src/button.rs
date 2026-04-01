@@ -180,6 +180,10 @@ fn resolve_text(style: ButtonStyle, state: InteractionState, colors: &ColorToken
 }
 
 fn resolve_border(style: ButtonStyle, state: InteractionState, colors: &ColorTokens) -> Color {
+    // Focus ring is visible for keyboard-focused state (any style)
+    if state == InteractionState::Focused {
+        return colors.focus_ring;
+    }
     match style {
         ButtonStyle::Outlined => match state {
             InteractionState::Disabled => colors.disabled_fill,
@@ -231,10 +235,21 @@ impl CompositeWidget for Button {
         .set_child(text_id);
         let padding_id = ctx.add(padding);
 
+        let border_width = {
+            let default_width = theme.shape.border_width;
+            interaction.map(move |s| {
+                if *s == InteractionState::Focused {
+                    2.0_f32.max(default_width) // thicker for focus ring visibility
+                } else {
+                    default_width
+                }
+            })
+        };
+
         let rect = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
-            .border_width(theme.shape.border_width)
+            .bind_border_width(border_width)
             .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
         let rect_id = ctx.add(rect);
 
@@ -506,6 +521,52 @@ mod tests {
         let (mut tree, _btn) = setup();
         tree.press_key(Key::Tab, Modifiers::NONE);
         assert_eq!(tree.focus_origin(), Some(FocusOrigin::Keyboard));
+    }
+
+    #[test]
+    fn keyboard_focus_shows_focus_ring() {
+        let (mut tree, btn) = setup();
+
+        let frame_idle = tree.render();
+        let idle_shapes = frame_idle.shapes.clone();
+
+        // Tab into button — keyboard focus should show focus ring
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let frame_focused = tree.render();
+        let focused_shapes = frame_focused.shapes.clone();
+
+        // The border should change (focus ring color appears)
+        assert_ne!(idle_shapes, focused_shapes,
+            "keyboard focus should change the button's visual appearance (focus ring)");
+    }
+
+    #[test]
+    fn pointer_focus_no_focus_ring() {
+        let (mut tree, btn) = setup();
+
+        // Click the button — pointer focus should NOT show focus ring
+        let center = tree.bounds(btn).center();
+        tree.pointer_move(center);
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let frame_hover = tree.render();
+        let hover_shapes = frame_hover.shapes.clone();
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: center,
+            button: PointerButton::Primary,
+        });
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        let frame_after_click = tree.render();
+
+        // After click, button goes to Hovered (not Focused), so no focus ring
+        // The shapes should be the hover state, not a focus-ring state
+        assert_eq!(hover_shapes, frame_after_click.shapes,
+            "pointer click should return to hover state, not show focus ring");
     }
 
     #[test]
