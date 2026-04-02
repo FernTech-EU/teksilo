@@ -196,6 +196,10 @@ impl Renderer {
                     fern_canvas::DrawCommand::SetOpacity(_) => {}
                     fern_canvas::DrawCommand::RestoreOpacity => {}
                     fern_canvas::DrawCommand::Path(_) => {}
+                    fern_canvas::DrawCommand::Shadow(_) => {}
+                    fern_canvas::DrawCommand::SetBlendMode(_) => {}
+                    fern_canvas::DrawCommand::RestoreBlendMode => {}
+                    fern_canvas::DrawCommand::SetTransform(_) => {}
                 }
             }
         }

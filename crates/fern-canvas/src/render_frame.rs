@@ -1,4 +1,5 @@
-use crate::geometry::Rect;
+use crate::geometry::{Rect, Transform2D};
+use crate::paint::StrokeStyle;
 
 /// The complete render output for one frame. This is the boundary between
 /// platform-independent widget code and GPU-specific rendering code.
@@ -8,6 +9,7 @@ pub struct RenderFrame {
     pub images: Vec<ImageQuad>,
     pub decorations: Vec<DecorationRect>,
     pub shapes: Vec<ShapeQuad>,
+    pub shadows: Vec<ShadowQuad>,
     pub rasterized: Vec<RasterizedQuad>,
     pub paths: Vec<PathEntry>,
     pub draw_order: Vec<DrawCommand>,
@@ -29,6 +31,7 @@ impl RenderFrame {
         let image_offset = self.images.len();
         let decoration_offset = self.decorations.len();
         let shape_offset = self.shapes.len();
+        let shadow_offset = self.shadows.len();
         let rasterized_offset = self.rasterized.len();
         let path_offset = self.paths.len();
 
@@ -36,18 +39,20 @@ impl RenderFrame {
         self.images.extend_from_slice(&other.images);
         self.decorations.extend_from_slice(&other.decorations);
         self.shapes.extend_from_slice(&other.shapes);
+        self.shadows.extend_from_slice(&other.shadows);
         self.rasterized.extend_from_slice(&other.rasterized);
         self.paths.extend_from_slice(&other.paths);
 
         for cmd in &other.draw_order {
-            let shifted = match *cmd {
+            let shifted = match cmd {
                 DrawCommand::Glyph(i) => DrawCommand::Glyph(i + glyph_offset),
                 DrawCommand::Image(i) => DrawCommand::Image(i + image_offset),
                 DrawCommand::Decoration(i) => DrawCommand::Decoration(i + decoration_offset),
                 DrawCommand::Shape(i) => DrawCommand::Shape(i + shape_offset),
+                DrawCommand::Shadow(i) => DrawCommand::Shadow(i + shadow_offset),
                 DrawCommand::Rasterized(i) => DrawCommand::Rasterized(i + rasterized_offset),
                 DrawCommand::Path(i) => DrawCommand::Path(i + path_offset),
-                other => other,
+                other => other.clone(),
             };
             self.draw_order.push(shifted);
         }
@@ -134,6 +139,23 @@ pub struct RasterizedQuad {
     pub color: [f32; 4],
 }
 
+/// A shadow rendered behind a shape using a separate GPU pipeline with Gaussian blur.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadowQuad {
+    /// Shadow bounding box (expanded by blur + spread + offset): [x, y, width, height].
+    pub screen: [f32; 4],
+    /// Shadow color: [r, g, b, a].
+    pub color: [f32; 4],
+    /// Corner radii matching the shape: [top_left, top_right, bottom_right, bottom_left].
+    pub corner_radii: [f32; 4],
+    /// The original shape rect (before offset/spread): [x, y, width, height].
+    pub shape_rect: [f32; 4],
+    /// Gaussian blur radius.
+    pub blur_radius: f32,
+    /// Shadow spread amount.
+    pub spread: f32,
+}
+
 /// A path to be rasterized on the CPU (Tier 3). Stored in the RenderFrame
 /// until the renderer rasterizes it into the shape atlas and converts it
 /// to a [`RasterizedQuad`].
@@ -143,8 +165,8 @@ pub struct PathEntry {
     pub path: crate::path::Path,
     /// Fill color: [r, g, b, a].
     pub color: [f32; 4],
-    /// Stroke width (0.0 for filled paths).
-    pub stroke_width: f32,
+    /// Stroke style (width, dash pattern, line cap).
+    pub stroke_style: StrokeStyle,
     /// Bounding rect in logical pixels (computed from path bounds).
     pub bounds: [f32; 4],
 }
@@ -163,6 +185,11 @@ pub enum PaintData {
         radius: f32,
         stops: Vec<crate::paint::GradientStop>,
     },
+    ConicGradient {
+        center: [f32; 2],
+        start_angle: f32,
+        stops: Vec<crate::paint::GradientStop>,
+    },
 }
 
 impl Default for PaintData {
@@ -171,20 +198,38 @@ impl Default for PaintData {
     }
 }
 
+/// Compositing blend mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlendMode {
+    #[default]
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+}
+
 /// A draw command referencing an entry in one of the RenderFrame arrays.
 /// Commands are recorded in painter's order (back-to-front).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DrawCommand {
     Glyph(usize),
     Image(usize),
     Decoration(usize),
     Shape(usize),
+    Shadow(usize),
     Rasterized(usize),
     Path(usize),
     SetClip(Rect),
     ClearClip,
     SetOpacity(f32),
     RestoreOpacity,
+    SetBlendMode(BlendMode),
+    RestoreBlendMode,
+    SetTransform(Transform2D),
 }
 
 #[cfg(test)]

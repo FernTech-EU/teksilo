@@ -177,6 +177,99 @@ impl SizeProposal {
     }
 }
 
+/// A 2D affine transform stored as a 3×2 matrix: `[a, b, c, d, tx, ty]`.
+///
+/// The transform maps a point `(x, y)` to:
+///   `(a*x + c*y + tx, b*x + d*y + ty)`
+///
+/// This is the standard 2D affine matrix layout compatible with GPU uniform buffers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform2D {
+    /// Matrix entries: [a, b, c, d, tx, ty].
+    pub m: [f32; 6],
+}
+
+impl Transform2D {
+    pub const IDENTITY: Transform2D = Transform2D {
+        m: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+    };
+
+    pub fn identity() -> Self {
+        Self::IDENTITY
+    }
+
+    pub fn translate(dx: f32, dy: f32) -> Self {
+        Self {
+            m: [1.0, 0.0, 0.0, 1.0, dx, dy],
+        }
+    }
+
+    pub fn rotate(angle_radians: f32) -> Self {
+        let (s, c) = angle_radians.sin_cos();
+        Self {
+            m: [c, s, -s, c, 0.0, 0.0],
+        }
+    }
+
+    pub fn scale(sx: f32, sy: f32) -> Self {
+        Self {
+            m: [sx, 0.0, 0.0, sy, 0.0, 0.0],
+        }
+    }
+
+    /// Compose: apply `self` then `other` (i.e. `other * self`).
+    pub fn then(&self, other: &Transform2D) -> Transform2D {
+        let [a1, b1, c1, d1, tx1, ty1] = self.m;
+        let [a2, b2, c2, d2, tx2, ty2] = other.m;
+        Transform2D {
+            m: [
+                a2 * a1 + c2 * b1,
+                b2 * a1 + d2 * b1,
+                a2 * c1 + c2 * d1,
+                b2 * c1 + d2 * d1,
+                a2 * tx1 + c2 * ty1 + tx2,
+                b2 * tx1 + d2 * ty1 + ty2,
+            ],
+        }
+    }
+
+    pub fn apply_point(&self, p: Point) -> Point {
+        let [a, b, c, d, tx, ty] = self.m;
+        Point::new(a * p.x + c * p.y + tx, b * p.x + d * p.y + ty)
+    }
+
+    /// Compute the axis-aligned bounding box of a transformed rectangle.
+    pub fn apply_rect(&self, r: Rect) -> Rect {
+        let corners = [
+            self.apply_point(Point::new(r.x, r.y)),
+            self.apply_point(Point::new(r.right(), r.y)),
+            self.apply_point(Point::new(r.right(), r.bottom())),
+            self.apply_point(Point::new(r.x, r.bottom())),
+        ];
+        let min_x = corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let min_y = corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+        let max_x = corners.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+        let max_y = corners.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+        Rect::new(min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+
+    /// Convert to GPU-friendly layout: two columns of a 3×2 matrix.
+    pub fn to_mat3x2(&self) -> [[f32; 2]; 3] {
+        let [a, b, c, d, tx, ty] = self.m;
+        [[a, b], [c, d], [tx, ty]]
+    }
+
+    pub fn is_identity(&self) -> bool {
+        *self == Self::IDENTITY
+    }
+}
+
+impl Default for Transform2D {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,5 +369,68 @@ mod tests {
         assert_eq!(r.y, 20.0);
         assert_eq!(r.width, 30.0);
         assert_eq!(r.height, 40.0);
+    }
+
+    #[test]
+    fn transform_identity() {
+        let t = Transform2D::identity();
+        assert!(t.is_identity());
+        let p = t.apply_point(Point::new(3.0, 4.0));
+        assert_eq!(p, Point::new(3.0, 4.0));
+    }
+
+    #[test]
+    fn transform_translate() {
+        let t = Transform2D::translate(10.0, 20.0);
+        let p = t.apply_point(Point::new(3.0, 4.0));
+        assert_eq!(p, Point::new(13.0, 24.0));
+    }
+
+    #[test]
+    fn transform_scale() {
+        let t = Transform2D::scale(2.0, 3.0);
+        let p = t.apply_point(Point::new(5.0, 10.0));
+        assert_eq!(p, Point::new(10.0, 30.0));
+    }
+
+    #[test]
+    fn transform_rotate_90() {
+        let t = Transform2D::rotate(std::f32::consts::FRAC_PI_2);
+        let p = t.apply_point(Point::new(1.0, 0.0));
+        assert!((p.x - 0.0).abs() < 1e-5);
+        assert!((p.y - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn transform_compose_translate_then_scale() {
+        let translate = Transform2D::translate(10.0, 0.0);
+        let scale = Transform2D::scale(2.0, 2.0);
+        // apply translate first, then scale: result = scale(translate(point))
+        let composed = translate.then(&scale);
+        let p = composed.apply_point(Point::new(5.0, 3.0));
+        assert_eq!(p, Point::new(30.0, 6.0)); // (5+10)*2, 3*2
+    }
+
+    #[test]
+    fn transform_apply_rect() {
+        let t = Transform2D::translate(100.0, 200.0);
+        let r = t.apply_rect(Rect::new(10.0, 20.0, 30.0, 40.0));
+        assert!((r.x - 110.0).abs() < 1e-5);
+        assert!((r.y - 220.0).abs() < 1e-5);
+        assert!((r.width - 30.0).abs() < 1e-5);
+        assert!((r.height - 40.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn transform_to_mat3x2() {
+        let t = Transform2D::translate(10.0, 20.0);
+        let m = t.to_mat3x2();
+        assert_eq!(m, [[1.0, 0.0], [0.0, 1.0], [10.0, 20.0]]);
+    }
+
+    #[test]
+    fn transform_not_identity() {
+        let t = Transform2D::translate(1.0, 0.0);
+        assert!(!t.is_identity());
     }
 }

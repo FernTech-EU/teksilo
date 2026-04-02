@@ -2,7 +2,7 @@ use fern_tokens::TextStyle;
 
 use crate::render_frame::GlyphQuad;
 
-/// Result of measuring a single line of text.
+/// Result of measuring text.
 #[derive(Debug, Clone)]
 pub struct TextLayout {
     pub width: f32,
@@ -11,6 +11,8 @@ pub struct TextLayout {
     pub descent: f32,
     /// Opaque key for the backend to identify the cached layout.
     pub layout_key: u64,
+    /// Number of lines (1 for single-line, ≥1 for paragraph).
+    pub line_count: usize,
 }
 
 /// Trait for text layout and glyph rasterization backends.
@@ -29,6 +31,18 @@ pub trait TextBackend {
         style: &TextStyle,
         max_width: Option<f32>,
     ) -> TextLayout;
+
+    /// Measure and layout a paragraph of text with word wrapping.
+    /// Default implementation delegates to `layout_single_line`.
+    fn layout_paragraph(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        max_width: f32,
+        _max_lines: Option<usize>,
+    ) -> TextLayout {
+        self.layout_single_line(text, style, Some(max_width))
+    }
 
     /// Produce GPU-ready glyph quads for a previously laid-out text.
     /// The quads are positioned relative to (0, 0); the caller offsets them.
@@ -84,6 +98,69 @@ impl TextBackend for MockTextBackend {
             ascent: self.line_height * 0.75,
             descent: self.line_height * 0.25,
             layout_key: 0,
+            line_count: 1,
+        }
+    }
+
+    fn layout_paragraph(
+        &mut self,
+        text: &str,
+        _style: &TextStyle,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> TextLayout {
+        let max_chars_per_line = (max_width / self.char_width).floor() as usize;
+        if max_chars_per_line == 0 {
+            return TextLayout {
+                width: 0.0,
+                height: self.line_height,
+                ascent: self.line_height * 0.75,
+                descent: self.line_height * 0.25,
+                layout_key: 0,
+                line_count: 1,
+            };
+        }
+
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let mut lines: Vec<f32> = Vec::new(); // width of each line
+        let mut current_line_chars: usize = 0;
+
+        for word in &words {
+            let word_len = word.len();
+            let needed = if current_line_chars == 0 {
+                word_len
+            } else {
+                current_line_chars + 1 + word_len // space + word
+            };
+
+            if needed > max_chars_per_line && current_line_chars > 0 {
+                // Wrap: finish current line, start new one
+                lines.push(current_line_chars as f32 * self.char_width);
+                current_line_chars = word_len;
+            } else {
+                current_line_chars = needed;
+            }
+        }
+        // Finish last line
+        if current_line_chars > 0 || lines.is_empty() {
+            lines.push(current_line_chars as f32 * self.char_width);
+        }
+
+        // Apply max_lines limit
+        if let Some(max) = max_lines {
+            lines.truncate(max);
+        }
+
+        let line_count = lines.len();
+        let max_line_width = lines.iter().cloned().fold(0.0_f32, f32::max);
+
+        TextLayout {
+            width: max_line_width,
+            height: line_count as f32 * self.line_height,
+            ascent: self.line_height * 0.75,
+            descent: self.line_height * 0.25,
+            layout_key: 0,
+            line_count,
         }
     }
 
@@ -126,5 +203,42 @@ mod tests {
         let layout = backend.layout_single_line("Hi", &TextStyle::default(), None);
         let glyphs = backend.ensure_glyphs(&layout);
         assert!(glyphs.is_empty());
+    }
+
+    #[test]
+    fn mock_backend_single_line_count() {
+        let mut backend = MockTextBackend::new();
+        let layout = backend.layout_single_line("Hello", &TextStyle::default(), None);
+        assert_eq!(layout.line_count, 1);
+    }
+
+    #[test]
+    fn mock_backend_paragraph_wraps() {
+        let mut backend = MockTextBackend::new();
+        // "Hello World" = 11 chars × 8 = 88px. Max width 50px → 6 chars per line
+        let layout = backend.layout_paragraph("Hello World", &TextStyle::default(), 50.0, None);
+        assert_eq!(layout.line_count, 2);
+        assert_eq!(layout.height, 32.0); // 2 lines × 16px
+    }
+
+    #[test]
+    fn mock_backend_paragraph_max_lines() {
+        let mut backend = MockTextBackend::new();
+        // Multiple words that would wrap to 3+ lines, but limit to 2
+        let layout = backend.layout_paragraph(
+            "one two three four five",
+            &TextStyle::default(),
+            40.0, // 5 chars max per line
+            Some(2),
+        );
+        assert_eq!(layout.line_count, 2);
+    }
+
+    #[test]
+    fn mock_backend_paragraph_single_line_fits() {
+        let mut backend = MockTextBackend::new();
+        let layout = backend.layout_paragraph("Hi", &TextStyle::default(), 100.0, None);
+        assert_eq!(layout.line_count, 1);
+        assert_eq!(layout.width, 16.0); // 2 chars × 8
     }
 }

@@ -174,6 +174,81 @@ impl Path {
         path.close();
         path
     }
+
+    /// Create a non-rounded rectangle path.
+    pub fn rect(rect: Rect) -> Self {
+        let mut path = Self::new();
+        path.move_to(Point::new(rect.x, rect.y));
+        path.line_to(Point::new(rect.right(), rect.y));
+        path.line_to(Point::new(rect.right(), rect.bottom()));
+        path.line_to(Point::new(rect.x, rect.bottom()));
+        path.close();
+        path
+    }
+
+    /// Create a single line segment path.
+    pub fn line(from: Point, to: Point) -> Self {
+        let mut path = Self::new();
+        path.move_to(from);
+        path.line_to(to);
+        path
+    }
+
+    /// Create an ellipse inscribed in the given rectangle (4 cubic Bézier arcs).
+    pub fn ellipse(rect: Rect) -> Self {
+        // Approximate an ellipse with 4 cubic Bézier curves.
+        // Magic number for quarter-circle cubic approximation: κ ≈ 0.5522847498
+        const KAPPA: f32 = 0.5522847498;
+        let cx = rect.x + rect.width / 2.0;
+        let cy = rect.y + rect.height / 2.0;
+        let rx = rect.width / 2.0;
+        let ry = rect.height / 2.0;
+        let kx = rx * KAPPA;
+        let ky = ry * KAPPA;
+
+        let mut path = Self::new();
+        // Start at top center
+        path.move_to(Point::new(cx, cy - ry));
+        // Top-right quadrant
+        path.cubic_to(
+            Point::new(cx + kx, cy - ry),
+            Point::new(cx + rx, cy - ky),
+            Point::new(cx + rx, cy),
+        );
+        // Bottom-right quadrant
+        path.cubic_to(
+            Point::new(cx + rx, cy + ky),
+            Point::new(cx + kx, cy + ry),
+            Point::new(cx, cy + ry),
+        );
+        // Bottom-left quadrant
+        path.cubic_to(
+            Point::new(cx - kx, cy + ry),
+            Point::new(cx - rx, cy + ky),
+            Point::new(cx - rx, cy),
+        );
+        // Top-left quadrant
+        path.cubic_to(
+            Point::new(cx - rx, cy),  // this is the same as start - let the curve close
+            Point::new(cx - kx, cy - ry),
+            Point::new(cx, cy - ry),
+        );
+        path.close();
+        path
+    }
+
+    /// Create a closed polygon from a list of points.
+    pub fn polygon(points: &[Point]) -> Self {
+        let mut path = Self::new();
+        if let Some((&first, rest)) = points.split_first() {
+            path.move_to(first);
+            for &p in rest {
+                path.line_to(p);
+            }
+            path.close();
+        }
+        path
+    }
 }
 
 #[cfg(test)]
@@ -246,5 +321,51 @@ mod tests {
             .filter(|c| matches!(c, PathCommand::ArcTo { .. }))
             .count();
         assert_eq!(arc_count, 0);
+    }
+
+    #[test]
+    fn rect_path_has_four_lines() {
+        let p = Path::rect(Rect::new(10.0, 20.0, 30.0, 40.0));
+        // MoveTo + 3 LineTo + Close = 5 commands
+        assert_eq!(p.commands.len(), 5);
+        assert!(matches!(p.commands[0], PathCommand::MoveTo(_)));
+        assert!(matches!(p.commands[4], PathCommand::Close));
+    }
+
+    #[test]
+    fn line_path() {
+        let p = Path::line(Point::new(0.0, 0.0), Point::new(100.0, 50.0));
+        assert_eq!(p.commands.len(), 2);
+        assert!(matches!(p.commands[0], PathCommand::MoveTo(_)));
+        assert!(matches!(p.commands[1], PathCommand::LineTo(_)));
+    }
+
+    #[test]
+    fn ellipse_path_uses_cubics() {
+        let p = Path::ellipse(Rect::new(0.0, 0.0, 100.0, 50.0));
+        let cubic_count = p
+            .commands
+            .iter()
+            .filter(|c| matches!(c, PathCommand::CubicTo { .. }))
+            .count();
+        assert_eq!(cubic_count, 4);
+    }
+
+    #[test]
+    fn polygon_path() {
+        let points = vec![
+            Point::new(0.0, 0.0),
+            Point::new(100.0, 0.0),
+            Point::new(50.0, 80.0),
+        ];
+        let p = Path::polygon(&points);
+        // MoveTo + 2 LineTo + Close = 4 commands
+        assert_eq!(p.commands.len(), 4);
+    }
+
+    #[test]
+    fn polygon_empty_points() {
+        let p = Path::polygon(&[]);
+        assert!(p.is_empty());
     }
 }

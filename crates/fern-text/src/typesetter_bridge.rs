@@ -162,6 +162,7 @@ impl TextBackend for TypesetterBridge {
             ascent: result.baseline * inv,
             descent: (result.height - result.baseline) * inv,
             layout_key: key,
+            line_count: 1,
         };
 
         self.layout_cache.insert(cache_key, layout.clone());
