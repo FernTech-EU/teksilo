@@ -200,7 +200,7 @@ impl PlatformWindow {
 
     /// Render a frame to the surface.
     pub fn render_frame(
-        &self,
+        &mut self,
         frame: &fern_canvas::RenderFrame,
         clear_color: [f32; 4],
     ) -> Result<(), String> {

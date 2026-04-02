@@ -9,4 +9,8 @@ repository.workspace = true
 [dependencies]
 fern-canvas = { workspace = true }
 wgpu = { workspace = true }
+tiny-skia = { workspace = true }
 bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+fern-tokens = { workspace = true }
