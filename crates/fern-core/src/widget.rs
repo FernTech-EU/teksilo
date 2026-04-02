@@ -4,6 +4,26 @@ use crate::accessibility::AccessNodeBuilder;
 use crate::event::{EventResponse, WidgetEvent};
 use crate::widget_id::WidgetId;
 
+/// A child that is either pre-registered (ID) or waiting to be inserted.
+/// Used by the inline `child()` builder pattern: deferred children are stored
+/// inside the container and resolved recursively when `BuildContext::add()`
+/// inserts the container into the arena.
+pub enum PendingChild {
+    /// Already in the arena — use this ID directly.
+    Id(WidgetId),
+    /// Not yet in the arena — insert during resolution.
+    Deferred(Box<dyn IntoWidgetTree>),
+}
+
+impl std::fmt::Debug for PendingChild {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PendingChild::Id(id) => write!(f, "PendingChild::Id({:?})", id),
+            PendingChild::Deferred(_) => f.write_str("PendingChild::Deferred(..)"),
+        }
+    }
+}
+
 /// Context available during layout.
 pub struct LayoutContext<'a> {
     pub theme: &'a fern_tokens::Theme,
@@ -165,6 +185,32 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         _registry: &crate::state::BindingRegistry,
     ) {
         // Default: no reactive bindings.
+    }
+
+    /// Take any deferred children out of this widget for resolution.
+    /// Called by `WidgetTree::add_widget_direct()` before inserting the widget.
+    /// Containers override this to drain their pending children list.
+    fn take_pending_children(&mut self) -> Vec<PendingChild> {
+        Vec::new()
+    }
+
+    /// Wire resolved child IDs back into the widget after pending children
+    /// have been inserted into the arena. Containers override this to set
+    /// their internal `child_ids` field.
+    fn set_resolved_children(&mut self, _ids: Vec<WidgetId>) {
+        // Default: no children to wire.
+    }
+
+    /// Take a deferred `visible_when` binding stored by the builder pattern.
+    /// Called after insertion to register with the tree.
+    fn take_visible_when(&mut self) -> Option<crate::state::State<bool>> {
+        None
+    }
+
+    /// Take a deferred `enabled_when` binding stored by the builder pattern.
+    /// Called after insertion to register with the tree.
+    fn take_enabled_when(&mut self) -> Option<crate::state::State<bool>> {
+        None
     }
 }
 

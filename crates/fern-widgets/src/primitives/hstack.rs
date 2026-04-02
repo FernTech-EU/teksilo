@@ -1,5 +1,6 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::state::State;
+use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::VAlignment;
 
@@ -9,16 +10,22 @@ use fern_tokens::VAlignment;
 #[derive(Debug)]
 pub struct HStack {
     child_ids: Vec<WidgetId>,
+    pending: Vec<PendingChild>,
     spacing: f32,
     alignment: VAlignment,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
 }
 
 impl HStack {
     pub fn new() -> Self {
         Self {
             child_ids: Vec::new(),
+            pending: Vec::new(),
             spacing: 0.0,
             alignment: VAlignment::Center,
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
@@ -32,8 +39,46 @@ impl HStack {
         self
     }
 
+    /// Add a pre-registered child by ID.
     pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.child_ids.push(id);
+        self.pending.push(PendingChild::Id(id));
+        self
+    }
+
+    /// Add an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Add multiple inline children from an iterator.
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl IntoWidgetTree>,
+    ) -> Self {
+        for widget in iter {
+            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        }
+        self
+    }
+
+    /// Conditionally add a child. No-op if None.
+    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+        if let Some(w) = widget {
+            self.pending.push(PendingChild::Deferred(Box::new(w)));
+        }
+        self
+    }
+
+    /// Bind visibility to a boolean state (toggles dormant/active).
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    /// Bind enabled state to a boolean state.
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
         self
     }
 }
@@ -158,6 +203,22 @@ impl Widget for HStack {
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_ids.clone()
+    }
+
+    fn take_pending_children(&mut self) -> Vec<PendingChild> {
+        std::mem::take(&mut self.pending)
+    }
+
+    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
+        self.child_ids = ids;
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
     }
 }
 

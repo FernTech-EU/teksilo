@@ -68,6 +68,8 @@ pub struct Button {
     interaction: RefCell<Option<State<InteractionState>>>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
 }
 
 impl Button {
@@ -81,6 +83,8 @@ impl Button {
             interaction: RefCell::new(None),
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
@@ -106,6 +110,18 @@ impl Button {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Bind visibility to a boolean state (toggles dormant/active).
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    /// Bind enabled state to a boolean state.
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
         self
     }
 
@@ -365,6 +381,14 @@ impl CompositeWidget for Button {
         }
         builder.add_action(fern_core::accesskit::Action::Click);
         builder.add_action(fern_core::accesskit::Action::Focus);
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
     }
 
 }

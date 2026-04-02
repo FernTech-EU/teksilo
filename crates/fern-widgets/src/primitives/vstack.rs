@@ -1,5 +1,6 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::state::State;
+use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::HAlignment;
 
@@ -9,16 +10,22 @@ use fern_tokens::HAlignment;
 #[derive(Debug)]
 pub struct VStack {
     child_ids: Vec<WidgetId>,
+    pending: Vec<PendingChild>,
     spacing: f32,
     alignment: HAlignment,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
 }
 
 impl VStack {
     pub fn new() -> Self {
         Self {
             child_ids: Vec::new(),
+            pending: Vec::new(),
             spacing: 0.0,
             alignment: HAlignment::Leading,
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
@@ -32,8 +39,46 @@ impl VStack {
         self
     }
 
+    /// Add a pre-registered child by ID.
     pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.child_ids.push(id);
+        self.pending.push(PendingChild::Id(id));
+        self
+    }
+
+    /// Add an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Add multiple inline children from an iterator.
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl IntoWidgetTree>,
+    ) -> Self {
+        for widget in iter {
+            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        }
+        self
+    }
+
+    /// Conditionally add a child. No-op if None.
+    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+        if let Some(w) = widget {
+            self.pending.push(PendingChild::Deferred(Box::new(w)));
+        }
+        self
+    }
+
+    /// Bind visibility to a boolean state (toggles dormant/active).
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    /// Bind enabled state to a boolean state.
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
         self
     }
 }
@@ -155,6 +200,22 @@ impl Widget for VStack {
     fn children(&self) -> Vec<WidgetId> {
         self.child_ids.clone()
     }
+
+    fn take_pending_children(&mut self) -> Vec<PendingChild> {
+        std::mem::take(&mut self.pending)
+    }
+
+    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
+        self.child_ids = ids;
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
+    }
 }
 
 #[cfg(test)]
@@ -249,5 +310,181 @@ mod tests {
         let mut tree = WidgetTree::new();
         let _stack = tree.add(VStack::new());
         tree.layout(SizeProposal::exact(200.0, 50.0));
+    }
+
+    // --- Inline builder API tests ---
+
+    #[test]
+    fn child_inline_resolves_layout() {
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(
+            VStack::new()
+                .child(FixedLeaf(80.0, 30.0))
+                .child(FixedLeaf(60.0, 50.0)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let kids = tree.children(stack);
+        assert_eq!(kids.len(), 2);
+        assert!((tree.bounds(kids[0]).height - 30.0).abs() < 0.01);
+        assert!((tree.bounds(kids[1]).height - 50.0).abs() < 0.01);
+        assert!((tree.bounds(kids[1]).y - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn mixed_add_child_and_inline_child() {
+        let mut tree = WidgetTree::new();
+        let pre = tree.add(FixedLeaf(80.0, 20.0));
+        let stack = tree.add(
+            VStack::new()
+                .add_child(pre)
+                .child(FixedLeaf(80.0, 40.0)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let kids = tree.children(stack);
+        assert_eq!(kids.len(), 2);
+        assert_eq!(kids[0], pre);
+        assert!((tree.bounds(kids[0]).height - 20.0).abs() < 0.01);
+        assert!((tree.bounds(kids[1]).height - 40.0).abs() < 0.01);
+        assert!((tree.bounds(kids[1]).y - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn children_iterator() {
+        let leaves: Vec<FixedLeaf> = vec![
+            FixedLeaf(80.0, 10.0),
+            FixedLeaf(80.0, 20.0),
+            FixedLeaf(80.0, 30.0),
+        ];
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(VStack::new().children(leaves));
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let kids = tree.children(stack);
+        assert_eq!(kids.len(), 3);
+        assert!((tree.bounds(kids[2]).y - 30.0).abs() < 0.01); // 10 + 20
+    }
+
+    #[test]
+    fn child_opt_none_is_noop() {
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(
+            VStack::new()
+                .child(FixedLeaf(80.0, 30.0))
+                .child_opt(None::<FixedLeaf>)
+                .child(FixedLeaf(80.0, 50.0)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let kids = tree.children(stack);
+        assert_eq!(kids.len(), 2);
+    }
+
+    #[test]
+    fn child_opt_some_adds_child() {
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(
+            VStack::new()
+                .child_opt(Some(FixedLeaf(80.0, 25.0))),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let kids = tree.children(stack);
+        assert_eq!(kids.len(), 1);
+        assert!((tree.bounds(kids[0]).height - 25.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn nested_inline_children() {
+        use crate::primitives::hstack::HStack;
+
+        let mut tree = WidgetTree::new();
+        let outer = tree.add(
+            VStack::new()
+                .child(
+                    HStack::new()
+                        .child(FixedLeaf(40.0, 30.0))
+                        .child(FixedLeaf(50.0, 30.0)),
+                )
+                .child(FixedLeaf(80.0, 20.0)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let outer_kids = tree.children(outer);
+        assert_eq!(outer_kids.len(), 2);
+        // The HStack should have 2 children
+        let hstack_kids = tree.children(outer_kids[0]);
+        assert_eq!(hstack_kids.len(), 2);
+        // Second VStack child starts after HStack height (30)
+        assert!((tree.bounds(outer_kids[1]).y - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn single_child_wrapper_inline() {
+        use crate::primitives::padding::Padding;
+
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(
+            VStack::new()
+                .child(
+                    Padding::uniform(10.0)
+                        .child(FixedLeaf(80.0, 30.0)),
+                ),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let kids = tree.children(stack);
+        assert_eq!(kids.len(), 1);
+        // Padding adds 10 on each side: 30 + 20 = 50
+        assert!((tree.bounds(kids[0]).height - 50.0).abs() < 0.01);
+    }
+
+    // --- visible_when / enabled_when builder tests ---
+
+    #[test]
+    fn visible_when_builder_registers_binding() {
+        use fern_core::state::State;
+
+        let show = State::new(true);
+        let mut tree = WidgetTree::new();
+        let panel_id = tree.add(
+            VStack::new()
+                .child(FixedLeaf(80.0, 30.0))
+                .visible_when(show.clone()),
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        // Initially visible
+        assert!(tree.is_visible(panel_id));
+
+        // Set state to false → widget becomes dormant after next layout
+        show.set(false);
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        assert!(!tree.is_visible(panel_id));
+
+        // Set state back to true → widget is active again
+        show.set(true);
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        assert!(tree.is_visible(panel_id));
+    }
+
+    #[test]
+    fn enabled_when_builder_registers_binding() {
+        use fern_core::state::State;
+
+        let can_act = State::new(true);
+        let mut tree = WidgetTree::new();
+        let stack_id = tree.add(
+            VStack::new()
+                .child(FixedLeaf(80.0, 30.0))
+                .enabled_when(can_act.clone()),
+        );
+
+        assert!(tree.is_enabled(stack_id));
+
+        can_act.set(false);
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        assert!(!tree.is_enabled(stack_id));
     }
 }

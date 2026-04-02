@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, TextStyle};
 use fern_ui::widgets::{
-    Button, ButtonStyle, HStack, Padding, Panel, RectWidget, Spacer, TextWidget, VStack, ZStack,
+    Button, ButtonStyle, HStack, Padding, Panel, Spacer, TextWidget, VStack,
 };
 
 // ---------------------------------------------------------------------------
@@ -42,162 +42,85 @@ struct RootContent;
 impl CompositeWidget for RootContent {
     fn build(&self, ctx: &mut BuildContext) -> WidgetId {
         let theme = ctx.theme().clone();
+        let t = &theme.typography;
+        let c = &theme.colors;
 
-        // --- Section: heading ---
-        let heading = ctx.add(
-            TextWidget::new("Text & Layout")
-                .style(theme.typography.heading_2.clone())
-                .color(theme.colors.on_surface),
-        );
-
-        // --- Section: theme toggle button ---
-        let toggle_btn = ctx.add(
-            Button::new("Toggle Dark Mode")
-                .style(ButtonStyle::Outlined)
-                .on_click(Cmd::ToggleDarkMode),
-        );
-        let spacer_top = ctx.add(Spacer::new());
-        let toolbar = ctx.add(
-            HStack::new()
-                .add_child(heading)
-                .add_child(spacer_top)
-                .add_child(toggle_btn),
-        );
-
-        // --- Section: typography showcase ---
-        let typo_title = ctx.add(
-            TextWidget::new("Typography Styles")
-                .style(theme.typography.heading_3.clone())
-                .color(theme.colors.on_surface),
-        );
-        let body_text = ctx.add(
-            TextWidget::new("Body text (14px) — the default reading style for content.")
-                .style(theme.typography.body.clone())
-                .color(theme.colors.on_surface),
-        );
-        let small_text = ctx.add(
-            TextWidget::new("Body small (12px) — secondary information and descriptions.")
-                .style(theme.typography.body_small.clone())
-                .color(theme.colors.on_surface),
-        );
-        let caption_text = ctx.add(
-            TextWidget::new("Caption (11px) — timestamps, footnotes, and fine print.")
-                .style(theme.typography.caption.clone())
-                .color(theme.colors.on_surface),
-        );
-        let label_text = ctx.add(
-            TextWidget::new("LABEL (12px medium, +0.5 tracking) — form labels and tags.")
-                .style(theme.typography.label.clone())
-                .color(theme.colors.on_surface),
-        );
-        let typo_section = ctx.add(
-            VStack::new()
-                .spacing(6.0)
-                .add_child(typo_title)
-                .add_child(body_text)
-                .add_child(small_text)
-                .add_child(caption_text)
-                .add_child(label_text),
-        );
-
-        // --- Section: layout showcase ---
-        let layout_title = ctx.add(
-            TextWidget::new("Layout Primitives")
-                .style(theme.typography.heading_3.clone())
-                .color(theme.colors.on_surface),
-        );
-
-        // HStack row with three colored boxes
-        let box_a = build_color_box(ctx, theme.colors.primary, "A", &theme);
-        let box_b = build_color_box(ctx, theme.colors.secondary, "B", &theme);
-        let box_c = build_color_box(ctx, theme.colors.error, "C", &theme);
-        let hstack_row = ctx.add(
-            HStack::new()
-                .spacing(8.0)
-                .add_child(box_a)
-                .add_child(box_b)
-                .add_child(box_c),
-        );
-        let hstack_label = ctx.add(
-            TextWidget::new("HStack with spacing — three colored boxes")
-                .style(theme.typography.caption.clone())
-                .color(theme.colors.on_surface),
-        );
-
-        // Spacer demo: [Left] --- [Right]
-        let left_label = ctx.add(
-            TextWidget::new("Leading")
-                .style(theme.typography.body.clone())
-                .color(theme.colors.on_surface),
-        );
-        let spacer_mid = ctx.add(Spacer::new());
-        let right_label = ctx.add(
-            TextWidget::new("Trailing")
-                .style(theme.typography.body.clone())
-                .color(theme.colors.on_surface),
-        );
-        let spacer_row = ctx.add(
-            HStack::new()
-                .add_child(left_label)
-                .add_child(spacer_mid)
-                .add_child(right_label),
-        );
-        let spacer_label = ctx.add(
-            TextWidget::new("Spacer pushing items to edges")
-                .style(theme.typography.caption.clone())
-                .color(theme.colors.on_surface),
-        );
-
-        let layout_section = ctx.add(
-            VStack::new()
-                .spacing(6.0)
-                .add_child(layout_title)
-                .add_child(hstack_row)
-                .add_child(hstack_label)
-                .add_child(spacer_row)
-                .add_child(spacer_label),
-        );
-
-        // --- Root: VStack of all sections with padding ---
-        let content = ctx.add(
-            VStack::new()
-                .spacing(20.0)
-                .add_child(toolbar)
-                .add_child(typo_section)
-                .add_child(layout_section),
-        );
-
-        ctx.add(Padding::uniform(24.0).set_child(content))
+        ctx.add(
+            Padding::uniform(24.0).child(
+                VStack::new().spacing(20.0)
+                    // Toolbar
+                    .child(
+                        HStack::new()
+                            .child(TextWidget::new("Text & Layout")
+                                .style(t.heading_2.clone()).color(c.on_surface))
+                            .child(Spacer::new())
+                            .child(Button::new("Toggle Dark Mode")
+                                .style(ButtonStyle::Outlined)
+                                .on_click(Cmd::ToggleDarkMode))
+                    )
+                    // Typography showcase
+                    .child(
+                        VStack::new().spacing(6.0)
+                            .child(TextWidget::new("Typography Styles")
+                                .style(t.heading_3.clone()).color(c.on_surface))
+                            .child(TextWidget::new("Body text (14px) — the default reading style for content.")
+                                .style(t.body.clone()).color(c.on_surface))
+                            .child(TextWidget::new("Body small (12px) — secondary information and descriptions.")
+                                .style(t.body_small.clone()).color(c.on_surface))
+                            .child(TextWidget::new("Caption (11px) — timestamps, footnotes, and fine print.")
+                                .style(t.caption.clone()).color(c.on_surface))
+                            .child(TextWidget::new("LABEL (12px medium, +0.5 tracking) — form labels and tags.")
+                                .style(t.label.clone()).color(c.on_surface))
+                    )
+                    // Layout showcase
+                    .child(
+                        VStack::new().spacing(6.0)
+                            .child(TextWidget::new("Layout Primitives")
+                                .style(t.heading_3.clone()).color(c.on_surface))
+                            .child(
+                                HStack::new().spacing(8.0)
+                                    .child(build_color_box(c.primary, "A"))
+                                    .child(build_color_box(c.secondary, "B"))
+                                    .child(build_color_box(c.error, "C"))
+                            )
+                            .child(TextWidget::new("HStack with spacing — three colored boxes")
+                                .style(t.caption.clone()).color(c.on_surface))
+                            .child(
+                                HStack::new()
+                                    .child(TextWidget::new("Leading")
+                                        .style(t.body.clone()).color(c.on_surface))
+                                    .child(Spacer::new())
+                                    .child(TextWidget::new("Trailing")
+                                        .style(t.body.clone()).color(c.on_surface))
+                            )
+                            .child(TextWidget::new("Spacer pushing items to edges")
+                                .style(t.caption.clone()).color(c.on_surface))
+                    )
+            )
+        )
     }
 }
 
 fern_ui::core::impl_composite_into_widget_tree!(RootContent);
 
-/// Helper: a small colored box with a centered label.
-fn build_color_box(
-    ctx: &mut BuildContext,
-    color: Color,
-    label: &str,
-    _theme: &fern_ui::tokens::Theme,
-) -> WidgetId {
-    let text = ctx.add(
-        TextWidget::new(label)
-            .style(TextStyle {
-                family: "sans-serif".into(),
-                size: 14.0,
-                weight: FontWeight::BOLD,
-                line_height: 1.4,
-                letter_spacing: 0.0,
-            })
-            .color(Color::WHITE),
-    );
-    ctx.add(
-        Panel::new()
-            .background(color)
-            .corner_radius(6.0)
-            .padding(8.0)
-            .set_child(text),
-    )
+/// Helper — returns a widget value, not a WidgetId.
+/// Works with the inline child() pattern.
+fn build_color_box(color: Color, label: &str) -> Panel {
+    Panel::new()
+        .background(color)
+        .corner_radius(6.0)
+        .padding(8.0)
+        .child(
+            TextWidget::new(label)
+                .style(TextStyle {
+                    family: "sans-serif".into(),
+                    size: 14.0,
+                    weight: FontWeight::BOLD,
+                    line_height: 1.4,
+                    letter_spacing: 0.0,
+                })
+                .color(Color::WHITE)
+        )
 }
 
 // ---------------------------------------------------------------------------

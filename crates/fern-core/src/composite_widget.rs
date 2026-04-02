@@ -113,4 +113,16 @@ pub trait CompositeWidget: std::fmt::Debug {
 
     /// Accessibility identity for the composite root node.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+
+    /// Take a deferred `visible_when` binding stored by the builder pattern.
+    /// Called before build() to register with the tree after insertion.
+    fn take_visible_when(&mut self) -> Option<crate::state::State<bool>> {
+        None
+    }
+
+    /// Take a deferred `enabled_when` binding stored by the builder pattern.
+    /// Called before build() to register with the tree after insertion.
+    fn take_enabled_when(&mut self) -> Option<crate::state::State<bool>> {
+        None
+    }
 }

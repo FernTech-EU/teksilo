@@ -6,7 +6,7 @@ use fern_tokens::{Color, TextStyle};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::Reactive;
+use fern_core::state::{Reactive, State};
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget};
 
 /// A leaf widget that renders a single line of text via the TextBackend.
@@ -16,6 +16,8 @@ pub struct TextWidget {
     color: Reactive<Color>,
     style: TextStyle,
     text_backend: Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
 }
 
 impl std::fmt::Debug for TextWidget {
@@ -31,6 +33,8 @@ impl TextWidget {
             color: Reactive::Static(Color::BLACK),
             style: TextStyle::default(),
             text_backend: None,
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
@@ -64,6 +68,18 @@ impl TextWidget {
     /// Get the current text value (resolves from state if bound).
     pub fn text(&self) -> String {
         self.text.get()
+    }
+
+    /// Bind visibility to a boolean state (toggles dormant/active).
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    /// Bind enabled state to a boolean state.
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
+        self
     }
 }
 
@@ -110,6 +126,14 @@ impl Widget for TextWidget {
         use fern_core::state::BindingLevel;
         self.text.register_if_bound(id, registry, BindingLevel::Relayout);
         self.color.register_if_bound(id, registry, BindingLevel::RepaintOnly);
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
     }
 }
 

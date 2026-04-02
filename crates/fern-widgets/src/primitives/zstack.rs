@@ -2,7 +2,8 @@ use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::state::State;
+use fern_core::widget::{EventContext, IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::WidgetId;
 use fern_tokens::Alignment;
 
@@ -12,14 +13,20 @@ use fern_tokens::Alignment;
 #[derive(Debug)]
 pub struct ZStack {
     child_ids: Vec<WidgetId>,
+    pending: Vec<PendingChild>,
     alignment: Alignment,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
 }
 
 impl ZStack {
     pub fn new() -> Self {
         Self {
             child_ids: Vec::new(),
+            pending: Vec::new(),
             alignment: Alignment::CENTER,
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
@@ -28,9 +35,46 @@ impl ZStack {
         self
     }
 
-    /// Add a pre-inserted child widget ID.
+    /// Add a pre-registered child by ID.
     pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.child_ids.push(id);
+        self.pending.push(PendingChild::Id(id));
+        self
+    }
+
+    /// Add an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Add multiple inline children from an iterator.
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl IntoWidgetTree>,
+    ) -> Self {
+        for widget in iter {
+            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        }
+        self
+    }
+
+    /// Conditionally add a child. No-op if None.
+    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+        if let Some(w) = widget {
+            self.pending.push(PendingChild::Deferred(Box::new(w)));
+        }
+        self
+    }
+
+    /// Bind visibility to a boolean state (toggles dormant/active).
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    /// Bind enabled state to a boolean state.
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
         self
     }
 }
@@ -103,6 +147,22 @@ impl Widget for ZStack {
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_ids.clone()
+    }
+
+    fn take_pending_children(&mut self) -> Vec<PendingChild> {
+        std::mem::take(&mut self.pending)
+    }
+
+    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
+        self.child_ids = ids;
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
     }
 }
 

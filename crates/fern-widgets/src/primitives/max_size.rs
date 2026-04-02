@@ -1,6 +1,6 @@
 use fern_canvas::{Rect, Size, SizeProposal};
-use fern_core::state::{BindingLevel, Reactive};
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// Layout modifier that enforces maximum dimensions on a child widget.
@@ -8,32 +8,44 @@ use fern_core::widget_id::WidgetId;
 #[derive(Debug)]
 pub struct MaxSize {
     child_id: Option<WidgetId>,
+    pending_child: Option<PendingChild>,
     max_width: Option<Reactive<f32>>,
     max_height: Option<Reactive<f32>>,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
 }
 
 impl MaxSize {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
             child_id: None,
+            pending_child: None,
             max_width: Some(Reactive::Static(width)),
             max_height: Some(Reactive::Static(height)),
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
     pub fn width(width: f32) -> Self {
         Self {
             child_id: None,
+            pending_child: None,
             max_width: Some(Reactive::Static(width)),
             max_height: None,
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
     pub fn height(height: f32) -> Self {
         Self {
             child_id: None,
+            pending_child: None,
             max_width: None,
             max_height: Some(Reactive::Static(height)),
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
@@ -49,8 +61,27 @@ impl MaxSize {
         self
     }
 
+    /// Set child by pre-registered ID.
     pub fn set_child(mut self, id: WidgetId) -> Self {
-        self.child_id = Some(id);
+        self.pending_child = Some(PendingChild::Id(id));
+        self
+    }
+
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Bind visibility to a boolean state (toggles dormant/active).
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    /// Bind enabled state to a boolean state.
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
         self
     }
 }
@@ -106,6 +137,22 @@ impl Widget for MaxSize {
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
+    }
+
+    fn take_pending_children(&mut self) -> Vec<PendingChild> {
+        self.pending_child.take().into_iter().collect()
+    }
+
+    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
+        self.child_id = ids.into_iter().next();
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
     }
 
     fn register_bindings(

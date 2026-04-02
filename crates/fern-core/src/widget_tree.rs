@@ -321,20 +321,54 @@ impl WidgetTree {
     }
 
     /// Insert a pre-boxed Widget directly. Used by the `IntoWidgetTree` blanket impl.
-    /// Automatically registers reactive bindings.
-    pub fn add_widget_direct(&mut self, widget: Box<dyn Widget>) -> WidgetId {
+    /// Automatically resolves deferred (inline) children, registers reactive bindings,
+    /// and processes builder-style `visible_when` / `enabled_when` metadata.
+    pub fn add_widget_direct(&mut self, mut widget: Box<dyn Widget>) -> WidgetId {
+        // 1. Resolve any deferred children before inserting this widget.
+        let pending = widget.take_pending_children();
+        if !pending.is_empty() {
+            let resolved_ids: Vec<WidgetId> = pending
+                .into_iter()
+                .map(|child| match child {
+                    crate::widget::PendingChild::Id(id) => id,
+                    crate::widget::PendingChild::Deferred(w) => w.register(self),
+                })
+                .collect();
+            widget.set_resolved_children(resolved_ids);
+        }
+
+        // 2. Extract builder-style visibility/enabled metadata before inserting.
+        let vis_state = widget.take_visible_when();
+        let ena_state = widget.take_enabled_when();
+
+        // 3. Insert into the arena (this wires parent-child via widget.children()).
         let id = self.arena.insert(widget);
+
+        // 4. Register reactive property bindings.
         if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
         }
+
+        // 5. Apply deferred visible_when / enabled_when.
+        if let Some(state) = vis_state {
+            self.visible_when(id, &state);
+        }
+        if let Some(state) = ena_state {
+            self.enabled_when(id, &state);
+        }
+
         id
     }
 
     /// Insert a boxed CompositeWidget. Used by `IntoWidgetTree` impls on composites.
     pub fn add_composite_inner(
         &mut self,
-        composite: Box<dyn crate::composite_widget::CompositeWidget>,
+        mut composite: Box<dyn crate::composite_widget::CompositeWidget>,
     ) -> WidgetId {
+        // Extract builder-style visibility/enabled metadata before build.
+        let vis_state = composite.take_visible_when();
+        let ena_state = composite.take_enabled_when();
+
         use crate::composite_adapter::CompositeWidgetAdapter;
         let mut adapter = CompositeWidgetAdapter::new(composite);
 
@@ -360,6 +394,15 @@ impl WidgetTree {
         }
 
         self.composite_ids.push(adapter_id);
+
+        // Apply deferred visible_when / enabled_when.
+        if let Some(state) = vis_state {
+            self.visible_when(adapter_id, &state);
+        }
+        if let Some(state) = ena_state {
+            self.enabled_when(adapter_id, &state);
+        }
+
         adapter_id
     }
 

@@ -3,7 +3,7 @@ use fern_tokens::{Color, CornerRadius};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::Reactive;
+use fern_core::state::{Reactive, State};
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 
 /// A leaf widget that paints a filled and/or stroked rounded rectangle.
@@ -13,6 +13,8 @@ pub struct RectWidget {
     border_color: Reactive<Color>,
     border_width: Reactive<f32>,
     corner_radius: Reactive<CornerRadius>,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
 }
 
 impl RectWidget {
@@ -22,6 +24,8 @@ impl RectWidget {
             border_color: Reactive::Static(Color::TRANSPARENT),
             border_width: Reactive::Static(0.0),
             corner_radius: Reactive::Static(CornerRadius::ZERO),
+            visible_when_state: None,
+            enabled_when_state: None,
         }
     }
 
@@ -66,6 +70,18 @@ impl RectWidget {
     /// Bind the corner radius to a reactive state.
     pub fn bind_corner_radius(mut self, state: impl Into<Reactive<CornerRadius>>) -> Self {
         self.corner_radius = state.into();
+        self
+    }
+
+    /// Bind visibility to a boolean state (toggles dormant/active).
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    /// Bind enabled state to a boolean state.
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
         self
     }
 }
@@ -127,6 +143,14 @@ impl Widget for RectWidget {
         self.border_color.register_if_bound(id, registry, BindingLevel::RepaintOnly);
         self.border_width.register_if_bound(id, registry, BindingLevel::RepaintOnly);
         self.corner_radius.register_if_bound(id, registry, BindingLevel::RepaintOnly);
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
     }
 }
 
