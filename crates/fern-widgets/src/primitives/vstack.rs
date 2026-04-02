@@ -120,7 +120,14 @@ impl Widget for VStack {
         total_height += total_spacing;
 
         let width = proposal.width.unwrap_or(max_width);
-        let height = proposal.height.unwrap_or(total_height);
+        // Primary axis: fill the offered height only when spacers need to expand.
+        // Without spacers, use the intrinsic content height.
+        let has_spacers = self.child_ids.iter().any(|&id| ctx.child_is_spacer(id));
+        let height = if has_spacers {
+            proposal.height.unwrap_or(total_height)
+        } else {
+            total_height
+        };
 
         Size::new(width, height)
     }
@@ -137,8 +144,12 @@ impl Widget for VStack {
             return;
         }
 
-        // Query each child's intrinsic size once with unspecified proposal.
-        let intrinsic_proposal = SizeProposal::unspecified();
+        // Query each child's intrinsic size: offer the full container width
+        // so children containing spacers (e.g. HStack) can expand properly.
+        let intrinsic_proposal = SizeProposal {
+            width: Some(bounds.width),
+            height: None,
+        };
 
         let mut intrinsic_widths: Vec<f32> = Vec::with_capacity(n);
         let mut intrinsic_heights: Vec<f32> = Vec::with_capacity(n);
