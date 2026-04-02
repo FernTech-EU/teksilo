@@ -37,6 +37,8 @@ pub struct TypesetterBridge {
     next_layout_key: u64,
     /// Cached result from the last layout_single_line call.
     last_result: Option<SingleLineResult>,
+    /// Cache key that identifies which text `last_result` belongs to.
+    last_result_key: Option<LayoutCacheKey>,
     /// Display scale factor for HiDPI rasterization.
     scale_factor: f32,
     /// Layout metrics cache: avoids re-shaping text just for size measurement.
@@ -50,6 +52,7 @@ impl TypesetterBridge {
             default_font: None,
             next_layout_key: 1,
             last_result: None,
+            last_result_key: None,
             scale_factor: 1.0,
             layout_cache: HashMap::new(),
         }
@@ -134,12 +137,10 @@ impl TextBackend for TypesetterBridge {
         let sf = self.scale_factor;
         let cache_key = LayoutCacheKey::new(text, style, max_width, sf);
 
-        // Check cache for metrics (avoids full shaping for size_that_fits calls).
-        // If last_result is already Some (previous call not yet consumed by
-        // ensure_glyphs), we can return cached metrics safely.
-        // If last_result is None (ensure_glyphs consumed it), we must re-shape
-        // because the next ensure_glyphs call needs fresh glyph data.
-        if self.last_result.is_some() {
+        // Check cache for metrics. Only skip re-shaping if last_result already
+        // holds glyph data for THIS EXACT text (same cache key). Otherwise we
+        // must re-shape so ensure_glyphs returns the correct glyphs.
+        if self.last_result_key.as_ref() == Some(&cache_key) {
             if let Some(cached) = self.layout_cache.get(&cache_key) {
                 return cached.clone();
             }
@@ -165,12 +166,14 @@ impl TextBackend for TypesetterBridge {
             line_count: 1,
         };
 
-        self.layout_cache.insert(cache_key, layout.clone());
+        self.layout_cache.insert(cache_key.clone(), layout.clone());
         self.last_result = Some(result);
+        self.last_result_key = Some(cache_key);
         layout
     }
 
     fn ensure_glyphs(&mut self, _layout: &TextLayout) -> Vec<GlyphQuad> {
+        self.last_result_key = None;
         let result = match self.last_result.take() {
             Some(r) => r,
             None => return Vec::new(),
@@ -275,5 +278,36 @@ mod tests {
         let narrow = bridge.layout_single_line("Hello World", &TextStyle::default(), Some(30.0));
         // They should differ (narrow is constrained)
         assert!(narrow.width < wide.width || narrow.width <= 31.0);
+    }
+
+    /// Reproduces the stale-glyph bug: after a layout pass (many layout_single_line
+    /// calls without ensure_glyphs), the first paint call's ensure_glyphs should
+    /// return glyphs for the correct text, not for whatever was last measured.
+    #[test]
+    fn ensure_glyphs_after_layout_pass_returns_correct_text() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let style = TextStyle::default();
+
+        // Simulate layout pass: measure several texts (no ensure_glyphs calls)
+        let _l1 = bridge.layout_single_line("First text", &style, None);
+        let _l2 = bridge.layout_single_line("Second text", &style, None);
+        let _l3 = bridge.layout_single_line("Third text is the last measured", &style, None);
+
+        // Simulate paint for the FIRST text: layout_single_line + ensure_glyphs
+        let layout = bridge.layout_single_line("First text", &style, None);
+        let glyphs = bridge.ensure_glyphs(&layout);
+
+        // "First text" has 10 characters → should produce ~10 glyphs
+        // "Third text is the last measured" has 31 chars → ~31 glyphs
+        // If we get ~31 glyphs, the bug is present (stale last_result)
+        assert!(
+            !glyphs.is_empty(),
+            "should produce glyphs for 'First text'"
+        );
+        assert!(
+            glyphs.len() <= 15,
+            "got {} glyphs — expected ~10 for 'First text', not ~31 for the stale last_result",
+            glyphs.len()
+        );
     }
 }
