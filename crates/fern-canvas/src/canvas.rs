@@ -283,7 +283,13 @@ impl Canvas {
         let backend = self.text_backend.as_ref()?;
         let mut backend = backend.borrow_mut();
 
-        let layout = backend.layout_single_line(text, style, Some(position.width));
+        // Add a small epsilon to the bounds width before using it as max_width.
+        // The text was already measured during layout; re-shaping with the exact
+        // measured width can cause spurious truncation due to float precision loss
+        // in the scale_factor roundtrip (logical → physical → logical). The 0.5px
+        // cushion prevents that while still truncating text that genuinely overflows.
+        let max_width = Some(position.width + 0.5);
+        let layout = backend.layout_single_line(text, style, max_width);
         let glyphs = backend.ensure_glyphs(&layout);
 
         // Offset glyphs to the target position
