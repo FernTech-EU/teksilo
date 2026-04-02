@@ -80,6 +80,7 @@ impl<'a> LayoutContext<'a> {
 pub struct PaintContext<'a> {
     pub theme: &'a fern_tokens::Theme,
     pub scale_factor: f32,
+    // TODO: Wire from platform accessibility settings (winit doesn't expose these yet)
     pub prefers_high_contrast: bool,
     pub prefers_reduced_motion: bool,
     pub prefers_large_text: bool,

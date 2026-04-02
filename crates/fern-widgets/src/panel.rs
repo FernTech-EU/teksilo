@@ -8,6 +8,7 @@
 //! It reads theme tokens during layout and paint directly from the context.
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::state::State;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -155,6 +156,10 @@ impl Widget for Panel {
             let border = self.border_color.unwrap_or(ctx.theme.colors.border);
             canvas.stroke_rounded_rect(bounds, CornerRadius::uniform(radius), border, border_w);
         }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::Group);
     }
 
     fn children(&self) -> Vec<WidgetId> {

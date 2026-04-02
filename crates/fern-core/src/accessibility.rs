@@ -1,4 +1,4 @@
-use accesskit::{Action, Node, NodeId, Role};
+use accesskit::{Action, Live, Node, NodeId, Role};
 
 use crate::widget_id::WidgetId;
 
@@ -46,6 +46,18 @@ impl AccessNodeBuilder {
         let v: String = value.into();
         self.inner.set_value(v.clone());
         self.value = Some(v);
+    }
+
+    pub fn set_description(&mut self, description: impl Into<String>) {
+        self.inner.set_description(description.into());
+    }
+
+    pub fn set_live(&mut self, live: Live) {
+        self.inner.set_live(live);
+    }
+
+    pub fn set_described_by(&mut self, ids: impl Into<Vec<NodeId>>) {
+        self.inner.set_described_by(ids);
     }
 
     pub fn role(&self) -> Role {

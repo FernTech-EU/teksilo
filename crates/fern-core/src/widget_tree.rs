@@ -707,14 +707,22 @@ impl WidgetTree {
                     self.dispatch_to_widget(focused, &event);
                 }
             }
-            WidgetEvent::AccessAction { target, .. } => {
-                // Route to the specific target widget from AccessKit,
-                // falling back to the focused widget.
-                let dispatch_target = target
-                    .filter(|id| self.arena.is_active(*id))
-                    .or(self.focused);
-                if let Some(id) = dispatch_target {
-                    self.dispatch_to_widget(id, &event);
+            WidgetEvent::AccessAction { target, action, .. } => {
+                // Handle Action::Focus at the tree level — widgets can't request
+                // focus from EventContext, so we intercept it here.
+                if *action == accesskit::Action::Focus {
+                    if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
+                        self.focus_with_origin(id, crate::focus::FocusOrigin::Programmatic);
+                    }
+                } else {
+                    // Route other actions to the specific target widget from AccessKit,
+                    // falling back to the focused widget.
+                    let dispatch_target = target
+                        .filter(|id| self.arena.is_active(*id))
+                        .or(self.focused);
+                    if let Some(id) = dispatch_target {
+                        self.dispatch_to_widget(id, &event);
+                    }
                 }
             }
             WidgetEvent::Gesture { .. } => {
@@ -1173,9 +1181,10 @@ impl WidgetTree {
             self.build_accessibility_recursive(root_id, &mut nodes);
         }
 
-        // Focus: use the focused widget, or fall back to root
+        // Focus: use the focused widget if still active, or fall back to root
         let focus = self
             .focused
+            .filter(|id| self.arena.is_active(*id))
             .map(widget_id_to_node_id)
             .unwrap_or_else(root_node_id);
 
@@ -1218,6 +1227,11 @@ impl WidgetTree {
             x1: (bounds.x + bounds.width) as f64,
             y1: (bounds.y + bounds.height) as f64,
         });
+
+        // Link tooltip anchor to its tooltip content via described_by
+        if let Some(tooltip) = self.tooltips.iter().find(|t| t.anchor_id == id && t.overlay_id.is_some()) {
+            builder.inner_mut().push_described_by(widget_id_to_node_id(tooltip.content_id));
+        }
 
         let (node_id, ak_node) = builder.build(id);
         nodes.push((node_id, ak_node));

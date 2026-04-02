@@ -1,4 +1,5 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::state::State;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -74,6 +75,10 @@ impl Widget for Center {
     }
 
     fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {}
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+    }
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()

@@ -143,7 +143,9 @@ impl Widget for ZStack {
         EventResponse::Ignored
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+    }
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_ids.clone()
