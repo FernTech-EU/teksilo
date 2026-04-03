@@ -201,6 +201,11 @@ impl Renderer {
                 multiview_mask: None,
             });
 
+            // Clip rect stack for nested scroll areas.
+            // Each SetClip pushes a rect; the effective clip is the intersection.
+            // ClearClip pops the top and restores the previous intersection.
+            let mut clip_stack: Vec<[u32; 4]> = Vec::new(); // [x, y, w, h]
+
             // Opacity stack for nested opacity groups
             let mut opacity_stack: Vec<f32> = vec![1.0];
             let mut current_opacity: f32 = 1.0;
@@ -233,13 +238,28 @@ impl Renderer {
                         let y = (rect.y * scale_factor) as u32;
                         let w = (rect.width * scale_factor).ceil() as u32;
                         let h = (rect.height * scale_factor).ceil() as u32;
-                        // Clamp to surface bounds
                         let w = w.min(viewport_width.saturating_sub(x));
                         let h = h.min(viewport_height.saturating_sub(y));
-                        pass.set_scissor_rect(x, y, w, h);
+                        // Intersect with current clip (if any) for nesting
+                        let clipped = if let Some(&[cx, cy, cw, ch]) = clip_stack.last() {
+                            let ix = x.max(cx);
+                            let iy = y.max(cy);
+                            let ir = (x + w).min(cx + cw);
+                            let ib = (y + h).min(cy + ch);
+                            [ix, iy, ir.saturating_sub(ix), ib.saturating_sub(iy)]
+                        } else {
+                            [x, y, w, h]
+                        };
+                        clip_stack.push(clipped);
+                        pass.set_scissor_rect(clipped[0], clipped[1], clipped[2], clipped[3]);
                     }
                     fern_canvas::DrawCommand::ClearClip => {
-                        pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+                        clip_stack.pop();
+                        if let Some(&[x, y, w, h]) = clip_stack.last() {
+                            pass.set_scissor_rect(x, y, w, h);
+                        } else {
+                            pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+                        }
                     }
                     fern_canvas::DrawCommand::SetOpacity(opacity) => {
                         opacity_stack.push(current_opacity);
