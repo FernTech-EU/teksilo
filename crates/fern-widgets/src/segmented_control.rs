@@ -12,7 +12,7 @@ use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{
     GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
 };
-use fern_core::state::{BindingLevel, State};
+use fern_core::state::{BindingLevel, Reactive, State};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, TextStyle};
@@ -34,8 +34,8 @@ pub struct SegmentedControl {
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
     cached_bounds: Cell<Rect>,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl SegmentedControl {
@@ -59,13 +59,13 @@ impl SegmentedControl {
         self
     }
 
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -340,11 +340,11 @@ impl Widget for SegmentedControl {
             .bind_to(id, registry, BindingLevel::RepaintOnly);
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 }

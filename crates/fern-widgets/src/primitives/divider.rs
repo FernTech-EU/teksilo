@@ -6,7 +6,7 @@
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal, StrokeStyle};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::State;
+use fern_core::state::{Reactive, State};
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_tokens::{Color, Orientation};
 
@@ -16,8 +16,8 @@ pub struct Divider {
     orientation: Orientation,
     thickness: f32,
     color: Option<Color>,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Divider {
@@ -52,13 +52,13 @@ impl Divider {
         self
     }
 
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -115,11 +115,11 @@ impl Widget for Divider {
         builder.set_role(fern_core::accesskit::Role::Splitter);
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 }

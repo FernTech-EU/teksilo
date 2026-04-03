@@ -2,7 +2,7 @@ use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::State;
+use fern_core::state::{Reactive, State};
 use fern_core::widget::{EventContext, IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::WidgetId;
 
@@ -15,8 +15,8 @@ pub struct Padding {
     left: f32,
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Padding {
@@ -54,14 +54,14 @@ impl Padding {
     }
 
     /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
     /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -130,11 +130,11 @@ impl Widget for Padding {
         self.child_id = ids.into_iter().next();
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 }

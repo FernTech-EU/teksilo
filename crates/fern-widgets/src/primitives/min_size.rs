@@ -11,8 +11,8 @@ pub struct MinSize {
     pending_child: Option<PendingChild>,
     min_width: Option<Reactive<f32>>,
     min_height: Option<Reactive<f32>>,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl MinSize {
@@ -74,14 +74,14 @@ impl MinSize {
     }
 
     /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
     /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -131,11 +131,11 @@ impl Widget for MinSize {
         self.child_id = ids.into_iter().next();
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 

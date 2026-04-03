@@ -10,7 +10,7 @@ use fern_core::composite_widget::{BuildContext, CompositeWidget};
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
-use fern_core::state::State;
+use fern_core::state::{Reactive, State};
 use fern_core::widget::{CursorIcon, EventContext};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
@@ -28,8 +28,8 @@ pub struct RadioButton {
     interaction: RefCell<Option<State<InteractionState>>>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl RadioButton {
@@ -63,13 +63,13 @@ impl RadioButton {
         self
     }
 
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -174,15 +174,8 @@ impl CompositeWidget for RadioButton {
                 .set_child(dot_id),
         );
 
-        // Drive dot visibility from the shared selected state via observer
-        let is_selected = ctx.state(*selected.get() == value);
-        {
-            let is_selected = is_selected.clone();
-            ctx.observe(&selected, move |s| {
-                is_selected.set(*s == value);
-            });
-        }
-        ctx.visible_when(dot_sized, &is_selected);
+        // Drive dot visibility from the shared selected state
+        ctx.visible_when(dot_sized, selected.map(move |s| *s == value));
 
         let radio = ctx.add(ZStack::new().add_child(outer_sized).add_child(dot_sized));
 
@@ -299,11 +292,11 @@ impl CompositeWidget for RadioButton {
         builder.add_action(fern_core::accesskit::Action::Focus);
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 }

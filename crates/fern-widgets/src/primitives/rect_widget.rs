@@ -13,8 +13,8 @@ pub struct RectWidget {
     border_color: Reactive<Color>,
     border_width: Reactive<f32>,
     corner_radius: Reactive<CornerRadius>,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl RectWidget {
@@ -74,14 +74,14 @@ impl RectWidget {
     }
 
     /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
     /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -145,11 +145,11 @@ impl Widget for RectWidget {
         self.corner_radius.register_if_bound(id, registry, BindingLevel::RepaintOnly);
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 }

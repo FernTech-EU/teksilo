@@ -3,7 +3,7 @@
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::composite_widget::{BuildContext, CompositeWidget};
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::State;
+use fern_core::state::{Reactive, State};
 use fern_core::widget::EventContext;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
@@ -15,8 +15,8 @@ pub struct Badge {
     label: String,
     color: Option<Color>,
     text_color: Option<Color>,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Badge {
@@ -40,13 +40,13 @@ impl Badge {
         self
     }
 
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -89,11 +89,11 @@ impl CompositeWidget for Badge {
         builder.set_name(&self.label);
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 }

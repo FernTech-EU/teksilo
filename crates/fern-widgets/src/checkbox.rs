@@ -19,7 +19,7 @@ use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{
     GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
 };
-use fern_core::state::State;
+use fern_core::state::{Reactive, State};
 use fern_core::widget::{CursorIcon, EventContext};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
@@ -120,8 +120,8 @@ pub struct Checkbox {
     interaction: RefCell<Option<State<InteractionState>>>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
-    visible_when_state: Option<State<bool>>,
-    enabled_when_state: Option<State<bool>>,
+    visible_when_state: Option<Reactive<bool>>,
+    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Checkbox {
@@ -173,13 +173,13 @@ impl Checkbox {
         self
     }
 
-    pub fn visible_when(mut self, state: State<bool>) -> Self {
-        self.visible_when_state = Some(state);
+    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.visible_when_state = Some(state.into());
         self
     }
 
-    pub fn enabled_when(mut self, state: State<bool>) -> Self {
-        self.enabled_when_state = Some(state);
+    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
+        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -328,33 +328,14 @@ impl CompositeWidget for Checkbox {
         let dash_id = ctx.add(dash);
 
         // Control visibility based on check state.
-        // For two-state: checkmark visible when State<bool> is true, dash always hidden.
-        // For tristate: use derived state mapped to bool for each icon.
         match &self.kind {
             CheckKind::TwoState(checked) => {
-                ctx.visible_when(checkmark_id, checked);
-                // Dash is never shown in two-state mode. Use a State<bool>(false).
-                let never = ctx.state(false);
-                ctx.visible_when(dash_id, &never);
+                ctx.visible_when(checkmark_id, checked.clone());
+                ctx.visible_when(dash_id, false);
             }
             CheckKind::TriState(state) => {
-                // visible_when requires State<bool>, not DerivedState.
-                // Use the icon color transparency approach: icons are always present
-                // but we control their visibility via a helper State<bool> + observer.
-                //
-                // Create two bool states and observe the CheckState to update them.
-                let show_check = ctx.state(*state.get() == CheckState::Checked);
-                let show_dash = ctx.state(*state.get() == CheckState::Indeterminate);
-                ctx.visible_when(checkmark_id, &show_check);
-                ctx.visible_when(dash_id, &show_dash);
-
-                // Observe the tristate to keep the visibility states in sync.
-                let sc = show_check.clone();
-                let sd = show_dash.clone();
-                ctx.observe(state, move |val| {
-                    sc.set(*val == CheckState::Checked);
-                    sd.set(*val == CheckState::Indeterminate);
-                });
+                ctx.visible_when(checkmark_id, state.map(|v| *v == CheckState::Checked));
+                ctx.visible_when(dash_id, state.map(|v| *v == CheckState::Indeterminate));
             }
         }
 
@@ -486,11 +467,11 @@ impl CompositeWidget for Checkbox {
         builder.add_action(fern_core::accesskit::Action::Focus);
     }
 
-    fn take_visible_when(&mut self) -> Option<State<bool>> {
+    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
         self.visible_when_state.take()
     }
 
-    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
         self.enabled_when_state.take()
     }
 }
