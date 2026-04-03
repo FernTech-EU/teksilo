@@ -420,10 +420,10 @@ impl WidgetTree {
 
         // 5. Apply deferred visible_when / enabled_when.
         if let Some(state) = vis_state {
-            self.visible_when(id, &state);
+            self.visible_when(id, state);
         }
         if let Some(state) = ena_state {
-            self.enabled_when(id, &state);
+            self.enabled_when(id, state);
         }
 
         id
@@ -466,10 +466,10 @@ impl WidgetTree {
 
         // Apply deferred visible_when / enabled_when.
         if let Some(state) = vis_state {
-            self.visible_when(adapter_id, &state);
+            self.visible_when(adapter_id, state);
         }
         if let Some(state) = ena_state {
-            self.enabled_when(adapter_id, &state);
+            self.enabled_when(adapter_id, state);
         }
 
         adapter_id
@@ -520,10 +520,10 @@ impl WidgetTree {
 
         // 5. Apply visible_when / enabled_when
         if let Some(state) = vis_state {
-            self.visible_when(id, &state);
+            self.visible_when(id, state);
         }
         if let Some(state) = ena_state {
-            self.enabled_when(id, &state);
+            self.enabled_when(id, state);
         }
 
         id
@@ -539,19 +539,25 @@ impl WidgetTree {
 
     // --- Property bindings ---
 
-    /// Bind a widget's visibility to a boolean state.
+    /// Bind a widget's visibility to a boolean state or derived state.
     /// When false, the widget is set dormant; when true, it is activated.
-    pub fn visible_when(&mut self, id: WidgetId, state: &crate::state::State<bool>) {
+    /// Accepts `State<bool>`, `DerivedState<bool>`, or plain `bool`.
+    pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
+        let reactive = state.into();
+        reactive.register_if_bound(id, &self.binding_registry, crate::state::BindingLevel::Relayout);
         if let Some(node) = self.arena.get_mut(id) {
-            node.visible_state = Some(state.clone());
+            node.visible_state = Some(reactive);
         }
     }
 
-    /// Bind a widget's enabled state to a boolean state.
+    /// Bind a widget's enabled state to a boolean state or derived state.
     /// When false, the widget ignores all events but remains visible.
-    pub fn enabled_when(&mut self, id: WidgetId, state: &crate::state::State<bool>) {
+    /// Accepts `State<bool>`, `DerivedState<bool>`, or plain `bool`.
+    pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
+        let reactive = state.into();
+        reactive.register_if_bound(id, &self.binding_registry, crate::state::BindingLevel::Relayout);
         if let Some(node) = self.arena.get_mut(id) {
-            node.enabled_state = Some(state.clone());
+            node.enabled_state = Some(reactive);
         }
     }
 

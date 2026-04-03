@@ -220,13 +220,13 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 
     /// Take a deferred `visible_when` binding stored by the builder pattern.
     /// Called after insertion to register with the tree.
-    fn take_visible_when(&mut self) -> Option<crate::state::State<bool>> {
+    fn take_visible_when(&mut self) -> Option<crate::state::Reactive<bool>> {
         None
     }
 
     /// Take a deferred `enabled_when` binding stored by the builder pattern.
     /// Called after insertion to register with the tree.
-    fn take_enabled_when(&mut self) -> Option<crate::state::State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<crate::state::Reactive<bool>> {
         None
     }
 

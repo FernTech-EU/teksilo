@@ -50,8 +50,8 @@ pub struct WidgetNode {
     pub bounds: fern_canvas::Rect,
     pub(crate) gesture_binding: Option<GestureBinding>,
     pub(crate) theme_override: Option<ThemeOverride>,
-    pub(crate) visible_state: Option<crate::state::State<bool>>,
-    pub(crate) enabled_state: Option<crate::state::State<bool>>,
+    pub(crate) visible_state: Option<crate::state::Reactive<bool>>,
+    pub(crate) enabled_state: Option<crate::state::Reactive<bool>>,
     pub(crate) alignment_override: Option<fern_tokens::Alignment>,
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
@@ -318,7 +318,7 @@ impl WidgetArena {
         for (id, node) in self.nodes.iter() {
             if let Some(ref state) = node.visible_state {
                 let is_active = node.activation == ActivationState::Active;
-                let should_be_visible = *state.get();
+                let should_be_visible = state.get();
                 checks.push((id, is_active, should_be_visible));
             }
         }
@@ -332,7 +332,7 @@ impl WidgetArena {
             .map(|n| {
                 n.enabled_state
                     .as_ref()
-                    .map(|s| *s.get())
+                    .map(|s| s.get())
                     .unwrap_or(true)
             })
             .unwrap_or(true)

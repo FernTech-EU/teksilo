@@ -25,6 +25,12 @@ impl<'a> BuildContext<'a> {
         self.tree.add_widget(widget)
     }
 
+    /// Add a pre-boxed widget to the tree. Useful when storing deferred
+    /// children as `Box<dyn IntoWidgetTree>` (e.g. in Switcher).
+    pub fn add_boxed(&mut self, widget: Box<dyn crate::widget::IntoWidgetTree>) -> WidgetId {
+        widget.register(self.tree)
+    }
+
     /// Add a Level 2 widget as a child of another widget.
     pub fn add_child(
         &mut self,
@@ -76,13 +82,13 @@ impl<'a> BuildContext<'a> {
         self.tree.theme()
     }
 
-    /// Bind a widget's visibility to a boolean state.
-    pub fn visible_when(&mut self, id: WidgetId, state: &State<bool>) {
+    /// Bind a widget's visibility to a boolean state or derived state.
+    pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
         self.tree.visible_when(id, state);
     }
 
-    /// Bind a widget's enabled state to a boolean state.
-    pub fn enabled_when(&mut self, id: WidgetId, state: &State<bool>) {
+    /// Bind a widget's enabled state to a boolean state or derived state.
+    pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
         self.tree.enabled_when(id, state);
     }
 
@@ -124,13 +130,13 @@ pub trait CompositeWidget: std::fmt::Debug {
 
     /// Take a deferred `visible_when` binding stored by the builder pattern.
     /// Called before build() to register with the tree after insertion.
-    fn take_visible_when(&mut self) -> Option<crate::state::State<bool>> {
+    fn take_visible_when(&mut self) -> Option<crate::state::Reactive<bool>> {
         None
     }
 
     /// Take a deferred `enabled_when` binding stored by the builder pattern.
     /// Called before build() to register with the tree after insertion.
-    fn take_enabled_when(&mut self) -> Option<crate::state::State<bool>> {
+    fn take_enabled_when(&mut self) -> Option<crate::state::Reactive<bool>> {
         None
     }
 }
