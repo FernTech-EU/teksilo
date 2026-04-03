@@ -133,9 +133,13 @@ pub enum WidgetEvent {
     },
     /// Dispatched by the framework to a clipping ancestor when a child
     /// gains focus but is outside the viewport. The scroll area adjusts
-    /// its offset to make the target bounds visible.
+    /// its offset to make the target bounds visible, with an optional
+    /// margin around the target.
     ScrollIntoView {
         target_bounds: Rect,
+        /// Extra margin (in logical pixels) to keep around the target
+        /// when scrolling it into view. Defaults to 0.0.
+        margin: f32,
     },
     /// A recognized gesture event, routed through the same preview/bubble system.
     Gesture {

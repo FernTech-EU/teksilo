@@ -406,9 +406,16 @@ impl WidgetTree {
         // 3. Insert into the arena (this wires parent-child via widget.children()).
         let id = self.arena.insert(widget);
 
-        // 4. Register reactive property bindings.
+        // 4. Register reactive property bindings, animated states, and clips_children.
+        let clips = self.arena.get(id).map_or(false, |n| n.widget.clips_children());
         if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
+            for state in node.widget.animated_states() {
+                self.register_animated_state(&state);
+            }
+        }
+        if clips {
+            self.arena.set_clips_children(id, true);
         }
 
         // 5. Apply deferred visible_when / enabled_when.
@@ -499,9 +506,16 @@ impl WidgetTree {
         // 3. Insert as child
         let id = self.arena.insert_child(parent, boxed);
 
-        // 4. Register reactive bindings
+        // 4. Register reactive bindings, animated states, and clips_children
+        let clips = self.arena.get(id).map_or(false, |n| n.widget.clips_children());
         if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
+            for state in node.widget.animated_states() {
+                self.register_animated_state(&state);
+            }
+        }
+        if clips {
+            self.arena.set_clips_children(id, true);
         }
 
         // 5. Apply visible_when / enabled_when
@@ -1045,6 +1059,7 @@ impl WidgetTree {
                             ancestor_id,
                             &WidgetEvent::ScrollIntoView {
                                 target_bounds: focused_bounds,
+                                margin: 0.0,
                             },
                         );
                     }
