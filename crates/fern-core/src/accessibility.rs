@@ -9,6 +9,8 @@ pub struct AccessNodeBuilder {
     value: Option<String>,
     role: Role,
     actions: Vec<Action>,
+    toggled: Option<bool>,
+    expanded: Option<bool>,
 }
 
 impl AccessNodeBuilder {
@@ -19,6 +21,8 @@ impl AccessNodeBuilder {
             value: None,
             role: Role::Unknown,
             actions: Vec::new(),
+            toggled: None,
+            expanded: None,
         }
     }
 
@@ -60,6 +64,32 @@ impl AccessNodeBuilder {
         self.inner.set_described_by(ids);
     }
 
+    pub fn set_toggled(&mut self, toggled: bool) {
+        self.toggled = Some(toggled);
+        self.inner.set_toggled(if toggled {
+            accesskit::Toggled::True
+        } else {
+            accesskit::Toggled::False
+        });
+    }
+
+    pub fn set_expanded(&mut self, expanded: bool) {
+        self.expanded = Some(expanded);
+        self.inner.set_expanded(expanded);
+    }
+
+    pub fn set_numeric_value(&mut self, value: f64) {
+        self.inner.set_numeric_value(value);
+    }
+
+    pub fn set_min_numeric_value(&mut self, value: f64) {
+        self.inner.set_min_numeric_value(value);
+    }
+
+    pub fn set_max_numeric_value(&mut self, value: f64) {
+        self.inner.set_max_numeric_value(value);
+    }
+
     pub fn role(&self) -> Role {
         self.role
     }
@@ -74,6 +104,14 @@ impl AccessNodeBuilder {
 
     pub fn value(&self) -> Option<&str> {
         self.value.as_deref()
+    }
+
+    pub fn toggled(&self) -> Option<bool> {
+        self.toggled
+    }
+
+    pub fn expanded(&self) -> Option<bool> {
+        self.expanded
     }
 
     /// Build the AccessKit Node with the given ID.
@@ -120,6 +158,8 @@ pub struct AccessibilityInfo {
     role: Role,
     name: Option<String>,
     actions: Vec<Action>,
+    toggled: Option<bool>,
+    expanded: Option<bool>,
 }
 
 impl AccessibilityInfo {
@@ -128,7 +168,19 @@ impl AccessibilityInfo {
             role,
             name,
             actions,
+            toggled: None,
+            expanded: None,
         }
+    }
+
+    pub fn with_toggled(mut self, toggled: bool) -> Self {
+        self.toggled = Some(toggled);
+        self
+    }
+
+    pub fn with_expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
     }
 
     pub fn role(&self) -> Role {
@@ -141,5 +193,13 @@ impl AccessibilityInfo {
 
     pub fn actions(&self) -> &[Action] {
         &self.actions
+    }
+
+    pub fn is_toggled(&self) -> bool {
+        self.toggled.unwrap_or(false)
+    }
+
+    pub fn is_expanded(&self) -> bool {
+        self.expanded.unwrap_or(false)
     }
 }
