@@ -412,14 +412,44 @@ impl WidgetTree {
     }
 
     /// Add a widget as a child of another widget.
-    /// Routes through the full insertion pipeline (binding registration,
-    /// pending children resolution, visible_when/enabled_when).
+    /// Routes through the full insertion pipeline (pending children,
+    /// binding registration, visible_when/enabled_when).
     pub fn add_child(&mut self, parent: WidgetId, widget: impl Widget + 'static) -> WidgetId {
-        let id = self.arena.insert_child(parent, Box::new(widget));
-        // Auto-register reactive bindings
+        let mut boxed: Box<dyn Widget> = Box::new(widget);
+
+        // 1. Resolve deferred children
+        let pending = boxed.take_pending_children();
+        if !pending.is_empty() {
+            let resolved_ids: Vec<WidgetId> = pending
+                .into_iter()
+                .map(|child| match child {
+                    crate::widget::PendingChild::Id(id) => id,
+                    crate::widget::PendingChild::Deferred(w) => w.register(self),
+                })
+                .collect();
+            boxed.set_resolved_children(resolved_ids);
+        }
+
+        // 2. Extract builder-style metadata
+        let vis_state = boxed.take_visible_when();
+        let ena_state = boxed.take_enabled_when();
+
+        // 3. Insert as child
+        let id = self.arena.insert_child(parent, boxed);
+
+        // 4. Register reactive bindings
         if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
         }
+
+        // 5. Apply visible_when / enabled_when
+        if let Some(state) = vis_state {
+            self.visible_when(id, &state);
+        }
+        if let Some(state) = ena_state {
+            self.enabled_when(id, &state);
+        }
+
         id
     }
 
