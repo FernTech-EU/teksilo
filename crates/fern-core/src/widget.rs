@@ -229,6 +229,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     fn take_enabled_when(&mut self) -> Option<crate::state::State<bool>> {
         None
     }
+
 }
 
 /// Trait for anything that can be added to a WidgetTree via `add_widget()`.

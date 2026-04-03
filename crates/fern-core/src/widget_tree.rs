@@ -1370,7 +1370,14 @@ impl WidgetTree {
         let role = builder.role();
         let name = builder.name().map(|s| s.to_string());
         let actions = builder.actions().to_vec();
-        AccessibilityInfo::new(role, name, actions)
+        let mut info = AccessibilityInfo::new(role, name, actions);
+        if let Some(toggled) = builder.toggled() {
+            info = info.with_toggled(toggled);
+        }
+        if let Some(expanded) = builder.expanded() {
+            info = info.with_expanded(expanded);
+        }
+        info
     }
 
     pub fn find_by_role(&self, role: accesskit::Role) -> Option<WidgetId> {
