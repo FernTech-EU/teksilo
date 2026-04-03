@@ -229,7 +229,7 @@ impl Path {
         );
         // Top-left quadrant
         path.cubic_to(
-            Point::new(cx - rx, cy),  // this is the same as start - let the curve close
+            Point::new(cx - rx, cy - ky),
             Point::new(cx - kx, cy - ry),
             Point::new(cx, cy - ry),
         );
