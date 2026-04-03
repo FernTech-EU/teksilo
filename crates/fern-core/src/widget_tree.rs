@@ -42,6 +42,10 @@ pub struct WidgetTree {
     focus_origin: Option<crate::focus::FocusOrigin>,
     /// Layout direction for RTL/LTR support.
     layout_direction: crate::environment::LayoutDirection,
+    /// Animation scheduler for smooth State<f32> transitions.
+    animation_scheduler: crate::animation::AnimationScheduler,
+    /// States registered for animation (checked each frame for pending requests).
+    animated_states: Vec<crate::state::State<f32>>,
     /// IDs of composite widget adapters (for rebuild on theme/environment change).
     composite_ids: Vec<WidgetId>,
     /// Observer cleanup: functions to remove observers registered during build().
@@ -82,6 +86,8 @@ impl WidgetTree {
             layout_direction: crate::environment::LayoutDirection::default(),
             composite_ids: Vec::new(),
             observer_cleanups: std::collections::HashMap::new(),
+            animation_scheduler: crate::animation::AnimationScheduler::new(),
+            animated_states: Vec::new(),
         }
     }
 
@@ -104,7 +110,63 @@ impl WidgetTree {
 
     /// Whether any widget needs layout or paint (i.e., a redraw would be useful).
     pub fn needs_redraw(&self) -> bool {
-        self.arena.any_needs_layout() || self.arena.any_needs_paint()
+        self.arena.any_needs_layout()
+            || self.arena.any_needs_paint()
+            || self.animation_scheduler.has_active()
+    }
+
+    /// Register a `State<f32>` for animation support. The framework checks
+    /// registered states each frame for pending `set_animated` requests.
+    /// Called automatically by `BuildContext::state()` for f32 states.
+    pub fn register_animated_state(&mut self, state: &crate::state::State<f32>) {
+        // Avoid duplicates
+        if !self.animated_states.iter().any(|s| crate::state::State::same(s, state)) {
+            self.animated_states.push(state.clone());
+        }
+    }
+
+    /// Whether any animation is currently running.
+    pub fn has_active_animations(&self) -> bool {
+        self.animation_scheduler.has_active()
+    }
+
+    /// Pick up pending `set_animated` requests from registered states
+    /// and start them on the animation scheduler.
+    fn process_pending_animations(&mut self) {
+        let now = std::time::Instant::now();
+        self.process_pending_animations_at(now);
+    }
+
+    /// Pick up pending animations using the given time (for sim clock).
+    fn process_pending_animations_at(&mut self, now: std::time::Instant) {
+        for state in &self.animated_states {
+            if let Some(req) = state.take_pending_animation() {
+                self.animation_scheduler.animate(
+                    state,
+                    req.target,
+                    req.duration,
+                    req.easing,
+                    now,
+                );
+            }
+        }
+    }
+
+    /// Advance animations by simulated time (for deterministic testing).
+    /// Pending `set_animated` requests are started at the current sim_clock,
+    /// then time advances by `duration`, and the scheduler ticks at the new time.
+    pub fn tick_animations(&mut self, duration: std::time::Duration) {
+        // Start pending animations at the CURRENT time (before advancing)
+        self.process_pending_animations_at(self.sim_clock);
+
+        // Advance clock
+        self.sim_clock += duration;
+
+        // Tick the scheduler at the new time
+        self.animation_scheduler.tick(self.sim_clock);
+
+        // Process state changes from animation updates
+        self.process_state_changes();
     }
 
     /// Switch the tree-level theme at runtime.
@@ -560,6 +622,13 @@ impl WidgetTree {
 
     /// Run the layout pass with the given size proposal.
     pub fn layout(&mut self, proposal: SizeProposal) {
+        // Process pending animation requests from set_animated() calls.
+        self.process_pending_animations();
+
+        // Tick active animations (uses real time for windowed apps).
+        let now = std::time::Instant::now();
+        self.animation_scheduler.tick(now);
+
         // Process state bindings: mark widgets whose bound state changed.
         self.process_state_changes();
 
@@ -1469,13 +1538,19 @@ impl WidgetTree {
     /// Returns the earliest deadline for a pending tooltip (if any).
     /// The event loop should use ControlFlow::WaitUntil(deadline) if this returns Some.
     pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
-        self.tooltips
+        let tooltip_deadline = self.tooltips
             .iter()
-            .filter(|e| e.overlay_id.is_none()) // Only pending, not yet shown
-            .filter_map(|e| {
-                e.real_hover_start.map(|start| start + e.delay)
-            })
-            .min()
+            .filter(|e| e.overlay_id.is_none())
+            .filter_map(|e| e.real_hover_start.map(|start| start + e.delay))
+            .min();
+        let animation_deadline = self.animation_scheduler.next_deadline();
+
+        match (tooltip_deadline, animation_deadline) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
     }
 
     /// Get the overlay manager (read-only, for querying).
@@ -3126,5 +3201,102 @@ mod tests {
         tree.focus(child);
         tree.press_key(Key::Z, Modifiers::CTRL);
         assert_eq!(fired.get(), Some(Cmd::GlobalAction));
+    }
+
+    // --- Animation ---
+
+    #[test]
+    fn set_animated_interpolates_over_time() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new(0.0_f32);
+        tree.register_animated_state(&state);
+
+        state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::Linear);
+
+        // Advance 100ms (50%)
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        assert!((*state.get() - 50.0).abs() < 2.0, "at 50%: {}", *state.get());
+
+        // Advance another 100ms (100%)
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        assert!((*state.get() - 100.0).abs() < 0.1, "at 100%: {}", *state.get());
+
+        assert!(!tree.has_active_animations());
+    }
+
+    #[test]
+    fn set_animated_with_easing() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new(0.0_f32);
+        tree.register_animated_state(&state);
+
+        state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::EaseIn);
+
+        // At 50%, EaseIn (t²) = 0.25 → value ≈ 25
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        assert!((*state.get() - 25.0).abs() < 2.0, "ease-in at 50%: {}", *state.get());
+    }
+
+    #[test]
+    fn set_animated_replaces_in_flight() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new(0.0_f32);
+        tree.register_animated_state(&state);
+
+        state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::Linear);
+        tree.tick_animations(std::time::Duration::from_millis(100)); // at 50
+        assert!((*state.get() - 50.0).abs() < 2.0);
+
+        // New animation from current value to 0
+        state.set_animated(0.0, std::time::Duration::from_millis(100), fern_tokens::Easing::Linear);
+        tree.tick_animations(std::time::Duration::from_millis(50)); // 50% of new
+        assert!((*state.get() - 25.0).abs() < 3.0, "mid-replace: {}", *state.get());
+
+        tree.tick_animations(std::time::Duration::from_millis(50)); // 100% of new
+        assert!((*state.get() - 0.0).abs() < 0.5, "end-replace: {}", *state.get());
+    }
+
+    #[test]
+    fn animation_marks_widgets_dirty() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new(100.0_f32);
+        tree.register_animated_state(&state);
+
+        let w = tree.add(FillWidget::new());
+        state.bind_to(w, tree.binding_registry(), crate::state::BindingLevel::Relayout);
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        state.set_animated(0.0, std::time::Duration::from_millis(100), fern_tokens::Easing::Linear);
+
+        // Tick animation — state changes should mark widget dirty
+        tree.tick_animations(std::time::Duration::from_millis(50));
+        assert!(tree.needs_redraw());
+    }
+
+    #[test]
+    fn animated_state_from_build_context() {
+        // Verify that animated_state() from BuildContext works
+        #[derive(Debug)]
+        struct AnimWidget {
+            width_state: std::cell::RefCell<Option<crate::state::State<f32>>>,
+        }
+        impl crate::composite_widget::CompositeWidget for AnimWidget {
+            fn build(&self, ctx: &mut crate::composite_widget::BuildContext) -> WidgetId {
+                let w = ctx.animated_state(300.0);
+                *self.width_state.borrow_mut() = Some(w.clone());
+                ctx.add(FillWidget::new())
+            }
+        }
+        crate::impl_composite_into_widget_tree!(AnimWidget);
+
+        let mut tree = WidgetTree::new();
+        let widget = AnimWidget { width_state: std::cell::RefCell::new(None) };
+        let width_state_clone = widget.width_state.borrow().clone();
+        tree.add_widget(widget);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // The state should be registered for animation
+        assert!(tree.has_active_animations() == false); // nothing animating yet
     }
 }

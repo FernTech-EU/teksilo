@@ -39,6 +39,14 @@ impl<'a> BuildContext<'a> {
         State::new(value)
     }
 
+    /// Create a new `State<f32>` that supports `set_animated()`.
+    /// The state is registered with the animation scheduler automatically.
+    pub fn animated_state(&mut self, value: f32) -> State<f32> {
+        let state = State::new(value);
+        self.tree.register_animated_state(&state);
+        state
+    }
+
     /// Observe a state value: the callback is called whenever the value changes.
     /// This is for notifying the application layer, not for widget bindings
     /// (use `.bind_to()` or `.visible_when()` for those).

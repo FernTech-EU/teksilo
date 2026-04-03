@@ -1,0 +1,269 @@
+//! Animation scheduler — drives `State<f32>` values smoothly over time.
+//!
+//! The scheduler stores active animations and advances them each frame.
+//! It uses simulated time (for deterministic tests via `advance_time`)
+//! or real time (for windowed apps).
+//!
+//! ## High-level API
+//!
+//! ```ignore
+//! // From an event handler or build():
+//! sidebar_width.set_animated(0.0, Duration::from_millis(200), Easing::EaseInOut);
+//! ```
+//!
+//! This replaces the current value with a smooth interpolation to the target
+//! over the given duration. The framework drives the animation automatically.
+
+use std::time::{Duration, Instant};
+
+use fern_tokens::Easing;
+
+use crate::state::State;
+
+/// A single active animation driving a `State<f32>` from `start` to `end`.
+struct ActiveAnimation {
+    /// The state being animated.
+    state: State<f32>,
+    /// Value at animation start.
+    start_value: f32,
+    /// Target value.
+    end_value: f32,
+    /// When the animation started (simulated time).
+    start_time: Instant,
+    /// Total animation duration.
+    duration: Duration,
+    /// Easing curve.
+    easing: Easing,
+}
+
+/// Manages active animations and advances them each frame.
+pub struct AnimationScheduler {
+    animations: Vec<ActiveAnimation>,
+}
+
+impl AnimationScheduler {
+    pub fn new() -> Self {
+        Self {
+            animations: Vec::new(),
+        }
+    }
+
+    /// Start animating a `State<f32>` from its current value to `target`.
+    /// If the state is already being animated, the previous animation is
+    /// replaced (the current in-flight value becomes the new start).
+    pub fn animate(
+        &mut self,
+        state: &State<f32>,
+        target: f32,
+        duration: Duration,
+        easing: Easing,
+        now: Instant,
+    ) {
+        let current = *state.get();
+
+        // Remove any existing animation for this state
+        self.cancel(state);
+
+        // Don't animate if already at target or zero duration
+        if (current - target).abs() < f32::EPSILON || duration.is_zero() {
+            state.set(target);
+            return;
+        }
+
+        self.animations.push(ActiveAnimation {
+            state: state.clone(),
+            start_value: current,
+            end_value: target,
+            start_time: now,
+            duration,
+            easing,
+        });
+    }
+
+    /// Cancel any active animation on the given state.
+    pub fn cancel(&mut self, state: &State<f32>) {
+        self.animations.retain(|a| !State::same(&a.state, state));
+    }
+
+    /// Advance all active animations to the given time.
+    /// Completed animations are removed. Returns true if any animation
+    /// is still running (caller should request another frame).
+    pub fn tick(&mut self, now: Instant) -> bool {
+        self.animations.retain_mut(|anim| {
+            let elapsed = now.saturating_duration_since(anim.start_time);
+            let t = if anim.duration.is_zero() {
+                1.0
+            } else {
+                (elapsed.as_secs_f32() / anim.duration.as_secs_f32()).min(1.0)
+            };
+            let eased = anim.easing.apply(t);
+            let value = fern_tokens::lerp(anim.start_value, anim.end_value, eased);
+            anim.state.set(value);
+
+            // Keep if not yet complete
+            t < 1.0
+        });
+
+        !self.animations.is_empty()
+    }
+
+    /// Whether any animation is currently active.
+    pub fn has_active(&self) -> bool {
+        !self.animations.is_empty()
+    }
+
+    /// The earliest deadline when the next animation tick is needed.
+    /// Returns None if no animations are active.
+    /// For smooth 60fps, this returns "now" (immediate redraw needed).
+    pub fn next_deadline(&self) -> Option<Instant> {
+        if self.animations.is_empty() {
+            None
+        } else {
+            // Animations need continuous ticking — request immediate redraw
+            Some(Instant::now())
+        }
+    }
+
+    /// Number of active animations (for testing/debugging).
+    pub fn active_count(&self) -> usize {
+        self.animations.len()
+    }
+}
+
+impl Default for AnimationScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for AnimationScheduler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnimationScheduler")
+            .field("active_count", &self.animations.len())
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn animate_from_current_to_target() {
+        let state = State::new(0.0_f32);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::Linear, start);
+        assert_eq!(scheduler.active_count(), 1);
+
+        // At t=0: value should still be 0 (or very close)
+        scheduler.tick(start);
+        assert!((*state.get() - 0.0).abs() < 1.0);
+
+        // At t=100ms (50%): value should be ~50
+        let has_more = scheduler.tick(start + Duration::from_millis(100));
+        assert!(has_more);
+        assert!((*state.get() - 50.0).abs() < 1.0);
+
+        // At t=200ms (100%): value should be 100, animation complete
+        let has_more = scheduler.tick(start + Duration::from_millis(200));
+        assert!(!has_more);
+        assert!((*state.get() - 100.0).abs() < 0.01);
+        assert_eq!(scheduler.active_count(), 0);
+    }
+
+    #[test]
+    fn eased_animation() {
+        let state = State::new(0.0_f32);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::EaseIn, start);
+
+        // At 50%, EaseIn (t²) gives 0.25, so value ≈ 25
+        scheduler.tick(start + Duration::from_millis(100));
+        assert!((*state.get() - 25.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn zero_duration_sets_immediately() {
+        let state = State::new(0.0_f32);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate(&state, 100.0, Duration::ZERO, Easing::Linear, start);
+        assert_eq!(scheduler.active_count(), 0); // no animation created
+        assert!((*state.get() - 100.0).abs() < 0.01); // value set immediately
+    }
+
+    #[test]
+    fn replace_existing_animation() {
+        let state = State::new(0.0_f32);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::Linear, start);
+
+        // Advance to 50%
+        scheduler.tick(start + Duration::from_millis(100));
+        let mid_value = *state.get();
+        assert!((mid_value - 50.0).abs() < 1.0);
+
+        // Start a new animation from the current mid-value to 0
+        let mid_time = start + Duration::from_millis(100);
+        scheduler.animate(&state, 0.0, Duration::from_millis(100), Easing::Linear, mid_time);
+        assert_eq!(scheduler.active_count(), 1); // old one replaced
+
+        // At 50% of the new animation
+        scheduler.tick(mid_time + Duration::from_millis(50));
+        assert!((*state.get() - 25.0).abs() < 2.0); // ~25 (midpoint of 50→0)
+    }
+
+    #[test]
+    fn cancel_stops_animation() {
+        let state = State::new(0.0_f32);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::Linear, start);
+        assert_eq!(scheduler.active_count(), 1);
+
+        scheduler.cancel(&state);
+        assert_eq!(scheduler.active_count(), 0);
+
+        // Value stays where it was
+        assert!((*state.get() - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn already_at_target_no_animation() {
+        let state = State::new(50.0_f32);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate(&state, 50.0, Duration::from_millis(200), Easing::Linear, start);
+        assert_eq!(scheduler.active_count(), 0);
+    }
+
+    #[test]
+    fn multiple_states_animated_independently() {
+        let a = State::new(0.0_f32);
+        let b = State::new(100.0_f32);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate(&a, 100.0, Duration::from_millis(200), Easing::Linear, start);
+        scheduler.animate(&b, 0.0, Duration::from_millis(200), Easing::Linear, start);
+        assert_eq!(scheduler.active_count(), 2);
+
+        scheduler.tick(start + Duration::from_millis(100));
+        assert!((*a.get() - 50.0).abs() < 1.0);
+        assert!((*b.get() - 50.0).abs() < 1.0);
+
+        scheduler.tick(start + Duration::from_millis(200));
+        assert_eq!(scheduler.active_count(), 0);
+        assert!((*a.get() - 100.0).abs() < 0.01);
+        assert!((*b.get() - 0.0).abs() < 0.01);
+    }
+}

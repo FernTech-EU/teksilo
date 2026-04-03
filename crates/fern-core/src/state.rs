@@ -249,11 +249,22 @@ struct ObserverEntry<T> {
     callback: Rc<dyn Fn(&T)>,
 }
 
+/// A pending animation request on a `State<f32>`.
+#[derive(Debug, Clone)]
+pub struct AnimationRequest {
+    pub target: f32,
+    pub duration: std::time::Duration,
+    pub easing: fern_tokens::Easing,
+}
+
 struct StateInner<T> {
     value: T,
     dirty: bool,
     observers: Vec<ObserverEntry<T>>,
     next_observer_id: u64,
+    /// Pending animation request (only meaningful for State<f32>).
+    /// Picked up by the AnimationScheduler on the next frame.
+    pending_animation: Option<AnimationRequest>,
 }
 
 impl<T: 'static> State<T> {
@@ -264,6 +275,7 @@ impl<T: 'static> State<T> {
                 dirty: false,
                 observers: Vec::new(),
                 next_observer_id: 1,
+                pending_animation: None,
             })),
         }
     }
@@ -337,6 +349,51 @@ impl<T: 'static> State<T> {
             is_dirty: Rc::new(move || inner.borrow().dirty),
             clear_dirty: Rc::new(move || inner2.borrow_mut().dirty = false),
         });
+    }
+}
+
+impl<T> State<T> {
+    /// Check if two State handles point to the same underlying state.
+    pub fn same(a: &State<T>, b: &State<T>) -> bool {
+        Rc::ptr_eq(&a.inner, &b.inner)
+    }
+}
+
+impl State<f32> {
+    /// Animate this state smoothly from its current value to `target` over
+    /// `duration` using `easing`. The animation is driven automatically by
+    /// the framework — each frame interpolates the value and calls `set()`.
+    ///
+    /// If the state is already being animated, the previous animation is
+    /// replaced (the current in-flight value becomes the new start).
+    ///
+    /// ```ignore
+    /// sidebar_width.set_animated(0.0, Duration::from_millis(200), Easing::EaseInOut);
+    /// ```
+    pub fn set_animated(
+        &self,
+        target: f32,
+        duration: std::time::Duration,
+        easing: fern_tokens::Easing,
+    ) {
+        let mut inner = self.inner.borrow_mut();
+        inner.pending_animation = Some(AnimationRequest {
+            target,
+            duration,
+            easing,
+        });
+        inner.dirty = true; // trigger a frame so the scheduler picks this up
+    }
+
+    /// Take a pending animation request, if any. Called by the animation
+    /// scheduler during its tick to start the animation.
+    pub fn take_pending_animation(&self) -> Option<AnimationRequest> {
+        self.inner.borrow_mut().pending_animation.take()
+    }
+
+    /// Whether there is a pending animation request.
+    pub fn has_pending_animation(&self) -> bool {
+        self.inner.borrow().pending_animation.is_some()
     }
 }
 
