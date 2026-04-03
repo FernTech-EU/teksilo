@@ -9,7 +9,7 @@ pub mod typography;
 
 pub use alignment::{Alignment, HAlignment, VAlignment};
 pub use color::Color;
-pub use motion::{Easing, MotionTokens};
+pub use motion::{lerp, Easing, MotionTokens};
 pub use shape::{CornerRadius, Shadow, ShapeTokens};
 pub use spacing::SpacingTokens;
 pub use text_style::{FontWeight, TextStyle};
