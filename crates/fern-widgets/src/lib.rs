@@ -37,7 +37,7 @@ pub use toggle::Toggle;
 pub use toolbar::Toolbar;
 pub use primitives::{
     AspectRatio, Center, Divider, Expand, FixedSize, Grid, HStack, IconWidget, MaxSize, MinSize,
-    Padding, RectWidget, Spacer, TextWidget, TrackSize, VStack, Wrap, ZStack,
+    Padding, RectWidget, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
 
 #[cfg(test)]
