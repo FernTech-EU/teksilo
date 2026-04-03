@@ -628,17 +628,17 @@ impl GestureArena {
             }
         }
 
-        let mut best: Option<(u32, GestureEvent)> = None;
+        let mut best: Option<(usize, u32, GestureEvent)> = None;
 
-        for entry in &mut self.entries {
+        for (i, entry) in self.entries.iter_mut().enumerate() {
             if entry.failed {
                 continue;
             }
             match entry.recognizer.process(event) {
                 GestureResult::Recognized(gesture) => {
                     let prio = entry.recognizer.priority();
-                    if best.as_ref().map_or(true, |(bp, _)| prio > *bp) {
-                        best = Some((prio, gesture));
+                    if best.as_ref().map_or(true, |(_, bp, _)| prio > *bp) {
+                        best = Some((i, prio, gesture));
                     }
                 }
                 GestureResult::Failed => {
@@ -648,18 +648,19 @@ impl GestureArena {
             }
         }
 
-        if let Some((_, ref gesture)) = best {
-            // Winner recognized — reset all others
-            let _ = gesture; // used below
-            for entry in &mut self.entries {
-                if !entry.failed {
-                    // Reset non-failed recognizers that didn't win
-                    // (The winner will also get reset on next Down)
+        if let Some((winner_idx, _, _)) = &best {
+            // Winner recognized — reset all non-winning recognizers.
+            // The winner keeps its state (important for multi-event gestures
+            // like drag, which fire DragStart then DragUpdate then DragEnd).
+            for (i, entry) in self.entries.iter_mut().enumerate() {
+                if i != *winner_idx && !entry.failed {
+                    entry.recognizer.reset();
+                    entry.failed = false;
                 }
             }
         }
 
-        best.map(|(_, gesture)| gesture)
+        best.map(|(_, _, gesture)| gesture)
     }
 
     /// Reset all recognizers in the arena.
