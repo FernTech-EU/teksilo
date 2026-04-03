@@ -9,7 +9,7 @@ pub use tooltip::TooltipWidget;
 
 pub use button::{Button, ButtonStyle};
 pub use panel::Panel;
-pub use scroll_area::ScrollArea;
+pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarStyle};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
 pub use primitives::{
     Center, Expand, FixedSize, HStack, MaxSize, MinSize, Padding, RectWidget, Spacer, TextWidget,

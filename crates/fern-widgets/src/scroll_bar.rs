@@ -57,6 +57,8 @@ pub struct ScrollBar {
     min_thumb_length: f32,
     /// Pixels to scroll per keyboard step.
     step_size: f32,
+    /// Whether to paint the track background (false for overlay-style scrollbars).
+    show_track: bool,
 }
 
 impl std::fmt::Debug for ScrollBar {
@@ -94,6 +96,7 @@ impl ScrollBar {
             thickness: 12.0,
             min_thumb_length: 24.0,
             step_size: 40.0,
+            show_track: true,
         }
     }
 
@@ -112,6 +115,13 @@ impl ScrollBar {
     /// Set the scroll step for keyboard navigation.
     pub fn step_size(mut self, step: f32) -> Self {
         self.step_size = step;
+        self
+    }
+
+    /// Whether to paint the track background. Set to `false` for overlay-style
+    /// scrollbars that should only show the thumb.
+    pub fn show_track(mut self, show: bool) -> Self {
+        self.show_track = show;
         self
     }
 
@@ -238,13 +248,15 @@ impl Widget for ScrollBar {
         let dragging = self.dragging.get();
         let hovered = self.hovered.get();
 
-        // Track background
-        let track_color = ctx.theme.colors.on_surface.with_alpha(if hovered || dragging {
-            0.08
-        } else {
-            0.04
-        });
-        canvas.fill_rounded_rect(bounds, radius, track_color);
+        // Track background (skipped for overlay-style scrollbars)
+        if self.show_track {
+            let track_color = ctx.theme.colors.on_surface.with_alpha(if hovered || dragging {
+                0.08
+            } else {
+                0.04
+            });
+            canvas.fill_rounded_rect(bounds, radius, track_color);
+        }
 
         // Thumb
         let thumb = self.thumb_rect();
