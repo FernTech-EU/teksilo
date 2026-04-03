@@ -1,0 +1,299 @@
+//! Wrap — a horizontal flow layout that wraps children to the next line
+//! when they exceed the available width.
+
+use fern_canvas::{Point, Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::state::State;
+use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget_id::WidgetId;
+
+/// A horizontal flow layout that wraps children to the next line.
+#[derive(Debug)]
+pub struct Wrap {
+    spacing: f32,
+    line_spacing: f32,
+    child_ids: Vec<WidgetId>,
+    pending: Vec<PendingChild>,
+    visible_when_state: Option<State<bool>>,
+    enabled_when_state: Option<State<bool>>,
+}
+
+impl Wrap {
+    pub fn new() -> Self {
+        Self {
+            spacing: 0.0,
+            line_spacing: 0.0,
+            child_ids: Vec::new(),
+            pending: Vec::new(),
+            visible_when_state: None,
+            enabled_when_state: None,
+        }
+    }
+
+    /// Horizontal spacing between items on the same line.
+    pub fn spacing(mut self, spacing: f32) -> Self {
+        self.spacing = spacing;
+        self
+    }
+
+    /// Vertical spacing between lines.
+    pub fn line_spacing(mut self, spacing: f32) -> Self {
+        self.line_spacing = spacing;
+        self
+    }
+
+    pub fn add_child(mut self, id: WidgetId) -> Self {
+        self.pending.push(PendingChild::Id(id));
+        self
+    }
+
+    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    pub fn children(mut self, iter: impl IntoIterator<Item = impl IntoWidgetTree>) -> Self {
+        for widget in iter {
+            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+        }
+        self
+    }
+
+    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+        if let Some(w) = widget {
+            self.pending.push(PendingChild::Deferred(Box::new(w)));
+        }
+        self
+    }
+
+    pub fn visible_when(mut self, state: State<bool>) -> Self {
+        self.visible_when_state = Some(state);
+        self
+    }
+
+    pub fn enabled_when(mut self, state: State<bool>) -> Self {
+        self.enabled_when_state = Some(state);
+        self
+    }
+
+    /// Compute the line layout: returns (sizes, line_breaks).
+    /// line_breaks[i] = true means a new line starts before child i.
+    fn compute_layout(
+        &self,
+        available_width: f32,
+        children: &[WidgetId],
+        ctx: &LayoutContext,
+    ) -> (Vec<Size>, Vec<bool>) {
+        let child_proposal = SizeProposal::unspecified();
+        let mut sizes = Vec::with_capacity(children.len());
+        let mut line_breaks = vec![false; children.len()];
+        let mut x = 0.0_f32;
+
+        for (i, &child_id) in children.iter().enumerate() {
+            let size = ctx.child_size(child_id, child_proposal).unwrap_or(Size::ZERO);
+            sizes.push(size);
+
+            if i > 0 {
+                let needed = x + self.spacing + size.width;
+                if needed > available_width {
+                    line_breaks[i] = true;
+                    x = size.width;
+                } else {
+                    x += self.spacing + size.width;
+                }
+            } else {
+                x = size.width;
+            }
+        }
+        (sizes, line_breaks)
+    }
+}
+
+impl Default for Wrap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Widget for Wrap {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        if self.child_ids.is_empty() {
+            return proposal.resolve(0.0, 0.0);
+        }
+
+        let available_width = proposal.width.unwrap_or(f32::MAX);
+        let (sizes, line_breaks) = self.compute_layout(available_width, &self.child_ids, ctx);
+
+        let mut max_line_width = 0.0_f32;
+        let mut line_width = 0.0_f32;
+        let mut line_height = 0.0_f32;
+        let mut total_height = 0.0_f32;
+        let mut line_count = 0;
+
+        for (i, size) in sizes.iter().enumerate() {
+            if line_breaks[i] || i == 0 {
+                if i > 0 {
+                    max_line_width = max_line_width.max(line_width);
+                    total_height += line_height;
+                    line_count += 1;
+                }
+                line_width = size.width;
+                line_height = size.height;
+            } else {
+                line_width += self.spacing + size.width;
+                line_height = line_height.max(size.height);
+            }
+        }
+        // Last line
+        max_line_width = max_line_width.max(line_width);
+        total_height += line_height;
+        line_count += 1;
+
+        let total_line_gap = self.line_spacing * (line_count as f32 - 1.0).max(0.0);
+        Size::new(max_line_width, total_height + total_line_gap)
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
+    ) {
+        if children.is_empty() {
+            return;
+        }
+
+        let (sizes, line_breaks) = self.compute_layout(bounds.width, &self.child_ids, ctx);
+        let mut x = bounds.x;
+        let mut y = bounds.y;
+        let mut line_height = 0.0_f32;
+
+        for (i, child) in children.iter_mut().enumerate() {
+            if i >= sizes.len() {
+                break;
+            }
+            if line_breaks[i] {
+                y += line_height + self.line_spacing;
+                x = bounds.x;
+                line_height = 0.0;
+            }
+
+            child.origin = Point::new(x, y);
+            child.size = sizes[i];
+            line_height = line_height.max(sizes[i].height);
+
+            x += sizes[i].width + self.spacing;
+        }
+    }
+
+    fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {}
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_ids.clone()
+    }
+
+    fn take_pending_children(&mut self) -> Vec<PendingChild> {
+        std::mem::take(&mut self.pending)
+    }
+
+    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
+        self.child_ids = ids;
+    }
+
+    fn take_visible_when(&mut self) -> Option<State<bool>> {
+        self.visible_when_state.take()
+    }
+
+    fn take_enabled_when(&mut self) -> Option<State<bool>> {
+        self.enabled_when_state.take()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fern_core::widget_tree::WidgetTree;
+
+    #[derive(Debug)]
+    struct FixedLeaf(f32, f32);
+    impl Widget for FixedLeaf {
+        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+            Size::new(self.0, self.1)
+        }
+    }
+
+    #[test]
+    fn single_line_no_wrap() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(40.0, 20.0));
+        let b = tree.add(FixedLeaf(40.0, 20.0));
+        let _wrap = tree.add(
+            Wrap::new().spacing(10.0).add_child(a).add_child(b),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert!((tree.bounds(a).y - 0.0).abs() < 0.01);
+        assert!((tree.bounds(b).y - 0.0).abs() < 0.01);
+        assert!((tree.bounds(b).x - 50.0).abs() < 0.01); // 40 + 10
+    }
+
+    #[test]
+    fn wraps_to_next_line() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(80.0, 20.0));
+        let b = tree.add(FixedLeaf(80.0, 20.0));
+        let c = tree.add(FixedLeaf(80.0, 20.0));
+        let _wrap = tree.add(
+            Wrap::new()
+                .spacing(10.0)
+                .line_spacing(5.0)
+                .add_child(a)
+                .add_child(b)
+                .add_child(c),
+        );
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        // 80 + 10 + 80 = 170 fits in 200, so a and b on line 1
+        assert!((tree.bounds(a).y - 0.0).abs() < 0.01);
+        assert!((tree.bounds(b).y - 0.0).abs() < 0.01);
+        // 170 + 10 + 80 = 260 > 200, so c wraps to line 2
+        assert!((tree.bounds(c).y - 25.0).abs() < 0.01); // 20 + 5 line_spacing
+        assert!((tree.bounds(c).x - 0.0).abs() < 0.01); // starts at beginning
+    }
+
+    #[test]
+    fn intrinsic_height_accounts_for_wrapping() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(60.0, 20.0));
+        let b = tree.add(FixedLeaf(60.0, 30.0));
+        let c = tree.add(FixedLeaf(60.0, 20.0));
+        let wrap = tree.add(
+            Wrap::new()
+                .spacing(10.0)
+                .line_spacing(5.0)
+                .add_child(a)
+                .add_child(b)
+                .add_child(c),
+        );
+        tree.layout(SizeProposal::exact(140.0, 200.0));
+
+        // Line 1: a(60) + 10 + b(60) = 130 fits in 140
+        // Line 2: c(60)
+        // Height: max(20,30) + 5 + 20 = 55
+        let wb = tree.bounds(wrap);
+        assert!((wb.height - 55.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn empty_wrap() {
+        let mut tree = WidgetTree::new();
+        let _wrap = tree.add(Wrap::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        // No crash
+    }
+}
