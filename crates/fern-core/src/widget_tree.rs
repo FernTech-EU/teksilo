@@ -412,8 +412,15 @@ impl WidgetTree {
     }
 
     /// Add a widget as a child of another widget.
+    /// Routes through the full insertion pipeline (binding registration,
+    /// pending children resolution, visible_when/enabled_when).
     pub fn add_child(&mut self, parent: WidgetId, widget: impl Widget + 'static) -> WidgetId {
-        self.arena.insert_child(parent, Box::new(widget))
+        let id = self.arena.insert_child(parent, Box::new(widget));
+        // Auto-register reactive bindings
+        if let Some(node) = self.arena.get(id) {
+            node.widget.register_bindings(id, &self.binding_registry);
+        }
+        id
     }
 
     /// Add a Level 1 (CompositeWidget) to the tree. Alias for `add_widget()`.
