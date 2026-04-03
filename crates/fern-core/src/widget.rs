@@ -163,6 +163,14 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Whether this widget clips its children to its bounds. When true, the
+    /// framework sets `clips_children` on the arena node automatically,
+    /// enabling viewport clipping in the renderer and `ScrollIntoView`
+    /// dispatch. Override this in scroll containers and similar widgets.
+    fn clips_children(&self) -> bool {
+        false
+    }
+
     /// Whether this widget is a composite adapter that needs rebuild on
     /// environment changes (theme switch, locale switch).
     fn is_composite(&self) -> bool {
@@ -186,6 +194,14 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         _registry: &crate::state::BindingRegistry,
     ) {
         // Default: no reactive bindings.
+    }
+
+    /// Return any `State<f32>` values that may be animated via `set_animated`.
+    /// Called automatically during widget insertion to register them with the
+    /// animation scheduler. Override this if your widget uses `set_animated`
+    /// on internally owned states.
+    fn animated_states(&self) -> Vec<crate::state::State<f32>> {
+        Vec::new()
     }
 
     /// Take any deferred children out of this widget for resolution.
