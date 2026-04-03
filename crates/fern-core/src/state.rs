@@ -52,15 +52,23 @@ impl BindingRegistry {
         let bindings = self.bindings.borrow();
         let mut dirty_map: std::collections::HashMap<WidgetId, BindingLevel> =
             std::collections::HashMap::new();
+        // Collect all dirty bindings first, then clear. Multiple bindings may
+        // share the same underlying dirty flag (e.g. derived states from the
+        // same source). Clearing immediately would cause later bindings to miss
+        // the change.
+        let mut to_clear: Vec<&Rc<dyn Fn()>> = Vec::new();
         for b in bindings.iter() {
             if (b.is_dirty)() {
                 let entry = dirty_map.entry(b.widget_id).or_insert(b.level);
-                // Relayout wins over RepaintOnly
                 if b.level == BindingLevel::Relayout {
                     *entry = BindingLevel::Relayout;
                 }
-                (b.clear_dirty)();
+                to_clear.push(&b.clear_dirty);
             }
+        }
+        // Now clear all dirty flags
+        for clear in to_clear {
+            clear();
         }
         dirty_map.into_iter().collect()
     }
@@ -574,5 +582,35 @@ mod tests {
         s.observe(move |_| c2.set(c2.get() + 1));
         s.set(10);
         assert_eq!(count.get(), 2);
+    }
+
+    #[test]
+    fn flush_dirty_finds_all_bindings_from_same_source() {
+        // Multiple derived states from the same source all share one dirty flag.
+        // flush_dirty must detect ALL of them, not just the first.
+        use slotmap::KeyData;
+        let id_a: WidgetId = KeyData::from_ffi(1).into();
+        let id_b: WidgetId = KeyData::from_ffi(2).into();
+        let id_c: WidgetId = KeyData::from_ffi(3).into();
+
+        let registry = BindingRegistry::new();
+        let source = State::new(0);
+        let derived_a = source.map(|v| v + 1);
+        let derived_b = source.map(|v| v + 2);
+        let derived_c = source.map(|v| v + 3);
+
+        derived_a.bind_to(id_a, &registry, BindingLevel::RepaintOnly);
+        derived_b.bind_to(id_b, &registry, BindingLevel::RepaintOnly);
+        derived_c.bind_to(id_c, &registry, BindingLevel::RepaintOnly);
+
+        source.set(42);
+        let dirty = registry.flush_dirty();
+
+        // All three widgets should be dirty, not just the first one
+        let dirty_ids: std::collections::HashSet<WidgetId> =
+            dirty.iter().map(|(id, _)| *id).collect();
+        assert!(dirty_ids.contains(&id_a), "widget A missing from dirty set");
+        assert!(dirty_ids.contains(&id_b), "widget B missing from dirty set");
+        assert!(dirty_ids.contains(&id_c), "widget C missing from dirty set");
     }
 }
