@@ -114,13 +114,13 @@ impl AnimationScheduler {
 
     /// The earliest deadline when the next animation tick is needed.
     /// Returns None if no animations are active.
-    /// For smooth 60fps, this returns "now" (immediate redraw needed).
+    /// Targets ~60fps by scheduling the next tick 16ms from now.
     pub fn next_deadline(&self) -> Option<Instant> {
         if self.animations.is_empty() {
             None
         } else {
-            // Animations need continuous ticking — request immediate redraw
-            Some(Instant::now())
+            // Schedule next frame at ~60fps to avoid busy-spinning
+            Some(Instant::now() + Duration::from_millis(16))
         }
     }
 

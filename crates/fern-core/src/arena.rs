@@ -4,6 +4,7 @@ use crate::environment::ThemeOverride;
 use crate::gesture::{GestureArena, GestureEvent};
 use crate::widget::Widget;
 use crate::widget_id::WidgetId;
+use fern_canvas::RenderFrame;
 
 /// Minimal placeholder widget used during composite rebuild and ID reservation.
 #[derive(Debug)]
@@ -56,6 +57,9 @@ pub struct WidgetNode {
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
     pub clips_children: bool,
+    /// Cached paint output for this widget (excludes children).
+    /// Reused when `needs_paint` is false to avoid re-running `paint()`.
+    pub(crate) cached_paint: Option<RenderFrame>,
 }
 
 impl std::fmt::Debug for WidgetNode {
@@ -116,6 +120,7 @@ impl WidgetArena {
             enabled_state: None,
             alignment_override: None,
             clips_children: false,
+            cached_paint: None,
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -149,6 +154,7 @@ impl WidgetArena {
             enabled_state: None,
             alignment_override: None,
             clips_children: false,
+            cached_paint: None,
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -291,11 +297,11 @@ impl WidgetArena {
     }
 
     pub fn any_needs_layout(&self) -> bool {
-        self.nodes.values().any(|n| n.dirty.needs_layout)
+        self.nodes.values().any(|n| n.activation == ActivationState::Active && n.dirty.needs_layout)
     }
 
     pub fn any_needs_paint(&self) -> bool {
-        self.nodes.values().any(|n| n.dirty.needs_paint)
+        self.nodes.values().any(|n| n.activation == ActivationState::Active && n.dirty.needs_paint)
     }
 
     pub fn mark_needs_paint(&mut self, id: WidgetId) {

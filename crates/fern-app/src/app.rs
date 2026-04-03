@@ -379,9 +379,9 @@ impl FernAppBuilder {
                                         size.0 as f32 / sf,
                                         size.1 as f32 / sf,
                                     );
+
                                     managed.tree.layout(proposal);
 
-                                    // Sync accessibility tree between layout and render
                                     let a11y_update = managed.tree.sync_accessibility();
                                     managed.platform_window.update_accessibility(a11y_update);
 

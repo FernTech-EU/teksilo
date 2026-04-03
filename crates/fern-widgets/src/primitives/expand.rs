@@ -14,6 +14,10 @@ pub struct Expand {
     horizontal: bool,
     vertical: bool,
     content_alignment: Alignment,
+    /// When true, reports `is_spacer` to the parent stack so this widget
+    /// receives remaining space, and fills the child to its full bounds
+    /// instead of centering it.
+    fills_stack: bool,
     visible_when_state: Option<Reactive<bool>>,
     enabled_when_state: Option<Reactive<bool>>,
 }
@@ -27,6 +31,7 @@ impl Expand {
             horizontal: true,
             vertical: true,
             content_alignment: Alignment::CENTER,
+            fills_stack: false,
             visible_when_state: None,
             enabled_when_state: None,
         }
@@ -40,6 +45,7 @@ impl Expand {
             horizontal: true,
             vertical: false,
             content_alignment: Alignment::CENTER,
+            fills_stack: false,
             visible_when_state: None,
             enabled_when_state: None,
         }
@@ -53,9 +59,17 @@ impl Expand {
             horizontal: false,
             vertical: true,
             content_alignment: Alignment::CENTER,
+            fills_stack: false,
             visible_when_state: None,
             enabled_when_state: None,
         }
+    }
+
+    /// Make this Expand absorb remaining space in a VStack/HStack
+    /// (acts like a Spacer) and fill the child to its full bounds.
+    pub fn fills_stack(mut self) -> Self {
+        self.fills_stack = true;
+        self
     }
 
     pub fn content_alignment(mut self, alignment: Alignment) -> Self {
@@ -123,18 +137,28 @@ impl Widget for Expand {
         ctx: &LayoutContext,
     ) {
         for child in children.iter_mut() {
-            let child_size = ctx
-                .child_size(child.id, SizeProposal::unspecified())
-                .unwrap_or(bounds.size());
-            let rtl = ctx.is_rtl();
-            let (dx, dy) = self.content_alignment.resolve(
-                (child_size.width, child_size.height),
-                (bounds.width, bounds.height),
-                rtl,
-            );
-            child.origin = Point::new(bounds.x + dx, bounds.y + dy);
-            child.size = child_size;
+            if self.fills_stack {
+                // Fill mode: child takes the full Expand bounds
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            } else {
+                let child_size = ctx
+                    .child_size(child.id, SizeProposal::unspecified())
+                    .unwrap_or(bounds.size());
+                let rtl = ctx.is_rtl();
+                let (dx, dy) = self.content_alignment.resolve(
+                    (child_size.width, child_size.height),
+                    (bounds.width, bounds.height),
+                    rtl,
+                );
+                child.origin = Point::new(bounds.x + dx, bounds.y + dy);
+                child.size = child_size;
+            }
         }
+    }
+
+    fn is_spacer(&self) -> bool {
+        self.fills_stack
     }
 
     fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {}

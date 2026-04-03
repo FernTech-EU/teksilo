@@ -51,6 +51,12 @@ pub struct WidgetTree {
     /// Observer cleanup: functions to remove observers registered during build().
     /// Keyed by composite adapter ID. Cleared and re-populated on each rebuild.
     observer_cleanups: std::collections::HashMap<WidgetId, Vec<Box<dyn Fn()>>>,
+    /// Cached accessibility tree update — only rebuilt when layout changes.
+    cached_a11y: Option<accesskit::TreeUpdate>,
+    /// Whether the accessibility tree needs rebuilding (set when layout runs).
+    a11y_dirty: bool,
+    /// Cached full render frame — reused when no widget needs painting.
+    cached_frame: Option<RenderFrame>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -88,6 +94,9 @@ impl WidgetTree {
             observer_cleanups: std::collections::HashMap::new(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_states: Vec::new(),
+            cached_a11y: None,
+            a11y_dirty: true,
+            cached_frame: None,
         }
     }
 
@@ -113,6 +122,13 @@ impl WidgetTree {
         self.arena.any_needs_layout()
             || self.arena.any_needs_paint()
             || self.animation_scheduler.has_active()
+    }
+
+    /// Whether a render pass is needed (any widget needs layout or paint).
+    /// Unlike `needs_redraw`, this doesn't consider active animations — only
+    /// whether the tree has actual dirty widgets that need rendering.
+    pub fn needs_render(&self) -> bool {
+        self.arena.any_needs_layout() || self.arena.any_needs_paint()
     }
 
     /// Register a `State<f32>` for animation support. The framework checks
@@ -292,14 +308,14 @@ impl WidgetTree {
     /// Called automatically at the start of layout().
     fn process_state_changes(&mut self) {
         let dirty_widgets = self.binding_registry.flush_dirty();
-        for (id, level) in dirty_widgets {
+        for (id, level) in &dirty_widgets {
             match level {
                 crate::state::BindingLevel::RepaintOnly => {
-                    self.arena.mark_needs_paint(id);
+                    self.arena.mark_needs_paint(*id);
                 }
                 crate::state::BindingLevel::Relayout => {
-                    self.arena.mark_needs_layout(id);
-                    self.arena.mark_ancestors_need_layout(id);
+                    self.arena.mark_needs_layout(*id);
+                    self.arena.mark_ancestors_need_layout(*id);
                 }
             }
         }
@@ -665,6 +681,9 @@ impl WidgetTree {
         if !proposal_changed && !self.arena.any_needs_layout() {
             return;
         }
+
+        // Layout is running — accessibility tree needs rebuilding
+        self.a11y_dirty = true;
 
         let base_theme = self.theme.clone();
 
@@ -1040,6 +1059,7 @@ impl WidgetTree {
         }
         self.focused = Some(id);
         self.focus_origin = Some(origin);
+        self.a11y_dirty = true;
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin });
         self.scroll_focused_into_view(id);
         self.flush_commands();
@@ -1211,20 +1231,47 @@ impl WidgetTree {
     // --- Rendering ---
 
     /// Paint all active widgets and produce a RenderFrame.
+    /// Uses per-widget paint caching: only widgets with `needs_paint` are
+    /// re-painted; clean widgets reuse their cached paint output.
+    /// Also caches the full assembled frame — if no widget needs painting,
+    /// the previous frame is returned immediately.
     pub fn render(&mut self) -> RenderFrame {
+        // Flush any pending state changes so dirty flags are up-to-date
+        self.process_state_changes();
+
+        // Fast path: if nothing needs painting, return the cached frame
+        if !self.arena.any_needs_paint() {
+            if let Some(ref cached) = self.cached_frame {
+                return cached.clone();
+            }
+        }
+
         let mut frame = RenderFrame::new();
         let base_theme = self.theme.clone();
+        let text_backend = self.text_backend.clone();
 
         // Paint main content first
         let roots: Vec<WidgetId> = self.arena.roots();
         for root_id in roots {
-            self.paint_widget(root_id, &mut frame, &base_theme);
+            paint_widget_cached(
+                &mut self.arena,
+                root_id,
+                &mut frame,
+                &base_theme,
+                &text_backend,
+            );
         }
 
         // Paint overlays on top (in stack order, bottom to top)
         let overlay_ids = self.overlay_manager.active_content_ids();
         for content_id in overlay_ids {
-            self.paint_widget(content_id, &mut frame, &base_theme);
+            paint_widget_cached(
+                &mut self.arena,
+                content_id,
+                &mut frame,
+                &base_theme,
+                &text_backend,
+            );
         }
 
         for id in self.arena.active_ids() {
@@ -1233,54 +1280,8 @@ impl WidgetTree {
             }
         }
 
+        self.cached_frame = Some(frame.clone());
         frame
-    }
-
-    fn paint_widget(
-        &self,
-        id: WidgetId,
-        frame: &mut RenderFrame,
-        base_theme: &fern_tokens::Theme,
-    ) {
-        if !self.arena.is_active(id) {
-            return;
-        }
-
-        let resolved_theme = self.arena.resolve_theme(id, base_theme);
-        let ctx = PaintContext {
-            theme: &resolved_theme,
-            scale_factor: 1.0,
-            prefers_high_contrast: false,
-            prefers_reduced_motion: false,
-            prefers_large_text: false,
-        };
-
-        let bounds = self.arena.bounds(id);
-        let node = self.arena.get(id).unwrap();
-
-        let mut canvas = match &self.text_backend {
-            Some(tb) => Canvas::with_text_backend(tb.clone()),
-            None => Canvas::new(),
-        };
-        node.widget.paint(bounds, &mut canvas, &ctx);
-        let widget_frame = canvas.into_render_frame();
-        frame.merge(&widget_frame);
-
-        // Clip children to this widget's bounds if it clips (scroll areas)
-        let clips = node.clips_children;
-        if clips {
-            frame
-                .draw_order
-                .push(fern_canvas::DrawCommand::SetClip(bounds));
-        }
-
-        for &child_id in &node.children {
-            self.paint_widget(child_id, frame, base_theme);
-        }
-
-        if clips {
-            frame.draw_order.push(fern_canvas::DrawCommand::ClearClip);
-        }
     }
 
     // --- Accessibility ---
@@ -1288,7 +1289,22 @@ impl WidgetTree {
     /// Build an AccessKit `TreeUpdate` from the current state of all active
     /// widgets. Call this once per frame, between layout and paint, and push
     /// the result to the `accesskit_winit::Adapter`.
-    pub fn sync_accessibility(&self) -> accesskit::TreeUpdate {
+    /// Caches the result and only rebuilds when layout has changed.
+    pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
+        // Return cached result if nothing changed since last sync
+        if !self.a11y_dirty {
+            if let Some(cached) = &self.cached_a11y {
+                return cached.clone();
+            }
+        }
+
+        let update = self.build_accessibility_tree();
+        self.cached_a11y = Some(update.clone());
+        self.a11y_dirty = false;
+        update
+    }
+
+    fn build_accessibility_tree(&self) -> accesskit::TreeUpdate {
         use crate::accessibility::{root_node_id, widget_id_to_node_id};
 
         let roots = self.arena.roots();
@@ -1721,11 +1737,15 @@ impl WidgetTree {
     /// Set a widget subtree as dormant.
     pub fn set_dormant(&mut self, id: WidgetId) {
         self.arena.set_dormant(id);
+        self.cached_frame = None;
+        self.a11y_dirty = true;
     }
 
     /// Activate a dormant widget subtree.
     pub fn activate(&mut self, id: WidgetId) {
         self.arena.activate(id);
+        self.cached_frame = None;
+        self.a11y_dirty = true;
     }
 }
 
@@ -1750,6 +1770,80 @@ fn to_raw_pointer_event(event: &WidgetEvent) -> Option<RawPointerEvent> {
             button: *button,
         }),
         _ => None,
+    }
+}
+
+/// Recursive paint pass with per-widget caching.
+/// Only re-runs `paint()` for widgets with `needs_paint` set; clean widgets
+/// reuse their `cached_paint` output. The tree walk still runs for clip/child
+/// ordering, but skips the expensive `paint()` call for clean widgets.
+fn paint_widget_cached(
+    arena: &mut WidgetArena,
+    id: WidgetId,
+    frame: &mut RenderFrame,
+    base_theme: &fern_tokens::Theme,
+    text_backend: &Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
+) {
+    if !arena.is_active(id) {
+        return;
+    }
+
+    // Check if we need to repaint this widget or can reuse cached output
+    let node = arena.get(id).unwrap();
+    let needs_paint = node.dirty.needs_paint;
+
+    if needs_paint || node.cached_paint.is_none() {
+        // Repaint: run widget.paint() and cache the result
+        let resolved_theme = arena.resolve_theme(id, base_theme);
+        let ctx = PaintContext {
+            theme: &resolved_theme,
+            scale_factor: 1.0,
+            prefers_high_contrast: false,
+            prefers_reduced_motion: false,
+            prefers_large_text: false,
+        };
+
+        let bounds = arena.bounds(id);
+        let node = arena.get(id).unwrap();
+
+        let mut canvas = match text_backend {
+            Some(tb) => Canvas::with_text_backend(tb.clone()),
+            None => Canvas::new(),
+        };
+        node.widget.paint(bounds, &mut canvas, &ctx);
+        let widget_frame = canvas.into_render_frame();
+
+        // Store in cache and merge into output frame
+        frame.merge(&widget_frame);
+        if let Some(node) = arena.get_mut(id) {
+            node.cached_paint = Some(widget_frame);
+        }
+    } else {
+        // Clean widget: reuse cached paint output
+        let node = arena.get(id).unwrap();
+        if let Some(cached) = &node.cached_paint {
+            frame.merge(cached);
+        }
+    }
+
+    // Always walk children for correct draw order and clipping
+    let node = arena.get(id).unwrap();
+    let clips = node.clips_children;
+    let children: Vec<WidgetId> = node.children.clone();
+    let bounds = node.bounds;
+
+    if clips {
+        frame
+            .draw_order
+            .push(fern_canvas::DrawCommand::SetClip(bounds));
+    }
+
+    for child_id in children {
+        paint_widget_cached(arena, child_id, frame, base_theme, text_backend);
+    }
+
+    if clips {
+        frame.draw_order.push(fern_canvas::DrawCommand::ClearClip);
     }
 }
 
@@ -1789,6 +1883,10 @@ fn layout_widget_recursive(
         desired_size.height,
     );
     if let Some(node) = arena.get_mut(id) {
+        if node.bounds != bounds {
+            node.cached_paint = None;
+            node.dirty.needs_paint = true;
+        }
         node.bounds = bounds;
     }
 
@@ -1819,6 +1917,10 @@ fn layout_widget_recursive(
         for placement in &placements {
             let child_bounds = Rect::from_origin_size(placement.origin, placement.size);
             if let Some(child_node) = arena.get_mut(placement.id) {
+                if child_node.bounds != child_bounds {
+                    child_node.cached_paint = None;
+                    child_node.dirty.needs_paint = true;
+                }
                 child_node.bounds = child_bounds;
             }
 

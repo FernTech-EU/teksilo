@@ -31,8 +31,8 @@ use std::rc::Rc;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
-    Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, Divider, Grid, HStack,
-    IconWidget, Link, MaxSize, Padding, Panel, ProgressBar, RadioButton, RectWidget,
+    Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, Divider, Expand, Grid,
+    HStack, IconWidget, Link, MaxSize, Padding, Panel, ProgressBar, RadioButton, RectWidget,
     ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle,
     Toolbar, TrackSize, VStack, Wrap,
 };
@@ -530,11 +530,11 @@ impl CompositeWidget for WidgetCatalog {
         let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
         let scroll = ctx.add(ScrollArea::from_id(padded));
 
-        // Root: Toolbar | ScrollArea | StatusBar
+        // Root: Toolbar | ScrollArea (fills remaining space) | StatusBar
         ctx.add(
             VStack::new()
                 .add_child(toolbar)
-                .add_child(scroll)
+                .child(Expand::new().fills_stack().set_child(scroll))
                 .add_child(status),
         )
     }
@@ -643,5 +643,80 @@ mod tests {
             frame_light.shapes, frame_dark.shapes,
             "theme switch should produce different output"
         );
+    }
+
+    /// Regression test: second layout+render at same proposal must produce
+    /// the same number of draw commands as the first.
+    #[test]
+    fn second_render_same_output() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add_widget(WidgetCatalog);
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+        let frame1 = tree.render();
+        let cmds1 = frame1.draw_order.len();
+
+        // Second pass without resize — should be identical
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+        let frame2 = tree.render();
+        let cmds2 = frame2.draw_order.len();
+
+        assert_eq!(cmds1, cmds2,
+            "second render must produce same draw commands (got {cmds1} vs {cmds2})");
+    }
+
+    /// Regression test: after set_theme, render must still contain draw commands.
+    #[test]
+    fn theme_switch_preserves_draw_commands() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add_widget(WidgetCatalog);
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+        let frame1 = tree.render();
+        let cmds_before = frame1.draw_order.len();
+
+        tree.set_theme(Theme::dark_default());
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+        let frame2 = tree.render();
+        let cmds_after = frame2.draw_order.len();
+
+        // After theme switch we expect roughly the same number of commands
+        assert!(cmds_after > cmds_before / 2,
+            "draw commands after theme switch ({cmds_after}) should be \
+             close to before ({cmds_before})");
+    }
+
+    /// Verify the ScrollArea fills the space between toolbar and status bar.
+    #[test]
+    fn scroll_area_fills_remaining_space() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let root = tree.add_widget(WidgetCatalog);
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+
+        // root is CompositeAdapter → VStack → [Toolbar, Expand, StatusBar]
+        let vstack_children = {
+            let adapter_children = tree.children(root);
+            assert_eq!(adapter_children.len(), 1, "composite adapter has one child (VStack)");
+            tree.children(adapter_children[0])
+        };
+        assert_eq!(vstack_children.len(), 3, "VStack must have toolbar, expand, statusbar");
+
+        let toolbar_bounds = tree.bounds(vstack_children[0]);
+        let expand_bounds = tree.bounds(vstack_children[1]);
+        let status_bounds = tree.bounds(vstack_children[2]);
+
+        // Expand (containing ScrollArea) should fill remaining space
+        assert!(expand_bounds.height > 400.0,
+            "Expand wrapping ScrollArea should fill >400px, got {}",
+            expand_bounds.height);
+
+        // StatusBar should be at the bottom
+        assert!((status_bounds.y + status_bounds.height - 700.0).abs() < 1.0,
+            "StatusBar should reach bottom of window: y={}, h={}",
+            status_bounds.y, status_bounds.height);
+
+        // No overlap
+        assert!(expand_bounds.y >= toolbar_bounds.y + toolbar_bounds.height - 0.1,
+            "Expand should start below toolbar");
+        assert!(status_bounds.y >= expand_bounds.y + expand_bounds.height - 0.1,
+            "StatusBar should start below Expand");
     }
 }

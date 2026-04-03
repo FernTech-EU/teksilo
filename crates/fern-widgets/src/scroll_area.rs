@@ -245,14 +245,17 @@ impl ScrollArea {
 
 impl Widget for ScrollArea {
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        // Use preferred_size if set, then cached content size, then 300×200 fallback.
+        // Use preferred_size if set; otherwise use content width but a fixed
+        // default height.  A scroll area's HEIGHT should come from its parent,
+        // not from its content — otherwise it grows to fit everything and no
+        // scrolling is needed, AND the intrinsic height is unstable across
+        // layout passes (content_size is only known after place_children).
         let (default_w, default_h) = if let Some(pref) = self.preferred_size {
             (pref.width, pref.height)
         } else {
             let cs = self.content_size.get();
             let w = if cs.width > 0.0 { cs.width } else { 300.0 };
-            let h = if cs.height > 0.0 { cs.height } else { 200.0 };
-            (w, h)
+            (w, 200.0)
         };
         proposal.resolve(default_w, default_h)
     }
