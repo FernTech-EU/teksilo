@@ -185,27 +185,48 @@ impl Widget for HStack {
             0.0
         };
 
-        // Place children left-to-right with alignment on cross axis
+        // Place children with alignment on cross axis.
+        // In RTL mode, children are placed right-to-left.
         let rtl = ctx.is_rtl();
-        let mut x = bounds.x;
-        for (i, child) in children.iter_mut().enumerate() {
-            let w = if is_spacer[i] {
-                spacer_width
-            } else {
-                intrinsic_widths[i]
-            };
-            let h = intrinsic_heights[i];
+        if rtl {
+            let mut x = bounds.right();
+            for (i, child) in children.iter_mut().enumerate() {
+                let w = if is_spacer[i] {
+                    spacer_width
+                } else {
+                    intrinsic_widths[i]
+                };
+                let h = intrinsic_heights[i];
+                let valign = ctx
+                    .child_alignment(child.id)
+                    .map(|a| a.vertical)
+                    .unwrap_or(self.alignment);
+                let y_offset = valign.resolve(h, bounds.height);
 
-            // Cross-axis alignment: check per-child override, then container default
-            let valign = ctx
-                .child_alignment(child.id)
-                .map(|a| a.vertical)
-                .unwrap_or(self.alignment);
-            let y_offset = valign.resolve(h, bounds.height);
+                x -= w;
+                child.origin = Point::new(x, bounds.y + y_offset);
+                child.size = Size::new(w, h);
+                x -= self.spacing;
+            }
+        } else {
+            let mut x = bounds.x;
+            for (i, child) in children.iter_mut().enumerate() {
+                let w = if is_spacer[i] {
+                    spacer_width
+                } else {
+                    intrinsic_widths[i]
+                };
+                let h = intrinsic_heights[i];
+                let valign = ctx
+                    .child_alignment(child.id)
+                    .map(|a| a.vertical)
+                    .unwrap_or(self.alignment);
+                let y_offset = valign.resolve(h, bounds.height);
 
-            child.origin = Point::new(x, bounds.y + y_offset);
-            child.size = Size::new(w, h);
-            x += w + self.spacing;
+                child.origin = Point::new(x, bounds.y + y_offset);
+                child.size = Size::new(w, h);
+                x += w + self.spacing;
+            }
         }
     }
 
@@ -349,5 +370,26 @@ mod tests {
         let _stack = tree.add(HStack::new());
         tree.layout(SizeProposal::exact(200.0, 50.0));
         // No crash, no children to place
+    }
+
+    #[test]
+    fn rtl_reverses_child_order() {
+        let mut tree = WidgetTree::new();
+        tree.set_layout_direction(fern_core::environment::LayoutDirection::RightToLeft);
+        let a = tree.add(FixedLeaf(60.0, 30.0));
+        let b = tree.add(FixedLeaf(40.0, 30.0));
+        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+
+        // In RTL, first child (a) is placed on the right, second (b) on the left.
+        // HStack without spacers sizes to content: 60+40 = 100px wide.
+        let ab = tree.bounds(a);
+        let bb = tree.bounds(b);
+        assert!(ab.x > bb.x,
+            "a.x={} should be > b.x={} in RTL", ab.x, bb.x);
+        // a (60px) at right edge of 100px HStack
+        assert!((ab.x - 40.0).abs() < 0.01, "a.x={}", ab.x);
+        // b (40px) to the left of a
+        assert!((bb.x - 0.0).abs() < 0.01, "b.x={}", bb.x);
     }
 }
