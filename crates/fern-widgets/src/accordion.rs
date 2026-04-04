@@ -93,26 +93,29 @@ impl CompositeWidget for Accordion {
         let is_expanded = *expanded.get();
 
         // Header: title + spacer + chevron icon
-        let chevron = if is_expanded {
-            IconWidget::chevron_down(16.0)
-        } else {
-            IconWidget::chevron_right(16.0)
-        };
-        let chevron = chevron.color(theme.colors.on_surface);
+        // Use two chevrons with visible_when so the icon updates reactively
+        let chevron_down_id = ctx.add(
+            IconWidget::chevron_down(16.0).color(theme.colors.on_surface),
+        );
+        let chevron_right_id = ctx.add(
+            IconWidget::chevron_right(16.0).color(theme.colors.on_surface),
+        );
+        ctx.visible_when(chevron_down_id, expanded.clone());
+        ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
         let title_widget = TextWidget::new(&self.title)
             .style(theme.typography.body.clone())
             .color(theme.colors.on_surface);
         let title_id = ctx.add(title_widget);
         let spacer_id = ctx.add(Spacer::new());
-        let chevron_id = ctx.add(chevron);
 
         let header = ctx.add(
             HStack::new()
                 .spacing(8.0)
                 .add_child(title_id)
                 .add_child(spacer_id)
-                .add_child(chevron_id),
+                .add_child(chevron_down_id)
+                .add_child(chevron_right_id),
         );
 
         let mut vstack = VStack::new().spacing(theme.spacing.xs).add_child(header);
