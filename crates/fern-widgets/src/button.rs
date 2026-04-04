@@ -1,28 +1,26 @@
-//! Production-quality Button widget — CompositeWidget using reactive bindings.
+//! Production-quality Button widget — V2 Widget using Signal-based reactivity.
 //!
 //! Addresses all architectural requirements:
 //! - Non-generic (closure-based type erasure, Approach B)
-//! - State created via BuildContext (framework-managed state arena)
+//! - Signal-based reactive state (V2 API)
 //! - Theme resolved at paint time (not captured at build time)
 //! - Pointer interaction via TapRecognizer
 //! - Bindings auto-registered via register_bindings (no manual bind_to)
 //! - Minimum touch target size from theme
 
-use std::cell::RefCell;
-
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::app_command::AppCommand;
-use fern_core::composite_widget::{BuildContext, CompositeWidget};
+use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::focus::{FocusOrigin, FocusPolicy};
+use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{
     GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
 };
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{CursorIcon, EventContext};
+use fern_core::signal::Signal;
+use fern_core::widget::{CursorIcon, EventContext, LayoutContext, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Alignment, Color, CornerRadius, Theme};
-use fern_tokens::ColorTokens;
+use fern_tokens::{Color, ColorTokens, CornerRadius};
 
 use crate::primitives::{Padding, RectWidget, TextWidget, ZStack};
 
@@ -63,13 +61,12 @@ pub struct Button {
     action: Option<CommandFactory>,
     enabled: bool,
     tooltip_text: Option<String>,
-    /// Interaction state — set during build() via interior mutability.
-    /// None until build() is called.
-    interaction: RefCell<Option<State<InteractionState>>>,
+    /// Interaction state signal — set during build().
+    interaction: Signal<InteractionState>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    /// Root child ID — set during build().
+    root_child_id: Option<WidgetId>,
 }
 
 impl Button {
@@ -80,11 +77,10 @@ impl Button {
             action: None,
             enabled: true,
             tooltip_text: None,
-            interaction: RefCell::new(None),
+            interaction: Signal::new(InteractionState::Idle),
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
-            visible_when_state: None,
-            enabled_when_state: None,
+            root_child_id: None,
         }
     }
 
@@ -113,35 +109,9 @@ impl Button {
         self
     }
 
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
-
     fn fire_action(&self, ctx: &mut EventContext) {
         if let Some(ref action) = self.action {
             action(ctx);
-        }
-    }
-
-    fn interaction_state(&self) -> InteractionState {
-        self.interaction
-            .borrow()
-            .as_ref()
-            .map(|s| *s.get())
-            .unwrap_or(InteractionState::Idle)
-    }
-
-    fn set_interaction(&self, state: InteractionState) {
-        if let Some(ref s) = *self.interaction.borrow() {
-            s.set(state);
         }
     }
 }
@@ -210,23 +180,20 @@ fn resolve_border(style: ButtonStyle, state: InteractionState, colors: &ColorTok
     }
 }
 
-impl CompositeWidget for Button {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId {
+impl fern_core::widget::Widget for Button {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let style = self.style;
 
-        // Create interaction state in the framework's state arena
-        let interaction = ctx.state(if self.enabled {
+        // Create interaction signal
+        let interaction = ctx.signal(if self.enabled {
             InteractionState::Idle
         } else {
             InteractionState::Disabled
         });
-        // Store for event() to use (interior mutability since build takes &self)
-        *self.interaction.borrow_mut() = Some(interaction.clone());
+        self.interaction = interaction.clone();
 
-        // Derived reactive colors — resolve against theme at read time.
-        // The theme is captured here, but the state is read lazily.
-        // For runtime theme switching, the composite would need a rebuild.
+        // Derived reactive colors via Signal::map
         let bg_color = {
             let colors = theme.colors.clone();
             interaction.map(move |s| resolve_bg(style, *s, &colors))
@@ -240,7 +207,7 @@ impl CompositeWidget for Button {
             interaction.map(move |s| resolve_border(style, *s, &colors))
         };
 
-        // Build the widget subtree — bindings auto-register via register_bindings
+        // Build the widget subtree
         let text = TextWidget::new(&self.label).bind_color(text_color);
         let text_id = ctx.add(text);
 
@@ -284,7 +251,31 @@ impl CompositeWidget for Button {
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
-        root_id
+        self.root_child_id = Some(root_id);
+        vec![root_id]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        match self.root_child_id {
+            Some(root_id) => ctx
+                .child_size(root_id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            None => proposal.resolve(0.0, 0.0),
+        }
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        // Single child fills our bounds
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
     }
 
     fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
@@ -292,10 +283,9 @@ impl CompositeWidget for Button {
             return EventResponse::Ignored;
         }
 
-        // Feed pointer events through the TapRecognizer
         match event {
             WidgetEvent::PointerDown { position, button } => {
-                self.set_interaction(InteractionState::Pressed);
+                self.interaction.set(InteractionState::Pressed);
                 self.tap_recognizer.process(&RawPointerEvent::Down {
                     position: *position,
                     button: *button,
@@ -310,7 +300,7 @@ impl CompositeWidget for Button {
                 if matches!(result, GestureResult::Recognized(GestureEvent::Tap { .. })) {
                     self.fire_action(ctx);
                 }
-                self.set_interaction(InteractionState::Hovered);
+                self.interaction.set(InteractionState::Hovered);
                 EventResponse::Handled
             }
             WidgetEvent::PointerMove { position } => {
@@ -320,12 +310,12 @@ impl CompositeWidget for Button {
                 EventResponse::Ignored
             }
             WidgetEvent::PointerEnter => {
-                self.set_interaction(InteractionState::Hovered);
+                self.interaction.set(InteractionState::Hovered);
                 ctx.set_cursor(CursorIcon::Pointer);
                 EventResponse::Handled
             }
             WidgetEvent::PointerLeave => {
-                self.set_interaction(InteractionState::Idle);
+                self.interaction.set(InteractionState::Idle);
                 self.tap_recognizer.reset();
                 ctx.set_cursor(CursorIcon::Default);
                 EventResponse::Handled
@@ -334,7 +324,7 @@ impl CompositeWidget for Button {
                 key: Key::Space | Key::Enter,
                 ..
             } => {
-                self.set_interaction(InteractionState::Pressed);
+                self.interaction.set(InteractionState::Pressed);
                 EventResponse::Handled
             }
             WidgetEvent::KeyUp {
@@ -342,19 +332,19 @@ impl CompositeWidget for Button {
                 ..
             } => {
                 self.fire_action(ctx);
-                self.set_interaction(InteractionState::Focused);
+                self.interaction.set(InteractionState::Focused);
                 EventResponse::Handled
             }
             WidgetEvent::FocusGained { origin } => {
                 self.focus_origin = Some(*origin);
-                if self.interaction_state() == InteractionState::Idle {
-                    self.set_interaction(InteractionState::Focused);
+                if self.interaction.get() == InteractionState::Idle {
+                    self.interaction.set(InteractionState::Focused);
                 }
                 EventResponse::Handled
             }
             WidgetEvent::FocusLost => {
                 self.focus_origin = None;
-                self.set_interaction(InteractionState::Idle);
+                self.interaction.set(InteractionState::Idle);
                 EventResponse::Handled
             }
             WidgetEvent::AccessAction { action, .. } => {
@@ -383,17 +373,13 @@ impl CompositeWidget for Button {
         builder.add_action(fern_core::accesskit::Action::Focus);
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
+    fn children(&self) -> Vec<WidgetId> {
+        match self.root_child_id {
+            Some(id) => vec![id],
+            None => Vec::new(),
+        }
     }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
-
 }
-
-fern_core::impl_composite_into_widget_tree!(Button);
 
 #[cfg(test)]
 mod tests {
@@ -401,6 +387,7 @@ mod tests {
     use fern_canvas::SizeProposal;
     use fern_core::app_command::AppCommand;
     use fern_core::event::{Modifiers, PointerButton};
+    use fern_tokens::Theme;
     use fern_core::widget_tree::WidgetTree;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -413,7 +400,7 @@ mod tests {
 
     fn setup() -> (WidgetTree, WidgetId) {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add_composite(Button::new("Save").on_click(TestCmd::Save));
+        let btn = tree.add(Button::new("Save").on_click(TestCmd::Save));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         (tree, btn)
     }
@@ -465,7 +452,7 @@ mod tests {
     #[test]
     fn disabled_ignores_click() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add_composite(
+        let btn = tree.add(
             Button::new("Save").on_click(TestCmd::Save).enabled(false),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -496,7 +483,7 @@ mod tests {
     #[test]
     fn outlined_has_border() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_composite(Button::new("Save").style(ButtonStyle::Outlined));
+        tree.add(Button::new("Save").style(ButtonStyle::Outlined));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         assert!(frame.shapes.iter().any(|s| s.stroke_width > 0.0));
@@ -511,8 +498,8 @@ mod tests {
     #[test]
     fn button_sizes_to_content() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add_composite(Button::new("X"));
-        tree.layout(SizeProposal::exact(400.0, 400.0));
+        let btn = tree.add(Button::new("X"));
+        tree.layout(SizeProposal { width: None, height: None });
         let bounds = tree.bounds(btn);
         // Should not fill the full 400x400 proposal
         assert!(bounds.width < 400.0);
@@ -604,7 +591,7 @@ mod tests {
     #[test]
     fn button_tooltip_appears_after_delay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add_composite(
+        let btn = tree.add(
             Button::new("Save")
                 .on_click(TestCmd::Save)
                 .tooltip("Save the document"),
@@ -628,7 +615,7 @@ mod tests {
     #[test]
     fn button_tooltip_dismissed_on_leave() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add_composite(
+        let btn = tree.add(
             Button::new("Save")
                 .on_click(TestCmd::Save)
                 .tooltip("Save the document"),

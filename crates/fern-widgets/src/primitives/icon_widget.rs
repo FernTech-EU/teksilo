@@ -5,9 +5,9 @@
 
 use fern_canvas::{Canvas, Path, PathCommand, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{BindingLevel, Reactive, State};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::signal::Prop;
+use fern_core::state::BindingLevel;
+use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Color;
 
@@ -18,9 +18,7 @@ pub struct IconWidget {
     /// Icon size (width = height).
     size: f32,
     /// Fill color.
-    color: Reactive<Color>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    color: Prop<Color>,
 }
 
 impl IconWidget {
@@ -30,9 +28,7 @@ impl IconWidget {
         Self {
             path,
             size,
-            color: Reactive::Static(Color::BLACK),
-            visible_when_state: None,
-            enabled_when_state: None,
+            color: Prop::Static(Color::BLACK),
         }
     }
 
@@ -69,12 +65,12 @@ impl IconWidget {
 
     /// Set the icon fill color.
     pub fn color(mut self, color: Color) -> Self {
-        self.color = Reactive::Static(color);
+        self.color = Prop::Static(color);
         self
     }
 
     /// Bind the icon color to a reactive state.
-    pub fn bind_color(mut self, state: impl Into<Reactive<Color>>) -> Self {
+    pub fn bind_color(mut self, state: impl Into<Prop<Color>>) -> Self {
         self.color = state.into();
         self
     }
@@ -82,18 +78,6 @@ impl IconWidget {
     /// Set the icon size.
     pub fn icon_size(mut self, size: f32) -> Self {
         self.size = size;
-        self
-    }
-
-    /// Bind visibility to a boolean state.
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -169,15 +153,6 @@ impl Widget for IconWidget {
         Size::new(self.size, self.size)
     }
 
-    fn place_children(
-        &self,
-        _bounds: Rect,
-        _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-    }
-
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
         let color = self.color.get();
         if color.a() > 0.0 && !self.path.is_empty() {
@@ -186,24 +161,12 @@ impl Widget for IconWidget {
         }
     }
 
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
-    }
-
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
         // Icons are typically decorative — the parent widget sets the semantic role.
     }
 
     fn register_bindings(&self, id: WidgetId, registry: &fern_core::state::BindingRegistry) {
         self.color.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-    }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
     }
 }
 

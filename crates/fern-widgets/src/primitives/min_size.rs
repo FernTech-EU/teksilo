@@ -1,5 +1,6 @@
 use fern_canvas::{Rect, Size, SizeProposal};
-use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::signal::Prop;
+use fern_core::state::BindingLevel;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -9,10 +10,8 @@ use fern_core::widget_id::WidgetId;
 pub struct MinSize {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
-    min_width: Option<Reactive<f32>>,
-    min_height: Option<Reactive<f32>>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    min_width: Option<Prop<f32>>,
+    min_height: Option<Prop<f32>>,
 }
 
 impl MinSize {
@@ -20,10 +19,8 @@ impl MinSize {
         Self {
             child_id: None,
             pending_child: None,
-            min_width: Some(Reactive::Static(width)),
-            min_height: Some(Reactive::Static(height)),
-            visible_when_state: None,
-            enabled_when_state: None,
+            min_width: Some(Prop::Static(width)),
+            min_height: Some(Prop::Static(height)),
         }
     }
 
@@ -31,10 +28,8 @@ impl MinSize {
         Self {
             child_id: None,
             pending_child: None,
-            min_width: Some(Reactive::Static(width)),
+            min_width: Some(Prop::Static(width)),
             min_height: None,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -43,20 +38,18 @@ impl MinSize {
             child_id: None,
             pending_child: None,
             min_width: None,
-            min_height: Some(Reactive::Static(height)),
-            visible_when_state: None,
-            enabled_when_state: None,
+            min_height: Some(Prop::Static(height)),
         }
     }
 
     /// Bind min width to a reactive state.
-    pub fn bind_min_width(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_min_width(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.min_width = Some(state.into());
         self
     }
 
     /// Bind min height to a reactive state.
-    pub fn bind_min_height(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_min_height(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.min_height = Some(state.into());
         self
     }
@@ -70,18 +63,6 @@ impl MinSize {
     /// Set an inline child widget (deferred insertion).
     pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -131,14 +112,6 @@ impl Widget for MinSize {
         self.child_id = ids.into_iter().next();
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
-
     fn register_bindings(
         &self,
         id: WidgetId,
@@ -172,7 +145,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
         let min = tree.add(MinSize::new(48.0, 48.0).set_child(child));
-        tree.layout(SizeProposal::exact(200.0, 200.0));
+        tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
         assert!((mb.width - 48.0).abs() < 0.01);
@@ -184,7 +157,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 80.0));
         let min = tree.add(MinSize::new(48.0, 48.0).set_child(child));
-        tree.layout(SizeProposal::exact(200.0, 200.0));
+        tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
         assert!((mb.width - 100.0).abs() < 0.01);
@@ -196,7 +169,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
         let min = tree.add(MinSize::width(48.0).set_child(child));
-        tree.layout(SizeProposal::exact(200.0, 200.0));
+        tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
         assert!((mb.width - 48.0).abs() < 0.01);
@@ -209,11 +182,11 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
         let min = tree.add(MinSize::width(0.0).bind_min_width(min_w.clone()).set_child(child));
-        tree.layout(SizeProposal::exact(200.0, 200.0));
+        tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(min).width - 48.0).abs() < 0.01);
 
         min_w.set(80.0);
-        tree.layout(SizeProposal::exact(200.0, 200.0));
+        tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(min).width - 80.0).abs() < 0.01);
     }
 }

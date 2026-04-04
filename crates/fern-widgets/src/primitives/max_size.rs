@@ -1,5 +1,6 @@
 use fern_canvas::{Rect, Size, SizeProposal};
-use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::signal::Prop;
+use fern_core::state::BindingLevel;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -9,10 +10,8 @@ use fern_core::widget_id::WidgetId;
 pub struct MaxSize {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
-    max_width: Option<Reactive<f32>>,
-    max_height: Option<Reactive<f32>>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    max_width: Option<Prop<f32>>,
+    max_height: Option<Prop<f32>>,
 }
 
 impl MaxSize {
@@ -20,10 +19,8 @@ impl MaxSize {
         Self {
             child_id: None,
             pending_child: None,
-            max_width: Some(Reactive::Static(width)),
-            max_height: Some(Reactive::Static(height)),
-            visible_when_state: None,
-            enabled_when_state: None,
+            max_width: Some(Prop::Static(width)),
+            max_height: Some(Prop::Static(height)),
         }
     }
 
@@ -31,10 +28,8 @@ impl MaxSize {
         Self {
             child_id: None,
             pending_child: None,
-            max_width: Some(Reactive::Static(width)),
+            max_width: Some(Prop::Static(width)),
             max_height: None,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -43,20 +38,18 @@ impl MaxSize {
             child_id: None,
             pending_child: None,
             max_width: None,
-            max_height: Some(Reactive::Static(height)),
-            visible_when_state: None,
-            enabled_when_state: None,
+            max_height: Some(Prop::Static(height)),
         }
     }
 
     /// Bind max width to a reactive state.
-    pub fn bind_max_width(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_max_width(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.max_width = Some(state.into());
         self
     }
 
     /// Bind max height to a reactive state.
-    pub fn bind_max_height(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_max_height(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.max_height = Some(state.into());
         self
     }
@@ -70,18 +63,6 @@ impl MaxSize {
     /// Set an inline child widget (deferred insertion).
     pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -151,14 +132,6 @@ impl Widget for MaxSize {
         self.child_id = ids.into_iter().next();
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
-
     fn register_bindings(
         &self,
         id: WidgetId,
@@ -192,7 +165,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 600.0));
         let max = tree.add(MaxSize::new(400.0, 300.0).set_child(child));
-        tree.layout(SizeProposal::exact(1000.0, 1000.0));
+        tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
         assert!((mb.width - 400.0).abs() < 0.01);
@@ -204,7 +177,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 50.0));
         let max = tree.add(MaxSize::new(400.0, 300.0).set_child(child));
-        tree.layout(SizeProposal::exact(1000.0, 1000.0));
+        tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
         assert!((mb.width - 100.0).abs() < 0.01);
@@ -216,7 +189,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
         let max = tree.add(MaxSize::width(400.0).set_child(child));
-        tree.layout(SizeProposal::exact(1000.0, 1000.0));
+        tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
         assert!((mb.width - 400.0).abs() < 0.01);
@@ -229,11 +202,11 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
         let max = tree.add(MaxSize::width(9999.0).bind_max_width(max_w.clone()).set_child(child));
-        tree.layout(SizeProposal::exact(1000.0, 1000.0));
+        tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(max).width - 400.0).abs() < 0.01);
 
         max_w.set(200.0);
-        tree.layout(SizeProposal::exact(1000.0, 1000.0));
+        tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(max).width - 200.0).abs() < 0.01);
     }
 }

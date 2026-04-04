@@ -2,86 +2,69 @@ use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_tokens::{Color, CornerRadius};
 
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::signal::Prop;
+use fern_core::widget::{LayoutContext, PaintContext, Widget};
 
 /// A leaf widget that paints a filled and/or stroked rounded rectangle.
 /// Properties can be static values or bound to reactive state.
 pub struct RectWidget {
-    background: Reactive<Color>,
-    border_color: Reactive<Color>,
-    border_width: Reactive<f32>,
-    corner_radius: Reactive<CornerRadius>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    background: Prop<Color>,
+    border_color: Prop<Color>,
+    border_width: Prop<f32>,
+    corner_radius: Prop<CornerRadius>,
 }
 
 impl RectWidget {
     pub fn new() -> Self {
         Self {
-            background: Reactive::Static(Color::TRANSPARENT),
-            border_color: Reactive::Static(Color::TRANSPARENT),
-            border_width: Reactive::Static(0.0),
-            corner_radius: Reactive::Static(CornerRadius::ZERO),
-            visible_when_state: None,
-            enabled_when_state: None,
+            background: Prop::Static(Color::TRANSPARENT),
+            border_color: Prop::Static(Color::TRANSPARENT),
+            border_width: Prop::Static(0.0),
+            corner_radius: Prop::Static(CornerRadius::ZERO),
         }
     }
 
     pub fn background(mut self, color: Color) -> Self {
-        self.background = Reactive::Static(color);
+        self.background = Prop::Static(color);
         self
     }
 
     pub fn border_color(mut self, color: Color) -> Self {
-        self.border_color = Reactive::Static(color);
+        self.border_color = Prop::Static(color);
         self
     }
 
     pub fn border_width(mut self, width: f32) -> Self {
-        self.border_width = Reactive::Static(width);
+        self.border_width = Prop::Static(width);
         self
     }
 
     pub fn corner_radius(mut self, radius: CornerRadius) -> Self {
-        self.corner_radius = Reactive::Static(radius);
+        self.corner_radius = Prop::Static(radius);
         self
     }
 
     /// Bind the background color to a reactive state.
-    pub fn bind_background(mut self, state: impl Into<Reactive<Color>>) -> Self {
+    pub fn bind_background(mut self, state: impl Into<Prop<Color>>) -> Self {
         self.background = state.into();
         self
     }
 
     /// Bind the border color to a reactive state.
-    pub fn bind_border_color(mut self, state: impl Into<Reactive<Color>>) -> Self {
+    pub fn bind_border_color(mut self, state: impl Into<Prop<Color>>) -> Self {
         self.border_color = state.into();
         self
     }
 
     /// Bind the border width to a reactive state.
-    pub fn bind_border_width(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_border_width(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.border_width = state.into();
         self
     }
 
     /// Bind the corner radius to a reactive state.
-    pub fn bind_corner_radius(mut self, state: impl Into<Reactive<CornerRadius>>) -> Self {
+    pub fn bind_corner_radius(mut self, state: impl Into<Prop<CornerRadius>>) -> Self {
         self.corner_radius = state.into();
-        self
-    }
-
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -105,15 +88,6 @@ impl Widget for RectWidget {
         proposal.resolve(0.0, 0.0)
     }
 
-    fn place_children(
-        &self,
-        _bounds: Rect,
-        _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-    }
-
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
         let bg = self.background.get();
         let radius = self.corner_radius.get();
@@ -125,10 +99,6 @@ impl Widget for RectWidget {
         if bw > 0.0 && bc.a() > 0.0 {
             canvas.stroke_rounded_rect(bounds, radius, bc, bw);
         }
-    }
-
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
@@ -143,14 +113,6 @@ impl Widget for RectWidget {
         self.border_color.register_if_bound(id, registry, BindingLevel::RepaintOnly);
         self.border_width.register_if_bound(id, registry, BindingLevel::RepaintOnly);
         self.corner_radius.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-    }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
     }
 }
 

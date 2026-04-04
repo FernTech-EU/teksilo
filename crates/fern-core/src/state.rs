@@ -106,6 +106,24 @@ impl<T: Clone + 'static> StateHandle<T> {
         self.inner.read()
     }
 
+    /// Create a StateHandle from a Signal (bridge for V1/V2 interop).
+    pub fn from_signal(signal: crate::signal::Signal<T>) -> Self {
+        struct SignalReader<T: Clone + 'static>(crate::signal::Signal<T>);
+        impl<T: Clone + 'static> ReadableState<T> for SignalReader<T> {
+            fn read(&self) -> T {
+                self.0.get()
+            }
+        }
+
+        let dirty_signal = signal.clone();
+        let clear_signal = signal.clone();
+        StateHandle {
+            inner: Rc::new(SignalReader(signal)),
+            is_dirty: Some(Rc::new(move || dirty_signal.is_dirty())),
+            clear_dirty: Some(Rc::new(move || clear_signal.clear_dirty())),
+        }
+    }
+
     /// Register this handle's dirty tracking for a widget at the given level.
     /// No-op if the handle has no dirty tracking (e.g., static).
     pub fn register(&self, widget_id: WidgetId, registry: &BindingRegistry, level: BindingLevel) {
@@ -491,6 +509,18 @@ pub struct DerivedState<T> {
 impl<T> DerivedState<T> {
     pub fn get(&self) -> T {
         (self.compute)()
+    }
+
+    /// Whether the source state is dirty.
+    pub fn is_dirty(&self) -> bool {
+        self.source_dirty.as_ref().map_or(false, |f| f())
+    }
+
+    /// Clear the source state's dirty flag.
+    pub fn clear_dirty(&self) {
+        if let Some(f) = &self.source_clear {
+            f();
+        }
     }
 
     /// Bind this derived state's source to a widget at the given dirty-tracking level.

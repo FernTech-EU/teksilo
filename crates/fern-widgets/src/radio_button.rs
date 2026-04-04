@@ -3,48 +3,45 @@
 //! Non-generic: uses `usize` for values. Multiple RadioButtons share a
 //! `State<usize>` — selecting one automatically deselects others.
 
-use std::cell::RefCell;
-
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::composite_widget::{BuildContext, CompositeWidget};
+use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{CursorIcon, EventContext};
+use fern_core::signal::Signal;
+use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
 use crate::button::InteractionState;
 use crate::primitives::{FixedSize, HStack, MinSize, RectWidget, TextWidget, ZStack};
 
-/// A radio button that sets a shared `State<usize>` to its value when selected.
+/// A radio button that sets a shared `Signal<usize>` to its value when selected.
 pub struct RadioButton {
     label: Option<String>,
     value: usize,
-    selected: State<usize>,
+    selected: Signal<usize>,
     enabled: bool,
     tooltip_text: Option<String>,
-    interaction: RefCell<Option<State<InteractionState>>>,
+    interaction: Option<Signal<InteractionState>>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    root_child_id: Option<WidgetId>,
 }
 
 impl RadioButton {
-    pub fn new(value: usize, selected: State<usize>) -> Self {
+    pub fn new(value: usize, selected: Signal<usize>) -> Self {
         Self {
             label: None,
             value,
             selected,
             enabled: true,
             tooltip_text: None,
-            interaction: RefCell::new(None),
+            interaction: None,
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
-            visible_when_state: None,
-            enabled_when_state: None,
+            root_child_id: None,
         }
     }
 
@@ -63,35 +60,24 @@ impl RadioButton {
         self
     }
 
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
-
     fn select(&self) {
         self.selected.set(self.value);
     }
 
     fn is_selected(&self) -> bool {
-        *self.selected.get() == self.value
+        self.selected.get() == self.value
     }
 
     fn set_interaction(&self, state: InteractionState) {
-        if let Some(ref s) = *self.interaction.borrow() {
+        if let Some(ref s) = self.interaction {
             s.set(state);
         }
     }
 
     fn interaction_state(&self) -> InteractionState {
         self.interaction
-            .borrow()
             .as_ref()
-            .map(|s| *s.get())
+            .map(|s| s.get())
             .unwrap_or(InteractionState::Idle)
     }
 }
@@ -126,24 +112,24 @@ fn resolve_focus_ring(state: InteractionState, colors: &fern_tokens::ColorTokens
     }
 }
 
-impl CompositeWidget for RadioButton {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId {
+impl Widget for RadioButton {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let selected = self.selected.clone();
         let value = self.value;
 
-        let interaction = ctx.state(if self.enabled {
+        let interaction = ctx.signal(if self.enabled {
             InteractionState::Idle
         } else {
             InteractionState::Disabled
         });
-        *self.interaction.borrow_mut() = Some(interaction.clone());
+        self.interaction = Some(interaction.clone());
 
         // Outer circle border
         let border_color = {
             let colors = theme.colors.clone();
             let selected = selected.clone();
-            interaction.map(move |s| resolve_circle_border(*s, *selected.get() == value, &colors))
+            interaction.map(move |s| resolve_circle_border(*s, selected.get() == value, &colors))
         };
         let outer = RectWidget::new()
             .bind_border_color(border_color)
@@ -152,8 +138,8 @@ impl CompositeWidget for RadioButton {
         let outer_id = ctx.add(outer);
         let outer_sized = ctx.add(
             FixedSize::new()
-                .bind_width(fern_core::state::Reactive::Static(18.0))
-                .bind_height(fern_core::state::Reactive::Static(18.0))
+                .bind_width(18.0_f32)
+                .bind_height(18.0_f32)
                 .set_child(outer_id),
         );
 
@@ -174,15 +160,15 @@ impl CompositeWidget for RadioButton {
         let dot_id = ctx.add(dot);
         let dot_sized = ctx.add(
             FixedSize::new()
-                .bind_width(fern_core::state::Reactive::Static(10.0))
-                .bind_height(fern_core::state::Reactive::Static(10.0))
+                .bind_width(10.0_f32)
+                .bind_height(10.0_f32)
                 .set_child(dot_id),
         );
 
         // Drive dot visibility from the shared selected state
         ctx.visible_when(dot_sized, selected.map(move |s| *s == value));
 
-        // Outer focus ring — 3px offset outside the 18×18 circle (24×24 total)
+        // Outer focus ring — 3px offset outside the 18x18 circle (24x24 total)
         let focus_ring_color = {
             let colors = theme.colors.clone();
             interaction.map(move |s| resolve_focus_ring(*s, &colors))
@@ -197,8 +183,8 @@ impl CompositeWidget for RadioButton {
         let focus_ring_id = ctx.add(focus_ring);
         let focus_ring_sized = ctx.add(
             FixedSize::new()
-                .bind_width(fern_core::state::Reactive::Static(24.0))
-                .bind_height(fern_core::state::Reactive::Static(24.0))
+                .bind_width(24.0_f32)
+                .bind_height(24.0_f32)
                 .set_child(focus_ring_id),
         );
 
@@ -227,7 +213,30 @@ impl CompositeWidget for RadioButton {
             ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));
         }
 
-        root_id
+        self.root_child_id = Some(root_id);
+        vec![root_id]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        if let Some(root) = self.root_child_id {
+            if let Some(size) = ctx.child_size(root, proposal) {
+                return size;
+            }
+        }
+        proposal.resolve(0.0, 0.0)
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
+        }
     }
 
     fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
@@ -322,21 +331,14 @@ impl CompositeWidget for RadioButton {
         builder.add_action(fern_core::accesskit::Action::Focus);
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
     }
 }
-
-fern_core::impl_composite_into_widget_tree!(RadioButton);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_canvas::SizeProposal;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
@@ -344,42 +346,42 @@ mod tests {
     #[test]
     fn selecting_one_deselects_others() {
         use crate::primitives::VStack;
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let r0 = tree.add_composite(RadioButton::new(0, selected.clone()).label("A"));
-        let r1 = tree.add_composite(RadioButton::new(1, selected.clone()).label("B"));
-        let r2 = tree.add_composite(RadioButton::new(2, selected.clone()).label("C"));
+        let r0 = tree.add(RadioButton::new(0, selected.clone()).label("A"));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label("B"));
+        let r2 = tree.add(RadioButton::new(2, selected.clone()).label("C"));
         let _root = tree.add(VStack::new().add_child(r0).add_child(r1).add_child(r2));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
-        assert_eq!(*selected.get(), 0);
+        assert_eq!(selected.get(), 0);
         tree.click(r1);
-        assert_eq!(*selected.get(), 1);
+        assert_eq!(selected.get(), 1);
         tree.click(r2);
-        assert_eq!(*selected.get(), 2);
+        assert_eq!(selected.get(), 2);
         tree.click(r0);
-        assert_eq!(*selected.get(), 0);
+        assert_eq!(selected.get(), 0);
     }
 
     #[test]
     fn space_selects() {
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let _r0 = tree.add_composite(RadioButton::new(0, selected.clone()).label("A"));
-        let r1 = tree.add_composite(RadioButton::new(1, selected.clone()).label("B"));
+        let _r0 = tree.add(RadioButton::new(0, selected.clone()).label("A"));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label("B"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         tree.focus(r1);
         tree.press_key(Key::Space, Modifiers::NONE);
-        assert_eq!(*selected.get(), 1);
+        assert_eq!(selected.get(), 1);
     }
 
     #[test]
     fn accessibility() {
-        let selected = State::new(1_usize);
+        let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let r0 = tree.add_composite(RadioButton::new(0, selected.clone()).label("A"));
-        let r1 = tree.add_composite(RadioButton::new(1, selected.clone()).label("B"));
+        let r0 = tree.add(RadioButton::new(0, selected.clone()).label("A"));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label("B"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         let info0 = tree.accessibility_node(r0);
@@ -392,9 +394,9 @@ mod tests {
 
     #[test]
     fn accessibility_has_actions() {
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let r0 = tree.add_composite(RadioButton::new(0, selected).label("A"));
+        let r0 = tree.add(RadioButton::new(0, selected).label("A"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let info = tree.accessibility_node(r0);
         assert!(info.actions().contains(&fern_core::accesskit::Action::Click));

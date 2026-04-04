@@ -1,26 +1,24 @@
 //! Checkbox — a togglable checkbox with optional label and tristate support.
 //!
 //! Two modes:
-//! - **Two-state** (`Checkbox::new(State<bool>)`): toggles between checked/unchecked.
-//! - **Tristate** (`Checkbox::tristate(State<CheckState>)`): cycles through
+//! - **Two-state** (`Checkbox::new(Signal<bool>)`): toggles between checked/unchecked.
+//! - **Tristate** (`Checkbox::tristate(Signal<CheckState>)`): cycles through
 //!   Unchecked → Checked → Indeterminate → Unchecked. Useful for tree views
 //!   where a parent represents partially-selected children.
 //!
-//! Follows the Button pattern: CompositeWidget with TapRecognizer,
+//! Follows the Button pattern: Widget with TapRecognizer,
 //! InteractionState-driven reactive colors, and accessibility.
 
-use std::cell::RefCell;
-
-use fern_canvas::{Path, Point};
+use fern_canvas::{Path, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::composite_widget::{BuildContext, CompositeWidget};
+use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{
     GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
 };
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{CursorIcon, EventContext};
+use fern_core::signal::Signal;
+use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
@@ -72,26 +70,26 @@ impl From<bool> for CheckState {
 /// Wraps either a bool state (two-state) or a CheckState state (tristate).
 #[derive(Clone)]
 enum CheckKind {
-    TwoState(State<bool>),
-    TriState(State<CheckState>),
+    TwoState(Signal<bool>),
+    TriState(Signal<CheckState>),
 }
 
 impl CheckKind {
     fn check_state(&self) -> CheckState {
         match self {
-            CheckKind::TwoState(s) => CheckState::from(*s.get()),
-            CheckKind::TriState(s) => *s.get(),
+            CheckKind::TwoState(s) => CheckState::from(s.get()),
+            CheckKind::TriState(s) => s.get(),
         }
     }
 
     fn toggle(&self) {
         match self {
             CheckKind::TwoState(s) => {
-                let current = *s.get();
+                let current = s.get();
                 s.set(!current);
             }
             CheckKind::TriState(s) => {
-                let current = *s.get();
+                let current = s.get();
                 s.set(current.next_tristate());
             }
         }
@@ -111,50 +109,47 @@ impl std::fmt::Debug for CheckKind {
 // Checkbox
 // ---------------------------------------------------------------------------
 
-/// A checkbox that toggles a `State<bool>` or cycles a `State<CheckState>`.
+/// A checkbox that toggles a `Signal<bool>` or cycles a `Signal<CheckState>`.
 pub struct Checkbox {
     label: Option<String>,
     kind: CheckKind,
     enabled: bool,
     tooltip_text: Option<String>,
-    interaction: RefCell<Option<State<InteractionState>>>,
+    interaction: Option<Signal<InteractionState>>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    root_child_id: Option<WidgetId>,
 }
 
 impl Checkbox {
-    /// Create a two-state checkbox bound to a `State<bool>`.
-    pub fn new(checked: State<bool>) -> Self {
+    /// Create a two-state checkbox bound to a `Signal<bool>`.
+    pub fn new(checked: Signal<bool>) -> Self {
         Self {
             label: None,
             kind: CheckKind::TwoState(checked),
             enabled: true,
             tooltip_text: None,
-            interaction: RefCell::new(None),
+            interaction: None,
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
-            visible_when_state: None,
-            enabled_when_state: None,
+            root_child_id: None,
         }
     }
 
-    /// Create a tristate checkbox bound to a `State<CheckState>`.
+    /// Create a tristate checkbox bound to a `Signal<CheckState>`.
     ///
     /// Clicking cycles: Unchecked → Checked → Indeterminate → Unchecked.
     /// Useful for parent checkboxes in tree views.
-    pub fn tristate(state: State<CheckState>) -> Self {
+    pub fn tristate(state: Signal<CheckState>) -> Self {
         Self {
             label: None,
             kind: CheckKind::TriState(state),
             enabled: true,
             tooltip_text: None,
-            interaction: RefCell::new(None),
+            interaction: None,
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
-            visible_when_state: None,
-            enabled_when_state: None,
+            root_child_id: None,
         }
     }
 
@@ -173,16 +168,6 @@ impl Checkbox {
         self
     }
 
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
-
     fn toggle(&self) {
         self.kind.toggle();
     }
@@ -192,16 +177,15 @@ impl Checkbox {
     }
 
     fn set_interaction(&self, state: InteractionState) {
-        if let Some(ref s) = *self.interaction.borrow() {
+        if let Some(ref s) = self.interaction {
             s.set(state);
         }
     }
 
     fn interaction_state(&self) -> InteractionState {
         self.interaction
-            .borrow()
             .as_ref()
-            .map(|s| *s.get())
+            .map(|s| s.get())
             .unwrap_or(InteractionState::Idle)
     }
 }
@@ -271,20 +255,20 @@ fn indeterminate_icon(size: f32) -> IconWidget {
 }
 
 // ---------------------------------------------------------------------------
-// CompositeWidget
+// Widget
 // ---------------------------------------------------------------------------
 
-impl CompositeWidget for Checkbox {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId {
+impl Widget for Checkbox {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let kind = self.kind.clone();
 
-        let interaction = ctx.state(if self.enabled {
+        let interaction = ctx.signal(if self.enabled {
             InteractionState::Idle
         } else {
             InteractionState::Disabled
         });
-        *self.interaction.borrow_mut() = Some(interaction.clone());
+        self.interaction = Some(interaction.clone());
 
         // Derive box colors from interaction state AND check state
         let bg_color = {
@@ -298,7 +282,7 @@ impl CompositeWidget for Checkbox {
             interaction.map(move |s| resolve_box_border(*s, kind.check_state(), &colors))
         };
 
-        // Checkbox box (18×18)
+        // Checkbox box (18x18)
         let box_rect = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
@@ -307,8 +291,8 @@ impl CompositeWidget for Checkbox {
         let box_id = ctx.add(box_rect);
         let box_sized = ctx.add(
             FixedSize::new()
-                .bind_width(fern_core::state::Reactive::Static(18.0))
-                .bind_height(fern_core::state::Reactive::Static(18.0))
+                .bind_width(18.0_f32)
+                .bind_height(18.0_f32)
                 .set_child(box_id),
         );
 
@@ -344,7 +328,7 @@ impl CompositeWidget for Checkbox {
             }
         }
 
-        // Outer focus ring — 3px offset outside the 18×18 box (24×24 total)
+        // Outer focus ring — 3px offset outside the 18x18 box (24x24 total)
         let focus_ring_color = {
             let colors = theme.colors.clone();
             interaction.map(move |s| resolve_focus_ring(*s, &colors))
@@ -359,8 +343,8 @@ impl CompositeWidget for Checkbox {
         let focus_ring_id = ctx.add(focus_ring);
         let focus_ring_sized = ctx.add(
             FixedSize::new()
-                .bind_width(fern_core::state::Reactive::Static(24.0))
-                .bind_height(fern_core::state::Reactive::Static(24.0))
+                .bind_width(24.0_f32)
+                .bind_height(24.0_f32)
                 .set_child(focus_ring_id),
         );
 
@@ -391,7 +375,30 @@ impl CompositeWidget for Checkbox {
             ctx.attach_tooltip(root_id, tooltip_id, std::time::Duration::from_millis(500));
         }
 
-        root_id
+        self.root_child_id = Some(root_id);
+        vec![root_id]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        if let Some(root) = self.root_child_id {
+            if let Some(size) = ctx.child_size(root, proposal) {
+                return size;
+            }
+        }
+        proposal.resolve(0.0, 0.0)
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
+        }
     }
 
     fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
@@ -493,16 +500,10 @@ impl CompositeWidget for Checkbox {
         builder.add_action(fern_core::accesskit::Action::Focus);
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
     }
 }
-
-fern_core::impl_composite_into_widget_tree!(Checkbox);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -511,7 +512,6 @@ fern_core::impl_composite_into_widget_tree!(Checkbox);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_canvas::SizeProposal;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
@@ -520,50 +520,50 @@ mod tests {
 
     #[test]
     fn click_toggles_bool_state() {
-        let checked = State::new(false);
+        let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add_composite(Checkbox::new(checked.clone()).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked.clone()).label("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
-        assert!(!*checked.get());
+        assert!(!checked.get());
         tree.click(cb);
-        assert!(*checked.get());
+        assert!(checked.get());
         tree.click(cb);
-        assert!(!*checked.get());
+        assert!(!checked.get());
     }
 
     #[test]
     fn space_toggles_bool_state() {
-        let checked = State::new(false);
+        let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add_composite(Checkbox::new(checked.clone()).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked.clone()).label("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         tree.focus(cb);
         tree.press_key(Key::Space, Modifiers::NONE);
-        assert!(*checked.get());
+        assert!(checked.get());
         tree.press_key(Key::Space, Modifiers::NONE);
-        assert!(!*checked.get());
+        assert!(!checked.get());
     }
 
     #[test]
     fn disabled_ignores_click() {
-        let checked = State::new(false);
+        let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add_composite(
+        let cb = tree.add(
             Checkbox::new(checked.clone()).label("Accept").enabled(false),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         tree.click(cb);
-        assert!(!*checked.get());
+        assert!(!checked.get());
     }
 
     #[test]
     fn two_state_accessibility() {
-        let checked = State::new(true);
+        let checked = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add_composite(Checkbox::new(checked).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked).label("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         let info = tree.accessibility_node(cb);
@@ -576,40 +576,40 @@ mod tests {
 
     #[test]
     fn tristate_cycles_through_all_states() {
-        let state = State::new(CheckState::Unchecked);
+        let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add_composite(Checkbox::tristate(state.clone()).label("Select All"));
+        let cb = tree.add(Checkbox::tristate(state.clone()).label("Select All"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
-        assert_eq!(*state.get(), CheckState::Unchecked);
+        assert_eq!(state.get(), CheckState::Unchecked);
         tree.click(cb);
-        assert_eq!(*state.get(), CheckState::Checked);
+        assert_eq!(state.get(), CheckState::Checked);
         tree.click(cb);
-        assert_eq!(*state.get(), CheckState::Indeterminate);
+        assert_eq!(state.get(), CheckState::Indeterminate);
         tree.click(cb);
-        assert_eq!(*state.get(), CheckState::Unchecked);
+        assert_eq!(state.get(), CheckState::Unchecked);
     }
 
     #[test]
     fn tristate_space_cycles() {
-        let state = State::new(CheckState::Unchecked);
+        let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add_composite(Checkbox::tristate(state.clone()).label("Select All"));
+        let cb = tree.add(Checkbox::tristate(state.clone()).label("Select All"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         tree.focus(cb);
         tree.press_key(Key::Space, Modifiers::NONE);
-        assert_eq!(*state.get(), CheckState::Checked);
+        assert_eq!(state.get(), CheckState::Checked);
         tree.press_key(Key::Space, Modifiers::NONE);
-        assert_eq!(*state.get(), CheckState::Indeterminate);
+        assert_eq!(state.get(), CheckState::Indeterminate);
     }
 
     #[test]
     fn tristate_indeterminate_shows_filled_background() {
         // Indeterminate is_filled() == true, so it should have a primary background
-        let state = State::new(CheckState::Indeterminate);
+        let state = Signal::new(CheckState::Indeterminate);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_composite(Checkbox::tristate(state).label("Partial"));
+        tree.add(Checkbox::tristate(state).label("Partial"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         let primary = Theme::light_default().colors.primary.to_array();
@@ -630,9 +630,9 @@ mod tests {
 
     #[test]
     fn disabled_has_disabled_colors() {
-        let checked = State::new(true);
+        let checked = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_composite(Checkbox::new(checked).label("Disabled").enabled(false));
+        tree.add(Checkbox::new(checked).label("Disabled").enabled(false));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         let disabled_fill = Theme::light_default().colors.disabled_fill.to_array();
@@ -644,9 +644,9 @@ mod tests {
 
     #[test]
     fn accessibility_has_actions() {
-        let checked = State::new(false);
+        let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add_composite(Checkbox::new(checked).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked).label("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let info = tree.accessibility_node(cb);
         assert!(info.actions().contains(&fern_core::accesskit::Action::Click));

@@ -5,9 +5,7 @@
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal, StrokeStyle};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_tokens::{Color, Orientation};
 
 /// A themed 1px separator line.
@@ -16,8 +14,6 @@ pub struct Divider {
     orientation: Orientation,
     thickness: f32,
     color: Option<Color>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Divider {
@@ -26,8 +22,6 @@ impl Divider {
             orientation: Orientation::Horizontal,
             thickness: 1.0,
             color: None,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -52,15 +46,6 @@ impl Divider {
         self
     }
 
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
 }
 
 impl Default for Divider {
@@ -83,15 +68,6 @@ impl Widget for Divider {
         }
     }
 
-    fn place_children(
-        &self,
-        _bounds: Rect,
-        _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-    }
-
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let color = self.color.unwrap_or(ctx.theme.colors.border);
         let (from, to) = match self.orientation {
@@ -107,21 +83,10 @@ impl Widget for Divider {
         canvas.draw_line(from, to, color, StrokeStyle::solid(self.thickness));
     }
 
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
-    }
-
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Splitter);
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
 #[cfg(test)]
@@ -133,7 +98,7 @@ mod tests {
     fn horizontal_divider_size() {
         let mut tree = WidgetTree::new();
         let d = tree.add(Divider::new());
-        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal { width: Some(200.0), height: None });
         let b = tree.bounds(d);
         assert!((b.width - 200.0).abs() < 0.01);
         assert!((b.height - 1.0).abs() < 0.01);
@@ -143,7 +108,7 @@ mod tests {
     fn vertical_divider_size() {
         let mut tree = WidgetTree::new();
         let d = tree.add(Divider::vertical());
-        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal { width: None, height: Some(100.0) });
         let b = tree.bounds(d);
         assert!((b.width - 1.0).abs() < 0.01);
         assert!((b.height - 100.0).abs() < 0.01);
@@ -153,7 +118,7 @@ mod tests {
     fn custom_thickness() {
         let mut tree = WidgetTree::new();
         let d = tree.add(Divider::new().thickness(3.0));
-        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal { width: Some(200.0), height: None });
         let b = tree.bounds(d);
         assert!((b.height - 3.0).abs() < 0.01);
     }

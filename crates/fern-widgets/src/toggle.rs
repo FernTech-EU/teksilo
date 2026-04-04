@@ -11,7 +11,8 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
-use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::signal::Signal;
+use fern_core::state::{BindingLevel, State};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing};
@@ -21,22 +22,20 @@ const TRACK_HEIGHT: f32 = 24.0;
 const KNOB_SIZE: f32 = 20.0;
 const KNOB_MARGIN: f32 = 2.0;
 
-/// An animated toggle switch bound to a `State<bool>`.
+/// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
-    on: State<bool>,
+    on: Signal<bool>,
     knob_position: State<f32>,
     label: Option<String>,
     enabled: bool,
     hovered: Cell<bool>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Toggle {
-    pub fn new(on: State<bool>) -> Self {
-        let initial = if *on.get() { 1.0 } else { 0.0 };
+    pub fn new(on: Signal<bool>) -> Self {
+        let initial = if on.get() { 1.0 } else { 0.0 };
         Self {
             on,
             knob_position: State::new_animated(initial),
@@ -45,8 +44,6 @@ impl Toggle {
             hovered: Cell::new(false),
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -60,18 +57,8 @@ impl Toggle {
         self
     }
 
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
-
     fn toggle(&self) {
-        let new_on = !*self.on.get();
+        let new_on = !self.on.get();
         self.on.set(new_on);
         let target = if new_on { 1.0 } else { 0.0 };
         self.knob_position.set_animated(
@@ -279,7 +266,7 @@ impl Widget for Toggle {
         if let Some(ref label) = self.label {
             builder.set_name(label);
         }
-        builder.set_toggled(*self.on.get());
+        builder.set_toggled(self.on.get());
         if !self.enabled {
             builder.set_disabled();
         }
@@ -296,13 +283,6 @@ impl Widget for Toggle {
         vec![self.knob_position.clone()]
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
 #[cfg(test)]
@@ -313,38 +293,38 @@ mod tests {
 
     #[test]
     fn click_toggles_state() {
-        let on = State::new(false);
+        let on = Signal::new(false);
         let mut tree = WidgetTree::new();
         let t = tree.add(Toggle::new(on.clone()));
         tree.layout(SizeProposal::exact(100.0, 60.0));
 
         tree.click(t);
-        assert!(*on.get());
+        assert!(on.get());
         tree.click(t);
-        assert!(!*on.get());
+        assert!(!on.get());
     }
 
     #[test]
     fn space_toggles_state() {
-        let on = State::new(false);
+        let on = Signal::new(false);
         let mut tree = WidgetTree::new();
         let t = tree.add(Toggle::new(on.clone()));
         tree.layout(SizeProposal::exact(100.0, 60.0));
 
         tree.focus(t);
         tree.press_key(Key::Space, Modifiers::NONE);
-        assert!(*on.get());
+        assert!(on.get());
     }
 
     #[test]
     fn animation_interpolates_knob_position() {
-        let on = State::new(false);
+        let on = Signal::new(false);
         let mut tree = WidgetTree::new();
         let t = tree.add(Toggle::new(on.clone()));
         tree.layout(SizeProposal::exact(100.0, 60.0));
 
         tree.click(t); // toggles on, starts animation to 1.0
-        assert!(*on.get());
+        assert!(on.get());
 
         // At midpoint, knob_position should be between 0 and 1
         tree.tick_animations(Duration::from_millis(75));
@@ -359,7 +339,7 @@ mod tests {
 
     #[test]
     fn accessibility() {
-        let on = State::new(true);
+        let on = Signal::new(true);
         let mut tree = WidgetTree::new();
         let t = tree.add(Toggle::new(on));
         tree.layout(SizeProposal::exact(100.0, 60.0));
@@ -370,7 +350,7 @@ mod tests {
 
     #[test]
     fn accessibility_has_actions() {
-        let on = State::new(false);
+        let on = Signal::new(false);
         let mut tree = WidgetTree::new();
         let t = tree.add(Toggle::new(on));
         tree.layout(SizeProposal::exact(100.0, 60.0));

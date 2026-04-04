@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn button_has_correct_accessibility() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let button = tree.add_composite(
+        let button = tree.add_widget(
             Button::new("Click Me").on_click(DemoCmd::ButtonClicked),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -84,7 +84,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let button = tree.add_composite(
+        let button = tree.add_widget(
             Button::new("Click Me").on_click(DemoCmd::ButtonClicked),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn button_hover_changes_render_output() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let button = tree.add_composite(
+        let button = tree.add_widget(
             Button::new("Click Me").on_click(DemoCmd::ButtonClicked),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn button_renders_shape() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_composite(
+        tree.add_widget(
             Button::new("Click Me").on_click(DemoCmd::ButtonClicked),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -133,7 +133,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let button = tree.add_composite(
+        let button = tree.add_widget(
             Button::new("Click Me").on_click(DemoCmd::ButtonClicked),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));

@@ -6,7 +6,8 @@
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::signal::Prop;
+use fern_core::state::{BindingLevel, State};
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing, Orientation};
@@ -15,7 +16,7 @@ const DEFAULT_THICKNESS: f32 = 4.0;
 
 /// A progress bar — determinate or indeterminate, horizontal or vertical.
 pub struct ProgressBar {
-    value: Reactive<f32>,
+    value: Prop<f32>,
     indeterminate: bool,
     /// Animated position for indeterminate sweep (0.0–1.0, loops).
     indeterminate_pos: State<f32>,
@@ -29,7 +30,7 @@ impl ProgressBar {
     /// Create a determinate progress bar with a static value (0.0–1.0).
     pub fn new(value: f32) -> Self {
         Self {
-            value: Reactive::Static(value.clamp(0.0, 1.0)),
+            value: Prop::Static(value.clamp(0.0, 1.0)),
             indeterminate: false,
             indeterminate_pos: State::new_animated(0.0),
             orientation: Orientation::Horizontal,
@@ -45,7 +46,7 @@ impl ProgressBar {
         // Start the animation loop — the first set_animated kicks it off.
         pos.set_animated(1.0, std::time::Duration::from_millis(1500), Easing::EaseInOut);
         Self {
-            value: Reactive::Static(0.0),
+            value: Prop::Static(0.0),
             indeterminate: true,
             indeterminate_pos: pos,
             orientation: Orientation::Horizontal,
@@ -56,7 +57,7 @@ impl ProgressBar {
     }
 
     /// Bind the progress value to a reactive state.
-    pub fn bind_value(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_value(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.value = state.into();
         self
     }
@@ -68,12 +69,6 @@ impl ProgressBar {
 
     pub fn thickness(mut self, thickness: f32) -> Self {
         self.thickness = thickness;
-        self
-    }
-
-    /// Deprecated: use `.thickness()` instead.
-    pub fn height(mut self, height: f32) -> Self {
-        self.thickness = height;
         self
     }
 
@@ -207,7 +202,7 @@ mod tests {
     fn progress_bar_size() {
         let mut tree = WidgetTree::new();
         let pb = tree.add(ProgressBar::new(0.5));
-        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal { width: Some(200.0), height: None });
         let b = tree.bounds(pb);
         assert!((b.width - 200.0).abs() < 0.01);
         assert!((b.height - 4.0).abs() < 0.01);

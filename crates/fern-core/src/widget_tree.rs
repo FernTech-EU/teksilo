@@ -46,6 +46,8 @@ pub struct WidgetTree {
     animation_scheduler: crate::animation::AnimationScheduler,
     /// States registered for animation (checked each frame for pending requests).
     animated_states: Vec<crate::state::State<f32>>,
+    /// V2 Signals registered for animation.
+    animated_signals: Vec<crate::signal::Signal<f32>>,
     /// IDs of composite widget adapters (for rebuild on theme/environment change).
     composite_ids: Vec<WidgetId>,
     /// Observer cleanup: functions to remove observers registered during build().
@@ -97,6 +99,7 @@ impl WidgetTree {
             observer_cleanups: std::collections::HashMap::new(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_states: Vec::new(),
+            animated_signals: Vec::new(),
             cached_a11y: None,
             a11y_dirty: true,
             cached_frame: None,
@@ -145,6 +148,13 @@ impl WidgetTree {
         }
     }
 
+    /// Register a `Signal<f32>` for animation support.
+    pub fn register_animated_signal(&mut self, signal: &crate::signal::Signal<f32>) {
+        if !self.animated_signals.iter().any(|s| crate::signal::Signal::same(s, signal)) {
+            self.animated_signals.push(signal.clone());
+        }
+    }
+
     /// Whether any animation is currently running.
     pub fn has_active_animations(&self) -> bool {
         self.animation_scheduler.has_active()
@@ -163,6 +173,17 @@ impl WidgetTree {
             if let Some(req) = state.take_pending_animation() {
                 self.animation_scheduler.animate(
                     state,
+                    req.target,
+                    req.duration,
+                    req.easing,
+                    now,
+                );
+            }
+        }
+        for signal in &self.animated_signals {
+            if let Some(req) = signal.take_pending_animation() {
+                self.animation_scheduler.animate_signal(
+                    signal,
                     req.target,
                     req.duration,
                     req.easing,
@@ -200,12 +221,14 @@ impl WidgetTree {
         self.focus_origin = None;
         self.tooltips.clear();
         self.rebuild_composites();
+        self.rebuild_v2_widgets();
         self.arena.mark_all_dirty();
     }
 
     /// Reconstruct all composite widgets. Called when the environment changes
     /// (theme switch, locale switch). Each composite's old subtree is destroyed
     /// and `build()` is re-run with the new environment.
+    #[allow(deprecated)]
     fn rebuild_composites(&mut self) {
         let ids: Vec<WidgetId> = self.composite_ids.clone();
         for adapter_id in ids {
@@ -253,9 +276,10 @@ impl WidgetTree {
                         continue;
                     }
                 };
-                let mut build_ctx = crate::composite_widget::BuildContext {
+                let mut build_ctx = crate::build_context::BuildContext {
                     tree: self,
                     composite_id: Some(adapter_id),
+                    effect_handles: Vec::new(),
                 };
                 let (_old, new_root) = adapter.rebuild(&mut build_ctx);
                 new_root
@@ -270,6 +294,54 @@ impl WidgetTree {
             }
             if let Some(adapter_node) = self.arena.get_mut(adapter_id) {
                 adapter_node.children = vec![new_root];
+            }
+        }
+    }
+
+    /// Reconstruct all V2 widgets that have `has_built_children == true`.
+    /// Called when the environment changes (theme switch, locale switch).
+    fn rebuild_v2_widgets(&mut self) {
+        let ids: Vec<WidgetId> = self.arena.active_ids().into_iter().filter(|id| {
+            self.arena.get(*id).map_or(false, |n| n.has_built_children)
+        }).collect();
+
+        for widget_id in ids {
+            // Drop effect handles (RAII cleanup of observer subscriptions)
+            if let Some(node) = self.arena.get_mut(widget_id) {
+                node.effect_handles.clear();
+            }
+
+            // Destroy old child subtree
+            let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
+            for child_id in old_children {
+                self.arena.destroy(child_id);
+            }
+
+            // Take widget out, rebuild, put back
+            let mut widget_box = match self.arena.take_widget(widget_id) {
+                Some(w) => w,
+                None => continue,
+            };
+
+            let mut build_ctx = crate::build_context::BuildContext {
+                tree: self,
+                composite_id: Some(widget_id),
+                effect_handles: Vec::new(),
+            };
+            let new_children = widget_box.build(&mut build_ctx);
+            let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
+
+            self.arena.restore_widget(widget_id, widget_box);
+
+            // Wire new children
+            for &child_id in &new_children {
+                if let Some(child_node) = self.arena.get_mut(child_id) {
+                    child_node.parent = Some(widget_id);
+                }
+            }
+            if let Some(node) = self.arena.get_mut(widget_id) {
+                node.children = new_children;
+                node.effect_handles = effect_handles;
             }
         }
     }
@@ -406,7 +478,7 @@ impl WidgetTree {
     /// Automatically resolves deferred (inline) children, registers reactive bindings,
     /// and processes builder-style `visible_when` / `enabled_when` metadata.
     pub fn add_widget_direct(&mut self, mut widget: Box<dyn Widget>) -> WidgetId {
-        // 1. Resolve any deferred children before inserting this widget.
+        // 1. Resolve any deferred children before inserting this widget (V1 path).
         let pending = widget.take_pending_children();
         if !pending.is_empty() {
             let resolved_ids: Vec<WidgetId> = pending
@@ -425,6 +497,40 @@ impl WidgetTree {
 
         // 3. Insert into the arena (this wires parent-child via widget.children()).
         let id = self.arena.insert(widget);
+
+        // 3b. V2 build() path — call build() to resolve pending children.
+        //     If build() returns children, wire them up and mark for future rebuild.
+        {
+            let mut widget_box = match self.arena.take_widget(id) {
+                Some(w) => w,
+                None => {
+                    // Should not happen, but return id gracefully.
+                    return id;
+                }
+            };
+            let mut build_ctx = crate::build_context::BuildContext {
+                tree: self,
+                composite_id: Some(id),
+                effect_handles: Vec::new(),
+            };
+            let built_children = widget_box.build(&mut build_ctx);
+            let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
+
+            self.arena.restore_widget(id, widget_box);
+
+            if !built_children.is_empty() {
+                for &child_id in &built_children {
+                    if let Some(child_node) = self.arena.get_mut(child_id) {
+                        child_node.parent = Some(id);
+                    }
+                }
+                if let Some(node) = self.arena.get_mut(id) {
+                    node.children = built_children;
+                    node.has_built_children = true;
+                    node.effect_handles = effect_handles;
+                }
+            }
+        }
 
         // 4. Register reactive property bindings, animated states, and clips_children.
         let clips = self.arena.get(id).map_or(false, |n| n.widget.clips_children());
@@ -450,6 +556,8 @@ impl WidgetTree {
     }
 
     /// Insert a boxed CompositeWidget. Used by `IntoWidgetTree` impls on composites.
+    #[deprecated(note = "V2: use add() instead — all widgets now implement Widget directly")]
+    #[allow(deprecated)]
     pub fn add_composite_inner(
         &mut self,
         mut composite: Box<dyn crate::composite_widget::CompositeWidget>,
@@ -466,9 +574,10 @@ impl WidgetTree {
         use crate::arena::PlaceholderWidget;
         let adapter_id = self.arena.insert(Box::new(PlaceholderWidget));
 
-        let mut build_ctx = crate::composite_widget::BuildContext {
+        let mut build_ctx = crate::build_context::BuildContext {
             tree: self,
             composite_id: Some(adapter_id),
+            effect_handles: Vec::new(),
         };
         let root_child = adapter.build(&mut build_ctx);
 
@@ -506,7 +615,7 @@ impl WidgetTree {
     pub fn add_child(&mut self, parent: WidgetId, widget: impl Widget + 'static) -> WidgetId {
         let mut boxed: Box<dyn Widget> = Box::new(widget);
 
-        // 1. Resolve deferred children
+        // 1. Resolve deferred children (V1 path)
         let pending = boxed.take_pending_children();
         if !pending.is_empty() {
             let resolved_ids: Vec<WidgetId> = pending
@@ -525,6 +634,34 @@ impl WidgetTree {
 
         // 3. Insert as child
         let id = self.arena.insert_child(parent, boxed);
+
+        // 3b. V2 build() path — call build() to resolve pending children.
+        {
+            if let Some(mut widget_box) = self.arena.take_widget(id) {
+                let mut build_ctx = crate::build_context::BuildContext {
+                    tree: self,
+                    composite_id: Some(id),
+                    effect_handles: Vec::new(),
+                };
+                let built_children = widget_box.build(&mut build_ctx);
+                let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
+
+                self.arena.restore_widget(id, widget_box);
+
+                if !built_children.is_empty() {
+                    for &child_id in &built_children {
+                        if let Some(child_node) = self.arena.get_mut(child_id) {
+                            child_node.parent = Some(id);
+                        }
+                    }
+                    if let Some(node) = self.arena.get_mut(id) {
+                        node.children = built_children;
+                        node.has_built_children = true;
+                        node.effect_handles = effect_handles;
+                    }
+                }
+            }
+        }
 
         // 4. Register reactive bindings, animated states, and clips_children
         let clips = self.arena.get(id).map_or(false, |n| n.widget.clips_children());
@@ -550,6 +687,8 @@ impl WidgetTree {
     }
 
     /// Add a Level 1 (CompositeWidget) to the tree. Alias for `add_widget()`.
+    #[deprecated(note = "V2: use add() instead — all widgets now implement Widget directly")]
+    #[allow(deprecated)]
     pub fn add_composite(
         &mut self,
         composite: impl crate::composite_widget::CompositeWidget + 'static,
@@ -945,7 +1084,9 @@ impl WidgetTree {
         for &id in &ancestors {
             let mut ctx = EventContext::new();
             let response = if let Some(node) = self.arena.get_mut(id) {
-                node.widget.preview_event(event, &mut ctx)
+                // V2 handlers checked first, then V1 fallback
+                Self::try_v2_handler_preview(node, event, &mut ctx)
+                    .unwrap_or_else(|| node.widget.preview_event(event, &mut ctx))
             } else {
                 EventResponse::Ignored
             };
@@ -965,7 +1106,9 @@ impl WidgetTree {
         while let Some(id) = current {
             let mut ctx = EventContext::new();
             let response = if let Some(node) = self.arena.get_mut(id) {
-                node.widget.event(event, &mut ctx)
+                // V2 handlers checked first, then V1 fallback
+                Self::try_v2_handler_bubble(node, event, &mut ctx)
+                    .unwrap_or_else(|| node.widget.event(event, &mut ctx))
             } else {
                 EventResponse::Ignored
             };
@@ -979,6 +1122,104 @@ impl WidgetTree {
                 break;
             }
             current = self.arena.parent(id);
+        }
+    }
+
+    /// Try to dispatch an event to V2 handlers during the preview pass.
+    /// Returns `Some(response)` if a handler was found, `None` otherwise.
+    fn try_v2_handler_preview(
+        node: &mut crate::arena::WidgetNode,
+        event: &WidgetEvent,
+        ctx: &mut EventContext,
+    ) -> Option<EventResponse> {
+        // Preview pass only uses on_key and on_pointer_event (escape hatch)
+        match event {
+            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
+                // on_key in preview is not typical — skip for now
+                None
+            }
+            _ => {
+                if let Some(ref mut handler) = node.handlers.on_pointer_event {
+                    Some(handler(event, ctx))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Try to dispatch an event to V2 handlers during the bubble pass.
+    /// Returns `Some(response)` if a handler was found, `None` otherwise.
+    fn try_v2_handler_bubble(
+        node: &mut crate::arena::WidgetNode,
+        event: &WidgetEvent,
+        ctx: &mut EventContext,
+    ) -> Option<EventResponse> {
+        match event {
+            WidgetEvent::PointerEnter => {
+                if let Some(ref mut handler) = node.handlers.on_hover {
+                    handler(true, ctx);
+                    Some(EventResponse::Handled)
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::PointerLeave => {
+                if let Some(ref mut handler) = node.handlers.on_hover {
+                    handler(false, ctx);
+                    Some(EventResponse::Handled)
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::FocusGained { .. } => {
+                if let Some(ref mut handler) = node.handlers.on_focus {
+                    handler(true, ctx);
+                    Some(EventResponse::Handled)
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::FocusLost => {
+                if let Some(ref mut handler) = node.handlers.on_focus {
+                    handler(false, ctx);
+                    Some(EventResponse::Handled)
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
+                if let Some(ref mut handler) = node.handlers.on_key {
+                    Some(handler(event, ctx))
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::Scroll { .. } => {
+                if let Some(ref mut handler) = node.handlers.on_scroll {
+                    Some(handler(event, ctx))
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::AccessAction { action, .. } => {
+                if let Some(ref mut handler) = node.handlers.on_access_action {
+                    Some(handler(*action, ctx))
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::PointerDown { .. }
+            | WidgetEvent::PointerUp { .. }
+            | WidgetEvent::PointerMove { .. } => {
+                // Low-level pointer escape hatch
+                if let Some(ref mut handler) = node.handlers.on_pointer_event {
+                    Some(handler(event, ctx))
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 
@@ -2484,6 +2725,7 @@ mod tests {
         label: String,
     }
 
+    #[allow(deprecated)]
     impl crate::composite_widget::CompositeWidget for TestComposite {
         fn build(&self, ctx: &mut crate::composite_widget::BuildContext) -> WidgetId {
             ctx.add(FillWidget::new().label(&self.label))
@@ -2500,6 +2742,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn composite_widget_is_added_to_tree() {
         let mut tree = WidgetTree::new();
         let id = tree.add_composite(TestComposite {
@@ -2514,6 +2757,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn composite_widget_builds_child_subtree() {
         let mut tree = WidgetTree::new();
         let id = tree.add_composite(TestComposite {
@@ -2532,6 +2776,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn composite_widget_is_focusable() {
         let mut tree = WidgetTree::new();
         let id = tree.add_composite(TestComposite {
@@ -2544,6 +2789,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn composite_indistinguishable_from_widget() {
         // Both Widget and CompositeWidget produce WidgetIds that work the same
         let mut tree = WidgetTree::new();
@@ -3512,12 +3758,14 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn animated_state_from_build_context() {
         // Verify that animated_state() from BuildContext works
         #[derive(Debug)]
         struct AnimWidget {
             width_state: std::cell::RefCell<Option<crate::state::State<f32>>>,
         }
+        #[allow(deprecated)]
         impl crate::composite_widget::CompositeWidget for AnimWidget {
             fn build(&self, ctx: &mut crate::composite_widget::BuildContext) -> WidgetId {
                 let w = ctx.animated_state(300.0);

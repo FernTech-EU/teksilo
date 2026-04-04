@@ -54,43 +54,40 @@ impl AppCommand for Cmd {}
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct WidgetCatalog;
+struct WidgetCatalog {
+    root_child_id: Option<WidgetId>,
+}
 
-impl CompositeWidget for WidgetCatalog {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId {
+impl WidgetCatalog {
+    fn new() -> Self {
+        Self { root_child_id: None }
+    }
+}
+
+impl Widget for WidgetCatalog {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let t = &theme.typography;
         let c = &theme.colors;
 
-        // --- Shared state ---
-        let checkbox_checked = ctx.state(false);
-        let tristate = ctx.state(CheckState::Unchecked);
-        let radio_selected = ctx.state(0_usize);
-        let toggle_on = ctx.state(false);
-        let toggle_label_on = ctx.state(true);
-        let slider_value = ctx.state(50.0_f32);
-        let slider_v_value = ctx.state(0.3_f32);
-        let slider_stepped = ctx.state(25.0_f32);
-        let segment_selected = ctx.state(0_usize);
-        let accordion_expanded = ctx.state(false);
-        let accordion2_expanded = ctx.state(true);
+        // --- Shared signals ---
+        let checkbox_checked = ctx.signal(false);
+        let tristate = ctx.signal(CheckState::Unchecked);
+        let radio_selected = ctx.signal(0_usize);
+        let toggle_on = ctx.signal(false);
+        let toggle_label_on = ctx.signal(true);
+        let slider_value = ctx.signal(50.0_f32);
+        let slider_v_value = ctx.signal(0.3_f32);
+        let slider_stepped = ctx.signal(25.0_f32);
+        let segment_selected = ctx.signal(0_usize);
+        let accordion_expanded = ctx.signal(false);
+        let accordion2_expanded = ctx.signal(true);
 
         // =====================================================================
         // Section 1: Primitives
         // =====================================================================
 
-        let sec1_title = ctx.add(
-            TextWidget::new("Primitives")
-                .style(t.heading_2.clone())
-                .color(c.on_surface),
-        );
-
         // --- Divider ---
-        let div_label = ctx.add(
-            TextWidget::new("Divider (horizontal, vertical, thick, colored)")
-                .style(t.caption.clone())
-                .color(c.on_surface),
-        );
         let div_row = ctx.add(
             HStack::new()
                 .spacing(16.0)
@@ -115,23 +112,21 @@ impl CompositeWidget for WidgetCatalog {
         );
 
         // --- IconWidget ---
-        let icon_label = ctx.add(
-            TextWidget::new("IconWidget (checkmark, chevrons)")
-                .style(t.caption.clone())
-                .color(c.on_surface),
+        let icon_row = ctx.add(
+            HStack::new()
+                .spacing(12.0)
+                .child(IconWidget::checkmark(24.0).color(c.primary))
+                .child(IconWidget::chevron_down(24.0).color(c.secondary))
+                .child(IconWidget::chevron_right(24.0).color(c.error)),
         );
-        let icon_check = ctx.add(IconWidget::checkmark(24.0).color(c.primary));
-        let icon_down = ctx.add(IconWidget::chevron_down(24.0).color(c.secondary));
-        let icon_right = ctx.add(IconWidget::chevron_right(24.0).color(c.error));
-        let icon_row = ctx.add(HStack::new().spacing(12.0).add_child(icon_check).add_child(icon_down).add_child(icon_right));
 
         let primitives_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .add_child(sec1_title)
-                .add_child(div_label)
+                .child(TextWidget::new("Primitives").style(t.heading_2.clone()).color(c.on_surface))
+                .child(TextWidget::new("Divider (horizontal, vertical, thick, colored)").style(t.caption.clone()).color(c.on_surface))
                 .add_child(div_row)
-                .add_child(icon_label)
+                .child(TextWidget::new("IconWidget (checkmark, chevrons)").style(t.caption.clone()).color(c.on_surface))
                 .add_child(icon_row),
         );
 
@@ -139,141 +134,99 @@ impl CompositeWidget for WidgetCatalog {
         // Section 2: Layout Primitives
         // =====================================================================
 
-        let sec2_title = ctx.add(
-            TextWidget::new("Layout Primitives")
-                .style(t.heading_2.clone())
-                .color(c.on_surface),
-        );
-
-        // --- Grid ---
-        let grid_label = ctx.add(
-            TextWidget::new("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)")
-                .style(t.caption.clone())
-                .color(c.on_surface),
-        );
-        let grid = ctx.add(
-            Grid::new()
-                .columns(vec![TrackSize::Fixed(80.0), TrackSize::Fractional(1.0), TrackSize::Fractional(2.0)])
-                .rows(vec![TrackSize::Auto, TrackSize::Auto])
-                .column_gap(8.0)
-                .row_gap(8.0)
-                .child(build_color_cell(c.primary, "A1"))
-                .child(build_color_cell(c.secondary, "B1"))
-                .child(build_color_cell(c.error, "C1"))
-                .child(build_color_cell(c.info, "A2"))
-                .child(build_color_cell(c.success, "B2"))
-                .child(build_color_cell(c.warning, "C2")),
-        );
-
-        // --- Wrap ---
-        let wrap_label = ctx.add(
-            TextWidget::new("Wrap (flow layout, 8px spacing)")
-                .style(t.caption.clone())
-                .color(c.on_surface),
-        );
-        let wrap = ctx.add(
-            Wrap::new()
-                .spacing(8.0)
-                .line_spacing(8.0)
-                .child(Badge::new("Rust"))
-                .child(Badge::new("GUI"))
-                .child(Badge::new("Accessible"))
-                .child(Badge::new("Reactive"))
-                .child(Badge::new("Fast"))
-                .child(Badge::new("Cross-platform"))
-                .child(Badge::new("Retained"))
-                .child(Badge::new("wgpu")),
-        );
-
         let layout_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .add_child(sec2_title)
-                .add_child(grid_label)
-                .add_child(grid)
-                .add_child(wrap_label)
-                .add_child(wrap),
+                .child(TextWidget::new("Layout Primitives").style(t.heading_2.clone()).color(c.on_surface))
+                .child(TextWidget::new("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)").style(t.caption.clone()).color(c.on_surface))
+                .child(
+                    Grid::new()
+                        .columns(vec![TrackSize::Fixed(80.0), TrackSize::Fractional(1.0), TrackSize::Fractional(2.0)])
+                        .rows(vec![TrackSize::Auto, TrackSize::Auto])
+                        .column_gap(8.0)
+                        .row_gap(8.0)
+                        .child(build_color_cell(c.primary, "A1"))
+                        .child(build_color_cell(c.secondary, "B1"))
+                        .child(build_color_cell(c.error, "C1"))
+                        .child(build_color_cell(c.info, "A2"))
+                        .child(build_color_cell(c.success, "B2"))
+                        .child(build_color_cell(c.warning, "C2")),
+                )
+                .child(TextWidget::new("Wrap (flow layout, 8px spacing)").style(t.caption.clone()).color(c.on_surface))
+                .child(
+                    Wrap::new()
+                        .spacing(8.0)
+                        .line_spacing(8.0)
+                        .child(Badge::new("Rust"))
+                        .child(Badge::new("GUI"))
+                        .child(Badge::new("Accessible"))
+                        .child(Badge::new("Reactive"))
+                        .child(Badge::new("Fast"))
+                        .child(Badge::new("Cross-platform"))
+                        .child(Badge::new("Retained"))
+                        .child(Badge::new("wgpu")),
+                ),
         );
 
         // =====================================================================
         // Section 3: Form Controls
         // =====================================================================
 
-        let sec3_title = ctx.add(
-            TextWidget::new("Form Controls")
-                .style(t.heading_2.clone())
-                .color(c.on_surface),
-        );
-
         // --- Checkbox ---
-        let cb1 = ctx.add(
-            Checkbox::new(checkbox_checked.clone())
-                .label("Accept terms")
-                .tooltip("Click to accept the terms and conditions"),
+        let cb_disabled_state = ctx.signal(true);
+        let checkbox_group = ctx.add(
+            VStack::new()
+                .spacing(4.0)
+                .child(Checkbox::new(checkbox_checked.clone()).label("Accept terms").tooltip("Click to accept the terms and conditions"))
+                .child(Checkbox::new(cb_disabled_state).label("Always on (disabled)").enabled(false))
+                .child(Checkbox::tristate(tristate.clone()).label("Select all (tristate)").tooltip("Cycles: unchecked, checked, indeterminate")),
         );
-        let cb_disabled_state = ctx.state(true);
-        let cb_disabled = ctx.add(
-            Checkbox::new(cb_disabled_state)
-                .label("Always on (disabled)")
-                .enabled(false),
-        );
-        let cb_tristate = ctx.add(
-            Checkbox::tristate(tristate.clone())
-                .label("Select all (tristate)")
-                .tooltip("Cycles: unchecked, checked, indeterminate"),
-        );
-        let checkbox_group = ctx.add(VStack::new().spacing(4.0).add_child(cb1).add_child(cb_disabled).add_child(cb_tristate));
 
         // --- RadioButton ---
-        let rb0 = ctx.add(RadioButton::new(0, radio_selected.clone()).label("Option A").tooltip("First option"));
-        let rb1 = ctx.add(RadioButton::new(1, radio_selected.clone()).label("Option B"));
-        let rb2 = ctx.add(RadioButton::new(2, radio_selected.clone()).label("Option C"));
-        let radio_group = ctx.add(VStack::new().spacing(4.0).add_child(rb0).add_child(rb1).add_child(rb2));
+        let radio_group = ctx.add(
+            VStack::new()
+                .spacing(4.0)
+                .child(RadioButton::new(0, radio_selected.clone()).label("Option A").tooltip("First option"))
+                .child(RadioButton::new(1, radio_selected.clone()).label("Option B"))
+                .child(RadioButton::new(2, radio_selected.clone()).label("Option C")),
+        );
 
         // --- Toggle ---
-        let toggle1 = ctx.add(Toggle::new(toggle_on.clone()));
-        let toggle_labeled = ctx.add(Toggle::new(toggle_label_on.clone()).label("Notifications"));
-        let toggle_disabled_state = ctx.state(false);
-        let toggle_disabled = ctx.add(Toggle::new(toggle_disabled_state).enabled(false));
-        let toggle_group = ctx.add(VStack::new().spacing(8.0).add_child(toggle1).add_child(toggle_labeled).add_child(toggle_disabled));
+        let toggle_disabled_state = ctx.signal(false);
+        let toggle_group = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(Toggle::new(toggle_on.clone()))
+                .child(Toggle::new(toggle_label_on.clone()).label("Notifications"))
+                .child(Toggle::new(toggle_disabled_state).enabled(false)),
+        );
 
         // --- Slider ---
-        let slider_h = ctx.add(Slider::new(slider_value.clone(), 0.0, 100.0));
-        let slider_stepped_w = ctx.add(Slider::new(slider_stepped.clone(), 0.0, 100.0).step(25.0));
-        let slider_disabled_state = ctx.state(30.0_f32);
-        let slider_disabled = ctx.add(Slider::new(slider_disabled_state, 0.0, 100.0).enabled(false));
+        let slider_disabled_state = ctx.signal(30.0_f32);
         let slider_vert = ctx.add(
             Slider::new(slider_v_value.clone(), 0.0, 1.0)
                 .orientation(Orientation::Vertical),
         );
-        let slider_vert_sized = ctx.add(MaxSize::new(f32::MAX, 120.0).set_child(slider_vert));
-        let lbl_horizontal = ctx.add(TextWidget::new("Horizontal").style(t.caption.clone()).color(c.on_surface));
-        let lbl_stepped = ctx.add(TextWidget::new("Stepped (25)").style(t.caption.clone()).color(c.on_surface));
-        let lbl_disabled = ctx.add(TextWidget::new("Disabled").style(t.caption.clone()).color(c.on_surface));
-        let lbl_vertical = ctx.add(TextWidget::new("Vertical").style(t.caption.clone()).color(c.on_surface));
-        let slider_col = ctx.add(
-            VStack::new()
-                .spacing(8.0)
-                .add_child(lbl_horizontal)
-                .add_child(slider_h)
-                .add_child(lbl_stepped)
-                .add_child(slider_stepped_w)
-                .add_child(lbl_disabled)
-                .add_child(slider_disabled),
-        );
-        let vert_col = ctx.add(VStack::new().spacing(4.0).add_child(lbl_vertical).add_child(slider_vert_sized));
         let slider_section = ctx.add(
             HStack::new()
                 .spacing(16.0)
-                .add_child(slider_col)
-                .add_child(vert_col),
+                .child(
+                    VStack::new()
+                        .spacing(8.0)
+                        .child(TextWidget::new("Horizontal").style(t.caption.clone()).color(c.on_surface))
+                        .child(Slider::new(slider_value.clone(), 0.0, 100.0))
+                        .child(TextWidget::new("Stepped (25)").style(t.caption.clone()).color(c.on_surface))
+                        .child(Slider::new(slider_stepped.clone(), 0.0, 100.0).step(25.0))
+                        .child(TextWidget::new("Disabled").style(t.caption.clone()).color(c.on_surface))
+                        .child(Slider::new(slider_disabled_state, 0.0, 100.0).enabled(false)),
+                )
+                .child(
+                    VStack::new()
+                        .spacing(4.0)
+                        .child(TextWidget::new("Vertical").style(t.caption.clone()).color(c.on_surface))
+                        .child(MaxSize::new(f32::MAX, 120.0).set_child(slider_vert)),
+                ),
         );
-
-        // --- SegmentedControl ---
-        let segmented = ctx.add(SegmentedControl::new(
-            vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()],
-            segment_selected.clone(),
-        ));
 
         // Layout: Checkboxes | Radios | Toggles in a grid
         let form_row = ctx.add(
@@ -301,180 +254,117 @@ impl CompositeWidget for WidgetCatalog {
                 ),
         );
 
-        let ctrl_div1 = ctx.add(Divider::new());
-        let ctrl_div2 = ctx.add(Divider::new());
-        let lbl_slider = ctx.add(TextWidget::new("Slider").style(t.label.clone()).color(c.on_surface));
-        let lbl_segmented = ctx.add(TextWidget::new("SegmentedControl").style(t.label.clone()).color(c.on_surface));
         let controls_section = ctx.add(
             VStack::new()
                 .spacing(12.0)
-                .add_child(sec3_title)
+                .child(TextWidget::new("Form Controls").style(t.heading_2.clone()).color(c.on_surface))
                 .add_child(form_row)
-                .add_child(ctrl_div1)
-                .add_child(lbl_slider)
+                .child(Divider::new())
+                .child(TextWidget::new("Slider").style(t.label.clone()).color(c.on_surface))
                 .add_child(slider_section)
-                .add_child(ctrl_div2)
-                .add_child(lbl_segmented)
-                .add_child(segmented),
+                .child(Divider::new())
+                .child(TextWidget::new("SegmentedControl").style(t.label.clone()).color(c.on_surface))
+                .child(SegmentedControl::new(
+                    vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()],
+                    segment_selected.clone(),
+                )),
         );
 
         // =====================================================================
         // Section 4: Display Widgets
         // =====================================================================
 
-        let sec4_title = ctx.add(
-            TextWidget::new("Display Widgets")
-                .style(t.heading_2.clone())
-                .color(c.on_surface),
-        );
-
         // --- ProgressBar ---
-        let pb_det = ctx.add(ProgressBar::new(0.65));
-        let pb_indet = ctx.add(ProgressBar::indeterminate());
-        let pb_custom = ctx.add(
-            ProgressBar::new(0.4)
-                .thickness(8.0)
-                .fill_color(c.success)
-                .track_color(c.surface_tertiary),
-        );
         let pb_vert = ctx.add(
             ProgressBar::new(0.7)
                 .orientation(Orientation::Vertical)
                 .thickness(8.0),
         );
-        let pb_vert_sized = ctx.add(MaxSize::new(f32::MAX, 80.0).set_child(pb_vert));
-
-        let lbl_det = ctx.add(TextWidget::new("Determinate (65%)").style(t.caption.clone()).color(c.on_surface));
-        let lbl_indet = ctx.add(TextWidget::new("Indeterminate").style(t.caption.clone()).color(c.on_surface));
-        let lbl_custom = ctx.add(TextWidget::new("Custom colors + thick").style(t.caption.clone()).color(c.on_surface));
-        let lbl_pv = ctx.add(TextWidget::new("Vertical").style(t.caption.clone()).color(c.on_surface));
-        let progress_col = ctx.add(
-            VStack::new()
-                .spacing(8.0)
-                .add_child(lbl_det)
-                .add_child(pb_det)
-                .add_child(lbl_indet)
-                .add_child(pb_indet)
-                .add_child(lbl_custom)
-                .add_child(pb_custom),
-        );
-        let pv_col = ctx.add(VStack::new().spacing(4.0).add_child(lbl_pv).add_child(pb_vert_sized));
         let progress_section = ctx.add(
             HStack::new()
                 .spacing(16.0)
-                .add_child(progress_col)
-                .add_child(pv_col),
+                .child(
+                    VStack::new()
+                        .spacing(8.0)
+                        .child(TextWidget::new("Determinate (65%)").style(t.caption.clone()).color(c.on_surface))
+                        .child(ProgressBar::new(0.65))
+                        .child(TextWidget::new("Indeterminate").style(t.caption.clone()).color(c.on_surface))
+                        .child(ProgressBar::indeterminate())
+                        .child(TextWidget::new("Custom colors + thick").style(t.caption.clone()).color(c.on_surface))
+                        .child(ProgressBar::new(0.4).thickness(8.0).fill_color(c.success).track_color(c.surface_tertiary)),
+                )
+                .child(
+                    VStack::new()
+                        .spacing(4.0)
+                        .child(TextWidget::new("Vertical").style(t.caption.clone()).color(c.on_surface))
+                        .child(MaxSize::new(f32::MAX, 80.0).set_child(pb_vert)),
+                ),
         );
 
-        // --- Badge ---
-        let badge_row = ctx.add(
-            HStack::new()
-                .spacing(8.0)
-                .child(Badge::new("Default"))
-                .child(Badge::new("3").color(c.error).text_color(Color::WHITE))
-                .child(Badge::new("New").color(c.success).text_color(Color::WHITE))
-                .child(Badge::new("Beta").color(c.warning)),
-        );
-
-        let lbl_pb = ctx.add(TextWidget::new("ProgressBar").style(t.label.clone()).color(c.on_surface));
-        let disp_div = ctx.add(Divider::new());
-        let lbl_badge = ctx.add(TextWidget::new("Badge").style(t.label.clone()).color(c.on_surface));
         let display_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .add_child(sec4_title)
-                .add_child(lbl_pb)
+                .child(TextWidget::new("Display Widgets").style(t.heading_2.clone()).color(c.on_surface))
+                .child(TextWidget::new("ProgressBar").style(t.label.clone()).color(c.on_surface))
                 .add_child(progress_section)
-                .add_child(disp_div)
-                .add_child(lbl_badge)
-                .add_child(badge_row),
+                .child(Divider::new())
+                .child(TextWidget::new("Badge").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(Badge::new("Default"))
+                        .child(Badge::new("3").color(c.error).text_color(Color::WHITE))
+                        .child(Badge::new("New").color(c.success).text_color(Color::WHITE))
+                        .child(Badge::new("Beta").color(c.warning)),
+                ),
         );
 
         // =====================================================================
         // Section 5: Containers
         // =====================================================================
 
-        let sec5_title = ctx.add(
-            TextWidget::new("Containers")
-                .style(t.heading_2.clone())
-                .color(c.on_surface),
-        );
-
-        // --- Card ---
-        let card = ctx.add(
-            Card::new()
-                .header(TextWidget::new("Card Header").style(t.label.clone()).color(c.on_surface))
-                .content(
-                    TextWidget::new("Card content with shadow and themed background.")
-                        .style(t.body.clone())
-                        .color(c.on_surface),
-                )
-                .footer(TextWidget::new("Footer text").style(t.caption.clone()).color(c.on_surface)),
-        );
-
-        // --- Accordion ---
+        // --- Accordion (needs pre-registered content children) ---
         let acc_content1 = ctx.add(
             TextWidget::new("This content is revealed with an animated expand.")
-                .style(t.body.clone())
-                .color(c.on_surface),
-        );
-        let acc1 = ctx.add(
-            Accordion::new("Click to expand", accordion_expanded.clone())
-                .set_content(acc_content1),
+                .style(t.body.clone()).color(c.on_surface),
         );
         let acc_content2 = ctx.add(
             TextWidget::new("This section starts expanded and can be collapsed.")
-                .style(t.body.clone())
-                .color(c.on_surface),
-        );
-        let acc2 = ctx.add(
-            Accordion::new("Already expanded", accordion2_expanded.clone())
-                .set_content(acc_content2),
+                .style(t.body.clone()).color(c.on_surface),
         );
 
-        let lbl_card = ctx.add(TextWidget::new("Card").style(t.label.clone()).color(c.on_surface));
-        let cont_div = ctx.add(Divider::new());
-        let lbl_acc = ctx.add(TextWidget::new("Accordion").style(t.label.clone()).color(c.on_surface));
         let containers_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .add_child(sec5_title)
-                .add_child(lbl_card)
-                .add_child(card)
-                .add_child(cont_div)
-                .add_child(lbl_acc)
-                .add_child(acc1)
-                .add_child(acc2),
+                .child(TextWidget::new("Containers").style(t.heading_2.clone()).color(c.on_surface))
+                .child(TextWidget::new("Card").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    Card::new()
+                        .header(TextWidget::new("Card Header").style(t.label.clone()).color(c.on_surface))
+                        .content(TextWidget::new("Card content with shadow and themed background.").style(t.body.clone()).color(c.on_surface))
+                        .footer(TextWidget::new("Footer text").style(t.caption.clone()).color(c.on_surface)),
+                )
+                .child(Divider::new())
+                .child(TextWidget::new("Accordion").style(t.label.clone()).color(c.on_surface))
+                .child(Accordion::new("Click to expand", accordion_expanded.clone()).set_content(acc_content1))
+                .child(Accordion::new("Already expanded", accordion2_expanded.clone()).set_content(acc_content2)),
         );
 
         // =====================================================================
         // Section 6: Navigation
         // =====================================================================
 
-        let sec6_title = ctx.add(
-            TextWidget::new("Navigation")
-                .style(t.heading_2.clone())
-                .color(c.on_surface),
-        );
-
-        let link1 = ctx.add(
-            Link::new("Click me")
-                .on_click(Cmd::LinkClicked)
-                .tooltip("Fires the LinkClicked command"),
-        );
-        let link2 = ctx.add(
-            Link::new("FernUI Documentation")
-                .url("https://github.com/jacquetc/fern-ui"),
-        );
-        let link_row = ctx.add(HStack::new().spacing(16.0).add_child(link1).add_child(link2));
-
-        let lbl_link = ctx.add(TextWidget::new("Link").style(t.label.clone()).color(c.on_surface));
         let nav_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .add_child(sec6_title)
-                .add_child(lbl_link)
-                .add_child(link_row),
+                .child(TextWidget::new("Navigation").style(t.heading_2.clone()).color(c.on_surface))
+                .child(TextWidget::new("Link").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    HStack::new()
+                        .spacing(16.0)
+                        .child(Link::new("Click me").on_click(Cmd::LinkClicked).tooltip("Fires the LinkClicked command"))
+                        .child(Link::new("FernUI Documentation").url("https://github.com/jacquetc/fern-ui")),
+                ),
         );
 
         // =====================================================================
@@ -482,63 +372,57 @@ impl CompositeWidget for WidgetCatalog {
         // =====================================================================
 
         // Toolbar at top
-        let theme_btn = ctx.add(
-            Button::new("Toggle Dark Mode")
-                .style(ButtonStyle::Outlined)
-                .on_click(Cmd::ToggleDarkMode),
+        let toolbar = ctx.add(
+            Toolbar::new().child(
+                HStack::new()
+                    .child(TextWidget::new("Widget Catalog").style(t.heading_1.clone()).color(c.on_surface))
+                    .child(Spacer::new())
+                    .child(Button::new("Toggle Dark Mode").style(ButtonStyle::Outlined).on_click(Cmd::ToggleDarkMode)),
+            ),
         );
-        let toolbar_row = ctx.add(
-            HStack::new()
-                .child(TextWidget::new("Widget Catalog").style(t.heading_1.clone()).color(c.on_surface))
-                .child(Spacer::new())
-                .add_child(theme_btn),
-        );
-        let toolbar = ctx.add(Toolbar::new().add_child(toolbar_row));
-
-        // Status bar at bottom
-        let status_text = ctx.add(
-            TextWidget::new("Milestone 3 -- All widgets demonstrated")
-                .style(t.caption.clone())
-                .color(c.on_surface),
-        );
-        let status = ctx.add(StatusBar::new().add_child(status_text));
 
         // Main content
-        let div1 = ctx.add(Divider::new().thickness(2.0));
-        let div2 = ctx.add(Divider::new().thickness(2.0));
-        let div3 = ctx.add(Divider::new().thickness(2.0));
-        let div4 = ctx.add(Divider::new().thickness(2.0));
-        let div5 = ctx.add(Divider::new().thickness(2.0));
-
         let content_col = ctx.add(
             VStack::new()
                 .spacing(24.0)
                 .add_child(primitives_section)
-                .add_child(div1)
+                .child(Divider::new().thickness(2.0))
                 .add_child(layout_section)
-                .add_child(div2)
+                .child(Divider::new().thickness(2.0))
                 .add_child(controls_section)
-                .add_child(div3)
+                .child(Divider::new().thickness(2.0))
                 .add_child(display_section)
-                .add_child(div4)
+                .child(Divider::new().thickness(2.0))
                 .add_child(containers_section)
-                .add_child(div5)
+                .child(Divider::new().thickness(2.0))
                 .add_child(nav_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
         let scroll = ctx.add(ScrollArea::from_id(padded));
 
         // Root: Toolbar | ScrollArea (fills remaining space) | StatusBar
-        ctx.add(
+        let root = ctx.add(
             VStack::new()
                 .add_child(toolbar)
                 .child(Expand::new().fills_stack().set_child(scroll))
-                .add_child(status),
-        )
+                .child(
+                    StatusBar::new().child(
+                        TextWidget::new("Milestone 3 -- All widgets demonstrated")
+                            .style(t.caption.clone()).color(c.on_surface),
+                    ),
+                ),
+        );
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        match self.root_child_id {
+            Some(id) => ctx.child_size(id, proposal).unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            None => proposal.resolve(0.0, 0.0),
+        }
     }
 }
-
-fern_ui::core::impl_composite_into_widget_tree!(WidgetCatalog);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -588,7 +472,7 @@ fn main() {
                 println!("Link clicked!");
             }
         })
-        .root(|tree| tree.add_widget(WidgetCatalog))
+        .root(|tree| tree.add_widget(WidgetCatalog::new()))
         .run();
 }
 
@@ -624,7 +508,7 @@ mod tests {
     #[test]
     fn catalog_builds_and_layouts() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add_widget(WidgetCatalog);
+        let root = tree.add_widget(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let b = tree.bounds(root);
         assert!(b.width > 0.0);
@@ -634,7 +518,7 @@ mod tests {
     #[test]
     fn catalog_renders_without_crash() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog);
+        tree.add_widget(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame = tree.render();
         assert!(
@@ -646,7 +530,7 @@ mod tests {
     #[test]
     fn catalog_theme_switch() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog);
+        tree.add_widget(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame_light = tree.render();
 
@@ -665,7 +549,7 @@ mod tests {
     #[test]
     fn second_render_same_output() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog);
+        tree.add_widget(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame1 = tree.render();
         let cmds1 = frame1.draw_order.len();
@@ -683,7 +567,7 @@ mod tests {
     #[test]
     fn theme_switch_preserves_draw_commands() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog);
+        tree.add_widget(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame1 = tree.render();
         let cmds_before = frame1.draw_order.len();
@@ -703,10 +587,10 @@ mod tests {
     #[test]
     fn scroll_area_fills_remaining_space() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add_widget(WidgetCatalog);
+        let root = tree.add_widget(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
 
-        // root is CompositeAdapter → VStack → [Toolbar, Expand, StatusBar]
+        // root is WidgetCatalog → VStack → [Toolbar, Expand, StatusBar]
         let vstack_children = {
             let adapter_children = tree.children(root);
             assert_eq!(adapter_children.len(), 1, "composite adapter has one child (VStack)");
@@ -803,7 +687,7 @@ mod tests {
         };
 
         let (mut tree, typesetter) = tree_and_typesetter();
-        tree.add_widget(WidgetCatalog);
+        tree.add_widget(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let mut frame = tree.render();
         let atlas = typesetter.bridge().borrow_mut().atlas_info();

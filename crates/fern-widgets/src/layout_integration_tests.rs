@@ -88,12 +88,12 @@ fn zstack_per_child_alignment_overrides() {
     tree.layout(SizeProposal::exact(300.0, 200.0));
 
     let tb = tree.bounds(title);
-    assert!((tb.x - 60.0).abs() < 0.01); // (200-80)/2
-    assert!((tb.y - 40.0).abs() < 0.01); // (100-20)/2
+    assert!((tb.x - 110.0).abs() < 0.01); // (300-80)/2
+    assert!((tb.y - 90.0).abs() < 0.01); // (200-20)/2
 
     let bb = tree.bounds(button);
-    assert!((bb.x - 160.0).abs() < 0.01); // 200-40
-    assert!((bb.y - 70.0).abs() < 0.01); // 100-30
+    assert!((bb.x - 260.0).abs() < 0.01); // 300-40
+    assert!((bb.y - 170.0).abs() < 0.01); // 200-30
 }
 
 #[test]

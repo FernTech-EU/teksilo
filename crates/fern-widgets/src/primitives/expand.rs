@@ -1,5 +1,4 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
-use fern_core::state::{Reactive, State};
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Alignment;
@@ -18,8 +17,6 @@ pub struct Expand {
     /// receives remaining space, and fills the child to its full bounds
     /// instead of centering it.
     fills_stack: bool,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Expand {
@@ -32,8 +29,6 @@ impl Expand {
             vertical: true,
             content_alignment: Alignment::CENTER,
             fills_stack: false,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -46,8 +41,6 @@ impl Expand {
             vertical: false,
             content_alignment: Alignment::CENTER,
             fills_stack: false,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -60,8 +53,6 @@ impl Expand {
             vertical: true,
             content_alignment: Alignment::CENTER,
             fills_stack: false,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -86,18 +77,6 @@ impl Expand {
     /// Set an inline child widget (deferred insertion).
     pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -174,14 +153,6 @@ impl Widget for Expand {
     fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
         self.child_id = ids.into_iter().next();
     }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
 #[cfg(test)]
@@ -219,7 +190,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let expand = tree.add(Expand::horizontal().set_child(child));
-        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal { width: Some(200.0), height: None });
 
         let eb = tree.bounds(expand);
         assert!((eb.width - 200.0).abs() < 0.01);

@@ -10,7 +10,8 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{DragRecognizer, GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent};
-use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::signal::Signal;
+use fern_core::state::BindingLevel;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{CornerRadius, Orientation};
@@ -19,9 +20,9 @@ const TRACK_HEIGHT: f32 = 4.0;
 const THUMB_RADIUS: f32 = 10.0;
 const MIN_SIZE: f32 = 48.0;
 
-/// A slider that drives a `State<f32>` between min and max.
+/// A slider that drives a `Signal<f32>` between min and max.
 pub struct Slider {
-    value: State<f32>,
+    value: Signal<f32>,
     min: f32,
     max: f32,
     step: Option<f32>,
@@ -32,12 +33,10 @@ pub struct Slider {
     focus_origin: Option<FocusOrigin>,
     drag_recognizer: DragRecognizer,
     cached_bounds: Cell<Rect>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Slider {
-    pub fn new(value: State<f32>, min: f32, max: f32) -> Self {
+    pub fn new(value: Signal<f32>, min: f32, max: f32) -> Self {
         Self {
             value,
             min,
@@ -50,8 +49,6 @@ impl Slider {
             focus_origin: None,
             drag_recognizer: DragRecognizer::new(),
             cached_bounds: Cell::new(Rect::ZERO),
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -67,16 +64,6 @@ impl Slider {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
-        self
-    }
-
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -109,7 +96,7 @@ impl Slider {
         if range <= 0.0 {
             return 0.0;
         }
-        ((*self.value.get() - self.min) / range).clamp(0.0, 1.0)
+        ((self.value.get() - self.min) / range).clamp(0.0, 1.0)
     }
 
     /// Thumb center position on the primary axis.
@@ -142,7 +129,7 @@ impl Slider {
 
     fn adjust_by_step(&self, positive: bool) {
         let step = self.step.unwrap_or((self.max - self.min) * 0.01);
-        let current = *self.value.get();
+        let current = self.value.get();
         let new_val = if positive {
             current + step
         } else {
@@ -351,7 +338,7 @@ impl Widget for Slider {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Slider);
-        builder.set_numeric_value(*self.value.get() as f64);
+        builder.set_numeric_value(self.value.get() as f64);
         builder.set_min_numeric_value(self.min as f64);
         builder.set_max_numeric_value(self.max as f64);
         if !self.enabled {
@@ -366,13 +353,6 @@ impl Widget for Slider {
         self.value.bind_to(id, registry, BindingLevel::RepaintOnly);
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
 #[cfg(test)]
@@ -384,37 +364,37 @@ mod tests {
 
     #[test]
     fn keyboard_adjusts_value() {
-        let value = State::new(50.0_f32);
+        let value = Signal::new(50.0_f32);
         let mut tree = WidgetTree::new();
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
 
         tree.focus(s);
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert!((*value.get() - 60.0).abs() < 0.01, "value={}", *value.get());
+        assert!((value.get() - 60.0).abs() < 0.01, "value={}", value.get());
 
         tree.press_key(Key::ArrowLeft, Modifiers::NONE);
-        assert!((*value.get() - 50.0).abs() < 0.01);
+        assert!((value.get() - 50.0).abs() < 0.01);
     }
 
     #[test]
     fn home_end_jump_to_bounds() {
-        let value = State::new(50.0_f32);
+        let value = Signal::new(50.0_f32);
         let mut tree = WidgetTree::new();
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
 
         tree.focus(s);
         tree.press_key(Key::Home, Modifiers::NONE);
-        assert!((*value.get() - 0.0).abs() < 0.01);
+        assert!((value.get() - 0.0).abs() < 0.01);
 
         tree.press_key(Key::End, Modifiers::NONE);
-        assert!((*value.get() - 100.0).abs() < 0.01);
+        assert!((value.get() - 100.0).abs() < 0.01);
     }
 
     #[test]
     fn track_click_sets_value() {
-        let value = State::new(0.0_f32);
+        let value = Signal::new(0.0_f32);
         let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
@@ -425,7 +405,7 @@ mod tests {
         tree.click(s);
 
         // Value should be approximately 50 (midpoint of 0..100)
-        let val = *value.get();
+        let val = value.get();
         assert!(
             (val - 50.0).abs() < 15.0,
             "track click at center should set value near 50, got {}",
@@ -435,7 +415,7 @@ mod tests {
 
     #[test]
     fn accessibility() {
-        let value = State::new(25.0_f32);
+        let value = Signal::new(25.0_f32);
         let mut tree = WidgetTree::new();
         let s = tree.add(Slider::new(value, 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
@@ -445,21 +425,21 @@ mod tests {
 
     #[test]
     fn step_snaps_value() {
-        let value = State::new(0.0_f32);
+        let value = Signal::new(0.0_f32);
         let mut tree = WidgetTree::new();
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(25.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
 
         tree.focus(s);
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert!((*value.get() - 25.0).abs() < 0.01);
+        assert!((value.get() - 25.0).abs() < 0.01);
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert!((*value.get() - 50.0).abs() < 0.01);
+        assert!((value.get() - 50.0).abs() < 0.01);
     }
 
     #[test]
     fn thumb_drag_updates_value() {
-        let value = State::new(50.0_f32);
+        let value = Signal::new(50.0_f32);
         let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
@@ -477,7 +457,7 @@ mod tests {
         let target_x = bounds.x + THUMB_RADIUS + (bounds.width - THUMB_RADIUS * 2.0) * 0.75;
         tree.pointer_move(Point::new(target_x, center_y));
 
-        let val = *value.get();
+        let val = value.get();
         assert!(
             (val - 75.0).abs() < 5.0,
             "dragging to 75% should set value near 75, got {}",
@@ -490,7 +470,7 @@ mod tests {
 
     #[test]
     fn accessibility_has_actions() {
-        let value = State::new(25.0_f32);
+        let value = Signal::new(25.0_f32);
         let mut tree = WidgetTree::new();
         let s = tree.add(Slider::new(value, 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));

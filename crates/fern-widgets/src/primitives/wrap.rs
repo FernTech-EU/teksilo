@@ -3,7 +3,6 @@
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::state::Reactive;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -14,8 +13,6 @@ pub struct Wrap {
     line_spacing: f32,
     child_ids: Vec<WidgetId>,
     pending: Vec<PendingChild>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Wrap {
@@ -25,8 +22,6 @@ impl Wrap {
             line_spacing: 0.0,
             child_ids: Vec::new(),
             pending: Vec::new(),
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -63,16 +58,6 @@ impl Wrap {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));
         }
-        self
-    }
-
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -197,20 +182,15 @@ impl Widget for Wrap {
         self.child_ids.clone()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        std::mem::take(&mut self.pending)
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_ids = ids;
-    }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        let pending = std::mem::take(&mut self.pending);
+        if !pending.is_empty() {
+            self.child_ids = pending.into_iter().map(|child| match child {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            }).collect();
+        }
+        self.child_ids.clone()
     }
 }
 
@@ -280,7 +260,7 @@ mod tests {
                 .add_child(b)
                 .add_child(c),
         );
-        tree.layout(SizeProposal::exact(140.0, 200.0));
+        tree.layout(SizeProposal { width: Some(140.0), height: None });
 
         // Line 1: a(60) + 10 + b(60) = 130 fits in 140
         // Line 2: c(60)

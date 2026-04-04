@@ -1,9 +1,7 @@
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{EventContext, IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::WidgetId;
 use fern_tokens::Alignment;
 
@@ -15,8 +13,6 @@ pub struct ZStack {
     child_ids: Vec<WidgetId>,
     pending: Vec<PendingChild>,
     alignment: Alignment,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl ZStack {
@@ -25,8 +21,6 @@ impl ZStack {
             child_ids: Vec::new(),
             pending: Vec::new(),
             alignment: Alignment::CENTER,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -66,17 +60,6 @@ impl ZStack {
         self
     }
 
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
 }
 
 impl Default for ZStack {
@@ -139,10 +122,6 @@ impl Widget for ZStack {
 
     fn paint(&self, _bounds: Rect, _canvas: &mut Canvas, _ctx: &PaintContext) {}
 
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
-    }
-
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
     }
@@ -151,20 +130,15 @@ impl Widget for ZStack {
         self.child_ids.clone()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        std::mem::take(&mut self.pending)
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_ids = ids;
-    }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        let pending = std::mem::take(&mut self.pending);
+        if !pending.is_empty() {
+            self.child_ids = pending.into_iter().map(|child| match child {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            }).collect();
+        }
+        self.child_ids.clone()
     }
 }
 
@@ -189,13 +163,11 @@ mod tests {
         let _stack = tree.add(ZStack::new().add_child(a));
         tree.layout(SizeProposal::exact(100.0, 60.0));
 
-        // ZStack intrinsic = 40x20, but gets 100x60 from proposal
-        // Wait - ZStack returns max of children = 40x20, so bounds are 40x20
-        // The root proposal is 100x60, but the ZStack sizes to 40x20
-        // Actually, the child should be centered within the ZStack's bounds
+        // Root widget gets the full 100x60 proposal bounds.
+        // Child 40x20 centered in 100x60: x=(100-40)/2=30, y=(60-20)/2=20
         let b = tree.bounds(a);
-        assert!((b.x - 0.0).abs() < 0.01); // centered in 40: (40-40)/2=0
-        assert!((b.y - 0.0).abs() < 0.01); // centered in 20: (20-20)/2=0
+        assert!((b.x - 30.0).abs() < 0.01); // centered in 100: (100-40)/2=30
+        assert!((b.y - 20.0).abs() < 0.01); // centered in 60: (60-20)/2=20
     }
 
     #[test]
@@ -230,8 +202,8 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         let b = tree.bounds(fg);
-        assert!((b.x - 60.0).abs() < 0.01); // 100-40
-        assert!((b.y - 40.0).abs() < 0.01); // 60-20
+        assert!((b.x - 160.0).abs() < 0.01); // 200-40
+        assert!((b.y - 180.0).abs() < 0.01); // 200-20
     }
 
     #[test]
@@ -243,8 +215,8 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         let b = tree.bounds(fg);
-        assert!((b.x - 30.0).abs() < 0.01); // (100-40)/2
-        assert!((b.y - 20.0).abs() < 0.01); // (60-20)/2
+        assert!((b.x - 80.0).abs() < 0.01); // (200-40)/2
+        assert!((b.y - 90.0).abs() < 0.01); // (200-20)/2
     }
 
     #[test]
@@ -269,8 +241,8 @@ mod tests {
         assert!((ab.y - 0.0).abs() < 0.01);
 
         let bb = tree.bounds(b);
-        assert!((bb.x - 70.0).abs() < 0.01); // 100-30
-        assert!((bb.y - 45.0).abs() < 0.01); // 60-15
+        assert!((bb.x - 170.0).abs() < 0.01); // 200-30
+        assert!((bb.y - 185.0).abs() < 0.01); // 200-15
     }
 
     #[test]

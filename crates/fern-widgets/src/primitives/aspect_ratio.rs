@@ -3,7 +3,6 @@
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::state::{Reactive, State};
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -14,8 +13,6 @@ pub struct AspectRatio {
     ratio: f32,
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl AspectRatio {
@@ -25,8 +22,6 @@ impl AspectRatio {
             ratio: ratio.max(f32::EPSILON),
             child_id: None,
             pending_child: None,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -47,16 +42,6 @@ impl AspectRatio {
 
     pub fn set_child(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
-        self
-    }
-
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -113,14 +98,6 @@ impl Widget for AspectRatio {
     fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
         self.child_id = ids.into_iter().next();
     }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
 #[cfg(test)]
@@ -141,7 +118,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 100.0));
         let ar = tree.add(AspectRatio::new(2.0).set_child(child)); // 2:1
-        tree.layout(SizeProposal::exact(200.0, 200.0));
+        tree.layout(SizeProposal { width: Some(200.0), height: None });
 
         let b = tree.bounds(ar);
         assert!((b.width - 200.0).abs() < 0.01);
@@ -153,7 +130,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 100.0));
         let ar = tree.add(AspectRatio::new(2.0).set_child(child)); // 2:1
-        tree.layout(SizeProposal::exact(400.0, 100.0));
+        tree.layout(SizeProposal { width: None, height: Some(100.0) });
 
         let b = tree.bounds(ar);
         // height=100, width_from_height = 100*2 = 200
@@ -168,7 +145,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(50.0, 50.0));
         let ar = tree.add(AspectRatio::square().set_child(child));
-        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal { width: None, height: Some(100.0) });
 
         let b = tree.bounds(ar);
         assert!((b.width - 100.0).abs() < 0.01);

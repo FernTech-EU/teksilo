@@ -1,8 +1,10 @@
 use slotmap::SlotMap;
 
 use crate::environment::ThemeOverride;
+use crate::event_handlers::EventHandlers;
 use crate::gesture::{GestureArena, GestureEvent};
-use crate::widget::Widget;
+use crate::signal::ObserverHandle;
+use crate::widget::{CursorIcon, Widget};
 use crate::widget_id::WidgetId;
 use fern_canvas::RenderFrame;
 
@@ -60,6 +62,24 @@ pub struct WidgetNode {
     /// Cached paint output for this widget (excludes children).
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
+
+    // --- V2 fields ---
+
+    /// Attached event handlers (V2). Checked before widget.event() during dispatch.
+    pub(crate) handlers: EventHandlers,
+    /// V2 focusable override. When Some, takes precedence over widget.is_focusable().
+    pub(crate) v2_focusable: Option<bool>,
+    /// V2 tab index override.
+    pub(crate) v2_tab_index: Option<i32>,
+    /// V2 spacer flag. Set by Spacer during insertion.
+    pub(crate) v2_is_spacer: bool,
+    /// V2 cursor override.
+    pub(crate) v2_cursor: Option<CursorIcon>,
+    /// Whether build() returned children (for rebuild on environment change).
+    pub(crate) has_built_children: bool,
+    /// RAII observer handles for effects registered during build().
+    /// Dropped on rebuild or widget destruction.
+    pub(crate) effect_handles: Vec<ObserverHandle>,
 }
 
 impl std::fmt::Debug for WidgetNode {
@@ -121,6 +141,13 @@ impl WidgetArena {
             alignment_override: None,
             clips_children: false,
             cached_paint: None,
+            handlers: EventHandlers::new(),
+            v2_focusable: None,
+            v2_tab_index: None,
+            v2_is_spacer: false,
+            v2_cursor: None,
+            has_built_children: false,
+            effect_handles: Vec::new(),
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -155,6 +182,13 @@ impl WidgetArena {
             alignment_override: None,
             clips_children: false,
             cached_paint: None,
+            handlers: EventHandlers::new(),
+            v2_focusable: None,
+            v2_tab_index: None,
+            v2_is_spacer: false,
+            v2_cursor: None,
+            has_built_children: false,
+            effect_handles: Vec::new(),
         });
         // Set up parent-child for declared children
         for &child_id in &children {

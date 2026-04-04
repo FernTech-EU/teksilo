@@ -116,6 +116,14 @@ pub enum CursorIcon {
 
 /// The full Widget trait for Level 2 (custom rendering) widgets.
 pub trait Widget: std::fmt::Debug + std::any::Any {
+    /// Compose child widgets. Called once after the widget is placed in the
+    /// arena, and again on environment change (theme switch, locale switch).
+    /// Takes `&mut self` — store child IDs, signal handles, any state needed later.
+    /// Returns the list of root child IDs (empty for leaf widgets).
+    fn build(&mut self, _ctx: &mut crate::build_context::BuildContext) -> Vec<crate::widget_id::WidgetId> {
+        Vec::new()
+    }
+
     /// Respond to the parent's size proposal with the size this widget wants.
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
 
@@ -136,11 +144,15 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     }
 
     /// Handle an event during the bubble (target → root) pass.
+    ///
+    /// **Deprecated V1:** Use attached handlers via `WidgetBuilder` instead.
     fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
         EventResponse::Ignored
     }
 
     /// Handle an event during the preview (root → target) pass.
+    ///
+    /// **Deprecated V1:** Use attached handlers via `WidgetBuilder` instead.
     fn preview_event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
         EventResponse::Ignored
     }
@@ -149,11 +161,15 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 
     /// Whether this widget can receive keyboard focus.
+    ///
+    /// **Deprecated V1:** Use `.focusable(true)` via `WidgetBuilder`.
     fn is_focusable(&self) -> bool {
         false
     }
 
     /// Optional tab index override (default: tree order).
+    ///
+    /// **Deprecated V1:** Use `.tab_index(n)` via `WidgetBuilder`.
     fn tab_index(&self) -> Option<i32> {
         None
     }
@@ -164,6 +180,8 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     }
 
     /// Whether this widget is a flexible spacer (claims remaining space in stacks).
+    ///
+    /// **Deprecated V1:** Use `.spacer(true)` via `WidgetBuilder`.
     fn is_spacer(&self) -> bool {
         false
     }
@@ -172,17 +190,23 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// framework sets `clips_children` on the arena node automatically,
     /// enabling viewport clipping in the renderer and `ScrollIntoView`
     /// dispatch. Override this in scroll containers and similar widgets.
+    ///
+    /// **Deprecated V1:** Use `WidgetBuilder::clips_children()`.
     fn clips_children(&self) -> bool {
         false
     }
 
     /// Whether this widget is a composite adapter that needs rebuild on
     /// environment changes (theme switch, locale switch).
+    ///
+    /// **Deprecated V1:** No longer needed — all widgets are unified.
     fn is_composite(&self) -> bool {
         false
     }
 
     /// Downcast to `&mut dyn Any` for type-specific operations (e.g. composite rebuild).
+    ///
+    /// **Deprecated V1:** No longer needed — all widgets are unified.
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         // This default implementation won't work for all types because of object safety.
         // Concrete types that need downcasting override this.
@@ -193,6 +217,8 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Called automatically by `BuildContext::add()` after the widget
     /// receives its WidgetId. Widgets with `Reactive::Bound` fields
     /// override this to register their bindings.
+    ///
+    /// **Deprecated V1:** Use `Prop<T>` which self-registers.
     fn register_bindings(
         &self,
         _id: WidgetId,
@@ -205,6 +231,8 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Called automatically during widget insertion to register them with the
     /// animation scheduler. Override this if your widget uses `set_animated`
     /// on internally owned states.
+    ///
+    /// **Deprecated V1:** Use `Signal<f32>::new_animated()`.
     fn animated_states(&self) -> Vec<crate::state::State<f32>> {
         Vec::new()
     }
@@ -212,6 +240,8 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Take any deferred children out of this widget for resolution.
     /// Called by `WidgetTree::add_widget_direct()` before inserting the widget.
     /// Containers override this to drain their pending children list.
+    ///
+    /// **Deprecated V1:** Use `build()` to resolve children.
     fn take_pending_children(&mut self) -> Vec<PendingChild> {
         Vec::new()
     }
@@ -219,18 +249,24 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Wire resolved child IDs back into the widget after pending children
     /// have been inserted into the arena. Containers override this to set
     /// their internal `child_ids` field.
+    ///
+    /// **Deprecated V1:** Use `build()` to resolve children.
     fn set_resolved_children(&mut self, _ids: Vec<WidgetId>) {
         // Default: no children to wire.
     }
 
     /// Take a deferred `visible_when` binding stored by the builder pattern.
     /// Called after insertion to register with the tree.
+    ///
+    /// **Deprecated V1:** Use `WidgetBuilder::visible_when()`.
     fn take_visible_when(&mut self) -> Option<crate::state::Reactive<bool>> {
         None
     }
 
     /// Take a deferred `enabled_when` binding stored by the builder pattern.
     /// Called after insertion to register with the tree.
+    ///
+    /// **Deprecated V1:** Use `WidgetBuilder::enabled_when()`.
     fn take_enabled_when(&mut self) -> Option<crate::state::Reactive<bool>> {
         None
     }
@@ -254,6 +290,8 @@ impl<W: Widget + 'static> IntoWidgetTree for W {
 /// through the composite build path. Use this instead of writing the
 /// boilerplate manually.
 ///
+/// **Deprecated:** V2 widgets implement Widget directly. No macro needed.
+///
 /// ```ignore
 /// impl_composite_into_widget_tree!(MyWidget);
 /// ```
@@ -265,6 +303,7 @@ macro_rules! impl_composite_into_widget_tree {
                 self: Box<Self>,
                 tree: &mut $crate::widget_tree::WidgetTree,
             ) -> $crate::widget_id::WidgetId {
+                #[allow(deprecated)]
                 tree.add_composite_inner(self)
             }
         }

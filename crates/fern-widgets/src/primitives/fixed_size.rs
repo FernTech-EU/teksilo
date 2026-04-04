@@ -1,5 +1,6 @@
 use fern_canvas::{Rect, Size, SizeProposal};
-use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::signal::Prop;
+use fern_core::state::BindingLevel;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -12,10 +13,8 @@ use fern_core::widget_id::WidgetId;
 pub struct FixedSize {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
-    width: Option<Reactive<f32>>,
-    height: Option<Reactive<f32>>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    width: Option<Prop<f32>>,
+    height: Option<Prop<f32>>,
 }
 
 impl FixedSize {
@@ -25,8 +24,6 @@ impl FixedSize {
             pending_child: None,
             width: None,
             height: None,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -43,26 +40,14 @@ impl FixedSize {
     }
 
     /// Bind width to a reactive state. When the state changes, relayout is triggered.
-    pub fn bind_width(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_width(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.width = Some(state.into());
         self
     }
 
     /// Bind height to a reactive state. When the state changes, relayout is triggered.
-    pub fn bind_height(mut self, state: impl Into<Reactive<f32>>) -> Self {
+    pub fn bind_height(mut self, state: impl Into<Prop<f32>>) -> Self {
         self.height = Some(state.into());
-        self
-    }
-
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 }
@@ -120,14 +105,6 @@ impl Widget for FixedSize {
         self.child_id = ids.into_iter().next();
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
-
     fn register_bindings(
         &self,
         id: WidgetId,
@@ -161,7 +138,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let fixed = tree.add(FixedSize::new().set_child(child));
-        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
         assert!((fb.width - 40.0).abs() < 0.01);
@@ -173,7 +150,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let fixed = tree.add(FixedSize::new().set_child(child));
-        tree.layout(SizeProposal::exact(1000.0, 800.0));
+        tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
         assert!((fb.width - 40.0).abs() < 0.01);
@@ -186,7 +163,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let fixed = tree.add(FixedSize::new().bind_width(width.clone()).set_child(child));
-        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
         assert!((fb.width - 150.0).abs() < 0.01); // bound width
@@ -199,11 +176,11 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let fixed = tree.add(FixedSize::new().bind_width(width.clone()).set_child(child));
-        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(fixed).width - 200.0).abs() < 0.01);
 
         width.set(100.0);
-        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(fixed).width - 100.0).abs() < 0.01);
     }
 }

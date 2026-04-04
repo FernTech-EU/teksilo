@@ -37,15 +37,23 @@ impl AppCommand for Cmd {}
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct RootContent;
+struct RootContent {
+    root_child_id: Option<WidgetId>,
+}
 
-impl CompositeWidget for RootContent {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId {
+impl RootContent {
+    fn new() -> Self {
+        Self { root_child_id: None }
+    }
+}
+
+impl Widget for RootContent {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let t = &theme.typography;
         let c = &theme.colors;
 
-        ctx.add(
+        let root = ctx.add(
             Padding::uniform(24.0).child(
                 VStack::new().spacing(20.0)
                     // Toolbar
@@ -97,11 +105,18 @@ impl CompositeWidget for RootContent {
                                 .style(t.caption.clone()).color(c.on_surface))
                     )
             )
-        )
+        );
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        match self.root_child_id {
+            Some(id) => ctx.child_size(id, proposal).unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            None => proposal.resolve(0.0, 0.0),
+        }
     }
 }
-
-fern_ui::core::impl_composite_into_widget_tree!(RootContent);
 
 /// Helper — returns a widget value, not a WidgetId.
 /// Works with the inline child() pattern.
@@ -147,7 +162,7 @@ fn main() {
                 }
             }
         })
-        .root(|tree| tree.add_widget(RootContent))
+        .root(|tree| tree.add_widget(RootContent::new()))
         .run();
 }
 
@@ -240,7 +255,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let _root = tree.add_widget(RootContent);
+        let _root = tree.add_widget(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
 
         // Tab to the button (first focusable) and activate via Space
@@ -264,7 +279,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let _root = tree.add_widget(RootContent);
+        let _root = tree.add_widget(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
 
         // Tab to button to discover its ID, then click it
@@ -287,7 +302,7 @@ mod tests {
         use super::{Cmd, RootContent};
 
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let _root = tree.add_widget(RootContent);
+        let _root = tree.add_widget(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
 
         // Tab to button and click
@@ -311,7 +326,7 @@ mod tests {
         use super::RootContent;
 
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add_widget(RootContent);
+        let root = tree.add_widget(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_light = tree.render();
 

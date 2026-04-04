@@ -15,12 +15,14 @@ pub use fern_i18n as i18n;
 pub mod prelude {
     // Core widget types
     pub use fern_core::{
-        Widget, CompositeWidget, BuildContext, EventContext, PaintContext, LayoutContext,
+        Widget, BuildContext, EventContext, PaintContext, LayoutContext,
         WidgetId, WidgetEvent, EventResponse, FocusPolicy,
         State, DerivedState,
         AppCommand, ShortcutMap, Shortcut, Modifiers, Key,
         AccessNodeBuilder, CursorIcon,
     };
+    #[allow(deprecated)]
+    pub use fern_core::CompositeWidget;
 
     // Geometry (lives in fern-canvas)
     pub use fern_canvas::{

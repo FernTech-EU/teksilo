@@ -448,7 +448,7 @@ mod tests {
         let (bar, ..) = make_scrollbar();
         let mut tree = WidgetTree::new();
         let id = tree.add(bar);
-        tree.layout(SizeProposal::exact(200.0, 400.0));
+        tree.layout(SizeProposal { width: None, height: Some(400.0) });
 
         let bounds = tree.bounds(id);
         // Vertical: width = thickness (12), height = proposed (400)
@@ -470,7 +470,7 @@ mod tests {
         );
         let mut tree = WidgetTree::new();
         let id = tree.add(bar);
-        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.layout(SizeProposal { width: Some(400.0), height: None });
 
         let bounds = tree.bounds(id);
         // Horizontal: width = proposed (400), height = thickness (12)

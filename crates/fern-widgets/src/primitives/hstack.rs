@@ -1,6 +1,5 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::state::{Reactive, State};
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::VAlignment;
@@ -14,8 +13,6 @@ pub struct HStack {
     pending: Vec<PendingChild>,
     spacing: f32,
     alignment: VAlignment,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl HStack {
@@ -25,8 +22,6 @@ impl HStack {
             pending: Vec::new(),
             spacing: 0.0,
             alignment: VAlignment::Center,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -71,17 +66,6 @@ impl HStack {
         self
     }
 
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
 }
 
 impl Default for HStack {
@@ -240,20 +224,15 @@ impl Widget for HStack {
         self.child_ids.clone()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        std::mem::take(&mut self.pending)
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_ids = ids;
-    }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        let pending = std::mem::take(&mut self.pending);
+        if !pending.is_empty() {
+            self.child_ids = pending.into_iter().map(|child| match child {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            }).collect();
+        }
+        self.child_ids.clone()
     }
 }
 
@@ -379,7 +358,7 @@ mod tests {
         let a = tree.add(FixedLeaf(60.0, 30.0));
         let b = tree.add(FixedLeaf(40.0, 30.0));
         let _stack = tree.add(HStack::new().add_child(a).add_child(b));
-        tree.layout(SizeProposal::exact(300.0, 50.0));
+        tree.layout(SizeProposal { width: None, height: Some(50.0) });
 
         // In RTL, first child (a) is placed on the right, second (b) on the left.
         // HStack without spacers sizes to content: 60+40 = 100px wide.

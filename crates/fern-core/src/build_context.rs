@@ -1,0 +1,132 @@
+//! BuildContext — context available during Widget::build().
+//!
+//! This module provides the `BuildContext` used by both V1 composites
+//! and V2 widgets during their `build()` method. It offers Signal-based
+//! APIs alongside the legacy State-based APIs.
+
+use crate::signal::{ObserverHandle, Signal};
+use crate::state::{BindingRegistry, State};
+use crate::widget_id::WidgetId;
+
+/// Context available during Widget::build() or CompositeWidget::build().
+pub struct BuildContext<'a> {
+    pub(crate) tree: &'a mut crate::widget_tree::WidgetTree,
+    pub(crate) composite_id: Option<WidgetId>,
+    /// RAII handles for effects registered during this build cycle.
+    /// Transferred to the arena node's `effect_handles` after build returns.
+    pub(crate) effect_handles: Vec<ObserverHandle>,
+}
+
+impl<'a> BuildContext<'a> {
+    /// The WidgetId of the widget being built.
+    pub fn self_id(&self) -> WidgetId {
+        self.composite_id.expect("self_id() called outside of build()")
+    }
+
+    /// Add any widget to the tree.
+    pub fn add(&mut self, widget: impl crate::widget::IntoWidgetTree) -> WidgetId {
+        self.tree.add_widget(widget)
+    }
+
+    /// Add a pre-boxed widget to the tree.
+    pub fn add_boxed(&mut self, widget: Box<dyn crate::widget::IntoWidgetTree>) -> WidgetId {
+        widget.register(self.tree)
+    }
+
+    /// Add a Level 2 widget as a child of another widget.
+    pub fn add_child(
+        &mut self,
+        parent: WidgetId,
+        widget: impl crate::widget::Widget + 'static,
+    ) -> WidgetId {
+        self.tree.add_child(parent, widget)
+    }
+
+    // --- V2: Signal-based APIs ---
+
+    /// Create a new mutable signal.
+    pub fn signal<T: 'static>(&mut self, value: T) -> Signal<T> {
+        Signal::new(value)
+    }
+
+    /// Create a new `Signal<f32>` that supports `animate_to()`.
+    /// Registered with the animation scheduler automatically.
+    pub fn animated_signal(&mut self, value: f32) -> Signal<f32> {
+        let signal = Signal::new_animated(value);
+        self.tree.register_animated_signal(&signal);
+        signal
+    }
+
+    /// Register a scoped effect tied to this build cycle.
+    /// The effect fires whenever the signal changes. It is automatically
+    /// cleaned up on rebuild or widget destruction.
+    pub fn effect<T: Clone + 'static>(
+        &mut self,
+        signal: &Signal<T>,
+        f: impl Fn(&T) + 'static,
+    ) {
+        let handle = signal.observe(f);
+        self.effect_handles.push(handle);
+    }
+
+    // --- V1: Legacy State-based APIs ---
+
+    /// Create a new reactive state value. (V1 API — prefer `signal()`)
+    pub fn state<T: 'static>(&mut self, value: T) -> State<T> {
+        State::new(value)
+    }
+
+    /// Create a new `State<f32>` that supports `set_animated()`. (V1 API — prefer `animated_signal()`)
+    pub fn animated_state(&mut self, value: f32) -> State<f32> {
+        let state = State::new_animated(value);
+        self.tree.register_animated_state(&state);
+        state
+    }
+
+    /// Observe a state value. (V1 API — prefer `effect()`)
+    pub fn observe<T: 'static>(
+        &mut self,
+        state: &State<T>,
+        callback: impl Fn(&T) + 'static,
+    ) {
+        let observer_id = state.observe(callback);
+        // Register cleanup so the observer is removed on rebuild
+        if let Some(composite_id) = self.composite_id {
+            let state_clone = state.clone();
+            self.tree.register_observer_cleanup(
+                composite_id,
+                Box::new(move || state_clone.remove_observer(observer_id)),
+            );
+        }
+    }
+
+    /// Get the binding registry.
+    pub fn binding_registry(&self) -> &BindingRegistry {
+        self.tree.binding_registry()
+    }
+
+    /// Get the current theme.
+    pub fn theme(&self) -> &fern_tokens::Theme {
+        self.tree.theme()
+    }
+
+    /// Bind a widget's visibility to a boolean state or derived state.
+    pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
+        self.tree.visible_when(id, state);
+    }
+
+    /// Bind a widget's enabled state to a boolean state or derived state.
+    pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
+        self.tree.enabled_when(id, state);
+    }
+
+    /// Attach a tooltip to a widget.
+    pub fn attach_tooltip(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+    ) {
+        self.tree.attach_tooltip(anchor_id, content_id, delay);
+    }
+}

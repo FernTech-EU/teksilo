@@ -12,7 +12,8 @@ use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{
     GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
 };
-use fern_core::state::{BindingLevel, Reactive, State};
+use fern_core::signal::Signal;
+use fern_core::state::BindingLevel;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, TextStyle};
@@ -27,19 +28,17 @@ const FALLBACK_LINE_HEIGHT: f32 = 16.0;
 /// A segmented control with mutually exclusive segments.
 pub struct SegmentedControl {
     labels: Vec<String>,
-    selected: State<usize>,
+    selected: Signal<usize>,
     enabled: bool,
     hovered_segment: Cell<Option<usize>>,
     last_click_x: Cell<f32>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
     cached_bounds: Cell<Rect>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl SegmentedControl {
-    pub fn new(labels: Vec<String>, selected: State<usize>) -> Self {
+    pub fn new(labels: Vec<String>, selected: Signal<usize>) -> Self {
         Self {
             labels,
             selected,
@@ -49,23 +48,11 @@ impl SegmentedControl {
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
             cached_bounds: Cell::new(Rect::ZERO),
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
-        self
-    }
-
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
         self
     }
 
@@ -169,7 +156,7 @@ impl Widget for SegmentedControl {
             return;
         }
 
-        let selected = { *self.selected.get() };
+        let selected = self.selected.get();
         let hovered = self.hovered_segment.get();
 
         for i in 0..n {
@@ -277,7 +264,7 @@ impl Widget for SegmentedControl {
             WidgetEvent::KeyDown { key: Key::ArrowRight, .. } => {
                 let n = self.segment_count();
                 if n > 0 {
-                    let current = { *self.selected.get() };
+                    let current = self.selected.get();
                     self.selected.set((current + 1) % n);
                 }
                 EventResponse::Handled
@@ -285,7 +272,7 @@ impl Widget for SegmentedControl {
             WidgetEvent::KeyDown { key: Key::ArrowLeft, .. } => {
                 let n = self.segment_count();
                 if n > 0 {
-                    let current = { *self.selected.get() };
+                    let current = self.selected.get();
                     self.selected.set(if current == 0 { n - 1 } else { current - 1 });
                 }
                 EventResponse::Handled
@@ -302,14 +289,14 @@ impl Widget for SegmentedControl {
                 if *action == fern_core::accesskit::Action::Increment {
                     let n = self.segment_count();
                     if n > 0 {
-                        let current = { *self.selected.get() };
+                        let current = self.selected.get();
                         self.selected.set((current + 1) % n);
                     }
                     EventResponse::Handled
                 } else if *action == fern_core::accesskit::Action::Decrement {
                     let n = self.segment_count();
                     if n > 0 {
-                        let current = { *self.selected.get() };
+                        let current = self.selected.get();
                         self.selected.set(if current == 0 { n - 1 } else { current - 1 });
                     }
                     EventResponse::Handled
@@ -340,13 +327,6 @@ impl Widget for SegmentedControl {
             .bind_to(id, registry, BindingLevel::RepaintOnly);
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
 #[cfg(test)]
@@ -358,7 +338,7 @@ mod tests {
 
     #[test]
     fn click_selects_segment_by_position() {
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
@@ -370,12 +350,12 @@ mod tests {
         // Click at center of 300px-wide control with 3 segments (100px each).
         // Center is x=150 → segment 1 (the middle one).
         tree.click(sc);
-        assert_eq!(*selected.get(), 1, "click at center should select segment 1");
+        assert_eq!(selected.get(), 1, "click at center should select segment 1");
     }
 
     #[test]
     fn keyboard_navigation() {
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
@@ -385,16 +365,16 @@ mod tests {
 
         tree.focus(sc);
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(*selected.get(), 1);
+        assert_eq!(selected.get(), 1);
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(*selected.get(), 2);
+        assert_eq!(selected.get(), 2);
         tree.press_key(Key::ArrowLeft, Modifiers::NONE);
-        assert_eq!(*selected.get(), 1);
+        assert_eq!(selected.get(), 1);
     }
 
     #[test]
     fn keyboard_wraps_around() {
-        let selected = State::new(2_usize);
+        let selected = Signal::new(2_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
@@ -404,14 +384,14 @@ mod tests {
 
         tree.focus(sc);
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(*selected.get(), 0, "should wrap from last to first");
+        assert_eq!(selected.get(), 0, "should wrap from last to first");
         tree.press_key(Key::ArrowLeft, Modifiers::NONE);
-        assert_eq!(*selected.get(), 2, "should wrap from first to last");
+        assert_eq!(selected.get(), 2, "should wrap from first to last");
     }
 
     #[test]
     fn accessibility() {
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into()],
@@ -424,7 +404,7 @@ mod tests {
 
     #[test]
     fn paints_selected_segment_with_primary_color() {
-        let selected = State::new(1_usize);
+        let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
@@ -441,7 +421,7 @@ mod tests {
 
     #[test]
     fn only_selected_segment_has_primary_color() {
-        let selected = State::new(1_usize);
+        let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
@@ -460,7 +440,7 @@ mod tests {
 
     #[test]
     fn accessibility_has_actions() {
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into()],

@@ -18,11 +18,12 @@ use std::time::{Duration, Instant};
 
 use fern_tokens::Easing;
 
+use crate::signal::Signal;
 use crate::state::State;
 
 /// A single active animation driving a `State<f32>` from `start` to `end`.
 struct ActiveAnimation {
-    /// The state being animated.
+    /// The state being animated (V1).
     state: State<f32>,
     /// Value at animation start.
     start_value: f32,
@@ -36,15 +37,27 @@ struct ActiveAnimation {
     easing: Easing,
 }
 
+/// A single active animation driving a `Signal<f32>` from `start` to `end`.
+struct ActiveSignalAnimation {
+    signal: Signal<f32>,
+    start_value: f32,
+    end_value: f32,
+    start_time: Instant,
+    duration: Duration,
+    easing: Easing,
+}
+
 /// Manages active animations and advances them each frame.
 pub struct AnimationScheduler {
     animations: Vec<ActiveAnimation>,
+    signal_animations: Vec<ActiveSignalAnimation>,
 }
 
 impl AnimationScheduler {
     pub fn new() -> Self {
         Self {
             animations: Vec::new(),
+            signal_animations: Vec::new(),
         }
     }
 
@@ -86,6 +99,39 @@ impl AnimationScheduler {
         self.animations.retain(|a| !State::same(&a.state, state));
     }
 
+    /// Start animating a `Signal<f32>` from its current value to `target`.
+    pub fn animate_signal(
+        &mut self,
+        signal: &Signal<f32>,
+        target: f32,
+        duration: Duration,
+        easing: Easing,
+        now: Instant,
+    ) {
+        let current = signal.get();
+        self.cancel_signal(signal);
+
+        if (current - target).abs() < f32::EPSILON || duration.is_zero() {
+            signal.set(target);
+            signal.clear_animation_target();
+            return;
+        }
+
+        self.signal_animations.push(ActiveSignalAnimation {
+            signal: signal.clone(),
+            start_value: current,
+            end_value: target,
+            start_time: now,
+            duration,
+            easing,
+        });
+    }
+
+    /// Cancel any active animation on the given signal.
+    pub fn cancel_signal(&mut self, signal: &Signal<f32>) {
+        self.signal_animations.retain(|a| !Signal::same(&a.signal, signal));
+    }
+
     /// Advance all active animations to the given time.
     /// Completed animations are removed. Returns true if any animation
     /// is still running (caller should request another frame).
@@ -101,7 +147,6 @@ impl AnimationScheduler {
             let value = fern_tokens::lerp(anim.start_value, anim.end_value, eased);
             anim.state.set(value);
 
-            // Keep if not yet complete
             let keep = t < 1.0;
             if !keep {
                 anim.state.clear_animation_target();
@@ -109,19 +154,37 @@ impl AnimationScheduler {
             keep
         });
 
-        !self.animations.is_empty()
+        self.signal_animations.retain_mut(|anim| {
+            let elapsed = now.saturating_duration_since(anim.start_time);
+            let t = if anim.duration.is_zero() {
+                1.0
+            } else {
+                (elapsed.as_secs_f32() / anim.duration.as_secs_f32()).min(1.0)
+            };
+            let eased = anim.easing.apply(t);
+            let value = fern_tokens::lerp(anim.start_value, anim.end_value, eased);
+            anim.signal.set(value);
+
+            let keep = t < 1.0;
+            if !keep {
+                anim.signal.clear_animation_target();
+            }
+            keep
+        });
+
+        !self.animations.is_empty() || !self.signal_animations.is_empty()
     }
 
     /// Whether any animation is currently active.
     pub fn has_active(&self) -> bool {
-        !self.animations.is_empty()
+        !self.animations.is_empty() || !self.signal_animations.is_empty()
     }
 
     /// The earliest deadline when the next animation tick is needed.
     /// Returns None if no animations are active.
     /// Targets ~60fps by scheduling the next tick 16ms from now.
     pub fn next_deadline(&self) -> Option<Instant> {
-        if self.animations.is_empty() {
+        if self.animations.is_empty() && self.signal_animations.is_empty() {
             None
         } else {
             // Schedule next frame at ~60fps to avoid busy-spinning
@@ -131,7 +194,7 @@ impl AnimationScheduler {
 
     /// Number of active animations (for testing/debugging).
     pub fn active_count(&self) -> usize {
-        self.animations.len()
+        self.animations.len() + self.signal_animations.len()
     }
 }
 

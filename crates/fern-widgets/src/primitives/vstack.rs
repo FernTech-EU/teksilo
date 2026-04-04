@@ -1,6 +1,5 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::state::{Reactive, State};
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::HAlignment;
@@ -14,8 +13,6 @@ pub struct VStack {
     pending: Vec<PendingChild>,
     spacing: f32,
     alignment: HAlignment,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl VStack {
@@ -25,8 +22,6 @@ impl VStack {
             pending: Vec::new(),
             spacing: 0.0,
             alignment: HAlignment::Leading,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -71,17 +66,6 @@ impl VStack {
         self
     }
 
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
 }
 
 impl Default for VStack {
@@ -217,20 +201,15 @@ impl Widget for VStack {
         self.child_ids.clone()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        std::mem::take(&mut self.pending)
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_ids = ids;
-    }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        let pending = std::mem::take(&mut self.pending);
+        if !pending.is_empty() {
+            self.child_ids = pending.into_iter().map(|child| match child {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            }).collect();
+        }
+        self.child_ids.clone()
     }
 }
 
@@ -454,117 +433,6 @@ mod tests {
         assert_eq!(kids.len(), 1);
         // Padding adds 10 on each side: 30 + 20 = 50
         assert!((tree.bounds(kids[0]).height - 50.0).abs() < 0.01);
-    }
-
-    // --- visible_when / enabled_when builder tests ---
-
-    #[test]
-    fn visible_when_builder_registers_binding() {
-        use fern_core::state::State;
-
-        let show = State::new(true);
-        let mut tree = WidgetTree::new();
-        let panel_id = tree.add(
-            VStack::new()
-                .child(FixedLeaf(80.0, 30.0))
-                .visible_when(show.clone()),
-        );
-
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        // Initially visible
-        assert!(tree.is_visible(panel_id));
-
-        // Set state to false → widget becomes dormant after next layout
-        show.set(false);
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        assert!(!tree.is_visible(panel_id));
-
-        // Set state back to true → widget is active again
-        show.set(true);
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        assert!(tree.is_visible(panel_id));
-    }
-
-    #[test]
-    fn enabled_when_builder_registers_binding() {
-        use fern_core::state::State;
-
-        let can_act = State::new(true);
-        let mut tree = WidgetTree::new();
-        let stack_id = tree.add(
-            VStack::new()
-                .child(FixedLeaf(80.0, 30.0))
-                .enabled_when(can_act.clone()),
-        );
-
-        assert!(tree.is_enabled(stack_id));
-
-        can_act.set(false);
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        assert!(!tree.is_enabled(stack_id));
-    }
-
-    #[test]
-    fn visible_when_accepts_derived_state() {
-        use fern_core::state::State;
-
-        let index = State::new(0_usize);
-        let mut tree = WidgetTree::new();
-
-        // Use DerivedState<bool> from State::map — this was previously impossible
-        let panel_id = tree.add(
-            VStack::new()
-                .child(FixedLeaf(80.0, 30.0))
-                .visible_when(index.map(|i| *i == 1)),
-        );
-
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        // index is 0, so *i == 1 is false → dormant
-        assert!(!tree.is_visible(panel_id));
-
-        // Change index to 1 → derived state becomes true → active
-        index.set(1);
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        assert!(tree.is_visible(panel_id));
-
-        // Change to 2 → derived state becomes false → dormant again
-        index.set(2);
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        assert!(!tree.is_visible(panel_id));
-    }
-
-    #[test]
-    fn enabled_when_accepts_derived_state() {
-        use fern_core::state::State;
-
-        let mode = State::new("edit".to_string());
-        let mut tree = WidgetTree::new();
-
-        let stack_id = tree.add(
-            VStack::new()
-                .child(FixedLeaf(80.0, 30.0))
-                .enabled_when(mode.map(|m| m == "edit")),
-        );
-
-        assert!(tree.is_enabled(stack_id));
-
-        mode.set("view".to_string());
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        assert!(!tree.is_enabled(stack_id));
-    }
-
-    #[test]
-    fn visible_when_accepts_static_bool() {
-        let mut tree = WidgetTree::new();
-
-        let hidden = tree.add(
-            VStack::new()
-                .child(FixedLeaf(80.0, 30.0))
-                .visible_when(false),
-        );
-
-        tree.layout(SizeProposal::exact(200.0, 300.0));
-        assert!(!tree.is_visible(hidden));
     }
 
     #[test]

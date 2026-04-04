@@ -3,6 +3,8 @@
 //! delegates layout/paint to the root child. Events and accessibility are
 //! handled by the composite itself.
 
+#![allow(deprecated)]
+
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 
 use crate::accessibility::AccessNodeBuilder;

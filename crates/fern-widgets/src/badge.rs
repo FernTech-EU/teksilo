@@ -1,10 +1,10 @@
 //! Badge — a pill-shaped label for tags, status indicators, and counts.
 
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::composite_widget::{BuildContext, CompositeWidget};
+use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::Reactive;
-use fern_core::widget::EventContext;
+use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
@@ -15,8 +15,7 @@ pub struct Badge {
     label: String,
     color: Option<Color>,
     text_color: Option<Color>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
+    root_child_id: Option<WidgetId>,
 }
 
 impl Badge {
@@ -25,8 +24,7 @@ impl Badge {
             label: label.into(),
             color: None,
             text_color: None,
-            visible_when_state: None,
-            enabled_when_state: None,
+            root_child_id: None,
         }
     }
 
@@ -39,16 +37,6 @@ impl Badge {
         self.text_color = Some(color);
         self
     }
-
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
 }
 
 impl std::fmt::Debug for Badge {
@@ -59,8 +47,8 @@ impl std::fmt::Debug for Badge {
     }
 }
 
-impl CompositeWidget for Badge {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId {
+impl Widget for Badge {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let bg = self.color.unwrap_or(theme.colors.secondary);
         let text = self.text_color.unwrap_or(theme.colors.on_secondary);
@@ -77,7 +65,31 @@ impl CompositeWidget for Badge {
         let padding_id = ctx.add(padding);
         let bg_id = ctx.add(bg_rect);
 
-        ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id))
+        let root = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        if let Some(root) = self.root_child_id {
+            if let Some(size) = ctx.child_size(root, proposal) {
+                return size;
+            }
+        }
+        proposal.resolve(0.0, 0.0)
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = Size::new(bounds.width, bounds.height);
+        }
     }
 
     fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
@@ -89,28 +101,21 @@ impl CompositeWidget for Badge {
         builder.set_name(&self.label);
     }
 
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
     }
 }
-
-fern_core::impl_composite_into_widget_tree!(Badge);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_canvas::SizeProposal;
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
 
     #[test]
     fn badge_builds_and_renders() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let badge = tree.add_composite(Badge::new("New"));
+        let badge = tree.add(Badge::new("New"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let b = tree.bounds(badge);
         assert!(b.width > 0.0);
@@ -120,7 +125,7 @@ mod tests {
     #[test]
     fn badge_accessibility() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let badge = tree.add_composite(Badge::new("3"));
+        let badge = tree.add(Badge::new("3"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(badge);
         assert_eq!(info.role(), fern_core::accesskit::Role::Label);

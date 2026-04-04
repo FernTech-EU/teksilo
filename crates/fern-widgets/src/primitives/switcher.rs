@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 
 use fern_core::accessibility::AccessNodeBuilder;
+#[allow(deprecated)]
 use fern_core::composite_widget::{BuildContext, CompositeWidget};
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{EventContext, IntoWidgetTree};
+use fern_core::state::State;
+use fern_core::widget::IntoWidgetTree;
 use fern_core::widget_id::WidgetId;
 
 use crate::primitives::ZStack;
@@ -30,8 +30,6 @@ use crate::primitives::ZStack;
 pub struct Switcher {
     selected: State<usize>,
     deferred_children: RefCell<Vec<Box<dyn IntoWidgetTree>>>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Switcher {
@@ -39,8 +37,6 @@ impl Switcher {
         Self {
             selected,
             deferred_children: RefCell::new(Vec::new()),
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -63,17 +59,6 @@ impl Switcher {
         self
     }
 
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
 }
 
 impl std::fmt::Debug for Switcher {
@@ -84,6 +69,7 @@ impl std::fmt::Debug for Switcher {
     }
 }
 
+#[allow(deprecated)]
 impl CompositeWidget for Switcher {
     fn build(&self, ctx: &mut BuildContext) -> WidgetId {
         let children = self.deferred_children.borrow_mut().drain(..).collect::<Vec<_>>();
@@ -102,16 +88,9 @@ impl CompositeWidget for Switcher {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
     }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
+#[allow(deprecated)]
 fern_core::impl_composite_into_widget_tree!(Switcher);
 
 #[cfg(test)]
@@ -200,26 +179,6 @@ mod tests {
         let bounds = tree.bounds(switcher_id);
         assert!(bounds.width > 0.0);
         assert!(bounds.height > 0.0);
-    }
-
-    #[test]
-    fn switcher_visible_when() {
-        let show = State::new(false);
-        let selected = State::new(0_usize);
-        let mut tree = WidgetTree::new();
-
-        let switcher_id = tree.add_widget(
-            Switcher::new(selected)
-                .child(FixedLeaf(100.0, 40.0))
-                .visible_when(show.clone()),
-        );
-
-        tree.layout(SizeProposal::exact(200.0, 200.0));
-        assert!(!tree.is_visible(switcher_id));
-
-        show.set(true);
-        tree.layout(SizeProposal::exact(200.0, 200.0));
-        assert!(tree.is_visible(switcher_id));
     }
 
     #[test]
