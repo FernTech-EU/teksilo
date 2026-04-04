@@ -32,7 +32,7 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, Divider, Expand, Grid,
-    HStack, IconWidget, Link, MaxSize, Padding, Panel, ProgressBar, RadioButton, RectWidget,
+    HStack, IconWidget, Link, MaxSize, Padding, Panel, ProgressBar, RadioButton,
     ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle,
     Toolbar, TrackSize, VStack, Wrap,
 };
@@ -61,7 +61,6 @@ impl CompositeWidget for WidgetCatalog {
         let theme = ctx.theme().clone();
         let t = &theme.typography;
         let c = &theme.colors;
-        let spacing = &theme.spacing;
 
         // --- Shared state ---
         let checkbox_checked = ctx.state(false);
@@ -73,7 +72,6 @@ impl CompositeWidget for WidgetCatalog {
         let slider_v_value = ctx.state(0.3_f32);
         let slider_stepped = ctx.state(25.0_f32);
         let segment_selected = ctx.state(0_usize);
-        let progress_value = ctx.state(0.65_f32);
         let accordion_expanded = ctx.state(false);
         let accordion2_expanded = ctx.state(true);
 
@@ -602,9 +600,26 @@ fn main() {
 mod tests {
     use fern_ui::core::WidgetTree;
     use fern_ui::prelude::*;
+    use fern_ui::text::SharedTypesetter;
     use fern_ui::widgets::*;
+    use fern_render::test_support;
 
     use super::WidgetCatalog;
+
+    fn tree_with_real_text_backend() -> WidgetTree {
+        let typesetter = SharedTypesetter::new_with_default_font();
+        WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(typesetter.as_text_backend())
+    }
+
+    fn tree_and_typesetter() -> (WidgetTree, SharedTypesetter) {
+        let typesetter = SharedTypesetter::new_with_default_font();
+        let tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(typesetter.as_text_backend());
+        (tree, typesetter)
+    }
 
     #[test]
     fn catalog_builds_and_layouts() {
@@ -719,4 +734,148 @@ mod tests {
         assert!(status_bounds.y >= expand_bounds.y + expand_bounds.height - 0.1,
             "StatusBar should start below Expand");
     }
+
+    #[test]
+    fn badge_renders_text_with_real_text_backend() {
+        let mut tree = tree_with_real_text_backend();
+        tree.add_widget(Badge::new("Badge text"));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        let frame = tree.render();
+        assert!(
+            !frame.glyphs.is_empty(),
+            "badge should emit glyphs when rendered with the real text backend"
+        );
+    }
+
+    #[test]
+    fn catalog_missing_text_candidates_produce_bright_pixels_offscreen() {
+        fn pixel_extrema(pixels: &[u8], width: u32, bounds: Rect) -> ([u8; 3], [u8; 3]) {
+            let x0 = bounds.x.floor().max(0.0) as u32;
+            let y0 = bounds.y.floor().max(0.0) as u32;
+            let x1 = (bounds.x + bounds.width).ceil().max(0.0) as u32;
+            let y1 = (bounds.y + bounds.height).ceil().max(0.0) as u32;
+
+            let mut best = [0u8; 3];
+            let mut darkest = [255u8; 3];
+
+            for y in y0.min(700)..y1.min(700) {
+                for x in x0.min(width)..x1.min(width) {
+                    let offset = ((y * width + x) * 4) as usize;
+                    let r = pixels.get(offset).copied().unwrap_or(0);
+                    let g = pixels.get(offset + 1).copied().unwrap_or(0);
+                    let b = pixels.get(offset + 2).copied().unwrap_or(0);
+                    if u16::from(r) + u16::from(g) + u16::from(b)
+                        > u16::from(best[0]) + u16::from(best[1]) + u16::from(best[2])
+                    {
+                        best = [r, g, b];
+                    }
+                    if u16::from(r) + u16::from(g) + u16::from(b)
+                        < u16::from(darkest[0]) + u16::from(darkest[1]) + u16::from(darkest[2])
+                    {
+                        darkest = [r, g, b];
+                    }
+                }
+            }
+            (best, darkest)
+        }
+
+        fn atlas_max_alpha(atlas: &[u8], atlas_width: u32, atlas_height: u32, rect: [f32; 4]) -> u8 {
+            let x0 = rect[0].floor().max(0.0) as u32;
+            let y0 = rect[1].floor().max(0.0) as u32;
+            let x1 = (rect[0] + rect[2]).ceil().max(0.0) as u32;
+            let y1 = (rect[1] + rect[3]).ceil().max(0.0) as u32;
+
+            let mut max_alpha = 0u8;
+            for y in y0.min(atlas_height)..y1.min(atlas_height) {
+                for x in x0.min(atlas_width)..x1.min(atlas_width) {
+                    let offset = ((y * atlas_width + x) * 4 + 3) as usize;
+                    max_alpha = max_alpha.max(atlas.get(offset).copied().unwrap_or(0));
+                }
+            }
+            max_alpha
+        }
+
+        let Some((mut renderer, device, queue)) =
+            pollster::block_on(test_support::create_test_renderer("widget_catalog_test_device"))
+        else {
+            return;
+        };
+
+        let (mut tree, typesetter) = tree_and_typesetter();
+        tree.add_widget(WidgetCatalog);
+        tree.layout(SizeProposal::exact(900.0, 700.0));
+        let mut frame = tree.render();
+        let atlas = typesetter.bridge().borrow_mut().atlas_info();
+        renderer.upload_atlas(atlas.width, atlas.height, &atlas.pixels);
+        if atlas.glyphs_evicted {
+            tree.invalidate_all_paints();
+            frame = tree.render();
+            let atlas2 = typesetter.bridge().borrow_mut().atlas_info();
+            renderer.upload_atlas(atlas2.width, atlas2.height, &atlas2.pixels);
+        }
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("widget_catalog_test_target"),
+            size: wgpu::Extent3d {
+                width: 900,
+                height: 700,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render(
+            &frame,
+            &view,
+            1.0,
+            900,
+            700,
+            tree.theme().colors.surface.to_array(),
+        );
+        let pixels = test_support::read_texture_rgba(&device, &queue, &texture, 900, 700);
+
+        for label in ["Rust", "A1", "Option A"] {
+            let id = tree
+                .find_by_label(label)
+                .unwrap_or_else(|| panic!("expected to find text node for {label:?}"));
+            let bounds = tree.bounds(id);
+            let matching_glyphs: Vec<_> = frame
+                .glyphs
+                .iter()
+                .filter(|glyph| {
+                    let [x, y, w, h] = glyph.screen;
+                    let glyph_right = x + w;
+                    let glyph_bottom = y + h;
+                    glyph_right > bounds.x
+                        && x < bounds.x + bounds.width
+                        && glyph_bottom > bounds.y
+                        && y < bounds.y + bounds.height
+                })
+                .map(|glyph| (glyph.screen, glyph.atlas, glyph.color))
+                .collect();
+            let (brightest, darkest) = pixel_extrema(&pixels, 900, bounds);
+            let atlas_alpha: Vec<_> = matching_glyphs
+                .iter()
+                .map(|(_, atlas_rect, _)| atlas_max_alpha(&atlas.pixels, atlas.width, atlas.height, *atlas_rect))
+                .collect();
+            assert!(
+                brightest[0] > 170 && brightest[1] > 170 && brightest[2] > 170,
+                "expected bright text pixels for {label:?} in {:?}, brightest was {:?}, darkest was {:?}, matching glyphs were {:?}, atlas alpha was {:?}, total glyphs {}, draw commands {}",
+                bounds,
+                brightest,
+                darkest,
+                matching_glyphs,
+                atlas_alpha,
+                frame.glyphs.len(),
+                frame.draw_order.len()
+            );
+        }
+    }
+
 }

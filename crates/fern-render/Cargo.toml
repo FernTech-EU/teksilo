@@ -14,3 +14,4 @@ bytemuck = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 fern-tokens = { workspace = true }
+pollster = "0.4"
