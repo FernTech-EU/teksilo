@@ -566,4 +566,67 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 300.0));
         assert!(!tree.is_visible(hidden));
     }
+
+    #[test]
+    fn dormant_child_does_not_take_layout_space() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(80.0, 30.0));
+        let b = tree.add(FixedLeaf(80.0, 40.0));
+        let c = tree.add(FixedLeaf(80.0, 50.0));
+        let _stack = tree.add(
+            VStack::new()
+                .spacing(10.0)
+                .add_child(a)
+                .add_child(b)
+                .add_child(c),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        // Before dormant: a(0..30), gap(10), b(40..80), gap(10), c(90..140)
+        assert!((tree.bounds(c).y - 90.0).abs() < 0.01);
+
+        // Make middle child dormant
+        tree.set_dormant(b);
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        // After dormant: a(0..30), gap(10), c(40..90) — b's space is reclaimed
+        assert!((tree.bounds(c).y - 40.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn dormant_child_via_visible_when_does_not_take_layout_space() {
+        use fern_core::state::State;
+
+        let show_b = State::new(true);
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(80.0, 30.0));
+        let b = tree.add(FixedLeaf(80.0, 40.0));
+        tree.visible_when(b, show_b.clone());
+        let c = tree.add(FixedLeaf(80.0, 50.0));
+        let _stack = tree.add(
+            VStack::new()
+                .spacing(10.0)
+                .add_child(a)
+                .add_child(b)
+                .add_child(c),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        // All visible: a(0..30), gap(10), b(40..80), gap(10), c(90..140)
+        assert!((tree.bounds(c).y - 90.0).abs() < 0.01);
+
+        // Hide b via state
+        show_b.set(false);
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        // b is dormant: a(0..30), gap(10), c(40..90)
+        assert!((tree.bounds(c).y - 40.0).abs() < 0.01);
+
+        // Show b again
+        show_b.set(true);
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        // Back to original layout
+        assert!((tree.bounds(c).y - 90.0).abs() < 0.01);
+    }
 }
