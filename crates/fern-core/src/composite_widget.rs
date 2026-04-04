@@ -48,7 +48,7 @@ impl<'a> BuildContext<'a> {
     /// Create a new `State<f32>` that supports `set_animated()`.
     /// The state is registered with the animation scheduler automatically.
     pub fn animated_state(&mut self, value: f32) -> State<f32> {
-        let state = State::new(value);
+        let state = State::new_animated(value);
         self.tree.register_animated_state(&state);
         state
     }

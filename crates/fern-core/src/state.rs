@@ -234,10 +234,22 @@ impl<T: Clone + 'static> From<DerivedState<T>> for StateHandle<T> {
 
 // --- State<T> ---
 
+/// Animation-specific state, only initialized for `State<f32>`.
+struct AnimationState {
+    /// Pending animation request, picked up by the scheduler on the next frame.
+    pending: Option<AnimationRequest>,
+    /// The target value of the current or most recent animation.
+    /// Persists after `pending` is consumed so that callers can accumulate
+    /// from the intended destination rather than the mid-flight value.
+    target: Option<f32>,
+}
+
 /// A reactive state value. When set, marks itself dirty.
 /// Can be bound to widget properties via a BindingRegistry.
 pub struct State<T> {
     inner: Rc<RefCell<StateInner<T>>>,
+    /// Animation bookkeeping — `Some` only for `State<f32>`.
+    animation: Option<Rc<RefCell<AnimationState>>>,
 }
 
 /// Opaque ID for an observer callback, used to remove it later.
@@ -262,9 +274,6 @@ struct StateInner<T> {
     dirty: bool,
     observers: Vec<ObserverEntry<T>>,
     next_observer_id: u64,
-    /// Pending animation request (only meaningful for State<f32>).
-    /// Picked up by the AnimationScheduler on the next frame.
-    pending_animation: Option<AnimationRequest>,
 }
 
 impl<T: 'static> State<T> {
@@ -275,8 +284,8 @@ impl<T: 'static> State<T> {
                 dirty: false,
                 observers: Vec::new(),
                 next_observer_id: 1,
-                pending_animation: None,
             })),
+            animation: None,
         }
     }
 
@@ -360,6 +369,28 @@ impl<T> State<T> {
 }
 
 impl State<f32> {
+    /// Create a new `State<f32>` with animation support.
+    pub fn new_animated(value: f32) -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(StateInner {
+                value,
+                dirty: false,
+                observers: Vec::new(),
+                next_observer_id: 1,
+            })),
+            animation: Some(Rc::new(RefCell::new(AnimationState {
+                pending: None,
+                target: None,
+            }))),
+        }
+    }
+
+    fn animation_state(&self) -> &Rc<RefCell<AnimationState>> {
+        self.animation
+            .as_ref()
+            .expect("set_animated called on State<f32> without animation support; use State::new_animated()")
+    }
+
     /// Animate this state smoothly from its current value to `target` over
     /// `duration` using `easing`. The animation is driven automatically by
     /// the framework — each frame interpolates the value and calls `set()`.
@@ -376,24 +407,41 @@ impl State<f32> {
         duration: std::time::Duration,
         easing: fern_tokens::Easing,
     ) {
-        let mut inner = self.inner.borrow_mut();
-        inner.pending_animation = Some(AnimationRequest {
+        let mut anim = self.animation_state().borrow_mut();
+        anim.pending = Some(AnimationRequest {
             target,
             duration,
             easing,
         });
-        inner.dirty = true; // trigger a frame so the scheduler picks this up
+        anim.target = Some(target);
+        drop(anim);
+        self.inner.borrow_mut().dirty = true; // trigger a frame so the scheduler picks this up
+    }
+
+    /// Returns the target value of the current or pending animation, if any.
+    /// Useful for accumulating incremental changes (e.g. scroll wheel) from the
+    /// intended destination rather than the mid-flight interpolated value.
+    pub fn animation_target(&self) -> Option<f32> {
+        self.animation.as_ref().and_then(|a| a.borrow().target)
+    }
+
+    /// Clear the animation target. Called by the animation scheduler when an
+    /// animation completes so that `animation_target()` doesn't return a stale value.
+    pub fn clear_animation_target(&self) {
+        if let Some(a) = &self.animation {
+            a.borrow_mut().target = None;
+        }
     }
 
     /// Take a pending animation request, if any. Called by the animation
     /// scheduler during its tick to start the animation.
     pub fn take_pending_animation(&self) -> Option<AnimationRequest> {
-        self.inner.borrow_mut().pending_animation.take()
+        self.animation.as_ref().and_then(|a| a.borrow_mut().pending.take())
     }
 
     /// Whether there is a pending animation request.
     pub fn has_pending_animation(&self) -> bool {
-        self.inner.borrow().pending_animation.is_some()
+        self.animation.as_ref().is_some_and(|a| a.borrow().pending.is_some())
     }
 }
 
@@ -407,6 +455,7 @@ impl<T> Clone for State<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            animation: self.animation.clone(),
         }
     }
 }

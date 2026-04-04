@@ -125,8 +125,8 @@ impl ScrollArea {
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
             preferred_size: None,
-            scroll_y: State::new(0.0),
-            scroll_x: State::new(0.0),
+            scroll_y: State::new_animated(0.0),
+            scroll_x: State::new_animated(0.0),
             max_scroll_y: State::new(0.0),
             max_scroll_x: State::new(0.0),
             viewport_ratio_y: State::new(1.0),
@@ -150,8 +150,8 @@ impl ScrollArea {
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
             preferred_size: None,
-            scroll_y: State::new(0.0),
-            scroll_x: State::new(0.0),
+            scroll_y: State::new_animated(0.0),
+            scroll_x: State::new_animated(0.0),
             max_scroll_y: State::new(0.0),
             max_scroll_x: State::new(0.0),
             viewport_ratio_y: State::new(1.0),
@@ -428,9 +428,13 @@ impl Widget for ScrollArea {
 
                 match delta {
                     ScrollDelta::Lines { x, y } => {
-                        let target_y = (cur_y + y * self.line_height)
+                        // Use the animation target (if mid-flight) so rapid wheel
+                        // notches accumulate correctly instead of losing distance.
+                        let base_y = self.scroll_y.animation_target().unwrap_or(cur_y);
+                        let base_x = self.scroll_x.animation_target().unwrap_or(cur_x);
+                        let target_y = (base_y + y * self.line_height)
                             .clamp(0.0, max_y);
-                        let target_x = (cur_x + x * self.line_height)
+                        let target_x = (base_x + x * self.line_height)
                             .clamp(0.0, max_x);
                         if self.smooth_scrolling {
                             self.scroll_y.set_animated(

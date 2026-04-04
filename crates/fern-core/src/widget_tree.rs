@@ -3388,7 +3388,7 @@ mod tests {
     #[test]
     fn set_animated_interpolates_over_time() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new(0.0_f32);
+        let state = crate::state::State::new_animated(0.0_f32);
         tree.register_animated_state(&state);
 
         state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::Linear);
@@ -3407,7 +3407,7 @@ mod tests {
     #[test]
     fn set_animated_with_easing() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new(0.0_f32);
+        let state = crate::state::State::new_animated(0.0_f32);
         tree.register_animated_state(&state);
 
         state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::EaseIn);
@@ -3420,7 +3420,7 @@ mod tests {
     #[test]
     fn set_animated_replaces_in_flight() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new(0.0_f32);
+        let state = crate::state::State::new_animated(0.0_f32);
         tree.register_animated_state(&state);
 
         state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::Linear);
@@ -3439,7 +3439,7 @@ mod tests {
     #[test]
     fn animation_marks_widgets_dirty() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new(100.0_f32);
+        let state = crate::state::State::new_animated(100.0_f32);
         tree.register_animated_state(&state);
 
         let w = tree.add(FillWidget::new());

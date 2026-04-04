@@ -67,6 +67,7 @@ impl AnimationScheduler {
         // Don't animate if already at target or zero duration
         if (current - target).abs() < f32::EPSILON || duration.is_zero() {
             state.set(target);
+            state.clear_animation_target();
             return;
         }
 
@@ -101,7 +102,11 @@ impl AnimationScheduler {
             anim.state.set(value);
 
             // Keep if not yet complete
-            t < 1.0
+            let keep = t < 1.0;
+            if !keep {
+                anim.state.clear_animation_target();
+            }
+            keep
         });
 
         !self.animations.is_empty()

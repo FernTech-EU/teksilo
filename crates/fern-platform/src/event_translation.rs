@@ -193,7 +193,7 @@ pub fn translate_mouse_wheel(
         winit::event::MouseScrollDelta::PixelDelta(pos) => ScrollDelta::Pixels {
             x: -(pos.x / state.scale_factor) as f32,
             y: -(pos.y / state.scale_factor) as f32,
-        },
+        }
     };
     Some(WidgetEvent::Scroll {
         delta: scroll_delta,
