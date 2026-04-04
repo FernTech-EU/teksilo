@@ -46,13 +46,16 @@ impl<'a> LayoutContext<'a> {
     }
 
     /// Query a child widget's preferred size for a given proposal.
-    /// Returns None if the child doesn't exist or the arena is not available.
+    /// Returns None if the child doesn't exist, is dormant, or the arena is not available.
     pub fn child_size(
         &self,
         child_id: WidgetId,
         proposal: fern_canvas::SizeProposal,
     ) -> Option<fern_canvas::Size> {
         let arena = self.arena?;
+        if !arena.is_active(child_id) {
+            return None;
+        }
         let node = arena.get(child_id)?;
         Some(node.widget.size_that_fits(proposal, self))
     }
@@ -69,8 +72,10 @@ impl<'a> LayoutContext<'a> {
     }
 
     /// Query whether a child widget is a spacer.
+    /// Returns false for dormant children.
     pub fn child_is_spacer(&self, child_id: WidgetId) -> bool {
         self.arena
+            .filter(|arena| arena.is_active(child_id))
             .and_then(|arena| arena.get(child_id))
             .map_or(false, |node| node.widget.is_spacer())
     }
@@ -274,6 +279,8 @@ pub struct EventContext {
     pub(crate) idle_callbacks: Vec<crate::idle::IdleCallback>,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
+    /// Request to capture or release the pointer.
+    pub(crate) pointer_capture: Option<bool>,
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -293,6 +300,7 @@ impl EventContext {
             idle_callbacks: Vec::new(),
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
+            pointer_capture: None,
         }
     }
 
@@ -340,5 +348,18 @@ impl EventContext {
         callback: impl FnOnce(crate::idle::IdleDeadline) + 'static,
     ) {
         self.idle_callbacks.push(Box::new(callback));
+    }
+
+    /// Capture the pointer: all subsequent `PointerMove` and `PointerUp`
+    /// events will be routed to the capturing widget until the capture is
+    /// released. Use this when starting a drag operation.
+    pub fn capture_pointer(&mut self) {
+        self.pointer_capture = Some(true);
+    }
+
+    /// Release a previously captured pointer. Pointer events resume normal
+    /// hit-test dispatch.
+    pub fn release_pointer(&mut self) {
+        self.pointer_capture = Some(false);
     }
 }

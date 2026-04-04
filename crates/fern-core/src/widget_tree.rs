@@ -57,6 +57,9 @@ pub struct WidgetTree {
     a11y_dirty: bool,
     /// Cached full render frame — reused when no widget needs painting.
     cached_frame: Option<RenderFrame>,
+    /// Widget that has captured the pointer (receives all PointerMove/PointerUp
+    /// regardless of hit-test). Set via `EventContext::capture_pointer()`.
+    pointer_captured_by: Option<WidgetId>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -97,6 +100,7 @@ impl WidgetTree {
             cached_a11y: None,
             a11y_dirty: true,
             cached_frame: None,
+            pointer_captured_by: None,
         }
     }
 
@@ -802,11 +806,15 @@ impl WidgetTree {
 
         // Feed pointer events to gesture recognizers on the target widget chain
         if let Some(raw) = to_raw_pointer_event(&event) {
-            let target = match &event {
-                WidgetEvent::PointerDown { position, .. }
-                | WidgetEvent::PointerUp { position, .. } => self.hit_test(*position),
-                WidgetEvent::PointerMove { position } => self.hit_test(*position),
-                _ => None,
+            let target = if self.pointer_captured_by.is_some() {
+                self.pointer_captured_by
+            } else {
+                match &event {
+                    WidgetEvent::PointerDown { position, .. }
+                    | WidgetEvent::PointerUp { position, .. } => self.hit_test(*position),
+                    WidgetEvent::PointerMove { position } => self.hit_test(*position),
+                    _ => None,
+                }
             };
             if let Some(target_id) = target {
                 self.feed_gesture_recognizers(target_id, &raw);
@@ -815,7 +823,12 @@ impl WidgetTree {
 
         match &event {
             WidgetEvent::PointerMove { position } => {
-                self.handle_pointer_move(*position);
+                if let Some(captured) = self.pointer_captured_by {
+                    // Pointer is captured — route directly, skip hover tracking
+                    self.dispatch_to_widget(captured, &WidgetEvent::PointerMove { position: *position });
+                } else {
+                    self.handle_pointer_move(*position);
+                }
             }
             WidgetEvent::PointerDown { position, .. } => {
                 if let Some(target) = self.hit_test(*position) {
@@ -827,7 +840,11 @@ impl WidgetTree {
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
-                if let Some(target) = self.hit_test(*position) {
+                if let Some(captured) = self.pointer_captured_by {
+                    // Route to the capturing widget and auto-release capture
+                    self.dispatch_to_widget(captured, &event);
+                    self.pointer_captured_by = None;
+                } else if let Some(target) = self.hit_test(*position) {
                     self.dispatch_to_widget(target, &event);
                 }
             }
@@ -932,7 +949,7 @@ impl WidgetTree {
             } else {
                 EventResponse::Ignored
             };
-            self.collect_from_ctx(ctx);
+            self.collect_from_ctx(ctx, id);
             if response == EventResponse::Handled {
                 self.arena.mark_needs_paint(id);
                 return;
@@ -952,7 +969,7 @@ impl WidgetTree {
             } else {
                 EventResponse::Ignored
             };
-            self.collect_from_ctx(ctx);
+            self.collect_from_ctx(ctx, id);
             if response == EventResponse::Handled {
                 if needs_layout_on_handle {
                     self.arena.mark_needs_layout(id);
@@ -966,7 +983,7 @@ impl WidgetTree {
     }
 
     /// Collect commands, tree mutations, and idle callbacks from an EventContext.
-    fn collect_from_ctx(&mut self, ctx: EventContext) {
+    fn collect_from_ctx(&mut self, ctx: EventContext, source_widget: WidgetId) {
         self.pending_commands.extend(ctx.commands);
         self.apply_tree_mutations(&ctx.tree_mutations);
         for cb in ctx.idle_callbacks {
@@ -977,6 +994,14 @@ impl WidgetTree {
         }
         for id in ctx.overlay_dismissals {
             self.overlay_manager.dismiss(id);
+        }
+        // Handle pointer capture requests
+        if let Some(capture) = ctx.pointer_capture {
+            if capture {
+                self.pointer_captured_by = Some(source_widget);
+            } else {
+                self.pointer_captured_by = None;
+            }
         }
     }
 
@@ -998,7 +1023,7 @@ impl WidgetTree {
                     if let Some(gesture) = binding.arena.process(raw) {
                         let mut ctx = EventContext::new();
                         (binding.handler)(gesture.clone(), &mut ctx);
-                        self.collect_from_ctx(ctx);
+                        self.collect_from_ctx(ctx, id);
 
                         // Also dispatch as WidgetEvent::Gesture for the widget's event()
                         self.dispatch_to_widget(id, &WidgetEvent::Gesture { gesture });
@@ -1737,6 +1762,7 @@ impl WidgetTree {
     /// Set a widget subtree as dormant.
     pub fn set_dormant(&mut self, id: WidgetId) {
         self.arena.set_dormant(id);
+        self.arena.mark_ancestors_need_layout(id);
         self.cached_frame = None;
         self.a11y_dirty = true;
     }
@@ -1744,6 +1770,7 @@ impl WidgetTree {
     /// Activate a dormant widget subtree.
     pub fn activate(&mut self, id: WidgetId) {
         self.arena.activate(id);
+        self.arena.mark_ancestors_need_layout(id);
         self.cached_frame = None;
         self.a11y_dirty = true;
     }
@@ -1892,7 +1919,15 @@ fn layout_widget_recursive(
 
     let child_ids: Vec<WidgetId> = arena.children(id).to_vec();
     if !child_ids.is_empty() {
-        let mut placements: Vec<WidgetPlacement> = child_ids
+        // Only include active children in placements — dormant children
+        // should not occupy layout space.
+        let active_child_ids: Vec<WidgetId> = child_ids
+            .iter()
+            .copied()
+            .filter(|&cid| arena.is_active(cid))
+            .collect();
+
+        let mut placements: Vec<WidgetPlacement> = active_child_ids
             .iter()
             .map(|&cid| WidgetPlacement {
                 id: cid,
