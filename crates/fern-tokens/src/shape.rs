@@ -28,6 +28,19 @@ impl CornerRadius {
         }
     }
 
+    /// Clamp all corner radii so they don't exceed half the rect dimension.
+    /// Without this, the SDF shader produces incorrect results for large radii
+    /// (e.g. `radius_full = 9999`) on small rectangles.
+    pub fn clamped(self, width: f32, height: f32) -> Self {
+        let max_r = (width.min(height) * 0.5).max(0.0);
+        Self {
+            top_left: self.top_left.min(max_r),
+            top_right: self.top_right.min(max_r),
+            bottom_left: self.bottom_left.min(max_r),
+            bottom_right: self.bottom_right.min(max_r),
+        }
+    }
+
     pub fn to_array(self) -> [f32; 4] {
         [
             self.top_left,

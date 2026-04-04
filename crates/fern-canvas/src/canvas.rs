@@ -124,13 +124,14 @@ impl Canvas {
     /// Fill a rounded rectangle using SDF rendering.
     pub fn fill_rounded_rect(&mut self, rect: Rect, corner_radius: CornerRadius, paint: impl Into<Paint>) {
         let (color, paint_data) = paint_to_data(&paint.into());
+        let clamped = corner_radius.clamped(rect.width, rect.height);
         let idx = self.frame.shapes.len();
         self.frame.shapes.push(ShapeQuad {
             screen: rect.to_array(),
             color,
             shape: ShapeKind::RoundedRect,
             stroke_width: 0.0,
-            corner_radii: corner_radius.to_array(),
+            corner_radii: clamped.to_array(),
             paint_data,
         });
         self.frame.draw_order.push(DrawCommand::Shape(idx));
@@ -145,13 +146,14 @@ impl Canvas {
         style: impl Into<StrokeStyle>,
     ) {
         let (color, paint_data) = paint_to_data(&paint.into());
+        let clamped = corner_radius.clamped(rect.width, rect.height);
         let idx = self.frame.shapes.len();
         self.frame.shapes.push(ShapeQuad {
             screen: rect.to_array(),
             color,
             shape: ShapeKind::RoundedRect,
             stroke_width: style.into().width,
-            corner_radii: corner_radius.to_array(),
+            corner_radii: clamped.to_array(),
             paint_data,
         });
         self.frame.draw_order.push(DrawCommand::Shape(idx));
