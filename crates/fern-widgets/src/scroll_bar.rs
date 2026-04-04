@@ -210,7 +210,10 @@ impl ScrollBar {
         }
 
         // Page scroll: move by one viewport's worth in the direction of the click
-        let viewport_scroll = max * self.viewport_ratio.get().clamp(0.001, 1.0);
+        // viewport_ratio = viewport / content, max = content - viewport
+        // viewport = max * ratio / (1 - ratio)
+        let ratio = self.viewport_ratio.get().clamp(0.001, 0.999);
+        let viewport_scroll = max * ratio / (1.0 - ratio);
         let current = *self.scroll_position.get();
         if click_axis < thumb_center {
             self.set_scroll(current - viewport_scroll);
@@ -270,7 +273,7 @@ impl Widget for ScrollBar {
         canvas.fill_rounded_rect(thumb, radius, thumb_color);
     }
 
-    fn event(&mut self, event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
+    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
         let max = *self.max_scroll.get();
         if max <= 0.0 {
             return EventResponse::Ignored;
@@ -296,6 +299,7 @@ impl Widget for ScrollBar {
                         .set(self.axis_value(*position));
                     self.drag_start_scroll
                         .set(*self.scroll_position.get());
+                    ctx.capture_pointer();
                 } else {
                     // Track click — page scroll toward click position
                     self.page_scroll_toward(*position);
@@ -324,6 +328,7 @@ impl Widget for ScrollBar {
             } => {
                 if self.dragging.get() {
                     self.dragging.set(false);
+                    ctx.release_pointer();
                     EventResponse::Handled
                 } else {
                     EventResponse::Ignored
@@ -589,5 +594,51 @@ mod tests {
 
         let pos = *position.get();
         assert!(pos > 0.0, "Expected positive scroll after track click, got {}", pos);
+    }
+
+    #[test]
+    fn drag_release_outside_does_not_stick() {
+        // Regression test: dragging the thumb and releasing outside the
+        // scrollbar must not leave `dragging` stuck to true. This requires
+        // pointer capture so that PointerUp reaches the scrollbar even when
+        // the pointer is outside its bounds.
+        let (bar, position, ..) = make_scrollbar();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        tree.render();
+
+        // Start drag on the thumb
+        tree.pointer_move(Point::new(6.0, 10.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(6.0, 10.0),
+            button: PointerButton::Primary,
+        });
+
+        // Move far outside the scrollbar bounds
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(200.0, 300.0),
+        });
+
+        // Release outside
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(200.0, 300.0),
+            button: PointerButton::Primary,
+        });
+
+        // Now hover the scrollbar again — should NOT continue dragging
+        let pos_before = *position.get();
+        tree.pointer_move(Point::new(6.0, 50.0));
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(6.0, 50.0),
+        });
+
+        let pos_after = *position.get();
+        assert!(
+            (pos_after - pos_before).abs() < 0.01,
+            "Hovering after release should not move scroll: before={}, after={}",
+            pos_before,
+            pos_after,
+        );
     }
 }
