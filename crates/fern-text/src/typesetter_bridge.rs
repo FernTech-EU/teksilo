@@ -35,14 +35,13 @@ pub struct TypesetterBridge {
     typesetter: Typesetter,
     default_font: Option<FontFaceId>,
     next_layout_key: u64,
-    /// Cached result from the last layout_single_line call.
-    last_result: Option<SingleLineResult>,
-    /// Cache key that identifies which text `last_result` belongs to.
-    last_result_key: Option<LayoutCacheKey>,
     /// Display scale factor for HiDPI rasterization.
     scale_factor: f32,
     /// Layout metrics cache: avoids re-shaping text just for size measurement.
     layout_cache: HashMap<LayoutCacheKey, TextLayout>,
+    /// Glyph quads stored by opaque layout key so ensure_glyphs can be
+    /// resolved independently for many text widgets in the same frame.
+    glyph_cache: HashMap<u64, Vec<GlyphQuad>>,
     /// Whether any text work (layout_single_line/ensure_glyphs) happened
     /// since the last atlas_info() call. When false, we skip advancing
     /// the eviction generation to avoid aging out idle-but-visible glyphs.
@@ -55,10 +54,9 @@ impl TypesetterBridge {
             typesetter: Typesetter::new(),
             default_font: None,
             next_layout_key: 1,
-            last_result: None,
-            last_result_key: None,
             scale_factor: 1.0,
             layout_cache: HashMap::new(),
+            glyph_cache: HashMap::new(),
             had_text_activity: false,
         }
     }
@@ -121,6 +119,7 @@ impl TypesetterBridge {
     /// Invalidate the layout cache (e.g. on scale factor change).
     pub fn invalidate_cache(&mut self) {
         self.layout_cache.clear();
+        self.glyph_cache.clear();
     }
 }
 
@@ -134,7 +133,8 @@ impl TextBackend for TypesetterBridge {
     fn set_scale_factor(&mut self, scale_factor: f32) {
         if (self.scale_factor - scale_factor).abs() > 0.001 {
             self.scale_factor = scale_factor;
-            self.layout_cache.clear(); // Scale change invalidates all cached layouts
+            self.layout_cache.clear();
+            self.glyph_cache.clear();
         }
     }
 
@@ -147,22 +147,17 @@ impl TextBackend for TypesetterBridge {
         let sf = self.scale_factor;
         let cache_key = LayoutCacheKey::new(text, style, max_width, sf);
 
-        // Check cache for metrics. Only skip re-shaping if last_result already
-        // holds glyph data for THIS EXACT text (same cache key). Otherwise we
-        // must re-shape so ensure_glyphs returns the correct glyphs.
-        if self.last_result_key.as_ref() == Some(&cache_key) {
-            if let Some(cached) = self.layout_cache.get(&cache_key) {
-                return cached.clone();
-            }
+        if let Some(cached) = self.layout_cache.get(&cache_key) {
+            return cached.clone();
         }
 
-        // Full shaping — either cache miss or last_result was consumed
+        // Full shaping on cache miss.
         self.had_text_activity = true;
         let mut format = Self::to_text_format(style);
         format.font_size = format.font_size.map(|s| s * sf);
 
         let physical_max = max_width.map(|w| w * sf);
-        let result = self.typesetter.layout_single_line(text, &format, physical_max);
+        let result: SingleLineResult = self.typesetter.layout_single_line(text, &format, physical_max);
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -178,33 +173,32 @@ impl TextBackend for TypesetterBridge {
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
-        self.last_result = Some(result);
-        self.last_result_key = Some(cache_key);
+        let inv = 1.0 / sf;
+        self.glyph_cache.insert(
+            key,
+            result
+                .glyphs
+                .iter()
+                .map(|g| GlyphQuad {
+                    screen: [
+                        g.screen[0] * inv,
+                        g.screen[1] * inv,
+                        g.screen[2] * inv,
+                        g.screen[3] * inv,
+                    ],
+                    atlas: g.atlas,
+                    color: g.color,
+                })
+                .collect(),
+        );
         layout
     }
 
-    fn ensure_glyphs(&mut self, _layout: &TextLayout) -> Vec<GlyphQuad> {
-        self.last_result_key = None;
-        let result = match self.last_result.take() {
-            Some(r) => r,
-            None => return Vec::new(),
-        };
-
-        let inv = 1.0 / self.scale_factor;
-        result
-            .glyphs
-            .iter()
-            .map(|g| GlyphQuad {
-                screen: [
-                    g.screen[0] * inv,
-                    g.screen[1] * inv,
-                    g.screen[2] * inv,
-                    g.screen[3] * inv,
-                ],
-                atlas: g.atlas,
-                color: g.color,
-            })
-            .collect()
+    fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<GlyphQuad> {
+        self.glyph_cache
+            .get(&layout.layout_key)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 

@@ -20,7 +20,6 @@ pub struct Renderer {
     path_atlas: PathAtlas,
     path_atlas_texture: Option<AtlasTexture>,
     image_manager: ImageManager,
-    surface_format: wgpu::TextureFormat,
 }
 
 struct AtlasTexture {
@@ -53,7 +52,6 @@ impl Renderer {
             path_atlas: PathAtlas::new(512, 512),
             path_atlas_texture: None,
             image_manager: ImageManager::new(),
-            surface_format,
         }
     }
 
@@ -230,7 +228,10 @@ impl Renderer {
             // Which pipeline the current quad batch uses (glyph atlas, path atlas, or image).
             // Flushed when the bind group source changes.
             #[derive(Clone, Copy, PartialEq, Eq)]
-            enum QuadSource { GlyphAtlas, PathAtlas, Image }
+            enum QuadSource {
+                GlyphAtlas,
+                PathAtlas,
+            }
             let mut quad_source: Option<QuadSource> = None;
 
             // Flush helpers — each creates one buffer pair and one draw call.
@@ -298,6 +299,11 @@ impl Renderer {
             for cmd in &frame.draw_order {
                 match cmd {
                     fern_canvas::DrawCommand::Decoration(idx) => {
+                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
+                            &self.quad_pipeline, &self.shadow_pipeline,
+                            rect_batch, sdf_batch, quad_batch, shadow_batch,
+                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        quad_source = None;
                         let Some(rect) = frame.decorations.get(*idx) else { continue };
                         let verts = RectVertex::from_decoration(rect, scale_factor);
                         for v in &verts {
@@ -309,6 +315,11 @@ impl Renderer {
                         }
                     }
                     fern_canvas::DrawCommand::Shape(idx) => {
+                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
+                            &self.quad_pipeline, &self.shadow_pipeline,
+                            rect_batch, sdf_batch, quad_batch, shadow_batch,
+                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        quad_source = None;
                         let Some(shape) = frame.shapes.get(*idx) else { continue };
                         let verts = SdfVertex::from_shape_quad(shape, scale_factor);
                         for v in &verts {
@@ -321,30 +332,12 @@ impl Renderer {
                         }
                     }
                     fern_canvas::DrawCommand::Glyph(idx) => {
+                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
+                            &self.quad_pipeline, &self.shadow_pipeline,
+                            rect_batch, sdf_batch, quad_batch, shadow_batch,
+                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        quad_source = None;
                         if let Some(atlas) = &self.atlas_texture {
-                            // Flush quad batch if source changes
-                            if quad_source != Some(QuadSource::GlyphAtlas) && !quad_batch.is_empty() {
-                                // Flush current quad batch with previous source
-                                let bg = match quad_source {
-                                    Some(QuadSource::PathAtlas) => self.path_atlas_texture.as_ref().map(|a| &a.bind_group),
-                                    _ => self.atlas_texture.as_ref().map(|a| &a.bind_group),
-                                };
-                                if let Some(bind_group) = bg {
-                                    let indices = crate::vertex::generate_quad_indices(quad_batch.len() / 4);
-                                    let vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                        label: None, contents: bytemuck::cast_slice(&quad_batch), usage: wgpu::BufferUsages::VERTEX,
-                                    });
-                                    let ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                        label: None, contents: bytemuck::cast_slice(&indices), usage: wgpu::BufferUsages::INDEX,
-                                    });
-                                    pass.set_pipeline(&self.quad_pipeline);
-                                    pass.set_bind_group(0, bind_group, &[]);
-                                    pass.set_vertex_buffer(0, vb.slice(..));
-                                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                                    pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
-                                }
-                                quad_batch.clear();
-                            }
                             quad_source = Some(QuadSource::GlyphAtlas);
 
                             let Some(glyph) = frame.glyphs.get(*idx) else { continue };
@@ -360,6 +353,11 @@ impl Renderer {
                         }
                     }
                     fern_canvas::DrawCommand::Shadow(idx) => {
+                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
+                            &self.quad_pipeline, &self.shadow_pipeline,
+                            rect_batch, sdf_batch, quad_batch, shadow_batch,
+                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        quad_source = None;
                         let Some(shadow) = frame.shadows.get(*idx) else { continue };
                         let verts = ShadowVertex::from_shadow_quad(shadow, scale_factor);
                         for v in &verts {
@@ -382,29 +380,12 @@ impl Renderer {
                         self.draw_image(&mut pass, image, scale_factor, viewport_width, viewport_height, current_opacity, &current_transform);
                     }
                     fern_canvas::DrawCommand::Path(idx) => {
+                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
+                            &self.quad_pipeline, &self.shadow_pipeline,
+                            rect_batch, sdf_batch, quad_batch, shadow_batch,
+                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        quad_source = None;
                         if let Some(Some(region)) = path_regions.get(*idx) {
-                            // Flush quad batch if source changes
-                            if quad_source != Some(QuadSource::PathAtlas) && !quad_batch.is_empty() {
-                                let bg = match quad_source {
-                                    Some(QuadSource::GlyphAtlas) => self.atlas_texture.as_ref().map(|a| &a.bind_group),
-                                    _ => self.atlas_texture.as_ref().map(|a| &a.bind_group),
-                                };
-                                if let Some(bind_group) = bg {
-                                    let indices = crate::vertex::generate_quad_indices(quad_batch.len() / 4);
-                                    let vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                        label: None, contents: bytemuck::cast_slice(&quad_batch), usage: wgpu::BufferUsages::VERTEX,
-                                    });
-                                    let ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                        label: None, contents: bytemuck::cast_slice(&indices), usage: wgpu::BufferUsages::INDEX,
-                                    });
-                                    pass.set_pipeline(&self.quad_pipeline);
-                                    pass.set_bind_group(0, bind_group, &[]);
-                                    pass.set_vertex_buffer(0, vb.slice(..));
-                                    pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                                    pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
-                                }
-                                quad_batch.clear();
-                            }
                             quad_source = Some(QuadSource::PathAtlas);
 
                             let Some(entry) = frame.paths.get(*idx) else { continue };
@@ -1068,4 +1049,76 @@ fn create_shadow_pipeline(
         multiview_mask: None,
         cache: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use fern_canvas::render_frame::{DrawCommand, GlyphQuad, PaintData, ShapeKind, ShapeQuad};
+    use fern_canvas::RenderFrame;
+
+    use super::*;
+
+    #[test]
+    fn glyph_quad_renders_over_shape_in_offscreen_target() {
+        let Some((mut renderer, device, queue)) =
+            pollster::block_on(crate::test_support::create_test_renderer("fern_render_test_device"))
+        else {
+            return;
+        };
+
+        renderer.upload_atlas(
+            2,
+            2,
+            &[
+                255, 255, 255, 255, 255, 255, 255, 255,
+                255, 255, 255, 255, 255, 255, 255, 255,
+            ],
+        );
+
+        let mut frame = RenderFrame::new();
+        frame.shapes.push(ShapeQuad {
+            screen: [4.0, 4.0, 24.0, 24.0],
+            color: [0.2, 0.6, 0.9, 1.0],
+            shape: ShapeKind::RoundedRect,
+            stroke_width: 0.0,
+            corner_radii: [0.0; 4],
+            paint_data: PaintData::Solid,
+        });
+        frame.draw_order.push(DrawCommand::Shape(0));
+
+        frame.glyphs.push(GlyphQuad {
+            screen: [10.0, 10.0, 8.0, 8.0],
+            atlas: [0.0, 0.0, 2.0, 2.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+        });
+        frame.draw_order.push(DrawCommand::Glyph(0));
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fern_render_test_target"),
+            size: wgpu::Extent3d {
+                width: 32,
+                height: 32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        renderer.render(&frame, &view, 1.0, 32, 32, [0.0, 0.0, 0.0, 0.0]);
+
+        let pixels = crate::test_support::read_texture_rgba(&device, &queue, &texture, 32, 32);
+        let center = ((14 * 32 + 14) * 4) as usize;
+        let blue_only = [pixels[center], pixels[center + 1], pixels[center + 2], pixels[center + 3]];
+
+        assert!(
+            blue_only[0] > 200 && blue_only[1] > 200 && blue_only[2] > 200,
+            "expected glyph pixel to be visible over shape, got {:?}",
+            blue_only
+        );
+    }
 }
