@@ -56,6 +56,10 @@ pub struct AtlasInfo {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+    /// True when glyph eviction occurred — callers that cache glyph output
+    /// (e.g. paint caches) must invalidate, since evicted atlas space may
+    /// be reused by future glyph allocations.
+    pub glyphs_evicted: bool,
 }
 
 /// A mock text backend for headless testing.
