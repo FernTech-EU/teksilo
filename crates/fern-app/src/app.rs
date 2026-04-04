@@ -1,19 +1,16 @@
-use std::sync::Arc;
-
 use fern_canvas::SizeProposal;
 use fern_core::app_command::{AppCommand, ErasedCommand};
 use fern_core::app_event::AppEvent;
 use fern_core::event::WidgetEvent;
 use fern_core::{WidgetId, WidgetTree};
 use fern_platform::event_translation;
-use fern_platform::PlatformWindow;
 use fern_tokens::Theme;
 
 #[cfg(feature = "text")]
 use fern_text::SharedTypesetter;
 
 use crate::command_context::CommandContext;
-use crate::window_config::{FernWindowId, WindowConfig};
+use crate::window_config::WindowConfig;
 use crate::window_manager::WindowManager;
 
 /// A thread-safe handle for posting `AppEvent`s to the UI thread.
@@ -417,6 +414,7 @@ impl FernAppBuilder {
                                         // by future allocations. Invalidate all paint caches so
                                         // widgets repaint with fresh glyph data.
                                         if atlas.glyphs_evicted {
+                                            typesetter.bridge().borrow_mut().invalidate_cache();
                                             managed.tree.invalidate_all_paints();
                                             frame = managed.tree.render();
                                             // Re-upload atlas: the repaint may have rasterized

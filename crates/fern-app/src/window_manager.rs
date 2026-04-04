@@ -5,14 +5,10 @@
 //! by winit `WindowId`, broadcasts environment changes to all windows, and
 //! handles modal dialog blocking.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
-use fern_canvas::SizeProposal;
-use fern_core::event::WidgetEvent;
 use fern_core::WidgetTree;
-use fern_platform::event_translation::{self, TranslationState};
+use fern_platform::event_translation::TranslationState;
 use fern_platform::PlatformWindow;
 use fern_tokens::Theme;
 
@@ -178,13 +174,8 @@ impl WindowManager {
         }
     }
 
-    /// Get the ManagedWindow for a winit WindowId.
-    pub fn get_by_winit(&self, id: winit::window::WindowId) -> Option<&ManagedWindow> {
-        self.windows.get(&id)
-    }
-
     /// Get a mutable ManagedWindow for a winit WindowId.
-    pub fn get_by_winit_mut(
+    pub(crate) fn get_by_winit_mut(
         &mut self,
         id: winit::window::WindowId,
     ) -> Option<&mut ManagedWindow> {
@@ -233,14 +224,10 @@ impl WindowManager {
     }
 
     /// Iterate over all managed windows.
-    pub fn iter(&self) -> impl Iterator<Item = &ManagedWindow> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &ManagedWindow> {
         self.windows.values()
     }
 
-    /// Iterate mutably over all managed windows.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ManagedWindow> {
-        self.windows.values_mut()
-    }
 
     /// Get the winit WindowId for a FernWindowId.
     pub fn winit_id_for_fern(&self, fern_id: FernWindowId) -> Option<winit::window::WindowId> {

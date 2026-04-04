@@ -1921,8 +1921,8 @@ fn layout_widget_recursive(
     let bounds = Rect::new(
         parent_bounds.x,
         parent_bounds.y,
-        desired_size.width,
-        desired_size.height,
+        proposal.width.unwrap_or(desired_size.width),
+        proposal.height.unwrap_or(desired_size.height),
     );
     if let Some(node) = arena.get_mut(id) {
         if node.bounds != bounds {
@@ -1996,7 +1996,46 @@ fn layout_widget_recursive(
 mod tests {
     use super::*;
     use crate::test_widgets::{FillWidget, InsetWidget, StackWidget};
+    use fern_canvas::Size;
     use fern_tokens::{Color, CornerRadius};
+
+    #[derive(Debug)]
+    struct ShrinkWrapContainer {
+        child: WidgetId,
+        inset: f32,
+    }
+
+    impl Widget for ShrinkWrapContainer {
+        fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+            let child_size = ctx
+                .child_size(self.child, SizeProposal::unspecified())
+                .unwrap_or(Size::ZERO);
+            Size::new(
+                child_size.width + self.inset * 2.0,
+                child_size.height + self.inset * 2.0,
+            )
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = Point::new(bounds.x + self.inset, bounds.y + self.inset);
+                child.size = Size::new(
+                    (bounds.width - self.inset * 2.0).max(0.0),
+                    (bounds.height - self.inset * 2.0).max(0.0),
+                );
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            vec![self.child]
+        }
+    }
 
     #[test]
     fn single_widget_fills_proposal() {
@@ -2035,6 +2074,24 @@ mod tests {
         assert_eq!(cb.y, 10.0);
         assert_eq!(cb.width, 80.0);
         assert_eq!(cb.height, 30.0);
+    }
+
+    #[test]
+    fn recursive_layout_preserves_exact_parent_placement_for_containers() {
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new());
+        let shrink = tree.add(ShrinkWrapContainer { child: leaf, inset: 8.0 });
+        let root = tree.add(StackWidget::new().add_child(shrink));
+
+        tree.layout(SizeProposal::exact(120.0, 80.0));
+
+        assert_eq!(tree.bounds(root), Rect::new(0.0, 0.0, 120.0, 80.0));
+        assert_eq!(
+            tree.bounds(shrink),
+            Rect::new(0.0, 0.0, 120.0, 80.0),
+            "child container should keep the exact size assigned by its parent"
+        );
+        assert_eq!(tree.bounds(leaf), Rect::new(8.0, 8.0, 104.0, 64.0));
     }
 
     #[test]

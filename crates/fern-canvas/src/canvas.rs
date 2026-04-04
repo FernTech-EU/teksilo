@@ -322,6 +322,9 @@ impl Canvas {
         };
         let mut backend = backend.borrow_mut();
         let glyphs = backend.ensure_glyphs(layout);
+        if glyphs.is_empty() {
+            return false;
+        }
 
         for glyph in &glyphs {
             let mut offset_glyph = *glyph;
