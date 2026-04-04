@@ -6,7 +6,7 @@ use fern_tokens::{Color, TextStyle};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{Reactive, State};
+use fern_core::state::Reactive;
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget};
 
 /// A leaf widget that renders a single line of text via the TextBackend.

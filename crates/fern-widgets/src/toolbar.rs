@@ -3,8 +3,8 @@
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::composite_widget::{BuildContext, CompositeWidget};
 use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::state::{Reactive, State};
-use fern_core::widget::{EventContext, IntoWidgetTree};
+use fern_core::state::Reactive;
+use fern_core::widget::EventContext;
 use fern_core::widget_id::WidgetId;
 
 use crate::primitives::HStack;
