@@ -1,5 +1,5 @@
 use fern_canvas::Point;
-use fern_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+use fern_core::event::{Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
 use fern_core::gesture::GestureEvent;
 
 /// State tracked during event translation.
@@ -167,6 +167,37 @@ fn translate_named_key(key: winit::keyboard::NamedKey) -> Option<Key> {
         NamedKey::F12 => Some(Key::F12),
         _ => None,
     }
+}
+
+/// Translate a winit MouseWheel event to a WidgetEvent::Scroll.
+pub fn translate_mouse_wheel(
+    delta: winit::event::MouseScrollDelta,
+    _phase: winit::event::TouchPhase,
+    state: &TranslationState,
+) -> Option<WidgetEvent> {
+    // Winit uses "natural" sign: positive y = scroll up (content moves down).
+    // FernUI's ScrollDelta uses positive y = increase scroll offset (content moves up).
+    // Negate both axes to match.
+    //
+    // Winit reports raw notch counts (typically 1.0 per wheel notch). Multiply
+    // by a platform factor so each notch scrolls a comfortable number of lines.
+    // 3 lines per notch matches the Windows/GTK default.
+    const LINES_PER_NOTCH: f32 = 3.0;
+    let scroll_delta = match delta {
+        winit::event::MouseScrollDelta::LineDelta(x, y) => {
+            ScrollDelta::Lines {
+                x: -x * LINES_PER_NOTCH,
+                y: -y * LINES_PER_NOTCH,
+            }
+        }
+        winit::event::MouseScrollDelta::PixelDelta(pos) => ScrollDelta::Pixels {
+            x: -(pos.x / state.scale_factor) as f32,
+            y: -(pos.y / state.scale_factor) as f32,
+        },
+    };
+    Some(WidgetEvent::Scroll {
+        delta: scroll_delta,
+    })
 }
 
 // --- Desktop trackpad gesture passthrough ---

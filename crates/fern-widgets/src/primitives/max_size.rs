@@ -135,6 +135,10 @@ impl Widget for MaxSize {
 
     fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {}
 
+    fn clips_children(&self) -> bool {
+        self.max_width.is_some() || self.max_height.is_some()
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
