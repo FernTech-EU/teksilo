@@ -298,7 +298,7 @@ impl Renderer {
             for cmd in &frame.draw_order {
                 match cmd {
                     fern_canvas::DrawCommand::Decoration(idx) => {
-                        let rect = &frame.decorations[*idx];
+                        let Some(rect) = frame.decorations.get(*idx) else { continue };
                         let verts = RectVertex::from_decoration(rect, scale_factor);
                         for v in &verts {
                             let tp = apply_transform_pixel(v.position, &current_transform);
@@ -309,7 +309,7 @@ impl Renderer {
                         }
                     }
                     fern_canvas::DrawCommand::Shape(idx) => {
-                        let shape = &frame.shapes[*idx];
+                        let Some(shape) = frame.shapes.get(*idx) else { continue };
                         let verts = SdfVertex::from_shape_quad(shape, scale_factor);
                         for v in &verts {
                             let tp = apply_transform_pixel(v.position, &current_transform);
@@ -347,7 +347,7 @@ impl Renderer {
                             }
                             quad_source = Some(QuadSource::GlyphAtlas);
 
-                            let glyph = &frame.glyphs[*idx];
+                            let Some(glyph) = frame.glyphs.get(*idx) else { continue };
                             let verts = QuadVertex::from_glyph_quad(glyph, scale_factor, atlas.width, atlas.height);
                             for v in &verts {
                                 let tp = apply_transform_pixel(v.position, &current_transform);
@@ -360,7 +360,7 @@ impl Renderer {
                         }
                     }
                     fern_canvas::DrawCommand::Shadow(idx) => {
-                        let shadow = &frame.shadows[*idx];
+                        let Some(shadow) = frame.shadows.get(*idx) else { continue };
                         let verts = ShadowVertex::from_shadow_quad(shadow, scale_factor);
                         for v in &verts {
                             let tp = apply_transform_pixel(v.position, &current_transform);
@@ -378,7 +378,7 @@ impl Renderer {
                             rect_batch, sdf_batch, quad_batch, shadow_batch,
                             self.atlas_texture, self.path_atlas_texture, quad_source);
                         quad_source = None;
-                        let image = &frame.images[*idx];
+                        let Some(image) = frame.images.get(*idx) else { continue };
                         self.draw_image(&mut pass, image, scale_factor, viewport_width, viewport_height, current_opacity, &current_transform);
                     }
                     fern_canvas::DrawCommand::Path(idx) => {
@@ -407,8 +407,8 @@ impl Renderer {
                             }
                             quad_source = Some(QuadSource::PathAtlas);
 
-                            let entry = &frame.paths[*idx];
-                            let path_atlas = self.path_atlas_texture.as_ref().unwrap();
+                            let Some(entry) = frame.paths.get(*idx) else { continue };
+                            let Some(path_atlas) = self.path_atlas_texture.as_ref() else { continue };
                             let verts = path_quad_verts(entry, region, scale_factor, path_atlas.width, path_atlas.height, current_opacity, &current_transform);
                             for v in &verts {
                                 quad_batch.push(QuadVertex {
@@ -425,10 +425,13 @@ impl Renderer {
                             rect_batch, sdf_batch, quad_batch, shadow_batch,
                             self.atlas_texture, self.path_atlas_texture, quad_source);
                         quad_source = None;
-                        let x = (rect.x * scale_factor) as u32;
-                        let y = (rect.y * scale_factor) as u32;
-                        let w = (rect.width * scale_factor).ceil() as u32;
-                        let h = (rect.height * scale_factor).ceil() as u32;
+                        let x = (rect.x * scale_factor).max(0.0) as u32;
+                        let y = (rect.y * scale_factor).max(0.0) as u32;
+                        let w = (rect.width * scale_factor).ceil().max(0.0) as u32;
+                        let h = (rect.height * scale_factor).ceil().max(0.0) as u32;
+                        // Clamp to viewport — wgpu requires x+w <= width, y+h <= height.
+                        let x = x.min(viewport_width);
+                        let y = y.min(viewport_height);
                         let w = w.min(viewport_width.saturating_sub(x));
                         let h = h.min(viewport_height.saturating_sub(y));
                         let clipped = if let Some(&[cx, cy, cw, ch]) = clip_stack.last() {

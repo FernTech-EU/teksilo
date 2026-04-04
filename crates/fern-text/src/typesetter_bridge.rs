@@ -43,6 +43,10 @@ pub struct TypesetterBridge {
     scale_factor: f32,
     /// Layout metrics cache: avoids re-shaping text just for size measurement.
     layout_cache: HashMap<LayoutCacheKey, TextLayout>,
+    /// Whether any text work (layout_single_line/ensure_glyphs) happened
+    /// since the last atlas_info() call. When false, we skip advancing
+    /// the eviction generation to avoid aging out idle-but-visible glyphs.
+    had_text_activity: bool,
 }
 
 impl TypesetterBridge {
@@ -55,6 +59,7 @@ impl TypesetterBridge {
             last_result_key: None,
             scale_factor: 1.0,
             layout_cache: HashMap::new(),
+            had_text_activity: false,
         }
     }
 
@@ -85,14 +90,19 @@ impl TypesetterBridge {
     }
 
     /// Get atlas information for GPU upload.
-    /// Calls render() internally to synchronize atlas metadata.
+    /// Only advances the glyph cache generation and runs eviction when
+    /// text work happened since the last call — this prevents aging out
+    /// glyphs that are still visible but cached (idle app scenario).
     pub fn atlas_info(&mut self) -> AtlasInfo {
-        let frame = self.typesetter.render();
+        let (dirty, width, height, pixels, glyphs_evicted) =
+            self.typesetter.atlas_snapshot(self.had_text_activity);
+        self.had_text_activity = false;
         AtlasInfo {
-            dirty: frame.atlas_dirty,
-            width: frame.atlas_width,
-            height: frame.atlas_height,
-            pixels: frame.atlas_pixels.clone(),
+            dirty,
+            width,
+            height,
+            pixels: pixels.to_vec(),
+            glyphs_evicted,
         }
     }
 
@@ -147,6 +157,7 @@ impl TextBackend for TypesetterBridge {
         }
 
         // Full shaping — either cache miss or last_result was consumed
+        self.had_text_activity = true;
         let mut format = Self::to_text_format(style);
         format.font_size = format.font_size.map(|s| s * sf);
 

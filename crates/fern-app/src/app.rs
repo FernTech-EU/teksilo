@@ -331,6 +331,18 @@ impl FernAppBuilder {
                                     managed.platform_window.request_redraw();
                                 }
                             }
+                            WindowEvent::MouseWheel { delta, phase, .. } => {
+                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
+                                    if let Some(evt) = event_translation::translate_mouse_wheel(
+                                        delta,
+                                        phase,
+                                        &managed.translation_state,
+                                    ) {
+                                        managed.tree.dispatch_event(evt);
+                                    }
+                                    managed.platform_window.request_redraw();
+                                }
+                            }
                             WindowEvent::ModifiersChanged(mods) => {
                                 if let Some(managed) = wm.get_by_winit_mut(window_id) {
                                     managed.current_modifiers = mods.state();
@@ -385,7 +397,7 @@ impl FernAppBuilder {
                                     let a11y_update = managed.tree.sync_accessibility();
                                     managed.platform_window.update_accessibility(a11y_update);
 
-                                    let frame = managed.tree.render();
+                                    let mut frame = managed.tree.render();
 
                                     #[cfg(feature = "text")]
                                     {
@@ -400,6 +412,28 @@ impl FernAppBuilder {
                                                     atlas.height,
                                                     &atlas.pixels,
                                                 );
+                                        }
+                                        // Glyph eviction freed atlas space that may be reused
+                                        // by future allocations. Invalidate all paint caches so
+                                        // widgets repaint with fresh glyph data.
+                                        if atlas.glyphs_evicted {
+                                            managed.tree.invalidate_all_paints();
+                                            frame = managed.tree.render();
+                                            // Re-upload atlas: the repaint may have rasterized
+                                            // new glyphs into the freed atlas space.
+                                            let atlas2 =
+                                                typesetter.bridge().borrow_mut().atlas_info();
+                                            if atlas2.dirty && atlas2.width > 0 && atlas2.height > 0
+                                            {
+                                                managed
+                                                    .platform_window
+                                                    .renderer_mut()
+                                                    .upload_atlas(
+                                                        atlas2.width,
+                                                        atlas2.height,
+                                                        &atlas2.pixels,
+                                                    );
+                                            }
                                         }
                                     }
 

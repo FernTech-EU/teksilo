@@ -397,10 +397,12 @@ impl WidgetArena {
     }
 
     /// Mark all widgets as needing layout and paint (e.g. after a theme change).
+    /// Also clears per-widget paint caches since the visual output is stale.
     pub fn mark_all_dirty(&mut self) {
         for (_, node) in self.nodes.iter_mut() {
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
+            node.cached_paint = None;
         }
     }
 

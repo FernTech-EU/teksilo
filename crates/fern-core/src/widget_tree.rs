@@ -1305,6 +1305,7 @@ impl WidgetTree {
             }
         }
 
+        frame.debug_validate_stacks();
         self.cached_frame = Some(frame.clone());
         frame
     }
@@ -1773,6 +1774,20 @@ impl WidgetTree {
         self.arena.mark_ancestors_need_layout(id);
         self.cached_frame = None;
         self.a11y_dirty = true;
+    }
+
+    /// Invalidate all per-widget paint caches and the assembled frame cache.
+    /// Forces every widget to repaint on the next `render()` call.
+    /// Used when external state (e.g. glyph atlas eviction) makes cached
+    /// paint output stale.
+    pub fn invalidate_all_paints(&mut self) {
+        for id in self.arena.active_ids() {
+            if let Some(node) = self.arena.get_mut(id) {
+                node.dirty.needs_paint = true;
+                node.cached_paint = None;
+            }
+        }
+        self.cached_frame = None;
     }
 }
 

@@ -59,6 +59,61 @@ impl RenderFrame {
     }
 }
 
+impl RenderFrame {
+    /// Validate that clip and opacity stacks are balanced in the draw order.
+    /// Only runs in debug builds. Panics with a descriptive message if
+    /// any push/pop pair is unbalanced.
+    pub fn debug_validate_stacks(&self) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let mut clip_depth: i32 = 0;
+        let mut opacity_depth: i32 = 0;
+        let mut blend_depth: i32 = 0;
+        for (i, cmd) in self.draw_order.iter().enumerate() {
+            match cmd {
+                DrawCommand::SetClip(_) => clip_depth += 1,
+                DrawCommand::ClearClip => {
+                    clip_depth -= 1;
+                    debug_assert!(
+                        clip_depth >= 0,
+                        "RenderFrame: ClearClip without matching SetClip at draw_order[{i}]"
+                    );
+                }
+                DrawCommand::SetOpacity(_) => opacity_depth += 1,
+                DrawCommand::RestoreOpacity => {
+                    opacity_depth -= 1;
+                    debug_assert!(
+                        opacity_depth >= 0,
+                        "RenderFrame: RestoreOpacity without matching SetOpacity at draw_order[{i}]"
+                    );
+                }
+                DrawCommand::SetBlendMode(_) => blend_depth += 1,
+                DrawCommand::RestoreBlendMode => {
+                    blend_depth -= 1;
+                    debug_assert!(
+                        blend_depth >= 0,
+                        "RenderFrame: RestoreBlendMode without matching SetBlendMode at draw_order[{i}]"
+                    );
+                }
+                _ => {}
+            }
+        }
+        debug_assert!(
+            clip_depth == 0,
+            "RenderFrame: {clip_depth} unmatched SetClip(s) without ClearClip"
+        );
+        debug_assert!(
+            opacity_depth == 0,
+            "RenderFrame: {opacity_depth} unmatched SetOpacity(s) without RestoreOpacity"
+        );
+        debug_assert!(
+            blend_depth == 0,
+            "RenderFrame: {blend_depth} unmatched SetBlendMode(s) without RestoreBlendMode"
+        );
+    }
+}
+
 /// A positioned glyph to render as a textured rectangle from the glyph atlas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlyphQuad {
