@@ -110,14 +110,19 @@ fn resolve_circle_border(
     selected: bool,
     colors: &fern_tokens::ColorTokens,
 ) -> Color {
-    if state == InteractionState::Focused {
-        return colors.focus_ring;
-    }
     match state {
         InteractionState::Disabled => colors.disabled_fill,
         _ if selected => colors.primary,
         InteractionState::Hovered => colors.border_strong,
         _ => colors.border,
+    }
+}
+
+fn resolve_focus_ring(state: InteractionState, colors: &fern_tokens::ColorTokens) -> Color {
+    if state == InteractionState::Focused {
+        colors.focus_ring
+    } else {
+        Color::TRANSPARENT
     }
 }
 
@@ -177,7 +182,32 @@ impl CompositeWidget for RadioButton {
         // Drive dot visibility from the shared selected state
         ctx.visible_when(dot_sized, selected.map(move |s| *s == value));
 
-        let radio = ctx.add(ZStack::new().add_child(outer_sized).add_child(dot_sized));
+        // Outer focus ring — 3px offset outside the 18×18 circle (24×24 total)
+        let focus_ring_color = {
+            let colors = theme.colors.clone();
+            interaction.map(move |s| resolve_focus_ring(*s, &colors))
+        };
+        let focus_ring_width = interaction.map(|s| {
+            if *s == InteractionState::Focused { 2.0_f32 } else { 0.0 }
+        });
+        let focus_ring = RectWidget::new()
+            .bind_border_color(focus_ring_color)
+            .bind_border_width(focus_ring_width)
+            .corner_radius(CornerRadius::uniform(theme.shape.radius_full));
+        let focus_ring_id = ctx.add(focus_ring);
+        let focus_ring_sized = ctx.add(
+            FixedSize::new()
+                .bind_width(fern_core::state::Reactive::Static(24.0))
+                .bind_height(fern_core::state::Reactive::Static(24.0))
+                .set_child(focus_ring_id),
+        );
+
+        let radio = ctx.add(
+            ZStack::new()
+                .add_child(focus_ring_sized)
+                .add_child(outer_sized)
+                .add_child(dot_sized),
+        );
 
         let mut row = HStack::new().spacing(8.0).add_child(radio);
         if let Some(ref label) = self.label {

@@ -39,7 +39,7 @@ impl Toggle {
         let initial = if *on.get() { 1.0 } else { 0.0 };
         Self {
             on,
-            knob_position: State::new(initial),
+            knob_position: State::new_animated(initial),
             label: None,
             enabled: true,
             hovered: Cell::new(false),
@@ -153,11 +153,19 @@ impl Widget for Toggle {
             track_color,
         );
 
-        // Focus ring
-        if self.focus_origin.is_some() {
+        // Focus ring — only for keyboard navigation, not pointer clicks.
+        // Drawn with a 2px offset outside the track so it's visible over any fill color.
+        if self.focus_origin == Some(FocusOrigin::Keyboard) {
+            let offset = 3.0; // 2px gap + half of 2px stroke
+            let ring_rect = Rect::new(
+                track_rect.x - offset,
+                track_rect.y - offset,
+                track_rect.width + offset * 2.0,
+                track_rect.height + offset * 2.0,
+            );
             canvas.stroke_rounded_rect(
-                track_rect,
-                CornerRadius::uniform(TRACK_HEIGHT / 2.0),
+                ring_rect,
+                CornerRadius::uniform(TRACK_HEIGHT / 2.0 + offset),
                 colors.focus_ring,
                 2.0,
             );

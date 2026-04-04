@@ -31,7 +31,7 @@ impl ProgressBar {
         Self {
             value: Reactive::Static(value.clamp(0.0, 1.0)),
             indeterminate: false,
-            indeterminate_pos: State::new(0.0),
+            indeterminate_pos: State::new_animated(0.0),
             orientation: Orientation::Horizontal,
             thickness: DEFAULT_THICKNESS,
             track_color: None,
@@ -41,7 +41,7 @@ impl ProgressBar {
 
     /// Create an indeterminate progress bar (animated sweep).
     pub fn indeterminate() -> Self {
-        let pos = State::new(0.0);
+        let pos = State::new_animated(0.0);
         // Start the animation loop — the first set_animated kicks it off.
         pos.set_animated(1.0, std::time::Duration::from_millis(1500), Easing::EaseInOut);
         Self {

@@ -216,7 +216,7 @@ impl Widget for SegmentedControl {
         }
 
         // Focus ring around the whole control
-        if self.focus_origin.is_some() {
+        if self.focus_origin == Some(FocusOrigin::Keyboard) {
             canvas.stroke_rounded_rect(
                 bounds,
                 CornerRadius::uniform(shape.radius_sm),

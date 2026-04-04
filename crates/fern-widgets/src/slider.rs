@@ -235,8 +235,16 @@ impl Widget for Slider {
         );
         canvas.fill_rounded_rect(thumb_rect, CornerRadius::uniform(THUMB_RADIUS), thumb_color);
 
-        if self.focus_origin.is_some() {
-            canvas.stroke_rounded_rect(thumb_rect, CornerRadius::uniform(THUMB_RADIUS), colors.focus_ring, 2.0);
+        // Focus ring with offset so it's visible over the primary-colored thumb
+        if self.focus_origin == Some(FocusOrigin::Keyboard) {
+            let offset = 3.0;
+            let ring_rect = Rect::new(
+                thumb_rect.x - offset,
+                thumb_rect.y - offset,
+                thumb_rect.width + offset * 2.0,
+                thumb_rect.height + offset * 2.0,
+            );
+            canvas.stroke_rounded_rect(ring_rect, CornerRadius::uniform(THUMB_RADIUS + offset), colors.focus_ring, 2.0);
         }
     }
 

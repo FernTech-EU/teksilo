@@ -17,7 +17,9 @@ use fern_core::widget::{CursorIcon, EventContext};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
-use crate::primitives::{HStack, IconWidget, MaxSize, Spacer, TextWidget, VStack};
+use fern_tokens::{Color, CornerRadius};
+
+use crate::primitives::{HStack, IconWidget, MaxSize, RectWidget, Spacer, TextWidget, VStack, ZStack};
 
 /// Large enough to never clip content when fully expanded.
 const EXPANDED_MAX_HEIGHT: f32 = 10000.0;
@@ -30,6 +32,7 @@ pub struct Accordion {
     expanded: State<bool>,
     content_id: Option<WidgetId>,
     content_height: RefCell<Option<State<f32>>>,
+    keyboard_focused: RefCell<Option<State<bool>>>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
     visible_when_state: Option<Reactive<bool>>,
@@ -43,6 +46,7 @@ impl Accordion {
             expanded,
             content_id: None,
             content_height: RefCell::new(None),
+            keyboard_focused: RefCell::new(None),
             focus_origin: None,
             tap_recognizer: TapRecognizer::new(),
             visible_when_state: None,
@@ -92,6 +96,10 @@ impl CompositeWidget for Accordion {
         let expanded = self.expanded.clone();
         let is_expanded = *expanded.get();
 
+        // Keyboard focus state for focus ring
+        let kb_focused = ctx.state(false);
+        *self.keyboard_focused.borrow_mut() = Some(kb_focused.clone());
+
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
         let chevron_down_id = ctx.add(
@@ -118,7 +126,22 @@ impl CompositeWidget for Accordion {
                 .add_child(chevron_right_id),
         );
 
-        let mut vstack = VStack::new().spacing(theme.spacing.xs).add_child(header);
+        // Focus ring border around the header
+        let focus_ring_color = {
+            let colors = theme.colors.clone();
+            kb_focused.map(move |focused| {
+                if *focused { colors.focus_ring } else { Color::TRANSPARENT }
+            })
+        };
+        let focus_ring_width = kb_focused.map(|focused| if *focused { 2.0_f32 } else { 0.0 });
+        let focus_rect = RectWidget::new()
+            .bind_border_color(focus_ring_color)
+            .bind_border_width(focus_ring_width)
+            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
+        let focus_rect_id = ctx.add(focus_rect);
+        let header_with_ring = ctx.add(ZStack::new().add_child(focus_rect_id).add_child(header));
+
+        let mut vstack = VStack::new().spacing(theme.spacing.xs).add_child(header_with_ring);
         if let Some(content_id) = self.content_id {
             // Wrap content in MaxSize with animated height for smooth expand/collapse
             let initial_height = if is_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
@@ -177,10 +200,16 @@ impl CompositeWidget for Accordion {
             }
             WidgetEvent::FocusGained { origin } => {
                 self.focus_origin = Some(*origin);
+                if let Some(ref s) = *self.keyboard_focused.borrow() {
+                    s.set(*origin == FocusOrigin::Keyboard);
+                }
                 EventResponse::Handled
             }
             WidgetEvent::FocusLost => {
                 self.focus_origin = None;
+                if let Some(ref s) = *self.keyboard_focused.borrow() {
+                    s.set(false);
+                }
                 EventResponse::Handled
             }
             _ => EventResponse::Ignored,

@@ -241,14 +241,19 @@ fn resolve_box_border(
     check: CheckState,
     colors: &fern_tokens::ColorTokens,
 ) -> Color {
-    if state == InteractionState::Focused {
-        return colors.focus_ring;
-    }
     match state {
         InteractionState::Disabled => colors.disabled_fill,
         _ if check.is_filled() => Color::TRANSPARENT,
         InteractionState::Hovered => colors.border_strong,
         _ => colors.border,
+    }
+}
+
+fn resolve_focus_ring(state: InteractionState, colors: &fern_tokens::ColorTokens) -> Color {
+    if state == InteractionState::Focused {
+        colors.focus_ring
+    } else {
+        Color::TRANSPARENT
     }
 }
 
@@ -339,8 +344,29 @@ impl CompositeWidget for Checkbox {
             }
         }
 
+        // Outer focus ring — 3px offset outside the 18×18 box (24×24 total)
+        let focus_ring_color = {
+            let colors = theme.colors.clone();
+            interaction.map(move |s| resolve_focus_ring(*s, &colors))
+        };
+        let focus_ring_width = interaction.map(|s| {
+            if *s == InteractionState::Focused { 2.0_f32 } else { 0.0 }
+        });
+        let focus_ring = RectWidget::new()
+            .bind_border_color(focus_ring_color)
+            .bind_border_width(focus_ring_width)
+            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm + 3.0));
+        let focus_ring_id = ctx.add(focus_ring);
+        let focus_ring_sized = ctx.add(
+            FixedSize::new()
+                .bind_width(fern_core::state::Reactive::Static(24.0))
+                .bind_height(fern_core::state::Reactive::Static(24.0))
+                .set_child(focus_ring_id),
+        );
+
         let check_box = ctx.add(
             ZStack::new()
+                .add_child(focus_ring_sized)
                 .add_child(box_sized)
                 .add_child(checkmark_id)
                 .add_child(dash_id),

@@ -16,7 +16,7 @@ use fern_core::widget_id::WidgetId;
 use fern_tokens::Color;
 
 use crate::button::InteractionState;
-use crate::primitives::{RectWidget, TextWidget, VStack};
+use crate::primitives::{RectWidget, TextWidget, VStack, ZStack};
 
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
@@ -120,6 +120,14 @@ fn resolve_link_color(state: InteractionState, colors: &fern_tokens::ColorTokens
     }
 }
 
+fn resolve_focus_border(state: InteractionState, colors: &fern_tokens::ColorTokens) -> Color {
+    if state == InteractionState::Focused {
+        colors.focus_ring
+    } else {
+        Color::TRANSPARENT
+    }
+}
+
 impl CompositeWidget for Link {
     fn build(&self, ctx: &mut BuildContext) -> WidgetId {
         let theme = ctx.theme().clone();
@@ -151,7 +159,23 @@ impl CompositeWidget for Link {
                 .set_child(underline_id),
         );
 
-        let root_id = ctx.add(VStack::new().spacing(0.0).add_child(text_id).add_child(underline_sized));
+        let content_id = ctx.add(VStack::new().spacing(0.0).add_child(text_id).add_child(underline_sized));
+
+        // Focus ring border — visible only on keyboard focus
+        let border_color = {
+            let colors = theme.colors.clone();
+            interaction.map(move |s| resolve_focus_border(*s, &colors))
+        };
+        let border_width = interaction.map(move |s| {
+            if *s == InteractionState::Focused { 2.0_f32 } else { 0.0 }
+        });
+        let focus_rect = RectWidget::new()
+            .bind_border_color(border_color)
+            .bind_border_width(border_width)
+            .corner_radius(fern_tokens::CornerRadius::uniform(theme.shape.radius_sm));
+        let focus_rect_id = ctx.add(focus_rect);
+
+        let root_id = ctx.add(ZStack::new().add_child(focus_rect_id).add_child(content_id));
 
         if let Some(ref tooltip_text) = self.tooltip_text {
             let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
