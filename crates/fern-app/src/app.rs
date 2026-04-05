@@ -5,6 +5,11 @@ use fern_core::event::WidgetEvent;
 use fern_core::{WidgetId, WidgetTree};
 use fern_platform::event_translation;
 use fern_tokens::Theme;
+use std::time::{Duration, Instant};
+use winit::application::ApplicationHandler;
+use winit::event::{StartCause, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::window::WindowId;
 
 #[cfg(feature = "text")]
 use fern_text::SharedTypesetter;
@@ -12,6 +17,298 @@ use fern_text::SharedTypesetter;
 use crate::command_context::CommandContext;
 use crate::window_config::WindowConfig;
 use crate::window_manager::WindowManager;
+
+struct FernAppHandler {
+    wm: WindowManager,
+    command_handler: Option<WindowCommandHandler>,
+    app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
+    initial_window: Option<WindowConfig>,
+    initial_created: bool,
+    idle_budget: Duration,
+    #[cfg(feature = "text")]
+    typesetter: SharedTypesetter,
+}
+
+impl FernAppHandler {
+    fn new(
+        theme: Theme,
+        command_handler: Option<WindowCommandHandler>,
+        app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
+        initial_window: WindowConfig,
+        #[cfg(feature = "text")] typesetter: SharedTypesetter,
+    ) -> Self {
+        let mut wm = WindowManager::new(theme);
+
+        #[cfg(feature = "text")]
+        {
+            wm.set_typesetter(typesetter.clone());
+        }
+
+        Self {
+            wm,
+            command_handler,
+            app_event_handler,
+            initial_window: Some(initial_window),
+            initial_created: false,
+            idle_budget: Duration::from_millis(4),
+            #[cfg(feature = "text")]
+            typesetter,
+        }
+    }
+
+    fn process_pending(&mut self, event_loop: &ActiveEventLoop) {
+        self.wm.process_pending(event_loop);
+    }
+
+    fn flush_commands(&mut self) -> bool {
+        self.wm.flush_commands_through(&mut self.command_handler)
+    }
+
+    fn maybe_exit(&self, event_loop: &ActiveEventLoop) {
+        if self.wm.is_empty() {
+            event_loop.exit();
+        }
+    }
+
+    fn update_control_flow(&self, event_loop: &ActiveEventLoop) {
+        let mut earliest_deadline: Option<Instant> = None;
+        for managed in self.wm.iter() {
+            if let Some(deadline) = managed.tree.next_timer_deadline() {
+                earliest_deadline = Some(match earliest_deadline {
+                    Some(current) => current.min(deadline),
+                    None => deadline,
+                });
+            }
+        }
+
+        if let Some(deadline) = earliest_deadline {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
+    fn post_event(&mut self, event_loop: &ActiveEventLoop) {
+        let had_commands = self.flush_commands();
+        self.process_pending(event_loop);
+        if had_commands {
+            self.wm.request_redraw_all();
+        }
+        self.maybe_exit(event_loop);
+        self.update_control_flow(event_loop);
+    }
+
+    fn handle_accessibility_actions(&mut self, window_id: WindowId, event: &WindowEvent) {
+        if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+            managed.platform_window.process_accessibility_event(event);
+
+            let actions = managed.platform_window.drain_accessibility_actions();
+            for req in actions {
+                let target_widget =
+                    fern_core::accessibility::node_id_to_widget_id(req.target_node);
+                managed.tree.dispatch_event(WidgetEvent::AccessAction {
+                    action: req.action,
+                    target: Some(target_widget),
+                });
+            }
+        }
+    }
+
+    fn handle_redraw_requested(&mut self, window_id: WindowId) {
+        if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+            if managed.tree.has_idle_work() {
+                managed.tree.run_idle_callbacks(self.idle_budget);
+            }
+
+            let size = managed.platform_window.surface_size();
+            let sf = managed.platform_window.scale_factor() as f32;
+            let proposal = SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
+
+            managed.tree.layout(proposal);
+
+            let a11y_update = managed.tree.sync_accessibility();
+            managed.platform_window.update_accessibility(a11y_update);
+
+            let mut frame = managed.tree.render();
+
+            #[cfg(feature = "text")]
+            {
+                let atlas = self.typesetter.bridge().borrow_mut().atlas_info();
+                if atlas.dirty && atlas.width > 0 && atlas.height > 0 {
+                    managed.platform_window.renderer_mut().upload_atlas(
+                        atlas.width,
+                        atlas.height,
+                        &atlas.pixels,
+                    );
+                }
+
+                if atlas.glyphs_evicted {
+                    self.typesetter.bridge().borrow_mut().invalidate_cache();
+                    managed.tree.invalidate_all_paints();
+                    frame = managed.tree.render();
+                    let atlas2 = self.typesetter.bridge().borrow_mut().atlas_info();
+                    if atlas2.dirty && atlas2.width > 0 && atlas2.height > 0 {
+                        managed.platform_window.renderer_mut().upload_atlas(
+                            atlas2.width,
+                            atlas2.height,
+                            &atlas2.pixels,
+                        );
+                    }
+                }
+            }
+
+            let clear = managed.tree.theme().colors.surface.to_array();
+            let _ = managed.platform_window.render_frame(&frame, clear);
+        }
+    }
+
+    fn handle_window_event_inner(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+        let fern_id = self.wm.fern_id_for_winit(window_id);
+
+        if let Some(fid) = fern_id {
+            if self.wm.is_blocked(fid) && !matches!(event, WindowEvent::CloseRequested) {
+                self.update_control_flow(event_loop);
+                return;
+            }
+        }
+
+        self.handle_accessibility_actions(window_id, &event);
+
+        match event {
+            WindowEvent::CloseRequested => {
+                if let Some(fid) = fern_id {
+                    self.wm.close_window(fid);
+                }
+            }
+            WindowEvent::Resized(new_size) => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    managed.platform_window.resize(new_size);
+                    managed.platform_window.request_redraw();
+                }
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    managed.translation_state.set_scale_factor(scale_factor);
+                    managed.platform_window.set_scale_factor(scale_factor);
+                }
+                #[cfg(feature = "text")]
+                {
+                    self.typesetter.set_scale_factor(scale_factor as f32);
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    if let Some(evt) = event_translation::translate_cursor_moved(
+                        position.x,
+                        position.y,
+                        &mut managed.translation_state,
+                    ) {
+                        managed.tree.dispatch_event(evt);
+                    }
+                    if managed.tree.needs_redraw() {
+                        managed.platform_window.request_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    if let Some(evt) = event_translation::translate_mouse_input(
+                        state,
+                        button,
+                        &managed.translation_state,
+                    ) {
+                        managed.tree.dispatch_event(evt);
+                    }
+                    managed.platform_window.request_redraw();
+                }
+            }
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    if let Some(evt) = event_translation::translate_mouse_wheel(
+                        delta,
+                        phase,
+                        &managed.translation_state,
+                    ) {
+                        managed.tree.dispatch_event(evt);
+                    }
+                    managed.platform_window.request_redraw();
+                }
+            }
+            WindowEvent::ModifiersChanged(mods) => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    managed.current_modifiers = mods.state();
+                }
+            }
+            WindowEvent::KeyboardInput { event: key_event, .. } => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    if let Some(key) = event_translation::translate_key(&key_event.logical_key) {
+                        let modifiers =
+                            event_translation::translate_modifiers(managed.current_modifiers);
+                        let text = key_event.text.as_ref().map(|t| t.to_string());
+                        match key_event.state {
+                            winit::event::ElementState::Pressed => {
+                                managed.tree.dispatch_event(WidgetEvent::KeyDown {
+                                    key,
+                                    modifiers,
+                                    text,
+                                });
+                            }
+                            winit::event::ElementState::Released => {
+                                managed.tree.dispatch_event(WidgetEvent::KeyUp { key, modifiers });
+                            }
+                        }
+                    }
+                    managed.platform_window.request_redraw();
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                self.handle_redraw_requested(window_id);
+            }
+            _ => {}
+        }
+
+        self.post_event(event_loop);
+    }
+}
+
+impl ApplicationHandler<AppEvent> for FernAppHandler {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.initial_created {
+            if let Some(config) = self.initial_window.take() {
+                self.wm.create_window(config, event_loop);
+                self.initial_created = true;
+            }
+        }
+
+        self.process_pending(event_loop);
+        self.update_control_flow(event_loop);
+    }
+
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        if matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            self.wm.request_redraw_all();
+        }
+        self.update_control_flow(event_loop);
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
+        if let Some(handler) = &mut self.app_event_handler {
+            handler(&event);
+        }
+        self.wm.request_redraw_all();
+        self.post_event(event_loop);
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+        self.handle_window_event_inner(event_loop, window_id, event);
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.process_pending(event_loop);
+        self.maybe_exit(event_loop);
+        self.update_control_flow(event_loop);
+    }
+}
 
 /// A thread-safe handle for posting `AppEvent`s to the UI thread.
 ///
@@ -173,22 +470,15 @@ impl FernAppBuilder {
         let event_loop = winit::event_loop::EventLoop::<AppEvent>::with_user_event()
             .build()
             .unwrap();
-        event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+        event_loop.set_control_flow(ControlFlow::Wait);
 
         #[cfg(feature = "text")]
         let typesetter = self
             .typesetter
             .unwrap_or_else(SharedTypesetter::new_with_default_font);
 
-        let mut wm = WindowManager::new(self.theme.clone());
-
-        #[cfg(feature = "text")]
-        {
-            wm.set_typesetter(typesetter.clone());
-        }
-
         // Build the initial window config
-        let mut initial_config = if let Some(config) = self.initial_window {
+        let initial_config = if let Some(config) = self.initial_window {
             config
         } else {
             let mut config = WindowConfig::new()
@@ -200,283 +490,16 @@ impl FernAppBuilder {
             config
         };
 
-        let mut command_handler = self.command_handler;
-        let mut app_event_handler = self.app_event_handler;
-        let mut initial_created = false;
+        let mut app = FernAppHandler::new(
+            self.theme,
+            self.command_handler,
+            self.app_event_handler,
+            initial_config,
+            #[cfg(feature = "text")]
+            typesetter,
+        );
 
-        let idle_budget = std::time::Duration::from_millis(4);
-
-        event_loop
-            .run(move |event, target| {
-                use winit::event::{Event, WindowEvent};
-
-                // Create the initial window on first Resumed event
-                if !initial_created {
-                    if matches!(event, Event::Resumed) {
-                        // Take the initial config out — we need ownership
-                        let config = std::mem::replace(
-                            &mut initial_config,
-                            WindowConfig::new(), // placeholder, won't be used again
-                        );
-                        wm.create_window(config, target);
-                        initial_created = true;
-                    }
-                    return;
-                }
-
-                // Process any pending window creates/closes
-                wm.process_pending(target);
-
-                match event {
-                    Event::Resumed => {
-                        // Already handled above for initial creation.
-                    }
-
-                    Event::NewEvents(winit::event::StartCause::ResumeTimeReached { .. }) => {
-                        // Timer fired (e.g., tooltip delay). Request redraw to process.
-                        wm.request_redraw_all();
-                    }
-
-                    Event::UserEvent(ref app_event) => {
-                        if let Some(handler) = &mut app_event_handler {
-                            handler(app_event);
-                        }
-                        wm.request_redraw_all();
-                    }
-
-                    Event::WindowEvent {
-                        window_id, event, ..
-                    } => {
-                        // Look up which FernWindowId this belongs to
-                        let fern_id = wm.fern_id_for_winit(window_id);
-
-                        // Block events if this window is modal-blocked
-                        if let Some(fid) = fern_id {
-                            if wm.is_blocked(fid) {
-                                // Only allow close requests through on blocked windows
-                                if !matches!(event, WindowEvent::CloseRequested) {
-                                    return;
-                                }
-                            }
-                        }
-
-                        // Forward all window events to AccessKit adapter
-                        if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                            managed.platform_window.process_accessibility_event(&event);
-
-                            // Drain AccessKit action requests and dispatch as events
-                            let actions = managed.platform_window.drain_accessibility_actions();
-                            for req in actions {
-                                let target_widget = fern_core::accessibility::node_id_to_widget_id(req.target_node);
-                                managed.tree.dispatch_event(WidgetEvent::AccessAction {
-                                    action: req.action,
-                                    target: Some(target_widget),
-                                });
-                            }
-                        }
-
-                        match event {
-                            WindowEvent::CloseRequested => {
-                                if let Some(fid) = fern_id {
-                                    wm.close_window(fid);
-                                }
-                                if wm.is_empty() {
-                                    target.exit();
-                                }
-                            }
-                            WindowEvent::Resized(new_size) => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    managed.platform_window.resize(new_size);
-                                    managed.platform_window.request_redraw();
-                                }
-                            }
-                            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    managed.translation_state.set_scale_factor(scale_factor);
-                                    managed.platform_window.set_scale_factor(scale_factor);
-                                }
-                                #[cfg(feature = "text")]
-                                {
-                                    typesetter.set_scale_factor(scale_factor as f32);
-                                }
-                            }
-                            WindowEvent::CursorMoved { position, .. } => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    if let Some(evt) = event_translation::translate_cursor_moved(
-                                        position.x,
-                                        position.y,
-                                        &mut managed.translation_state,
-                                    ) {
-                                        managed.tree.dispatch_event(evt);
-                                    }
-                                    // Only redraw if the event changed something (hover state, etc.)
-                                    if managed.tree.needs_redraw() {
-                                        managed.platform_window.request_redraw();
-                                    }
-                                }
-                            }
-                            WindowEvent::MouseInput { state, button, .. } => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    if let Some(evt) = event_translation::translate_mouse_input(
-                                        state,
-                                        button,
-                                        &managed.translation_state,
-                                    ) {
-                                        managed.tree.dispatch_event(evt);
-                                    }
-                                    managed.platform_window.request_redraw();
-                                }
-                            }
-                            WindowEvent::MouseWheel { delta, phase, .. } => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    if let Some(evt) = event_translation::translate_mouse_wheel(
-                                        delta,
-                                        phase,
-                                        &managed.translation_state,
-                                    ) {
-                                        managed.tree.dispatch_event(evt);
-                                    }
-                                    managed.platform_window.request_redraw();
-                                }
-                            }
-                            WindowEvent::ModifiersChanged(mods) => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    managed.current_modifiers = mods.state();
-                                }
-                            }
-                            WindowEvent::KeyboardInput {
-                                event: key_event, ..
-                            } => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    if let Some(key) = event_translation::translate_key(
-                                        &key_event.logical_key,
-                                    ) {
-                                        let modifiers = event_translation::translate_modifiers(
-                                            managed.current_modifiers,
-                                        );
-                                        let text = key_event.text.as_ref().map(|t| t.to_string());
-                                        match key_event.state {
-                                            winit::event::ElementState::Pressed => {
-                                                managed.tree.dispatch_event(WidgetEvent::KeyDown {
-                                                    key,
-                                                    modifiers,
-                                                    text,
-                                                });
-                                            }
-                                            winit::event::ElementState::Released => {
-                                                managed.tree.dispatch_event(WidgetEvent::KeyUp {
-                                                    key,
-                                                    modifiers,
-                                                });
-                                            }
-                                        }
-                                    }
-                                    managed.platform_window.request_redraw();
-                                }
-                            }
-                            WindowEvent::RedrawRequested => {
-                                if let Some(managed) = wm.get_by_winit_mut(window_id) {
-                                    // Run idle callbacks
-                                    if managed.tree.has_idle_work() {
-                                        managed.tree.run_idle_callbacks(idle_budget);
-                                    }
-
-                                    let size = managed.platform_window.surface_size();
-                                    let sf = managed.platform_window.scale_factor() as f32;
-                                    let proposal = SizeProposal::exact(
-                                        size.0 as f32 / sf,
-                                        size.1 as f32 / sf,
-                                    );
-
-                                    managed.tree.layout(proposal);
-
-                                    let a11y_update = managed.tree.sync_accessibility();
-                                    managed.platform_window.update_accessibility(a11y_update);
-
-                                    let mut frame = managed.tree.render();
-
-                                    #[cfg(feature = "text")]
-                                    {
-                                        let atlas =
-                                            typesetter.bridge().borrow_mut().atlas_info();
-                                        if atlas.dirty && atlas.width > 0 && atlas.height > 0 {
-                                            managed
-                                                .platform_window
-                                                .renderer_mut()
-                                                .upload_atlas(
-                                                    atlas.width,
-                                                    atlas.height,
-                                                    &atlas.pixels,
-                                                );
-                                        }
-                                        // Glyph eviction freed atlas space that may be reused
-                                        // by future allocations. Invalidate all paint caches so
-                                        // widgets repaint with fresh glyph data.
-                                        if atlas.glyphs_evicted {
-                                            typesetter.bridge().borrow_mut().invalidate_cache();
-                                            managed.tree.invalidate_all_paints();
-                                            frame = managed.tree.render();
-                                            // Re-upload atlas: the repaint may have rasterized
-                                            // new glyphs into the freed atlas space.
-                                            let atlas2 =
-                                                typesetter.bridge().borrow_mut().atlas_info();
-                                            if atlas2.dirty && atlas2.width > 0 && atlas2.height > 0
-                                            {
-                                                managed
-                                                    .platform_window
-                                                    .renderer_mut()
-                                                    .upload_atlas(
-                                                        atlas2.width,
-                                                        atlas2.height,
-                                                        &atlas2.pixels,
-                                                    );
-                                            }
-                                        }
-                                    }
-
-                                    let clear = managed.tree.theme().colors.surface.to_array();
-                                    let _ = managed.platform_window.render_frame(&frame, clear);
-                                }
-                            }
-                            _ => {}
-                        }
-
-                        // Route widget-emitted commands through the app-level handler
-                        // with a window-aware CommandContext.
-                        let had_commands = wm.flush_commands_through(&mut command_handler);
-                        wm.process_pending(target);
-                        // Only request redraw if commands were processed (theme change, etc.)
-                        if had_commands {
-                            wm.request_redraw_all();
-                        }
-
-                        if wm.is_empty() {
-                            target.exit();
-                        }
-                    }
-                    _ => {}
-                }
-
-                // Update control flow for pending timers (tooltips).
-                // Check all windows for the earliest pending deadline.
-                let mut earliest_deadline: Option<std::time::Instant> = None;
-                for managed in wm.iter() {
-                    if let Some(deadline) = managed.tree.next_timer_deadline() {
-                        earliest_deadline = Some(match earliest_deadline {
-                            Some(current) => current.min(deadline),
-                            None => deadline,
-                        });
-                    }
-                }
-                if let Some(deadline) = earliest_deadline {
-                    target.set_control_flow(
-                        winit::event_loop::ControlFlow::WaitUntil(deadline),
-                    );
-                } else {
-                    target.set_control_flow(winit::event_loop::ControlFlow::Wait);
-                }
-            })
-            .unwrap();
+        event_loop.run_app(&mut app).unwrap();
     }
 }
 
