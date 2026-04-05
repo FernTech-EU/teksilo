@@ -77,7 +77,7 @@ impl<'a> LayoutContext<'a> {
         self.arena
             .filter(|arena| arena.is_active(child_id))
             .and_then(|arena| arena.get(child_id))
-            .map_or(false, |node| node.widget.is_spacer())
+            .is_some_and(|node| node.widget.is_spacer())
     }
 }
 
@@ -232,8 +232,15 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// animation scheduler. Override this if your widget uses `set_animated`
     /// on internally owned states.
     ///
-    /// **Deprecated V1:** Use `Signal<f32>::new_animated()`.
+    /// **Deprecated V1:** Use `Signal<f32>::new_animated()` and `animated_signals()`.
     fn animated_states(&self) -> Vec<crate::state::State<f32>> {
+        Vec::new()
+    }
+
+    /// Return any `Signal<f32>` values that may be animated via `animate_to`.
+    /// Called automatically during widget insertion to register them with the
+    /// animation scheduler.
+    fn animated_signals(&self) -> Vec<crate::signal::Signal<f32>> {
         Vec::new()
     }
 
@@ -274,8 +281,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 }
 
 /// Trait for anything that can be added to a WidgetTree via `add_widget()`.
-/// Blanket-implemented for all `Widget` types. Composite widgets use the
-/// `impl_composite_into_widget_tree!` macro to generate the implementation.
+/// Blanket-implemented for all `Widget` types.
 pub trait IntoWidgetTree: 'static {
     fn register(self: Box<Self>, tree: &mut crate::widget_tree::WidgetTree) -> WidgetId;
 }
@@ -284,30 +290,6 @@ impl<W: Widget + 'static> IntoWidgetTree for W {
     fn register(self: Box<Self>, tree: &mut crate::widget_tree::WidgetTree) -> WidgetId {
         tree.add_widget_direct(self)
     }
-}
-
-/// Implement `IntoWidgetTree` for a `CompositeWidget` type, routing it
-/// through the composite build path. Use this instead of writing the
-/// boilerplate manually.
-///
-/// **Deprecated:** V2 widgets implement Widget directly. No macro needed.
-///
-/// ```ignore
-/// impl_composite_into_widget_tree!(MyWidget);
-/// ```
-#[macro_export]
-macro_rules! impl_composite_into_widget_tree {
-    ($t:ty) => {
-        impl $crate::widget::IntoWidgetTree for $t {
-            fn register(
-                self: Box<Self>,
-                tree: &mut $crate::widget_tree::WidgetTree,
-            ) -> $crate::widget_id::WidgetId {
-                #[allow(deprecated)]
-                tree.add_composite_inner(self)
-            }
-        }
-    };
 }
 
 /// Context available during event handling.

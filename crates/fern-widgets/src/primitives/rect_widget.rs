@@ -82,6 +82,16 @@ impl std::fmt::Debug for RectWidget {
 }
 
 impl Widget for RectWidget {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.background.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.border_color.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.border_width.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.corner_radius.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         // RectWidget has no intrinsic content — it accepts whatever space is offered.
         // With an exact proposal it fills the space; with unspecified it reports 0x0.
@@ -103,17 +113,6 @@ impl Widget for RectWidget {
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 
-    fn register_bindings(
-        &self,
-        id: fern_core::widget_id::WidgetId,
-        registry: &fern_core::state::BindingRegistry,
-    ) {
-        use fern_core::state::BindingLevel;
-        self.background.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        self.border_color.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        self.border_width.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        self.corner_radius.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-    }
 }
 
 #[cfg(test)]

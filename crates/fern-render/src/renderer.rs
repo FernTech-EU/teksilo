@@ -64,7 +64,7 @@ impl Renderer {
         let needs_recreate = self
             .atlas_texture
             .as_ref()
-            .map_or(true, |t| t.width != width || t.height != height);
+            .is_none_or(|t| t.width != width || t.height != height);
 
         if needs_recreate {
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -489,6 +489,7 @@ impl Renderer {
     // draw_rect, draw_sdf, draw_quad, draw_shadow, draw_path_quad removed —
     // replaced by batched rendering in render().
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_image(
         &self,
         pass: &mut wgpu::RenderPass,
@@ -562,7 +563,7 @@ impl Renderer {
         let needs_recreate = self
             .path_atlas_texture
             .as_ref()
-            .map_or(true, |t| t.width != width || t.height != height);
+            .is_none_or(|t| t.width != width || t.height != height);
 
         if needs_recreate {
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {

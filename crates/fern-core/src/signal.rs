@@ -247,6 +247,7 @@ impl<T: Clone + 'static> Signal<T> {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn dirty_fns(&self) -> (Option<Rc<dyn Fn() -> bool>>, Option<Rc<dyn Fn()>>) {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
@@ -350,10 +351,10 @@ impl Signal<f32> {
     /// Clear the animation target. Called by the animation scheduler when
     /// an animation completes.
     pub fn clear_animation_target(&self) {
-        if let SignalKind::Mutable { animation, .. } = &self.kind {
-            if let Some(a) = animation {
-                a.borrow_mut().target = None;
-            }
+        if let SignalKind::Mutable { animation, .. } = &self.kind
+            && let Some(a) = animation
+        {
+            a.borrow_mut().target = None;
         }
     }
 

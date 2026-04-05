@@ -3,8 +3,7 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
@@ -71,10 +70,10 @@ impl Widget for Badge {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        if let Some(root) = self.root_child_id {
-            if let Some(size) = ctx.child_size(root, proposal) {
-                return size;
-            }
+        if let Some(root) = self.root_child_id
+            && let Some(size) = ctx.child_size(root, proposal)
+        {
+            return size;
         }
         proposal.resolve(0.0, 0.0)
     }
@@ -90,10 +89,6 @@ impl Widget for Badge {
             child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
             child.size = Size::new(bounds.width, bounds.height);
         }
-    }
-
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

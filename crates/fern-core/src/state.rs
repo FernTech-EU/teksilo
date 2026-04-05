@@ -513,7 +513,7 @@ impl<T> DerivedState<T> {
 
     /// Whether the source state is dirty.
     pub fn is_dirty(&self) -> bool {
-        self.source_dirty.as_ref().map_or(false, |f| f())
+        self.source_dirty.as_ref().is_some_and(|f| f())
     }
 
     /// Clear the source state's dirty flag.
@@ -689,8 +689,8 @@ mod tests {
     #[test]
     fn reactive_from_plain_value() {
         // From<T> conversion
-        let r: Reactive<f32> = 3.14.into();
-        assert!((r.get() - 3.14).abs() < 0.001);
+        let r: Reactive<f32> = 2.75.into();
+        assert!((r.get() - 2.75).abs() < 0.001);
     }
 
     #[test]

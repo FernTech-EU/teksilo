@@ -1,9 +1,7 @@
 use std::cell::RefCell;
 
 use fern_core::accessibility::AccessNodeBuilder;
-#[allow(deprecated)]
-use fern_core::composite_widget::{BuildContext, CompositeWidget};
-use fern_core::state::State;
+use fern_core::signal::Signal;
 use fern_core::widget::IntoWidgetTree;
 use fern_core::widget_id::WidgetId;
 
@@ -17,23 +15,23 @@ use crate::primitives::ZStack;
 /// all others are dormant (state preserved, no rendering cost).
 ///
 /// The Switcher does not own the selection logic — it receives the
-/// `State<usize>` from outside, composing with any navigation pattern
+/// `Signal<usize>` from outside, composing with any navigation pattern
 /// (wizard Next/Back buttons, sidebar navigation, tab headers, routing).
 ///
 /// ```ignore
-/// let page = State::new(0_usize);
+/// let page = Signal::new(0_usize);
 /// Switcher::new(page.clone())
 ///     .child(TextWidget::new("Page 0"))
 ///     .child(TextWidget::new("Page 1"))
 ///     .child(TextWidget::new("Page 2"))
 /// ```
 pub struct Switcher {
-    selected: State<usize>,
+    selected: Signal<usize>,
     deferred_children: RefCell<Vec<Box<dyn IntoWidgetTree>>>,
 }
 
 impl Switcher {
-    pub fn new(selected: State<usize>) -> Self {
+    pub fn new(selected: Signal<usize>) -> Self {
         Self {
             selected,
             deferred_children: RefCell::new(Vec::new()),
@@ -69,30 +67,6 @@ impl std::fmt::Debug for Switcher {
     }
 }
 
-#[allow(deprecated)]
-impl CompositeWidget for Switcher {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId {
-        let children = self.deferred_children.borrow_mut().drain(..).collect::<Vec<_>>();
-
-        let mut zstack = ZStack::new();
-        for (i, widget) in children.into_iter().enumerate() {
-            let child_id = ctx.add_boxed(widget);
-            let selected = self.selected.clone();
-            ctx.visible_when(child_id, selected.map(move |idx| *idx == i));
-            zstack = zstack.add_child(child_id);
-        }
-
-        ctx.add(zstack)
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::GenericContainer);
-    }
-}
-
-#[allow(deprecated)]
-fern_core::impl_composite_into_widget_tree!(Switcher);
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,7 +84,7 @@ mod tests {
 
     #[test]
     fn switches_active_child_on_state_change() {
-        let selected = State::new(0_usize);
+        let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new();
 
         // Manually apply the same pattern Switcher uses internally,
@@ -142,7 +116,7 @@ mod tests {
 
     #[test]
     fn out_of_range_index_hides_all() {
-        let selected = State::new(5_usize);
+        let selected = Signal::new(5_usize);
         let mut tree = WidgetTree::new();
 
         let a = tree.add(FixedLeaf(100.0, 40.0));
@@ -160,7 +134,7 @@ mod tests {
 
     #[test]
     fn composite_switcher_builds_and_lays_out() {
-        let selected = State::new(1_usize);
+        let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new();
 
         let switcher_id = tree.add_widget(
@@ -183,7 +157,7 @@ mod tests {
 
     #[test]
     fn switcher_with_children_iterator() {
-        let selected = State::new(2_usize);
+        let selected = Signal::new(2_usize);
         let mut tree = WidgetTree::new();
 
         let pages: Vec<FixedLeaf> = vec![

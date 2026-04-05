@@ -20,6 +20,7 @@ type ShortcutLookup = Box<
     dyn Fn(Key, Modifiers, Option<WidgetId>, &dyn Fn(WidgetId, WidgetId) -> bool) -> Option<ErasedCommand>,
 >;
 
+#[allow(clippy::type_complexity)]
 pub struct WidgetTree {
     arena: WidgetArena,
     theme: Theme,
@@ -220,89 +221,15 @@ impl WidgetTree {
         self.hovered = None;
         self.focus_origin = None;
         self.tooltips.clear();
-        self.rebuild_composites();
         self.rebuild_v2_widgets();
         self.arena.mark_all_dirty();
-    }
-
-    /// Reconstruct all composite widgets. Called when the environment changes
-    /// (theme switch, locale switch). Each composite's old subtree is destroyed
-    /// and `build()` is re-run with the new environment.
-    #[allow(deprecated)]
-    fn rebuild_composites(&mut self) {
-        let ids: Vec<WidgetId> = self.composite_ids.clone();
-        for adapter_id in ids {
-            // Run observer cleanup for this composite before rebuilding
-            if let Some(cleanups) = self.observer_cleanups.remove(&adapter_id) {
-                for cleanup in cleanups {
-                    cleanup();
-                }
-            }
-
-            // Get the old root child for destruction
-            let old_root = {
-                let node = match self.arena.get(adapter_id) {
-                    Some(n) => n,
-                    None => continue,
-                };
-                if !node.widget.is_composite() {
-                    continue;
-                }
-                node.children.first().copied()
-            };
-
-            // Destroy the old subtree
-            if let Some(old_root_id) = old_root {
-                self.arena.destroy(old_root_id);
-            }
-
-            // Re-run build() via the adapter.
-            // We need to temporarily take the widget out to get a mutable reference
-            // to the adapter while also having &mut self for BuildContext.
-            // Use a two-phase approach: take the widget box out, rebuild, put it back.
-            let mut widget_box = match self.arena.take_widget(adapter_id) {
-                Some(w) => w,
-                None => continue,
-            };
-
-            let new_root = {
-                let adapter = match widget_box
-                    .as_any_mut()
-                    .downcast_mut::<crate::composite_adapter::CompositeWidgetAdapter>()
-                {
-                    Some(a) => a,
-                    None => {
-                        self.arena.restore_widget(adapter_id, widget_box);
-                        continue;
-                    }
-                };
-                let mut build_ctx = crate::build_context::BuildContext {
-                    tree: self,
-                    composite_id: Some(adapter_id),
-                    effect_handles: Vec::new(),
-                };
-                let (_old, new_root) = adapter.rebuild(&mut build_ctx);
-                new_root
-            };
-
-            // Put the adapter back
-            self.arena.restore_widget(adapter_id, widget_box);
-
-            // Wire the new root child
-            if let Some(child_node) = self.arena.get_mut(new_root) {
-                child_node.parent = Some(adapter_id);
-            }
-            if let Some(adapter_node) = self.arena.get_mut(adapter_id) {
-                adapter_node.children = vec![new_root];
-            }
-        }
     }
 
     /// Reconstruct all V2 widgets that have `has_built_children == true`.
     /// Called when the environment changes (theme switch, locale switch).
     fn rebuild_v2_widgets(&mut self) {
         let ids: Vec<WidgetId> = self.arena.active_ids().into_iter().filter(|id| {
-            self.arena.get(*id).map_or(false, |n| n.has_built_children)
+            self.arena.get(*id).is_some_and(|n| n.has_built_children)
         }).collect();
 
         for widget_id in ids {
@@ -532,13 +459,19 @@ impl WidgetTree {
             }
         }
 
-        // 4. Register reactive property bindings, animated states, and clips_children.
-        let clips = self.arena.get(id).map_or(false, |n| n.widget.clips_children());
-        if let Some(node) = self.arena.get(id) {
+        // 4. Register reactive property bindings, animated states/signals, and clips_children.
+        let clips = self.arena.get(id).is_some_and(|n| n.widget.clips_children());
+        let (anim_states, anim_signals) = if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
-            for state in node.widget.animated_states() {
-                self.register_animated_state(&state);
-            }
+            (node.widget.animated_states(), node.widget.animated_signals())
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        for state in anim_states {
+            self.register_animated_state(&state);
+        }
+        for signal in anim_signals {
+            self.register_animated_signal(&signal);
         }
         if clips {
             self.arena.set_clips_children(id, true);
@@ -553,55 +486,6 @@ impl WidgetTree {
         }
 
         id
-    }
-
-    /// Insert a boxed CompositeWidget. Used by `IntoWidgetTree` impls on composites.
-    #[deprecated(note = "V2: use add() instead — all widgets now implement Widget directly")]
-    #[allow(deprecated)]
-    pub fn add_composite_inner(
-        &mut self,
-        mut composite: Box<dyn crate::composite_widget::CompositeWidget>,
-    ) -> WidgetId {
-        // Extract builder-style visibility/enabled metadata before build.
-        let vis_state = composite.take_visible_when();
-        let ena_state = composite.take_enabled_when();
-
-        use crate::composite_adapter::CompositeWidgetAdapter;
-        let mut adapter = CompositeWidgetAdapter::new(composite);
-
-        // Insert a placeholder to reserve the adapter's ID before build().
-        // This allows BuildContext::self_id() to return the composite's own ID.
-        use crate::arena::PlaceholderWidget;
-        let adapter_id = self.arena.insert(Box::new(PlaceholderWidget));
-
-        let mut build_ctx = crate::build_context::BuildContext {
-            tree: self,
-            composite_id: Some(adapter_id),
-            effect_handles: Vec::new(),
-        };
-        let root_child = adapter.build(&mut build_ctx);
-
-        // Replace the placeholder with the real adapter
-        self.arena.restore_widget(adapter_id, Box::new(adapter));
-
-        if let Some(child_node) = self.arena.get_mut(root_child) {
-            child_node.parent = Some(adapter_id);
-        }
-        if let Some(adapter_node) = self.arena.get_mut(adapter_id) {
-            adapter_node.children = vec![root_child];
-        }
-
-        self.composite_ids.push(adapter_id);
-
-        // Apply deferred visible_when / enabled_when.
-        if let Some(state) = vis_state {
-            self.visible_when(adapter_id, state);
-        }
-        if let Some(state) = ena_state {
-            self.enabled_when(adapter_id, state);
-        }
-
-        adapter_id
     }
 
     /// Add a Level 2 (Widget) to the tree.
@@ -663,13 +547,19 @@ impl WidgetTree {
             }
         }
 
-        // 4. Register reactive bindings, animated states, and clips_children
-        let clips = self.arena.get(id).map_or(false, |n| n.widget.clips_children());
-        if let Some(node) = self.arena.get(id) {
+        // 4. Register reactive bindings, animated states/signals, and clips_children
+        let clips = self.arena.get(id).is_some_and(|n| n.widget.clips_children());
+        let (anim_states, anim_signals) = if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
-            for state in node.widget.animated_states() {
-                self.register_animated_state(&state);
-            }
+            (node.widget.animated_states(), node.widget.animated_signals())
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        for state in anim_states {
+            self.register_animated_state(&state);
+        }
+        for signal in anim_signals {
+            self.register_animated_signal(&signal);
         }
         if clips {
             self.arena.set_clips_children(id, true);
@@ -684,16 +574,6 @@ impl WidgetTree {
         }
 
         id
-    }
-
-    /// Add a Level 1 (CompositeWidget) to the tree. Alias for `add_widget()`.
-    #[deprecated(note = "V2: use add() instead — all widgets now implement Widget directly")]
-    #[allow(deprecated)]
-    pub fn add_composite(
-        &mut self,
-        composite: impl crate::composite_widget::CompositeWidget + 'static,
-    ) -> WidgetId {
-        self.add_composite_inner(Box::new(composite))
     }
 
     // --- Property bindings ---
@@ -741,7 +621,7 @@ impl WidgetTree {
         id: WidgetId,
         f: impl Fn(&mut fern_tokens::Theme) + 'static,
     ) {
-        let had_override = self.arena.get(id).map_or(false, |n| n.theme_override.is_some());
+        let had_override = self.arena.get(id).is_some_and(|n| n.theme_override.is_some());
         if let Some(node) = self.arena.get_mut(id) {
             node.theme_override = Some(crate::environment::ThemeOverride {
                 func: Box::new(f),
@@ -920,27 +800,27 @@ impl WidgetTree {
     /// - Scroll events → hit testing (scroll target under pointer)
     pub fn dispatch_event(&mut self, event: WidgetEvent) {
         // Overlay interception: Escape dismisses topmost overlay
-        if let WidgetEvent::KeyDown { key: Key::Escape, .. } = &event {
-            if !self.overlay_manager.is_empty() {
-                self.overlay_manager.dismiss_top();
-                return;
-            }
+        if let WidgetEvent::KeyDown { key: Key::Escape, .. } = &event
+            && !self.overlay_manager.is_empty()
+        {
+            self.overlay_manager.dismiss_top();
+            return;
         }
 
         // Overlay interception: click outside dismisses ClickOutside overlays
-        if let WidgetEvent::PointerDown { position, .. } = &event {
-            if self.overlay_manager.handle_click_outside(*position) {
-                return; // Click consumed by overlay dismissal
-            }
+        if let WidgetEvent::PointerDown { position, .. } = &event
+            && self.overlay_manager.handle_click_outside(*position)
+        {
+            return; // Click consumed by overlay dismissal
         }
 
         // Shortcut interception: before any widget sees the key event
-        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
-            if let Some(cmd) = self.shortcut_map_lookup(*key, *modifiers) {
-                self.pending_commands.push(cmd);
-                self.flush_commands();
-                return;
-            }
+        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event
+            && let Some(cmd) = self.shortcut_map_lookup(*key, *modifiers)
+        {
+            self.pending_commands.push(cmd);
+            self.flush_commands();
+            return;
         }
 
         // Feed pointer events to gesture recognizers on the target widget chain
@@ -1139,11 +1019,7 @@ impl WidgetTree {
                 None
             }
             _ => {
-                if let Some(ref mut handler) = node.handlers.on_pointer_event {
-                    Some(handler(event, ctx))
-                } else {
-                    None
-                }
+                node.handlers.on_pointer_event.as_mut().map(|handler| handler(event, ctx))
             }
         }
     }
@@ -1157,67 +1033,43 @@ impl WidgetTree {
     ) -> Option<EventResponse> {
         match event {
             WidgetEvent::PointerEnter => {
-                if let Some(ref mut handler) = node.handlers.on_hover {
+                node.handlers.on_hover.as_mut().map(|handler| {
                     handler(true, ctx);
-                    Some(EventResponse::Handled)
-                } else {
-                    None
-                }
+                    EventResponse::Handled
+                })
             }
             WidgetEvent::PointerLeave => {
-                if let Some(ref mut handler) = node.handlers.on_hover {
+                node.handlers.on_hover.as_mut().map(|handler| {
                     handler(false, ctx);
-                    Some(EventResponse::Handled)
-                } else {
-                    None
-                }
+                    EventResponse::Handled
+                })
             }
             WidgetEvent::FocusGained { .. } => {
-                if let Some(ref mut handler) = node.handlers.on_focus {
+                node.handlers.on_focus.as_mut().map(|handler| {
                     handler(true, ctx);
-                    Some(EventResponse::Handled)
-                } else {
-                    None
-                }
+                    EventResponse::Handled
+                })
             }
             WidgetEvent::FocusLost => {
-                if let Some(ref mut handler) = node.handlers.on_focus {
+                node.handlers.on_focus.as_mut().map(|handler| {
                     handler(false, ctx);
-                    Some(EventResponse::Handled)
-                } else {
-                    None
-                }
+                    EventResponse::Handled
+                })
             }
             WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
-                if let Some(ref mut handler) = node.handlers.on_key {
-                    Some(handler(event, ctx))
-                } else {
-                    None
-                }
+                node.handlers.on_key.as_mut().map(|handler| handler(event, ctx))
             }
             WidgetEvent::Scroll { .. } => {
-                if let Some(ref mut handler) = node.handlers.on_scroll {
-                    Some(handler(event, ctx))
-                } else {
-                    None
-                }
+                node.handlers.on_scroll.as_mut().map(|handler| handler(event, ctx))
             }
             WidgetEvent::AccessAction { action, .. } => {
-                if let Some(ref mut handler) = node.handlers.on_access_action {
-                    Some(handler(*action, ctx))
-                } else {
-                    None
-                }
+                node.handlers.on_access_action.as_mut().map(|handler| handler(*action, ctx))
             }
             WidgetEvent::PointerDown { .. }
             | WidgetEvent::PointerUp { .. }
             | WidgetEvent::PointerMove { .. } => {
                 // Low-level pointer escape hatch
-                if let Some(ref mut handler) = node.handlers.on_pointer_event {
-                    Some(handler(event, ctx))
-                } else {
-                    None
-                }
+                node.handlers.on_pointer_event.as_mut().map(|handler| handler(event, ctx))
             }
             _ => None,
         }
@@ -1259,18 +1111,17 @@ impl WidgetTree {
         }
 
         for id in chain {
-            if let Some(node) = self.arena.get_mut(id) {
-                if let Some(binding) = &mut node.gesture_binding {
-                    if let Some(gesture) = binding.arena.process(raw) {
-                        let mut ctx = EventContext::new();
-                        (binding.handler)(gesture.clone(), &mut ctx);
-                        self.collect_from_ctx(ctx, id);
+            if let Some(node) = self.arena.get_mut(id)
+                && let Some(binding) = &mut node.gesture_binding
+                && let Some(gesture) = binding.arena.process(raw)
+            {
+                let mut ctx = EventContext::new();
+                (binding.handler)(gesture.clone(), &mut ctx);
+                self.collect_from_ctx(ctx, id);
 
-                        // Also dispatch as WidgetEvent::Gesture for the widget's event()
-                        self.dispatch_to_widget(id, &WidgetEvent::Gesture { gesture });
-                        return; // First recognized gesture wins
-                    }
-                }
+                // Also dispatch as WidgetEvent::Gesture for the widget's event()
+                self.dispatch_to_widget(id, &WidgetEvent::Gesture { gesture });
+                return; // First recognized gesture wins
             }
         }
     }
@@ -1338,25 +1189,25 @@ impl WidgetTree {
 
         let mut current = self.arena.parent(focused_id);
         while let Some(ancestor_id) = current {
-            if let Some(node) = self.arena.get(ancestor_id) {
-                if node.clips_children {
-                    let viewport = node.bounds;
-                    let needs_scroll = focused_bounds.y < viewport.y
-                        || focused_bounds.bottom() > viewport.bottom()
-                        || focused_bounds.x < viewport.x
-                        || focused_bounds.right() > viewport.right();
+            if let Some(node) = self.arena.get(ancestor_id)
+                && node.clips_children
+            {
+                let viewport = node.bounds;
+                let needs_scroll = focused_bounds.y < viewport.y
+                    || focused_bounds.bottom() > viewport.bottom()
+                    || focused_bounds.x < viewport.x
+                    || focused_bounds.right() > viewport.right();
 
-                    if needs_scroll {
-                        self.dispatch_to_widget(
-                            ancestor_id,
-                            &WidgetEvent::ScrollIntoView {
-                                target_bounds: focused_bounds,
-                                margin: 0.0,
-                            },
-                        );
-                    }
-                    break; // Only scroll the nearest clipping ancestor
+                if needs_scroll {
+                    self.dispatch_to_widget(
+                        ancestor_id,
+                        &WidgetEvent::ScrollIntoView {
+                            target_bounds: focused_bounds,
+                            margin: 0.0,
+                        },
+                    );
                 }
+                break; // Only scroll the nearest clipping ancestor
             }
             current = self.arena.parent(ancestor_id);
         }
@@ -1429,10 +1280,10 @@ impl WidgetTree {
     fn find_focusable_at_or_above(&self, id: WidgetId) -> Option<WidgetId> {
         let mut current = Some(id);
         while let Some(cid) = current {
-            if let Some(node) = self.arena.get(cid) {
-                if node.widget.is_focusable() {
-                    return Some(cid);
-                }
+            if let Some(node) = self.arena.get(cid)
+                && node.widget.is_focusable()
+            {
+                return Some(cid);
             }
             current = self.arena.parent(cid);
         }
@@ -1457,6 +1308,7 @@ impl WidgetTree {
     // --- Querying ---
 
     /// Get an immutable reference to a widget node (for internal use).
+    #[allow(dead_code)] // V2 API: used for widget introspection
     pub(crate) fn arena_get(
         &self,
         id: WidgetId,
@@ -1506,10 +1358,10 @@ impl WidgetTree {
         self.process_state_changes();
 
         // Fast path: if nothing needs painting, return the cached frame
-        if !self.arena.any_needs_paint() {
-            if let Some(ref cached) = self.cached_frame {
-                return cached.clone();
-            }
+        if !self.arena.any_needs_paint()
+            && let Some(ref cached) = self.cached_frame
+        {
+            return cached.clone();
         }
 
         let mut frame = RenderFrame::new();
@@ -1559,10 +1411,10 @@ impl WidgetTree {
     /// Caches the result and only rebuilds when layout has changed.
     pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
         // Return cached result if nothing changed since last sync
-        if !self.a11y_dirty {
-            if let Some(cached) = &self.cached_a11y {
-                return cached.clone();
-            }
+        if !self.a11y_dirty
+            && let Some(cached) = &self.cached_a11y
+        {
+            return cached.clone();
         }
 
         let update = self.build_accessibility_tree();
@@ -1755,10 +1607,10 @@ impl WidgetTree {
             if entry.overlay_id.is_some() {
                 continue;
             }
-            if let Some(dur) = elapsed_fn(entry) {
-                if dur >= entry.delay {
-                    to_show.push((entry.anchor_id, entry.content_id));
-                }
+            if let Some(dur) = elapsed_fn(entry)
+                && dur >= entry.delay
+            {
+                to_show.push((entry.anchor_id, entry.content_id));
             }
         }
 
@@ -2604,6 +2456,7 @@ mod tests {
     #[derive(Debug, Clone, PartialEq)]
     enum TestCmd {
         Save,
+        #[allow(dead_code)]
         Bold,
     }
     impl AppCommand for TestCmd {}
@@ -2668,7 +2521,7 @@ mod tests {
     #[test]
     fn scroll_event_dispatched_to_hovered() {
         let mut tree = WidgetTree::new();
-        let w = tree.add(FillWidget::new());
+        let _w = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // Move pointer over widget
@@ -2715,98 +2568,6 @@ mod tests {
         visible.set(false);
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert!(tree.needs_paint());
-    }
-
-    // --- CompositeWidget integration ---
-
-    /// A minimal composite that builds a FillWidget with a label.
-    #[derive(Debug)]
-    struct TestComposite {
-        label: String,
-    }
-
-    #[allow(deprecated)]
-    impl crate::composite_widget::CompositeWidget for TestComposite {
-        fn build(&self, ctx: &mut crate::composite_widget::BuildContext) -> WidgetId {
-            ctx.add(FillWidget::new().label(&self.label))
-        }
-
-        fn is_focusable(&self) -> bool {
-            true
-        }
-
-        fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
-            builder.set_role(accesskit::Role::Button);
-            builder.set_name(&self.label);
-        }
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn composite_widget_is_added_to_tree() {
-        let mut tree = WidgetTree::new();
-        let id = tree.add_composite(TestComposite {
-            label: "OK".to_string(),
-        });
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        // The composite has accessibility
-        let info = tree.accessibility_node(id);
-        assert_eq!(info.role(), accesskit::Role::Button);
-        assert_eq!(info.name(), Some("OK"));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn composite_widget_builds_child_subtree() {
-        let mut tree = WidgetTree::new();
-        let id = tree.add_composite(TestComposite {
-            label: "Child".to_string(),
-        });
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        // The composite should have one child (the FillWidget built inside)
-        let children = tree.children(id);
-        assert_eq!(children.len(), 1);
-
-        // The child has the label accessibility
-        let child_info = tree.accessibility_node(children[0]);
-        assert_eq!(child_info.role(), accesskit::Role::Label);
-        assert_eq!(child_info.name(), Some("Child"));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn composite_widget_is_focusable() {
-        let mut tree = WidgetTree::new();
-        let id = tree.add_composite(TestComposite {
-            label: "Focus".to_string(),
-        });
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.focus(id);
-        assert_eq!(tree.focused(), Some(id));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn composite_indistinguishable_from_widget() {
-        // Both Widget and CompositeWidget produce WidgetIds that work the same
-        let mut tree = WidgetTree::new();
-
-        let w1 = tree.add(FillWidget::new().label("Level2"));
-        let w2 = tree.add_composite(TestComposite {
-            label: "Level1".to_string(),
-        });
-        tree.layout(SizeProposal::exact(200.0, 100.0));
-
-        // Both have bounds
-        assert!(tree.bounds(w1).width > 0.0);
-        assert!(tree.bounds(w2).width > 0.0);
-
-        // Both findable by label
-        assert!(tree.find_by_label("Level2").is_some());
-        assert!(tree.find_by_label("Level1").is_some());
     }
 
     // --- Gesture integration tests ---
@@ -3040,7 +2801,7 @@ mod tests {
         // Parent uses default theme
         let parent = tree.add(ThemeAwareWidget);
         // Child will get a dark theme override
-        let child = tree.add_child(parent, ThemeAwareWidget);
+        let _child = tree.add_child(parent, ThemeAwareWidget);
 
         tree.set_theme_override(parent, |theme| {
             theme.colors = fern_tokens::ColorTokens::dark_default();
@@ -3059,7 +2820,7 @@ mod tests {
     fn theme_override_only_affects_subtree() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
 
-        let unaffected = tree.add(ThemeAwareWidget);
+        let _unaffected = tree.add(ThemeAwareWidget);
         let overridden = tree.add(ThemeAwareWidget);
 
         tree.set_theme_override(overridden, |theme| {
@@ -3188,7 +2949,7 @@ mod tests {
         use std::rc::Rc;
 
         let had_time = Rc::new(Cell::new(false));
-        let h = had_time.clone();
+        let _h = had_time.clone();
 
         let mut tree = WidgetTree::new();
         let w = tree.add(IdleRequestWidget {
@@ -3206,7 +2967,7 @@ mod tests {
 
         // Now add a fresh one that checks the deadline
         // We'll do this through a second widget interaction
-        let w2 = tree.add(FillWidget::new());
+        let _w2 = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Directly test IdleDeadline
@@ -3275,7 +3036,7 @@ mod tests {
     #[test]
     fn sync_accessibility_excludes_dormant_widgets() {
         let mut tree = WidgetTree::new();
-        let w1 = tree.add(FillWidget::new().label("Active"));
+        let _w1 = tree.add(FillWidget::new().label("Active"));
         let w2 = tree.add(FillWidget::new().label("Dormant"));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -3622,9 +3383,6 @@ mod tests {
 
     #[test]
     fn access_action_routes_to_target_widget() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
         let mut tree = WidgetTree::new();
         let a = tree.add(FillWidget::new());
         let b = tree.add(FillWidget::new());
@@ -3662,6 +3420,7 @@ mod tests {
         use std::rc::Rc;
 
         #[derive(Debug, Clone, Copy, PartialEq)]
+        #[allow(dead_code)]
         enum Cmd { ScopedAction, GlobalAction }
         impl crate::app_command::AppCommand for Cmd {}
 
@@ -3673,7 +3432,7 @@ mod tests {
 
         let mut tree = WidgetTree::new().with_shortcuts(shortcuts);
         tree.on_command(move |cmd: &Cmd| {
-            f.set(Some(cmd.clone()));
+            f.set(Some(*cmd));
         });
 
         let parent = tree.add(FillWidget::new());
@@ -3757,31 +3516,4 @@ mod tests {
         assert!(tree.needs_redraw());
     }
 
-    #[test]
-    #[allow(deprecated)]
-    fn animated_state_from_build_context() {
-        // Verify that animated_state() from BuildContext works
-        #[derive(Debug)]
-        struct AnimWidget {
-            width_state: std::cell::RefCell<Option<crate::state::State<f32>>>,
-        }
-        #[allow(deprecated)]
-        impl crate::composite_widget::CompositeWidget for AnimWidget {
-            fn build(&self, ctx: &mut crate::composite_widget::BuildContext) -> WidgetId {
-                let w = ctx.animated_state(300.0);
-                *self.width_state.borrow_mut() = Some(w.clone());
-                ctx.add(FillWidget::new())
-            }
-        }
-        crate::impl_composite_into_widget_tree!(AnimWidget);
-
-        let mut tree = WidgetTree::new();
-        let widget = AnimWidget { width_state: std::cell::RefCell::new(None) };
-        let width_state_clone = widget.width_state.borrow().clone();
-        tree.add_widget(widget);
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-
-        // The state should be registered for animation
-        assert!(tree.has_active_animations() == false); // nothing animating yet
-    }
 }

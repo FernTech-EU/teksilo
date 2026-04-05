@@ -6,15 +6,12 @@
 
 use std::time::{Duration, Instant};
 
-use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::overlay::{
-    DismissBehavior, OverlayId, OverlayLayer, OverlayPlacement, OverlayRequest,
-};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget};
+use fern_core::overlay::OverlayId;
+use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+use fern_tokens::CornerRadius;
 
 /// A tooltip content widget — a themed rounded rect with text.
 #[derive(Debug)]
@@ -71,6 +68,7 @@ impl Widget for TooltipWidget {
 
 /// Tracks tooltip hover state for a widget.
 /// Stored on the WidgetTree and processed during event dispatch.
+#[allow(dead_code)] // Part of tooltip system, used when tooltip overlays are wired up
 pub(crate) struct TooltipState {
     /// The widget this tooltip is attached to.
     pub anchor_id: WidgetId,

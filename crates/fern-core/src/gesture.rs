@@ -194,10 +194,10 @@ impl DoubleTapRecognizer {
                 GestureResult::Pending
             }
             RawPointerEvent::Move { position } => {
-                if let Some(down) = self.down_position {
-                    if distance(*position, down) > self.max_distance {
-                        return GestureResult::Failed;
-                    }
+                if let Some(down) = self.down_position
+                    && distance(*position, down) > self.max_distance
+                {
+                    return GestureResult::Failed;
                 }
                 GestureResult::Pending
             }
@@ -305,11 +305,11 @@ impl LongPressRecognizer {
         if self.recognized {
             return GestureResult::Pending;
         }
-        if let (Some(pos), Some(time)) = (self.down_position, self.down_time) {
-            if now.duration_since(time) >= self.min_duration {
-                self.recognized = true;
-                return GestureResult::Recognized(GestureEvent::LongPress { position: pos });
-            }
+        if let (Some(pos), Some(time)) = (self.down_position, self.down_time)
+            && now.duration_since(time) >= self.min_duration
+        {
+            self.recognized = true;
+            return GestureResult::Recognized(GestureEvent::LongPress { position: pos });
         }
         GestureResult::Pending
     }
@@ -331,10 +331,10 @@ impl GestureRecognizer for LongPressRecognizer {
                 GestureResult::Pending
             }
             RawPointerEvent::Move { position } => {
-                if let Some(down) = self.down_position {
-                    if distance(*position, down) > self.max_distance {
-                        return GestureResult::Failed;
-                    }
+                if let Some(down) = self.down_position
+                    && distance(*position, down) > self.max_distance
+                {
+                    return GestureResult::Failed;
                 }
                 GestureResult::Pending
             }
@@ -637,7 +637,7 @@ impl GestureArena {
             match entry.recognizer.process(event) {
                 GestureResult::Recognized(gesture) => {
                     let prio = entry.recognizer.priority();
-                    if best.as_ref().map_or(true, |(_, bp, _)| prio > *bp) {
+                    if best.as_ref().is_none_or(|(_, bp, _)| prio > *bp) {
                         best = Some((i, prio, gesture));
                     }
                 }

@@ -1,9 +1,8 @@
 //! Toggle — an animated on/off switch.
 //!
 //! Level 2 widget that paints a track and knob directly. The knob position
-//! is animated via `State<f32>::set_animated()`.
+//! is animated via `Signal<f32>::animate_to()`.
 
-use std::cell::Cell;
 use std::time::Duration;
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
@@ -12,7 +11,7 @@ use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
 use fern_core::signal::Signal;
-use fern_core::state::{BindingLevel, State};
+use fern_core::state::BindingLevel;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing};
@@ -25,11 +24,11 @@ const KNOB_MARGIN: f32 = 2.0;
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
     on: Signal<bool>,
-    knob_position: State<f32>,
+    knob_position: Signal<f32>,
     label: Option<String>,
     enabled: bool,
-    hovered: Cell<bool>,
-    focus_origin: Option<FocusOrigin>,
+    hovered: Signal<bool>,
+    focus_origin: Signal<Option<FocusOrigin>>,
     tap_recognizer: TapRecognizer,
 }
 
@@ -38,11 +37,11 @@ impl Toggle {
         let initial = if on.get() { 1.0 } else { 0.0 };
         Self {
             on,
-            knob_position: State::new_animated(initial),
+            knob_position: Signal::new_animated(initial),
             label: None,
             enabled: true,
-            hovered: Cell::new(false),
-            focus_origin: None,
+            hovered: Signal::new(false),
+            focus_origin: Signal::new(None),
             tap_recognizer: TapRecognizer::new(),
         }
     }
@@ -61,7 +60,7 @@ impl Toggle {
         let new_on = !self.on.get();
         self.on.set(new_on);
         let target = if new_on { 1.0 } else { 0.0 };
-        self.knob_position.set_animated(
+        self.knob_position.animate_to(
             target,
             Duration::from_millis(150),
             Easing::EaseInOut,
@@ -85,6 +84,20 @@ impl std::fmt::Debug for Toggle {
 }
 
 impl Widget for Toggle {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        // Re-create animated knob_position signal (registered with scheduler)
+        let initial = if self.on.get() { 1.0 } else { 0.0 };
+        self.knob_position = ctx.animated_signal(initial);
+
+        // Register bindings
+        let id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.knob_position.bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.on.bind_to(id, registry, BindingLevel::RepaintOnly);
+
+        vec![] // leaf widget — no children
+    }
+
     fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let track_w = TRACK_WIDTH.max(48.0);
         let h = TRACK_HEIGHT.max(48.0);
@@ -114,13 +127,13 @@ impl Widget for Toggle {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
 
-        // Center the track within the (possibly 48×48) bounds
+        // Center the track within the (possibly 48x48) bounds
         let track_x = bounds.x + (bounds.width - TRACK_WIDTH) / 2.0;
         let track_y = bounds.y + (bounds.height - TRACK_HEIGHT) / 2.0;
         let track_rect = Rect::new(track_x, track_y, TRACK_WIDTH, TRACK_HEIGHT);
 
         // Track color based on on-state
-        let t = *self.knob_position.get();
+        let t = self.knob_position.get();
         let track_color = if !self.enabled {
             colors.disabled_fill
         } else {
@@ -142,7 +155,7 @@ impl Widget for Toggle {
 
         // Focus ring — only for keyboard navigation, not pointer clicks.
         // Drawn with a 2px offset outside the track so it's visible over any fill color.
-        if self.focus_origin == Some(FocusOrigin::Keyboard) {
+        if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
             let offset = 3.0; // 2px gap + half of 2px stroke
             let ring_rect = Rect::new(
                 track_rect.x - offset,
@@ -238,11 +251,11 @@ impl Widget for Toggle {
                 EventResponse::Handled
             }
             WidgetEvent::FocusGained { origin } => {
-                self.focus_origin = Some(*origin);
+                self.focus_origin.set(Some(*origin));
                 EventResponse::Handled
             }
             WidgetEvent::FocusLost => {
-                self.focus_origin = None;
+                self.focus_origin.set(None);
                 EventResponse::Handled
             }
             WidgetEvent::AccessAction { action, .. } => {
@@ -272,15 +285,6 @@ impl Widget for Toggle {
         }
         builder.add_action(fern_core::accesskit::Action::Click);
         builder.add_action(fern_core::accesskit::Action::Focus);
-    }
-
-    fn register_bindings(&self, id: WidgetId, registry: &fern_core::state::BindingRegistry) {
-        self.knob_position.bind_to(id, registry, BindingLevel::RepaintOnly);
-        self.on.bind_to(id, registry, BindingLevel::RepaintOnly);
-    }
-
-    fn animated_states(&self) -> Vec<State<f32>> {
-        vec![self.knob_position.clone()]
     }
 
 }

@@ -227,8 +227,9 @@ pub struct PathEntry {
 }
 
 /// Paint data for SDF shapes, passed to the GPU shader.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum PaintData {
+    #[default]
     Solid,
     LinearGradient {
         start: [f32; 2],
@@ -247,11 +248,6 @@ pub enum PaintData {
     },
 }
 
-impl Default for PaintData {
-    fn default() -> Self {
-        Self::Solid
-    }
-}
 
 /// Compositing blend mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

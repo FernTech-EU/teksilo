@@ -4,8 +4,6 @@ pub mod app_command;
 pub mod app_event;
 pub mod arena;
 pub mod build_context;
-pub mod composite_widget;
-pub(crate) mod composite_adapter;
 pub mod environment;
 pub mod event;
 pub(crate) mod event_handlers;
@@ -33,8 +31,6 @@ pub use overlay::{
 };
 pub use arena::WidgetArena;
 pub use build_context::BuildContext;
-#[allow(deprecated)]
-pub use composite_widget::CompositeWidget;
 pub use environment::{Environment, LayoutDirection};
 pub use event::{EventResponse, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
 pub use gesture::{

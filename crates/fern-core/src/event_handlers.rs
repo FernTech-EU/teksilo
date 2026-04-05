@@ -12,6 +12,7 @@ use crate::widget::EventContext;
 
 /// Event handlers attached to a widget node. Each field is an optional
 /// closure dispatched by the framework during the event pass.
+#[allow(clippy::type_complexity)]
 pub(crate) struct EventHandlers {
     pub on_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
     pub on_double_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
@@ -25,6 +26,7 @@ pub(crate) struct EventHandlers {
     pub on_scroll: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_access_action:
         Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> EventResponse>>,
+    #[allow(dead_code)] // V2 API: gesture arena for attached gesture recognizers
     pub gesture_arena: Option<GestureArena>,
 }
 
@@ -46,6 +48,7 @@ impl EventHandlers {
     }
 
     /// Whether any handler is attached.
+    #[allow(dead_code)] // V2 API: used for fast-path event dispatch skipping
     pub fn has_any(&self) -> bool {
         self.on_tap.is_some()
             || self.on_double_tap.is_some()

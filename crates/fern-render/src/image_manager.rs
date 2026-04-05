@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 /// Manages uploaded image textures and their bind groups.
+#[derive(Default)]
 pub struct ImageManager {
     images: HashMap<String, ImageEntry>,
 }
@@ -14,13 +15,12 @@ struct ImageEntry {
 
 impl ImageManager {
     pub fn new() -> Self {
-        Self {
-            images: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Register an image by name. Uploads RGBA pixel data and creates a bind group
     /// compatible with the quad pipeline's bind group layout.
+    #[allow(clippy::too_many_arguments)]
     pub fn register_image(
         &mut self,
         name: &str,

@@ -1,6 +1,5 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::signal::Prop;
-use fern_core::state::BindingLevel;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -59,6 +58,25 @@ impl Default for FixedSize {
 }
 
 impl Widget for FixedSize {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        // Register reactive bindings
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        if let Some(ref w) = self.width {
+            w.register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
+        }
+        if let Some(ref h) = self.height {
+            h.register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
+        }
+        self.child_id.into_iter().collect()
+    }
+
     fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let child_size = self
             .child_id
@@ -97,26 +115,6 @@ impl Widget for FixedSize {
         self.child_id.into_iter().collect()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        self.pending_child.take().into_iter().collect()
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_id = ids.into_iter().next();
-    }
-
-    fn register_bindings(
-        &self,
-        id: WidgetId,
-        registry: &fern_core::state::BindingRegistry,
-    ) {
-        if let Some(ref w) = self.width {
-            w.register_if_bound(id, registry, BindingLevel::Relayout);
-        }
-        if let Some(ref h) = self.height {
-            h.register_if_bound(id, registry, BindingLevel::Relayout);
-        }
-    }
 }
 
 #[cfg(test)]

@@ -15,19 +15,10 @@ pub struct Card {
     pending_header: Option<PendingChild>,
     pending_content: Option<PendingChild>,
     pending_footer: Option<PendingChild>,
-    /// Tracks which slots had pending children for correct set_resolved_children.
-    pending_slot_order: Vec<Slot>,
     shadow: Option<Shadow>,
     background: Option<Color>,
     corner_radius: Option<f32>,
     padding: Option<f32>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Slot {
-    Header,
-    Content,
-    Footer,
 }
 
 impl Card {
@@ -39,7 +30,6 @@ impl Card {
             pending_header: None,
             pending_content: None,
             pending_footer: None,
-            pending_slot_order: Vec::new(),
             shadow: None,
             background: None,
             corner_radius: None,
@@ -94,6 +84,31 @@ impl Default for Card {
 }
 
 impl Widget for Card {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        if let Some(h) = self.pending_header.take() {
+            self.header_id = Some(match h {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        if let Some(c) = self.pending_content.take() {
+            self.content_id = Some(match c {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        if let Some(f) = self.pending_footer.take() {
+            self.footer_id = Some(match f {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        [self.header_id, self.content_id, self.footer_id]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let pad = self.resolve_padding(ctx.theme);
         let inset = pad * 2.0;
@@ -172,34 +187,6 @@ impl Widget for Card {
             .into_iter()
             .flatten()
             .collect()
-    }
-
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        let mut children = Vec::new();
-        self.pending_slot_order.clear();
-        if let Some(h) = self.pending_header.take() {
-            children.push(h);
-            self.pending_slot_order.push(Slot::Header);
-        }
-        if let Some(c) = self.pending_content.take() {
-            children.push(c);
-            self.pending_slot_order.push(Slot::Content);
-        }
-        if let Some(f) = self.pending_footer.take() {
-            children.push(f);
-            self.pending_slot_order.push(Slot::Footer);
-        }
-        children
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        for (id, slot) in ids.into_iter().zip(self.pending_slot_order.iter()) {
-            match slot {
-                Slot::Header => self.header_id = Some(id),
-                Slot::Content => self.content_id = Some(id),
-                Slot::Footer => self.footer_id = Some(id),
-            }
-        }
     }
 
 }

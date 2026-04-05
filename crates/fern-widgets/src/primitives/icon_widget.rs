@@ -6,9 +6,7 @@
 use fern_canvas::{Canvas, Path, PathCommand, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::signal::Prop;
-use fern_core::state::BindingLevel;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
-use fern_core::widget_id::WidgetId;
 use fern_tokens::Color;
 
 /// A leaf widget that renders a vector icon path.
@@ -149,6 +147,13 @@ impl std::fmt::Debug for IconWidget {
 }
 
 impl Widget for IconWidget {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.color.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
     fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         Size::new(self.size, self.size)
     }
@@ -165,9 +170,6 @@ impl Widget for IconWidget {
         // Icons are typically decorative — the parent widget sets the semantic role.
     }
 
-    fn register_bindings(&self, id: WidgetId, registry: &fern_core::state::BindingRegistry) {
-        self.color.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-    }
 }
 
 #[cfg(test)]

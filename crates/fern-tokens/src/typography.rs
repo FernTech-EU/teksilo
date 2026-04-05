@@ -64,7 +64,7 @@ impl Default for TypographyTokens {
                 letter_spacing: 0.5,
             },
             caption: TextStyle {
-                family: family,
+                family,
                 size: 11.0,
                 weight: FontWeight::REGULAR,
                 line_height: 1.3,

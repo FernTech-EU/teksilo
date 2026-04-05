@@ -52,6 +52,7 @@ impl IdleQueue {
     }
 
     /// Enqueue an idle callback.
+    #[allow(dead_code)] // Public API for idle callback scheduling
     pub fn push(&mut self, callback: impl FnOnce(IdleDeadline) + 'static) {
         self.callbacks.push(Box::new(callback));
     }
@@ -72,6 +73,7 @@ impl IdleQueue {
     }
 
     /// Number of pending callbacks.
+    #[allow(dead_code)] // Public API complementing is_empty()
     pub fn len(&self) -> usize {
         self.callbacks.len()
     }

@@ -50,7 +50,7 @@ mod tests {
 
     #[test]
     fn font_weight_ordering() {
-        assert!(FontWeight::LIGHT.0 < FontWeight::BOLD.0);
+        const { assert!(FontWeight::LIGHT.0 < FontWeight::BOLD.0) };
     }
 
     #[test]

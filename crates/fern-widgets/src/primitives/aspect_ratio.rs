@@ -66,6 +66,16 @@ impl AspectRatio {
 }
 
 impl Widget for AspectRatio {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        self.child_id.into_iter().collect()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         self.constrain(proposal.width, proposal.height)
     }
@@ -91,13 +101,6 @@ impl Widget for AspectRatio {
         self.child_id.into_iter().collect()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        self.pending_child.take().into_iter().collect()
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_id = ids.into_iter().next();
-    }
 }
 
 #[cfg(test)]

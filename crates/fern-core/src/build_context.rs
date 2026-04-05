@@ -57,6 +57,13 @@ impl<'a> BuildContext<'a> {
         signal
     }
 
+    /// Register a pre-existing `Signal<f32>` for animation support.
+    /// Use this when the signal was created outside of `build()` (e.g. in the
+    /// widget constructor) and needs to be registered with the animation scheduler.
+    pub fn register_animated_signal(&mut self, signal: &Signal<f32>) {
+        self.tree.register_animated_signal(signal);
+    }
+
     /// Register a scoped effect tied to this build cycle.
     /// The effect fires whenever the signal changes. It is automatically
     /// cleaned up on rebuild or widget destruction.

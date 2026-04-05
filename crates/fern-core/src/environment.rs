@@ -1,16 +1,11 @@
 use fern_tokens::Theme;
 
 /// Layout direction for RTL/LTR support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LayoutDirection {
+    #[default]
     LeftToRight,
     RightToLeft,
-}
-
-impl Default for LayoutDirection {
-    fn default() -> Self {
-        Self::LeftToRight
-    }
 }
 
 /// Environment data that flows down the widget tree.

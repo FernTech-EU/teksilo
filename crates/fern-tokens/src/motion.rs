@@ -3,18 +3,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// Easing curve for animations.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Easing {
     Linear,
     EaseIn,
     EaseOut,
+    #[default]
     EaseInOut,
-}
-
-impl Default for Easing {
-    fn default() -> Self {
-        Self::EaseInOut
-    }
 }
 
 impl Easing {

@@ -1,19 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 /// Horizontal alignment — respects LayoutDirection for Leading/Trailing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HAlignment {
     /// Left in LTR, right in RTL.
     Leading,
+    #[default]
     Center,
     /// Right in LTR, left in RTL.
     Trailing,
-}
-
-impl Default for HAlignment {
-    fn default() -> Self {
-        Self::Center
-    }
 }
 
 impl HAlignment {
@@ -41,17 +36,12 @@ impl HAlignment {
 }
 
 /// Vertical alignment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VAlignment {
     Top,
+    #[default]
     Center,
     Bottom,
-}
-
-impl Default for VAlignment {
-    fn default() -> Self {
-        Self::Center
-    }
 }
 
 impl VAlignment {

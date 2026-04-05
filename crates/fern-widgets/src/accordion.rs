@@ -13,7 +13,6 @@ use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
 use fern_core::signal::Signal;
-use fern_core::state::State; // State<f32> still used for animated content height
 use fern_core::widget::{CursorIcon, EventContext, IntoWidgetTree, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
@@ -33,7 +32,7 @@ pub struct Accordion {
     expanded: Signal<bool>,
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn IntoWidgetTree>>,
-    content_height: Option<State<f32>>,
+    content_height: Option<Signal<f32>>,
     keyboard_focused: Option<Signal<bool>>,
     focus_origin: Option<FocusOrigin>,
     tap_recognizer: TapRecognizer,
@@ -74,7 +73,7 @@ impl Accordion {
         // Animate the content height
         if let Some(ref height) = self.content_height {
             let target = if new_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
-            height.set_animated(target, Duration::from_millis(200), Easing::EaseInOut);
+            height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
         }
     }
 }
@@ -147,7 +146,7 @@ impl Widget for Accordion {
         if let Some(content_id) = self.content_id {
             // Wrap content in MaxSize with animated height for smooth expand/collapse
             let initial_height = if is_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
-            let height_state = ctx.animated_state(initial_height);
+            let height_state = ctx.animated_signal(initial_height);
             self.content_height = Some(height_state.clone());
 
             let wrapper = ctx.add(
@@ -164,10 +163,10 @@ impl Widget for Accordion {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        if let Some(root) = self.root_child_id {
-            if let Some(size) = ctx.child_size(root, proposal) {
-                return size;
-            }
+        if let Some(root) = self.root_child_id
+            && let Some(size) = ctx.child_size(root, proposal)
+        {
+            return size;
         }
         proposal.resolve(0.0, 0.0)
     }
@@ -262,7 +261,6 @@ impl Widget for Accordion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
 

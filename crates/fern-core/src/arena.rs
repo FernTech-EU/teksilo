@@ -38,6 +38,7 @@ pub struct DirtyFlags {
 }
 
 /// A gesture binding: arena of recognizers + callback for when gestures fire.
+#[allow(clippy::type_complexity)]
 pub(crate) struct GestureBinding {
     pub arena: GestureArena,
     pub handler: Box<dyn FnMut(GestureEvent, &mut crate::widget::EventContext)>,
@@ -67,13 +68,13 @@ pub struct WidgetNode {
 
     /// Attached event handlers (V2). Checked before widget.event() during dispatch.
     pub(crate) handlers: EventHandlers,
-    /// V2 focusable override. When Some, takes precedence over widget.is_focusable().
+    #[allow(dead_code)] // V2 API: focusable override, takes precedence over widget.is_focusable()
     pub(crate) v2_focusable: Option<bool>,
-    /// V2 tab index override.
+    #[allow(dead_code)] // V2 API: tab index override
     pub(crate) v2_tab_index: Option<i32>,
-    /// V2 spacer flag. Set by Spacer during insertion.
+    #[allow(dead_code)] // V2 API: spacer flag, set by Spacer during insertion
     pub(crate) v2_is_spacer: bool,
-    /// V2 cursor override.
+    #[allow(dead_code)] // V2 API: cursor override
     pub(crate) v2_cursor: Option<CursorIcon>,
     /// Whether build() returned children (for rebuild on environment change).
     pub(crate) has_built_children: bool,
@@ -301,10 +302,10 @@ impl WidgetArena {
             self.destroy(child);
         }
         // Remove from parent's children list
-        if let Some(parent_id) = self.parent(id) {
-            if let Some(parent) = self.nodes.get_mut(parent_id) {
-                parent.children.retain(|&c| c != id);
-            }
+        if let Some(parent_id) = self.parent(id)
+            && let Some(parent) = self.nodes.get_mut(parent_id)
+        {
+            parent.children.retain(|&c| c != id);
         }
         self.nodes.remove(id);
     }
@@ -460,10 +461,10 @@ impl WidgetArena {
 
         let mut theme = base.clone();
         for nid in chain {
-            if let Some(node) = self.nodes.get(nid) {
-                if let Some(ovr) = &node.theme_override {
-                    (ovr.func)(&mut theme);
-                }
+            if let Some(node) = self.nodes.get(nid)
+                && let Some(ovr) = &node.theme_override
+            {
+                (ovr.func)(&mut theme);
             }
         }
         theme

@@ -9,7 +9,6 @@
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::state::Reactive;
 use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
@@ -24,8 +23,6 @@ pub struct Panel {
     border_width: Option<f32>,
     corner_radius: Option<f32>,
     padding: Option<f32>,
-    visible_when_state: Option<Reactive<bool>>,
-    enabled_when_state: Option<Reactive<bool>>,
 }
 
 impl Panel {
@@ -38,8 +35,6 @@ impl Panel {
             border_width: None,
             corner_radius: None,
             padding: None,
-            visible_when_state: None,
-            enabled_when_state: None,
         }
     }
 
@@ -85,18 +80,6 @@ impl Panel {
         self
     }
 
-    /// Bind visibility to a boolean state (toggles dormant/active).
-    pub fn visible_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.visible_when_state = Some(state.into());
-        self
-    }
-
-    /// Bind enabled state to a boolean state.
-    pub fn enabled_when(mut self, state: impl Into<Reactive<bool>>) -> Self {
-        self.enabled_when_state = Some(state.into());
-        self
-    }
-
     fn resolve_padding(&self, theme: &fern_tokens::Theme) -> f32 {
         self.padding.unwrap_or(theme.spacing.content_padding)
     }
@@ -109,6 +92,16 @@ impl Default for Panel {
 }
 
 impl Widget for Panel {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
+        }
+        self.child_id.into_iter().collect()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let pad = self.resolve_padding(ctx.theme);
         let inset = pad * 2.0;
@@ -166,21 +159,6 @@ impl Widget for Panel {
         self.child_id.into_iter().collect()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        self.pending_child.take().into_iter().collect()
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_id = ids.into_iter().next();
-    }
-
-    fn take_visible_when(&mut self) -> Option<Reactive<bool>> {
-        self.visible_when_state.take()
-    }
-
-    fn take_enabled_when(&mut self) -> Option<Reactive<bool>> {
-        self.enabled_when_state.take()
-    }
 }
 
 #[cfg(test)]

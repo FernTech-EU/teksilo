@@ -11,17 +11,12 @@ pub enum FocusOrigin {
 }
 
 /// Focus policy for composite widgets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FocusPolicy {
     /// Default behavior — widget participates in tab navigation if focusable.
+    #[default]
     Default,
     /// Widget acts as a focus scope — internal children don't participate in
     /// external tab navigation.
     Scope,
-}
-
-impl Default for FocusPolicy {
-    fn default() -> Self {
-        Self::Default
-    }
 }

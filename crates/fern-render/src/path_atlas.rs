@@ -209,13 +209,13 @@ impl PathAtlas {
         }
 
         // Try growing the atlas
-        if self.try_grow() {
-            if let Some(region) = self.try_allocate(w, h) {
-                self.blit(region.x, region.y, w, h, pixels);
-                self.cache.insert(key, region);
-                self.dirty = true;
-                return Some(region);
-            }
+        if self.try_grow()
+            && let Some(region) = self.try_allocate(w, h)
+        {
+            self.blit(region.x, region.y, w, h, pixels);
+            self.cache.insert(key, region);
+            self.dirty = true;
+            return Some(region);
         }
 
         None
@@ -430,6 +430,7 @@ fn rasterize_path(
 
 /// Approximate an elliptical arc with cubic Bézier segments.
 /// Each 90° sweep is one cubic; smaller sweeps use one cubic.
+#[allow(clippy::too_many_arguments)]
 fn arc_to_cubics(
     pb: &mut tiny_skia::PathBuilder,
     cx: f32,

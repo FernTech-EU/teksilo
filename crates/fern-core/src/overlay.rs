@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use fern_canvas::{Point, Rect, Size, Vec2};
 
-use crate::widget::Widget;
 use crate::widget_id::WidgetId;
 
 /// Unique identifier for an active overlay.
@@ -83,6 +82,7 @@ pub(crate) struct ActiveOverlay {
     pub anchor: WidgetId,
     pub placement: OverlayPlacement,
     pub dismiss: DismissBehavior,
+    #[allow(dead_code)] // Part of V2 overlay API, used for z-ordering
     pub layer: OverlayLayer,
     pub parent_overlay: Option<OverlayId>,
     /// Computed bounds after positioning.
@@ -181,7 +181,8 @@ impl OverlayManager {
     }
 
     /// Get the topmost overlay.
-    pub fn topmost(&self) -> Option<&ActiveOverlay> {
+    #[allow(dead_code)] // V2 API: used for overlay z-ordering and focus management
+    pub(crate) fn topmost(&self) -> Option<&ActiveOverlay> {
         self.stack.last()
     }
 

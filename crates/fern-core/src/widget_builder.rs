@@ -77,6 +77,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     }
 
     /// Take the handler set out, leaving defaults.
+    #[allow(dead_code)] // V2 API: used during widget insertion to extract handlers
     pub(crate) fn take_handler_set(&mut self) -> HandlerSet {
         std::mem::replace(&mut self.handler_set, HandlerSet::new())
     }
@@ -297,6 +298,10 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
 
     fn animated_states(&self) -> Vec<crate::state::State<f32>> {
         self.widget.animated_states()
+    }
+
+    fn animated_signals(&self) -> Vec<crate::signal::Signal<f32>> {
+        self.widget.animated_signals()
     }
 
     fn take_pending_children(&mut self) -> Vec<crate::widget::PendingChild> {

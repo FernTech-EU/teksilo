@@ -3,20 +3,23 @@ use std::time::Duration;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
-use fern_core::state::{BindingLevel, BindingRegistry, State};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::signal::Signal;
+use fern_core::state::BindingLevel;
+use fern_core::widget::{EventContext, IntoWidgetTree, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 /// How the scroll bar is displayed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollBarStyle {
     /// Scroll bar overlays the content (macOS-style). A thin passive
     /// indicator is painted during scrolling; the full interactive ScrollBar
     /// is shown as an overlay on pointer proximity.
+    #[default]
     Overlay,
     /// Scroll bar is a permanent layout sibling of the viewport, reducing
     /// the content area by the scroll bar's width. Always visible and
@@ -24,16 +27,11 @@ pub enum ScrollBarStyle {
     Permanent,
 }
 
-impl Default for ScrollBarStyle {
-    fn default() -> Self {
-        ScrollBarStyle::Overlay
-    }
-}
-
 /// Controls when a scroll bar is shown for a given axis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScrollBarPolicy {
     /// Show the scroll bar only when content exceeds the viewport (default).
+    #[default]
     AsNeeded,
     /// Always show the scroll bar, even when content fits.
     AlwaysOn,
@@ -41,21 +39,16 @@ pub enum ScrollBarPolicy {
     AlwaysOff,
 }
 
-impl Default for ScrollBarPolicy {
-    fn default() -> Self {
-        ScrollBarPolicy::AsNeeded
-    }
-}
-
 /// A scroll area that clips its content to a viewport and handles
-/// scroll events. The scroll offset is stored as `State<f32>` per axis,
+/// scroll events. The scroll offset is stored as `Signal<f32>` per axis,
 /// shared with the ScrollBar widget via the reactive binding system.
 ///
 /// Supports two display modes via `ScrollBarStyle`:
 /// - **Overlay** (default): thin indicator painted during scrolling
 /// - **Permanent**: ScrollBar is a layout child alongside the viewport
 pub struct ScrollArea {
-    content_child: Option<PendingChild>,
+    content_child: Option<Box<dyn IntoWidgetTree>>,
+    content_child_id: Option<WidgetId>,
     scroll_bar_style: ScrollBarStyle,
     /// Per-axis scroll bar visibility policy.
     vertical_policy: ScrollBarPolicy,
@@ -76,17 +69,17 @@ pub struct ScrollArea {
 
     // --- shared reactive state ---
     /// Vertical scroll position (0.0 = top).
-    scroll_y: State<f32>,
+    scroll_y: Signal<f32>,
     /// Horizontal scroll position (0.0 = left).
-    scroll_x: State<f32>,
+    scroll_x: Signal<f32>,
     /// Maximum vertical scroll (content_height - viewport_height).
-    max_scroll_y: State<f32>,
+    max_scroll_y: Signal<f32>,
     /// Maximum horizontal scroll (content_width - viewport_width).
-    max_scroll_x: State<f32>,
+    max_scroll_x: Signal<f32>,
     /// Vertical viewport/content ratio (0.0..1.0).
-    viewport_ratio_y: State<f32>,
+    viewport_ratio_y: Signal<f32>,
     /// Horizontal viewport/content ratio (0.0..1.0).
-    viewport_ratio_x: State<f32>,
+    viewport_ratio_x: Signal<f32>,
 
     // --- resolved children ---
     /// Resolved child IDs: [content, optional_v_scrollbar, optional_h_scrollbar]
@@ -100,8 +93,8 @@ pub struct ScrollArea {
 impl std::fmt::Debug for ScrollArea {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScrollArea")
-            .field("scroll_y", &*self.scroll_y.get())
-            .field("scroll_x", &*self.scroll_x.get())
+            .field("scroll_y", &self.scroll_y.get())
+            .field("scroll_x", &self.scroll_x.get())
             .field("style", &self.scroll_bar_style)
             .field("v_policy", &self.vertical_policy)
             .field("h_policy", &self.horizontal_policy)
@@ -113,9 +106,10 @@ impl std::fmt::Debug for ScrollArea {
 }
 
 impl ScrollArea {
-    pub fn new(child: impl fern_core::widget::IntoWidgetTree) -> Self {
+    pub fn new(child: impl IntoWidgetTree + 'static) -> Self {
         Self {
-            content_child: Some(PendingChild::Deferred(Box::new(child))),
+            content_child: Some(Box::new(child)),
+            content_child_id: None,
             scroll_bar_style: ScrollBarStyle::default(),
             vertical_policy: ScrollBarPolicy::default(),
             horizontal_policy: ScrollBarPolicy::default(),
@@ -125,12 +119,12 @@ impl ScrollArea {
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
             preferred_size: None,
-            scroll_y: State::new_animated(0.0),
-            scroll_x: State::new_animated(0.0),
-            max_scroll_y: State::new(0.0),
-            max_scroll_x: State::new(0.0),
-            viewport_ratio_y: State::new(1.0),
-            viewport_ratio_x: State::new(1.0),
+            scroll_y: Signal::new_animated(0.0),
+            scroll_x: Signal::new_animated(0.0),
+            max_scroll_y: Signal::new(0.0),
+            max_scroll_x: Signal::new(0.0),
+            viewport_ratio_y: Signal::new(1.0),
+            viewport_ratio_x: Signal::new(1.0),
             child_ids: Vec::new(),
             content_size: Cell::new(Size::ZERO),
             viewport_size: Cell::new(Size::ZERO),
@@ -140,7 +134,8 @@ impl ScrollArea {
     /// Construct from an already-registered child WidgetId.
     pub fn from_id(child: WidgetId) -> Self {
         Self {
-            content_child: Some(PendingChild::Id(child)),
+            content_child: None,
+            content_child_id: Some(child),
             scroll_bar_style: ScrollBarStyle::default(),
             vertical_policy: ScrollBarPolicy::default(),
             horizontal_policy: ScrollBarPolicy::default(),
@@ -150,12 +145,12 @@ impl ScrollArea {
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
             preferred_size: None,
-            scroll_y: State::new_animated(0.0),
-            scroll_x: State::new_animated(0.0),
-            max_scroll_y: State::new(0.0),
-            max_scroll_x: State::new(0.0),
-            viewport_ratio_y: State::new(1.0),
-            viewport_ratio_x: State::new(1.0),
+            scroll_y: Signal::new_animated(0.0),
+            scroll_x: Signal::new_animated(0.0),
+            max_scroll_y: Signal::new(0.0),
+            max_scroll_x: Signal::new(0.0),
+            viewport_ratio_y: Signal::new(1.0),
+            viewport_ratio_x: Signal::new(1.0),
             child_ids: Vec::new(),
             content_size: Cell::new(Size::ZERO),
             viewport_size: Cell::new(Size::ZERO),
@@ -216,21 +211,21 @@ impl ScrollArea {
         self
     }
 
-    /// Get the vertical scroll position state (for external observation).
-    pub fn scroll_y_state(&self) -> &State<f32> {
+    /// Get the vertical scroll position signal (for external observation).
+    pub fn scroll_y_signal(&self) -> &Signal<f32> {
         &self.scroll_y
     }
 
-    /// Get the horizontal scroll position state (for external observation).
-    pub fn scroll_x_state(&self) -> &State<f32> {
+    /// Get the horizontal scroll position signal (for external observation).
+    pub fn scroll_x_signal(&self) -> &Signal<f32> {
         &self.scroll_x
     }
 
     fn clamp_and_set_scroll(&self) {
-        let max_y = *self.max_scroll_y.get();
-        let max_x = *self.max_scroll_x.get();
-        let cur_y = *self.scroll_y.get();
-        let cur_x = *self.scroll_x.get();
+        let max_y = self.max_scroll_y.get();
+        let max_x = self.max_scroll_x.get();
+        let cur_y = self.scroll_y.get();
+        let cur_x = self.scroll_x.get();
         let clamped_y = cur_y.clamp(0.0, max_y);
         let clamped_x = cur_x.clamp(0.0, max_x);
         if (clamped_y - cur_y).abs() > f32::EPSILON {
@@ -244,6 +239,64 @@ impl ScrollArea {
 }
 
 impl Widget for ScrollArea {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let mut ids = Vec::new();
+
+        // Resolve the content child
+        let content_id = if let Some(child) = self.content_child.take() {
+            ctx.add_boxed(child)
+        } else if let Some(id) = self.content_child_id.take() {
+            id
+        } else {
+            // Already built — return existing children
+            return self.child_ids.clone();
+        };
+        ids.push(content_id);
+
+        // Scrollbar visual tuning depends on mode
+        let (thickness, track) = match self.scroll_bar_style {
+            ScrollBarStyle::Overlay => (6.0, false),
+            ScrollBarStyle::Permanent => (self.scroll_bar_thickness, true),
+        };
+
+        // Create vertical scrollbar
+        let v_scrollbar = ScrollBar::new(
+            ScrollBarOrientation::Vertical,
+            self.scroll_y.clone(),
+            self.max_scroll_y.clone(),
+            self.viewport_ratio_y.clone(),
+        )
+        .thickness(thickness)
+        .show_track(track);
+        let v_id = ctx.add(v_scrollbar);
+        ids.push(v_id);
+
+        // Create horizontal scrollbar
+        let h_scrollbar = ScrollBar::new(
+            ScrollBarOrientation::Horizontal,
+            self.scroll_x.clone(),
+            self.max_scroll_x.clone(),
+            self.viewport_ratio_x.clone(),
+        )
+        .thickness(thickness)
+        .show_track(track);
+        let h_id = ctx.add(h_scrollbar);
+        ids.push(h_id);
+
+        // Register animated signals
+        ctx.register_animated_signal(&self.scroll_y);
+        ctx.register_animated_signal(&self.scroll_x);
+
+        // Register bindings: scroll position changes trigger relayout (content offset moves)
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.scroll_y.bind_to(self_id, registry, BindingLevel::Relayout);
+        self.scroll_x.bind_to(self_id, registry, BindingLevel::Relayout);
+
+        self.child_ids = ids.clone();
+        ids
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         // Use preferred_size if set; otherwise use content width but a fixed
         // default height.  A scroll area's HEIGHT should come from its parent,
@@ -278,7 +331,7 @@ impl Widget for ScrollArea {
         let has_v = children.len() > 1;
         let has_h = children.len() > 2;
         let v_off = self.vertical_policy == ScrollBarPolicy::AlwaysOff;
-        let h_off = self.horizontal_policy == ScrollBarPolicy::AlwaysOff;
+        let _h_off = self.horizontal_policy == ScrollBarPolicy::AlwaysOff;
 
         // Scrollbar thickness for this mode
         let sb_thickness = match self.scroll_bar_style {
@@ -359,8 +412,8 @@ impl Widget for ScrollArea {
         self.viewport_ratio_x.set(ratio_x);
 
         self.clamp_and_set_scroll();
-        let scroll_y = *self.scroll_y.get();
-        let scroll_x = *self.scroll_x.get();
+        let scroll_y = self.scroll_y.get();
+        let scroll_x = self.scroll_x.get();
 
         // --- Step 3: Place content ---
         children[0].origin = Point::new(
@@ -421,10 +474,10 @@ impl Widget for ScrollArea {
     fn event(&mut self, event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
         match event {
             WidgetEvent::Scroll { delta, .. } => {
-                let max_y = *self.max_scroll_y.get();
-                let max_x = *self.max_scroll_x.get();
-                let cur_y = *self.scroll_y.get();
-                let cur_x = *self.scroll_x.get();
+                let max_y = self.max_scroll_y.get();
+                let max_x = self.max_scroll_x.get();
+                let cur_y = self.scroll_y.get();
+                let cur_x = self.scroll_x.get();
 
                 match delta {
                     ScrollDelta::Lines { x, y } => {
@@ -437,12 +490,12 @@ impl Widget for ScrollArea {
                         let target_x = (base_x + x * self.line_height)
                             .clamp(0.0, max_x);
                         if self.smooth_scrolling {
-                            self.scroll_y.set_animated(
+                            self.scroll_y.animate_to(
                                 target_y,
                                 self.smooth_scroll_duration,
                                 Easing::EaseOut,
                             );
-                            self.scroll_x.set_animated(
+                            self.scroll_x.animate_to(
                                 target_x,
                                 self.smooth_scroll_duration,
                                 Easing::EaseOut,
@@ -463,8 +516,8 @@ impl Widget for ScrollArea {
             }
             WidgetEvent::ScrollIntoView { target_bounds, margin } => {
                 let vp = self.viewport_size.get();
-                let scroll_y = *self.scroll_y.get();
-                let scroll_x = *self.scroll_x.get();
+                let scroll_y = self.scroll_y.get();
+                let scroll_x = self.scroll_x.get();
 
                 // Vertical: scroll minimum amount to make target + margin visible
                 let viewport_top = scroll_y;
@@ -500,25 +553,25 @@ impl Widget for ScrollArea {
             WidgetEvent::AccessAction { action, .. } => match *action {
                 fern_core::accesskit::Action::ScrollDown => {
                     let step = self.viewport_size.get().height * 0.9;
-                    self.scroll_y.set(*self.scroll_y.get() + step);
+                    self.scroll_y.set(self.scroll_y.get() + step);
                     self.clamp_and_set_scroll();
                     EventResponse::Handled
                 }
                 fern_core::accesskit::Action::ScrollUp => {
                     let step = self.viewport_size.get().height * 0.9;
-                    self.scroll_y.set(*self.scroll_y.get() - step);
+                    self.scroll_y.set(self.scroll_y.get() - step);
                     self.clamp_and_set_scroll();
                     EventResponse::Handled
                 }
                 fern_core::accesskit::Action::ScrollRight => {
                     let step = self.viewport_size.get().width * 0.9;
-                    self.scroll_x.set(*self.scroll_x.get() + step);
+                    self.scroll_x.set(self.scroll_x.get() + step);
                     self.clamp_and_set_scroll();
                     EventResponse::Handled
                 }
                 fern_core::accesskit::Action::ScrollLeft => {
                     let step = self.viewport_size.get().width * 0.9;
-                    self.scroll_x.set(*self.scroll_x.get() - step);
+                    self.scroll_x.set(self.scroll_x.get() - step);
                     self.clamp_and_set_scroll();
                     EventResponse::Handled
                 }
@@ -532,60 +585,6 @@ impl Widget for ScrollArea {
         self.child_ids.clone()
     }
 
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        let mut pending = Vec::new();
-        if let Some(child) = self.content_child.take() {
-            pending.push(child);
-        } else {
-            return pending;
-        }
-
-        // Scrollbar visual tuning depends on mode
-        let (thickness, track) = match self.scroll_bar_style {
-            ScrollBarStyle::Overlay => (6.0, false),
-            ScrollBarStyle::Permanent => (self.scroll_bar_thickness, true),
-        };
-
-        let v_scrollbar = ScrollBar::new(
-            ScrollBarOrientation::Vertical,
-            self.scroll_y.clone(),
-            self.max_scroll_y.clone(),
-            self.viewport_ratio_y.clone(),
-        )
-        .thickness(thickness)
-        .show_track(track);
-        pending.push(PendingChild::Deferred(Box::new(v_scrollbar)));
-
-        let h_scrollbar = ScrollBar::new(
-            ScrollBarOrientation::Horizontal,
-            self.scroll_x.clone(),
-            self.max_scroll_x.clone(),
-            self.viewport_ratio_x.clone(),
-        )
-        .thickness(thickness)
-        .show_track(track);
-        pending.push(PendingChild::Deferred(Box::new(h_scrollbar)));
-
-        pending
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<WidgetId>) {
-        self.child_ids = ids;
-    }
-
-    fn register_bindings(&self, id: WidgetId, registry: &BindingRegistry) {
-        // Scroll position changes trigger relayout (content offset moves)
-        let y_handle = fern_core::state::StateHandle::from(self.scroll_y.clone());
-        y_handle.register(id, registry, BindingLevel::Relayout);
-
-        let x_handle = fern_core::state::StateHandle::from(self.scroll_x.clone());
-        x_handle.register(id, registry, BindingLevel::Relayout);
-    }
-
-    fn animated_states(&self) -> Vec<fern_core::state::State<f32>> {
-        vec![self.scroll_y.clone(), self.scroll_x.clone()]
-    }
-
     fn clips_children(&self) -> bool {
         true
     }
@@ -594,10 +593,10 @@ impl Widget for ScrollArea {
         builder.set_role(fern_core::accesskit::Role::ScrollView);
         builder.inner_mut().set_clips_children();
 
-        let scroll_y = *self.scroll_y.get();
-        let scroll_x = *self.scroll_x.get();
-        let max_y = *self.max_scroll_y.get();
-        let max_x = *self.max_scroll_x.get();
+        let scroll_y = self.scroll_y.get();
+        let scroll_x = self.scroll_x.get();
+        let max_y = self.max_scroll_y.get();
+        let max_x = self.max_scroll_x.get();
 
         builder.inner_mut().set_scroll_y(scroll_y as f64);
         builder.inner_mut().set_scroll_y_min(0.0);
@@ -650,7 +649,7 @@ mod tests {
     fn scroll_area_clips_hit_test() {
         let mut tree = WidgetTree::new();
 
-        // Content taller than viewport: 3 items × 100px = 300px
+        // Content taller than viewport: 3 items x 100px = 300px
         let a = tree.add(TallLeaf::new(200.0, 100.0));
         let b = tree.add(TallLeaf::new(200.0, 100.0));
         let c = tree.add(TallLeaf::new(200.0, 100.0));
@@ -659,7 +658,7 @@ mod tests {
         let scroll = tree.add(ScrollArea::from_id(content));
 
 
-        // Viewport is 200×80 — only first 80px visible
+        // Viewport is 200x80 — only first 80px visible
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         // Point inside viewport: should hit a child
@@ -749,7 +748,7 @@ mod tests {
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        // The scroll area should be 200×100
+        // The scroll area should be 200x100
         let scroll_bounds = tree.bounds(scroll);
         assert!((scroll_bounds.width - 200.0).abs() < 0.01);
         assert!((scroll_bounds.height - 100.0).abs() < 0.01);
@@ -1064,7 +1063,7 @@ mod tests {
         });
 
         // The animation target was set but not yet ticked — the state
-        // should have a pending animation (set_animated marks dirty).
+        // should have a pending animation (animate_to marks dirty).
         // After a layout + tick, the value should be moving toward the target.
         tree.layout(SizeProposal::exact(200.0, 100.0));
 

@@ -3,9 +3,8 @@ use std::cell::Cell;
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
-use fern_core::state::{BindingLevel, BindingRegistry, State};
+use fern_core::signal::Signal;
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget};
-use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
 /// Orientation of the scroll bar.
@@ -17,8 +16,8 @@ pub enum ScrollBarOrientation {
 
 /// A standalone Level 2 scroll bar widget.
 ///
-/// The ScrollBar reads and writes a shared `State<f32>` for the scroll
-/// position, and reads a `State<f32>` for the content-to-viewport ratio
+/// The ScrollBar reads and writes a shared `Signal<f32>` for the scroll
+/// position, and reads a `Signal<f32>` for the content-to-viewport ratio
 /// (viewport_size / content_size, clamped to 0.0..1.0).
 ///
 /// Supports:
@@ -30,13 +29,13 @@ pub struct ScrollBar {
     orientation: ScrollBarOrientation,
     /// Scroll position: 0.0 = start, max_scroll = end.
     /// Shared with ScrollArea — both read and write.
-    scroll_position: State<f32>,
+    scroll_position: Signal<f32>,
     /// Maximum scroll value (content_size - viewport_size).
     /// Written by the ScrollArea, read by the ScrollBar.
-    max_scroll: State<f32>,
+    max_scroll: Signal<f32>,
     /// Viewport / content ratio (0.0..1.0). Determines thumb size.
     /// Written by the ScrollArea, read by the ScrollBar.
-    viewport_ratio: State<f32>,
+    viewport_ratio: Signal<f32>,
 
     // --- interaction state ---
     /// Whether the pointer is over the scroll bar.
@@ -74,14 +73,14 @@ impl std::fmt::Debug for ScrollBar {
 impl ScrollBar {
     /// Create a new ScrollBar with shared state.
     ///
-    /// - `scroll_position`: shared State<f32> for current scroll offset
-    /// - `max_scroll`: shared State<f32> for maximum scroll offset
-    /// - `viewport_ratio`: shared State<f32> for viewport/content ratio (0.0..1.0)
+    /// - `scroll_position`: shared Signal<f32> for current scroll offset
+    /// - `max_scroll`: shared Signal<f32> for maximum scroll offset
+    /// - `viewport_ratio`: shared Signal<f32> for viewport/content ratio (0.0..1.0)
     pub fn new(
         orientation: ScrollBarOrientation,
-        scroll_position: State<f32>,
-        max_scroll: State<f32>,
-        viewport_ratio: State<f32>,
+        scroll_position: Signal<f32>,
+        max_scroll: Signal<f32>,
+        viewport_ratio: Signal<f32>,
     ) -> Self {
         Self {
             orientation,
@@ -145,11 +144,11 @@ impl ScrollBar {
 
     /// Thumb offset from the start of the track.
     fn thumb_offset(&self) -> f32 {
-        let max = *self.max_scroll.get();
+        let max = self.max_scroll.get();
         if max <= 0.0 {
             return 0.0;
         }
-        let pos = *self.scroll_position.get();
+        let pos = self.scroll_position.get();
         let ratio = (pos / max).clamp(0.0, 1.0);
         let available = self.track_length() - self.thumb_length();
         ratio * available
@@ -191,7 +190,7 @@ impl ScrollBar {
 
     /// Set scroll position, clamped to valid range.
     fn set_scroll(&self, value: f32) {
-        let max = *self.max_scroll.get();
+        let max = self.max_scroll.get();
         self.scroll_position.set(value.clamp(0.0, max));
     }
 
@@ -204,7 +203,7 @@ impl ScrollBar {
             ScrollBarOrientation::Horizontal => thumb.x + thumb.width / 2.0,
         };
 
-        let max = *self.max_scroll.get();
+        let max = self.max_scroll.get();
         if max <= 0.0 {
             return;
         }
@@ -214,7 +213,7 @@ impl ScrollBar {
         // viewport = max * ratio / (1 - ratio)
         let ratio = self.viewport_ratio.get().clamp(0.001, 0.999);
         let viewport_scroll = max * ratio / (1.0 - ratio);
-        let current = *self.scroll_position.get();
+        let current = self.scroll_position.get();
         if click_axis < thumb_center {
             self.set_scroll(current - viewport_scroll);
         } else {
@@ -224,6 +223,15 @@ impl ScrollBar {
 }
 
 impl Widget for ScrollBar {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.scroll_position.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.max_scroll.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.viewport_ratio.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         match self.orientation {
             ScrollBarOrientation::Vertical => Size::new(
@@ -241,7 +249,7 @@ impl Widget for ScrollBar {
         // Cache bounds for event handling
         self.cached_bounds.set(bounds);
 
-        let max = *self.max_scroll.get();
+        let max = self.max_scroll.get();
         if max <= 0.0 {
             // Nothing to scroll — don't paint
             return;
@@ -274,7 +282,7 @@ impl Widget for ScrollBar {
     }
 
     fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        let max = *self.max_scroll.get();
+        let max = self.max_scroll.get();
         if max <= 0.0 {
             return EventResponse::Ignored;
         }
@@ -298,7 +306,7 @@ impl Widget for ScrollBar {
                     self.drag_start_pointer
                         .set(self.axis_value(*position));
                     self.drag_start_scroll
-                        .set(*self.scroll_position.get());
+                        .set(self.scroll_position.get());
                     ctx.capture_pointer();
                 } else {
                     // Track click — page scroll toward click position
@@ -339,19 +347,19 @@ impl Widget for ScrollBar {
                 let step = self.step_size;
                 match (self.orientation, key) {
                     (ScrollBarOrientation::Vertical, Key::ArrowUp) => {
-                        self.set_scroll(*self.scroll_position.get() - step);
+                        self.set_scroll(self.scroll_position.get() - step);
                         EventResponse::Handled
                     }
                     (ScrollBarOrientation::Vertical, Key::ArrowDown) => {
-                        self.set_scroll(*self.scroll_position.get() + step);
+                        self.set_scroll(self.scroll_position.get() + step);
                         EventResponse::Handled
                     }
                     (ScrollBarOrientation::Horizontal, Key::ArrowLeft) => {
-                        self.set_scroll(*self.scroll_position.get() - step);
+                        self.set_scroll(self.scroll_position.get() - step);
                         EventResponse::Handled
                     }
                     (ScrollBarOrientation::Horizontal, Key::ArrowRight) => {
-                        self.set_scroll(*self.scroll_position.get() + step);
+                        self.set_scroll(self.scroll_position.get() + step);
                         EventResponse::Handled
                     }
                     (_, Key::Home) => {
@@ -385,8 +393,8 @@ impl Widget for ScrollBar {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::ScrollBar);
 
-        let pos = *self.scroll_position.get();
-        let max = *self.max_scroll.get();
+        let pos = self.scroll_position.get();
+        let max = self.max_scroll.get();
 
         builder.inner_mut().set_numeric_value(pos as f64);
         builder.inner_mut().set_min_numeric_value(0.0);
@@ -408,19 +416,6 @@ impl Widget for ScrollBar {
         builder.add_action(fern_core::accesskit::Action::SetValue);
     }
 
-    fn register_bindings(&self, id: WidgetId, registry: &BindingRegistry) {
-        // Scroll position changes → repaint (thumb moves)
-        let pos_handle = fern_core::state::StateHandle::from(self.scroll_position.clone());
-        pos_handle.register(id, registry, BindingLevel::RepaintOnly);
-
-        // Max scroll changes → repaint (thumb size/position changes)
-        let max_handle = fern_core::state::StateHandle::from(self.max_scroll.clone());
-        max_handle.register(id, registry, BindingLevel::RepaintOnly);
-
-        // Viewport ratio changes → repaint (thumb size changes)
-        let ratio_handle = fern_core::state::StateHandle::from(self.viewport_ratio.clone());
-        ratio_handle.register(id, registry, BindingLevel::RepaintOnly);
-    }
 }
 
 #[cfg(test)]
@@ -429,10 +424,10 @@ mod tests {
     use fern_canvas::SizeProposal;
     use fern_core::widget_tree::WidgetTree;
 
-    fn make_scrollbar() -> (ScrollBar, State<f32>, State<f32>, State<f32>) {
-        let position = State::new(0.0_f32);
-        let max_scroll = State::new(500.0_f32);
-        let viewport_ratio = State::new(0.5_f32); // viewport is half of content
+    fn make_scrollbar() -> (ScrollBar, Signal<f32>, Signal<f32>, Signal<f32>) {
+        let position = Signal::new(0.0_f32);
+        let max_scroll = Signal::new(500.0_f32);
+        let viewport_ratio = Signal::new(0.5_f32); // viewport is half of content
 
         let bar = ScrollBar::new(
             ScrollBarOrientation::Vertical,
@@ -458,9 +453,9 @@ mod tests {
 
     #[test]
     fn horizontal_scrollbar_size() {
-        let position = State::new(0.0_f32);
-        let max_scroll = State::new(500.0_f32);
-        let viewport_ratio = State::new(0.5_f32);
+        let position = Signal::new(0.0_f32);
+        let max_scroll = Signal::new(500.0_f32);
+        let viewport_ratio = Signal::new(0.5_f32);
 
         let bar = ScrollBar::new(
             ScrollBarOrientation::Horizontal,
@@ -489,7 +484,7 @@ mod tests {
         tree.render();
 
         // Initial position is 0
-        assert!((*position.get() - 0.0).abs() < 0.01);
+        assert!((position.get() - 0.0).abs() < 0.01);
 
         // Pointer down on the thumb (which starts at top)
         tree.pointer_move(Point::new(6.0, 10.0));
@@ -504,7 +499,7 @@ mod tests {
             position: Point::new(6.0, 110.0),
         });
 
-        let pos = *position.get();
+        let pos = position.get();
         assert!(pos > 200.0, "Expected scroll > 200, got {}", pos);
         assert!(pos < 300.0, "Expected scroll < 300, got {}", pos);
     }
@@ -533,8 +528,8 @@ mod tests {
             });
         }
 
-        let pos = *position.get();
-        let max = *max_scroll.get();
+        let pos = position.get();
+        let max = max_scroll.get();
         assert!(
             (pos - max).abs() < 0.01,
             "Expected pos to be clamped at max={}, got {}",
@@ -545,9 +540,9 @@ mod tests {
 
     #[test]
     fn scrollbar_nothing_to_scroll() {
-        let position = State::new(0.0_f32);
-        let max_scroll = State::new(0.0_f32); // content fits in viewport
-        let viewport_ratio = State::new(1.0_f32);
+        let position = Signal::new(0.0_f32);
+        let max_scroll = Signal::new(0.0_f32); // content fits in viewport
+        let viewport_ratio = Signal::new(1.0_f32);
 
         let bar = ScrollBar::new(
             ScrollBarOrientation::Vertical,
@@ -592,7 +587,7 @@ mod tests {
             button: PointerButton::Primary,
         });
 
-        let pos = *position.get();
+        let pos = position.get();
         assert!(pos > 0.0, "Expected positive scroll after track click, got {}", pos);
     }
 
@@ -627,13 +622,13 @@ mod tests {
         });
 
         // Now hover the scrollbar again — should NOT continue dragging
-        let pos_before = *position.get();
+        let pos_before = position.get();
         tree.pointer_move(Point::new(6.0, 50.0));
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(6.0, 50.0),
         });
 
-        let pos_after = *position.get();
+        let pos_after = position.get();
         assert!(
             (pos_after - pos_before).abs() < 0.01,
             "Hovering after release should not move scroll: before={}, after={}",

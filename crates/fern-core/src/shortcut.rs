@@ -112,10 +112,10 @@ impl<C: AppCommand> ShortcutMap<C> {
                 if b.shortcut != *shortcut {
                     continue;
                 }
-                if let ShortcutScope::Scoped(scope_id) = b.scope {
-                    if is_in_scope(focused_id, scope_id) {
-                        return Some(&b.command);
-                    }
+                if let ShortcutScope::Scoped(scope_id) = b.scope
+                    && is_in_scope(focused_id, scope_id)
+                {
+                    return Some(&b.command);
                 }
             }
         }

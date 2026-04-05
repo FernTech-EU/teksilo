@@ -13,10 +13,8 @@ use fern_core::gesture::{
     GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
 };
 use fern_core::signal::Signal;
-use fern_core::state::BindingLevel;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
-use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, TextStyle};
+use fern_tokens::{Color, CornerRadius};
 
 /// Padding inside each segment.
 const SEGMENT_PADDING_H: f32 = 12.0;
@@ -132,6 +130,13 @@ impl std::fmt::Debug for SegmentedControl {
 }
 
 impl Widget for SegmentedControl {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.selected.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         let width = proposal.width.unwrap_or(self.estimate_width());
         let height = (FALLBACK_LINE_HEIGHT + SEGMENT_PADDING_V * 2.0).max(48.0);
@@ -320,11 +325,6 @@ impl Widget for SegmentedControl {
         builder.add_action(fern_core::accesskit::Action::Focus);
         builder.add_action(fern_core::accesskit::Action::Increment);
         builder.add_action(fern_core::accesskit::Action::Decrement);
-    }
-
-    fn register_bindings(&self, id: WidgetId, registry: &fern_core::state::BindingRegistry) {
-        self.selected
-            .bind_to(id, registry, BindingLevel::RepaintOnly);
     }
 
 }

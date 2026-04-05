@@ -11,9 +11,7 @@ use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::gesture::{DragRecognizer, GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent};
 use fern_core::signal::Signal;
-use fern_core::state::BindingLevel;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
-use fern_core::widget_id::WidgetId;
 use fern_tokens::{CornerRadius, Orientation};
 
 const TRACK_HEIGHT: f32 = 4.0;
@@ -119,10 +117,10 @@ impl Slider {
         let t = ((pos - self.primary_start(bounds) - THUMB_RADIUS) / usable).clamp(0.0, 1.0);
         let mut val = self.min + t * (self.max - self.min);
 
-        if let Some(step) = self.step {
-            if step > 0.0 {
-                val = ((val - self.min) / step).round() * step + self.min;
-            }
+        if let Some(step) = self.step
+            && step > 0.0
+        {
+            val = ((val - self.min) / step).round() * step + self.min;
         }
         self.value.set(val.clamp(self.min, self.max));
     }
@@ -150,6 +148,13 @@ impl std::fmt::Debug for Slider {
 }
 
 impl Widget for Slider {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.value.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         match self.orientation {
             Orientation::Horizontal => {
@@ -347,10 +352,6 @@ impl Widget for Slider {
         builder.add_action(fern_core::accesskit::Action::Increment);
         builder.add_action(fern_core::accesskit::Action::Decrement);
         builder.add_action(fern_core::accesskit::Action::Focus);
-    }
-
-    fn register_bindings(&self, id: WidgetId, registry: &fern_core::state::BindingRegistry) {
-        self.value.bind_to(id, registry, BindingLevel::RepaintOnly);
     }
 
 }

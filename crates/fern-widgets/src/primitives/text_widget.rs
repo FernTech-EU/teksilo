@@ -67,6 +67,14 @@ impl TextWidget {
 }
 
 impl Widget for TextWidget {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.text.register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
+        self.color.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        Vec::new()
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let text = self.text.get();
         // Use widget's own backend, or fall back to the context's shared backend.
@@ -95,16 +103,6 @@ impl Widget for TextWidget {
         let text = self.text.get();
         builder.set_role(fern_core::accesskit::Role::Label);
         builder.set_name(&text);
-    }
-
-    fn register_bindings(
-        &self,
-        id: fern_core::widget_id::WidgetId,
-        registry: &fern_core::state::BindingRegistry,
-    ) {
-        use fern_core::state::BindingLevel;
-        self.text.register_if_bound(id, registry, BindingLevel::Relayout);
-        self.color.register_if_bound(id, registry, BindingLevel::RepaintOnly);
     }
 
 }

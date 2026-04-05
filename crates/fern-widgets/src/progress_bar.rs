@@ -1,14 +1,13 @@
 //! ProgressBar — a bar showing progress from 0.0 to 1.0.
 //!
-//! Supports determinate mode (bound to `State<f32>`) and indeterminate mode
-//! (animated sweep when progress is unknown). Horizontal or vertical.
+//! Supports determinate mode (bound to a `Prop<f32>`) and indeterminate mode
+//! (animated sweep via `Signal<f32>`). Horizontal or vertical.
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::event::{EventResponse, WidgetEvent};
-use fern_core::signal::Prop;
-use fern_core::state::{BindingLevel, State};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::signal::{Prop, Signal};
+use fern_core::state::BindingLevel;
+use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing, Orientation};
 
@@ -19,7 +18,7 @@ pub struct ProgressBar {
     value: Prop<f32>,
     indeterminate: bool,
     /// Animated position for indeterminate sweep (0.0–1.0, loops).
-    indeterminate_pos: State<f32>,
+    indeterminate_pos: Signal<f32>,
     orientation: Orientation,
     thickness: f32,
     track_color: Option<Color>,
@@ -32,7 +31,7 @@ impl ProgressBar {
         Self {
             value: Prop::Static(value.clamp(0.0, 1.0)),
             indeterminate: false,
-            indeterminate_pos: State::new_animated(0.0),
+            indeterminate_pos: Signal::new_animated(0.0),
             orientation: Orientation::Horizontal,
             thickness: DEFAULT_THICKNESS,
             track_color: None,
@@ -42,9 +41,9 @@ impl ProgressBar {
 
     /// Create an indeterminate progress bar (animated sweep).
     pub fn indeterminate() -> Self {
-        let pos = State::new_animated(0.0);
-        // Start the animation loop — the first set_animated kicks it off.
-        pos.set_animated(1.0, std::time::Duration::from_millis(1500), Easing::EaseInOut);
+        let pos = Signal::new_animated(0.0);
+        // Start the animation loop — the first animate_to kicks it off.
+        pos.animate_to(1.0, std::time::Duration::from_millis(1500), Easing::EaseInOut);
         Self {
             value: Prop::Static(0.0),
             indeterminate: true,
@@ -92,6 +91,24 @@ impl std::fmt::Debug for ProgressBar {
 }
 
 impl Widget for ProgressBar {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        if self.indeterminate {
+            // Re-create animated signal registered with the scheduler
+            self.indeterminate_pos = ctx.animated_signal(self.indeterminate_pos.get());
+        }
+
+        // Register bindings
+        let id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.value.register_if_bound(id, registry, BindingLevel::RepaintOnly);
+        if self.indeterminate {
+            self.indeterminate_pos.bind_to(id, registry, BindingLevel::RepaintOnly);
+            // Kick off the animation loop
+            self.indeterminate_pos.animate_to(1.0, std::time::Duration::from_millis(1500), Easing::EaseInOut);
+        }
+        vec![]
+    }
+
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         match self.orientation {
             Orientation::Horizontal => {
@@ -140,9 +157,9 @@ impl Widget for ProgressBar {
             };
             canvas.fill_rounded_rect(fill_rect, radius, fill_color);
 
-            // Re-trigger animation to loop (ping-pong: 1→0 or 0→1)
+            // Re-trigger animation to loop (ping-pong: 1->0 or 0->1)
             let target = if pos >= 0.99 { 0.0 } else if pos <= 0.01 { 1.0 } else { return };
-            self.indeterminate_pos.set_animated(
+            self.indeterminate_pos.animate_to(
                 target,
                 std::time::Duration::from_millis(1500),
                 Easing::EaseInOut,
@@ -165,10 +182,6 @@ impl Widget for ProgressBar {
         }
     }
 
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
-    }
-
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::ProgressIndicator);
         let value = self.value.get();
@@ -177,20 +190,6 @@ impl Widget for ProgressBar {
         builder.set_max_numeric_value(1.0);
     }
 
-    fn register_bindings(&self, id: WidgetId, registry: &fern_core::state::BindingRegistry) {
-        self.value.register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        if self.indeterminate {
-            self.indeterminate_pos.bind_to(id, registry, BindingLevel::RepaintOnly);
-        }
-    }
-
-    fn animated_states(&self) -> Vec<State<f32>> {
-        if self.indeterminate {
-            vec![self.indeterminate_pos.clone()]
-        } else {
-            Vec::new()
-        }
-    }
 }
 
 #[cfg(test)]
@@ -221,7 +220,7 @@ mod tests {
     #[test]
     fn progress_bar_fill_width_proportional() {
         let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
-        let pb = tree.add(ProgressBar::new(0.5).fill_color(Color::RED));
+        let _pb = tree.add(ProgressBar::new(0.5).fill_color(Color::RED));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
         // The fill rect should be about half width (100px out of 200px)

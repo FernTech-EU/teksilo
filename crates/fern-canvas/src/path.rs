@@ -198,7 +198,7 @@ impl Path {
     pub fn ellipse(rect: Rect) -> Self {
         // Approximate an ellipse with 4 cubic Bézier curves.
         // Magic number for quarter-circle cubic approximation: κ ≈ 0.5522847498
-        const KAPPA: f32 = 0.5522847498;
+        const KAPPA: f32 = 0.552_284_8;
         let cx = rect.x + rect.width / 2.0;
         let cy = rect.y + rect.height / 2.0;
         let rx = rect.width / 2.0;

@@ -206,7 +206,6 @@ impl FernAppBuilder {
 
         let idle_budget = std::time::Duration::from_millis(4);
 
-        #[allow(deprecated)]
         event_loop
             .run(move |event, target| {
                 use winit::event::{Event, WindowEvent};

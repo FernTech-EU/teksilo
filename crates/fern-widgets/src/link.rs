@@ -174,10 +174,10 @@ impl Widget for Link {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        if let Some(root) = self.root_child_id {
-            if let Some(size) = ctx.child_size(root, proposal) {
-                return size;
-            }
+        if let Some(root) = self.root_child_id
+            && let Some(size) = ctx.child_size(root, proposal)
+        {
+            return size;
         }
         proposal.resolve(0.0, 0.0)
     }

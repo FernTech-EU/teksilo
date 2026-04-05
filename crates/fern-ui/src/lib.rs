@@ -21,8 +21,6 @@ pub mod prelude {
         AppCommand, ShortcutMap, Shortcut, Modifiers, Key,
         AccessNodeBuilder, CursorIcon,
     };
-    #[allow(deprecated)]
-    pub use fern_core::CompositeWidget;
 
     // Geometry (lives in fern-canvas)
     pub use fern_canvas::{
