@@ -183,11 +183,12 @@ impl WidgetTree {
         }
         for signal in &self.animated_signals {
             if let Some(req) = signal.take_pending_animation() {
-                self.animation_scheduler.animate_signal(
+                self.animation_scheduler.animate_signal_with_frame_interval(
                     signal,
                     req.target,
                     req.duration,
                     req.easing,
+                    req.frame_interval,
                     now,
                 );
             }
@@ -1332,6 +1333,17 @@ impl WidgetTree {
         self.arena.any_needs_paint()
     }
 
+    pub fn active_animation_count(&self) -> usize {
+        self.animation_scheduler.active_count()
+    }
+
+    pub fn pending_tooltip_count(&self) -> usize {
+        self.tooltips
+            .iter()
+            .filter(|entry| entry.overlay_id.is_none() && entry.real_hover_start.is_some())
+            .count()
+    }
+
     /// Whether there are pending idle callbacks to run.
     pub fn has_idle_work(&self) -> bool {
         !self.idle_queue.is_empty()
@@ -1377,6 +1389,7 @@ impl WidgetTree {
                 &mut frame,
                 &base_theme,
                 &text_backend,
+                None,
             );
         }
 
@@ -1389,6 +1402,7 @@ impl WidgetTree {
                 &mut frame,
                 &base_theme,
                 &text_backend,
+                None,
             );
         }
 
@@ -1918,13 +1932,25 @@ fn paint_widget_cached(
     frame: &mut RenderFrame,
     base_theme: &fern_tokens::Theme,
     text_backend: &Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
+    clip_bounds: Option<Rect>,
 ) {
     if !arena.is_active(id) {
         return;
     }
 
-    // Check if we need to repaint this widget or can reuse cached output
     let node = arena.get(id).unwrap();
+    let bounds = node.bounds;
+    if let Some(clip) = clip_bounds {
+        let x0 = bounds.x.max(clip.x);
+        let y0 = bounds.y.max(clip.y);
+        let x1 = bounds.right().min(clip.right());
+        let y1 = bounds.bottom().min(clip.bottom());
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+    }
+
+    // Check if we need to repaint this widget or can reuse cached output
     let needs_paint = node.dirty.needs_paint;
 
     if needs_paint || node.cached_paint.is_none() {
@@ -1966,6 +1992,20 @@ fn paint_widget_cached(
     let clips = node.clips_children;
     let children: Vec<WidgetId> = node.children.clone();
     let bounds = node.bounds;
+    let next_clip = if clips {
+        Some(match clip_bounds {
+            Some(clip) => {
+                let x0 = bounds.x.max(clip.x);
+                let y0 = bounds.y.max(clip.y);
+                let x1 = bounds.right().min(clip.right());
+                let y1 = bounds.bottom().min(clip.bottom());
+                Rect::new(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
+            }
+            None => bounds,
+        })
+    } else {
+        clip_bounds
+    };
 
     if clips {
         frame
@@ -1974,7 +2014,7 @@ fn paint_widget_cached(
     }
 
     for child_id in children {
-        paint_widget_cached(arena, child_id, frame, base_theme, text_backend);
+        paint_widget_cached(arena, child_id, frame, base_theme, text_backend, next_clip);
     }
 
     if clips {
