@@ -35,6 +35,10 @@ struct ActiveAnimation {
     duration: Duration,
     /// Easing curve.
     easing: Easing,
+    /// Minimum interval between animation updates.
+    frame_interval: Duration,
+    /// Deadline for the next animation update.
+    next_tick: Instant,
 }
 
 /// A single active animation driving a `Signal<f32>` from `start` to `end`.
@@ -45,7 +49,11 @@ struct ActiveSignalAnimation {
     start_time: Instant,
     duration: Duration,
     easing: Easing,
+    frame_interval: Duration,
+    next_tick: Instant,
 }
+
+const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// Manages active animations and advances them each frame.
 pub struct AnimationScheduler {
@@ -72,6 +80,18 @@ impl AnimationScheduler {
         easing: Easing,
         now: Instant,
     ) {
+        self.animate_with_frame_interval(state, target, duration, easing, None, now);
+    }
+
+    pub fn animate_with_frame_interval(
+        &mut self,
+        state: &State<f32>,
+        target: f32,
+        duration: Duration,
+        easing: Easing,
+        frame_interval: Option<Duration>,
+        now: Instant,
+    ) {
         let current = *state.get();
 
         // Remove any existing animation for this state
@@ -91,6 +111,8 @@ impl AnimationScheduler {
             start_time: now,
             duration,
             easing,
+            frame_interval: frame_interval.unwrap_or(DEFAULT_FRAME_INTERVAL),
+            next_tick: now,
         });
     }
 
@@ -106,6 +128,18 @@ impl AnimationScheduler {
         target: f32,
         duration: Duration,
         easing: Easing,
+        now: Instant,
+    ) {
+        self.animate_signal_with_frame_interval(signal, target, duration, easing, None, now);
+    }
+
+    pub fn animate_signal_with_frame_interval(
+        &mut self,
+        signal: &Signal<f32>,
+        target: f32,
+        duration: Duration,
+        easing: Easing,
+        frame_interval: Option<Duration>,
         now: Instant,
     ) {
         let current = signal.get();
@@ -124,6 +158,8 @@ impl AnimationScheduler {
             start_time: now,
             duration,
             easing,
+            frame_interval: frame_interval.unwrap_or(DEFAULT_FRAME_INTERVAL),
+            next_tick: now,
         });
     }
 
@@ -137,6 +173,10 @@ impl AnimationScheduler {
     /// is still running (caller should request another frame).
     pub fn tick(&mut self, now: Instant) -> bool {
         self.animations.retain_mut(|anim| {
+            if now < anim.next_tick {
+                return true;
+            }
+
             let elapsed = now.saturating_duration_since(anim.start_time);
             let t = if anim.duration.is_zero() {
                 1.0
@@ -150,11 +190,17 @@ impl AnimationScheduler {
             let keep = t < 1.0;
             if !keep {
                 anim.state.clear_animation_target();
+            } else {
+                anim.next_tick = now + anim.frame_interval;
             }
             keep
         });
 
         self.signal_animations.retain_mut(|anim| {
+            if now < anim.next_tick {
+                return true;
+            }
+
             let elapsed = now.saturating_duration_since(anim.start_time);
             let t = if anim.duration.is_zero() {
                 1.0
@@ -168,6 +214,8 @@ impl AnimationScheduler {
             let keep = t < 1.0;
             if !keep {
                 anim.signal.clear_animation_target();
+            } else {
+                anim.next_tick = now + anim.frame_interval;
             }
             keep
         });
@@ -184,12 +232,11 @@ impl AnimationScheduler {
     /// Returns None if no animations are active.
     /// Targets ~60fps by scheduling the next tick 16ms from now.
     pub fn next_deadline(&self) -> Option<Instant> {
-        if self.animations.is_empty() && self.signal_animations.is_empty() {
-            None
-        } else {
-            // Schedule next frame at ~60fps to avoid busy-spinning
-            Some(Instant::now() + Duration::from_millis(16))
-        }
+        self.animations
+            .iter()
+            .map(|anim| anim.next_tick)
+            .chain(self.signal_animations.iter().map(|anim| anim.next_tick))
+            .min()
     }
 
     /// Number of active animations (for testing/debugging).

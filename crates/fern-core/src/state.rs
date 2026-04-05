@@ -285,6 +285,7 @@ pub struct AnimationRequest {
     pub target: f32,
     pub duration: std::time::Duration,
     pub easing: fern_tokens::Easing,
+    pub frame_interval: Option<std::time::Duration>,
 }
 
 struct StateInner<T> {
@@ -430,6 +431,7 @@ impl State<f32> {
             target,
             duration,
             easing,
+            frame_interval: None,
         });
         anim.target = Some(target);
         drop(anim);

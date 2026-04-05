@@ -18,6 +18,140 @@ use crate::command_context::CommandContext;
 use crate::window_config::WindowConfig;
 use crate::window_manager::WindowManager;
 
+#[derive(Debug)]
+struct IdleTrace {
+    last_report: Instant,
+    resume_time_reached: u64,
+    redraw_requested: u64,
+    rendered_frames: u64,
+    request_redraw_all: u64,
+    cursor_redraw_requests: u64,
+    mouse_input_redraw_requests: u64,
+    mouse_wheel_redraw_requests: u64,
+    keyboard_redraw_requests: u64,
+    resize_redraw_requests: u64,
+    idle_callbacks_run: u64,
+    control_flow_wait: u64,
+    control_flow_wait_until: u64,
+    timer_windows: usize,
+    animation_timers: usize,
+    tooltip_timers: usize,
+}
+
+impl IdleTrace {
+    fn from_env() -> Option<Self> {
+        match std::env::var("FERN_IDLE_TRACE") {
+            Ok(value) if value != "0" && !value.is_empty() => Some(Self {
+                last_report: Instant::now(),
+                resume_time_reached: 0,
+                redraw_requested: 0,
+                rendered_frames: 0,
+                request_redraw_all: 0,
+                cursor_redraw_requests: 0,
+                mouse_input_redraw_requests: 0,
+                mouse_wheel_redraw_requests: 0,
+                keyboard_redraw_requests: 0,
+                resize_redraw_requests: 0,
+                idle_callbacks_run: 0,
+                control_flow_wait: 0,
+                control_flow_wait_until: 0,
+                timer_windows: 0,
+                animation_timers: 0,
+                tooltip_timers: 0,
+            }),
+            _ => None,
+        }
+    }
+
+    fn note_control_flow(&mut self, has_deadline: bool, timer_windows: usize, animation_timers: usize, tooltip_timers: usize) {
+        if has_deadline {
+            self.control_flow_wait_until += 1;
+        } else {
+            self.control_flow_wait += 1;
+        }
+        self.timer_windows = timer_windows;
+        self.animation_timers = animation_timers;
+        self.tooltip_timers = tooltip_timers;
+        self.maybe_report();
+    }
+
+    fn note_request_redraw_all(&mut self) {
+        self.request_redraw_all += 1;
+        self.maybe_report();
+    }
+
+    fn note_redraw_request(&mut self, reason: &'static str) {
+        match reason {
+            "cursor" => self.cursor_redraw_requests += 1,
+            "mouse_input" => self.mouse_input_redraw_requests += 1,
+            "mouse_wheel" => self.mouse_wheel_redraw_requests += 1,
+            "keyboard" => self.keyboard_redraw_requests += 1,
+            "resize" => self.resize_redraw_requests += 1,
+            _ => {}
+        }
+        self.maybe_report();
+    }
+
+    fn note_resume_time_reached(&mut self) {
+        self.resume_time_reached += 1;
+        self.maybe_report();
+    }
+
+    fn note_redraw_requested(&mut self) {
+        self.redraw_requested += 1;
+        self.maybe_report();
+    }
+
+    fn note_rendered_frame(&mut self) {
+        self.rendered_frames += 1;
+        self.maybe_report();
+    }
+
+    fn note_idle_callbacks_run(&mut self) {
+        self.idle_callbacks_run += 1;
+        self.maybe_report();
+    }
+
+    fn maybe_report(&mut self) {
+        if self.last_report.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+
+        eprintln!(
+            "fern_idle_trace redraw_requested={} rendered_frames={} resume_time_reached={} request_redraw_all={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{}}} idle_callbacks={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            self.redraw_requested,
+            self.rendered_frames,
+            self.resume_time_reached,
+            self.request_redraw_all,
+            self.cursor_redraw_requests,
+            self.mouse_input_redraw_requests,
+            self.mouse_wheel_redraw_requests,
+            self.keyboard_redraw_requests,
+            self.resize_redraw_requests,
+            self.idle_callbacks_run,
+            self.control_flow_wait,
+            self.control_flow_wait_until,
+            self.timer_windows,
+            self.animation_timers,
+            self.tooltip_timers,
+        );
+
+        self.last_report = Instant::now();
+        self.resume_time_reached = 0;
+        self.redraw_requested = 0;
+        self.rendered_frames = 0;
+        self.request_redraw_all = 0;
+        self.cursor_redraw_requests = 0;
+        self.mouse_input_redraw_requests = 0;
+        self.mouse_wheel_redraw_requests = 0;
+        self.keyboard_redraw_requests = 0;
+        self.resize_redraw_requests = 0;
+        self.idle_callbacks_run = 0;
+        self.control_flow_wait = 0;
+        self.control_flow_wait_until = 0;
+    }
+}
+
 struct FernAppHandler {
     wm: WindowManager,
     command_handler: Option<WindowCommandHandler>,
@@ -25,6 +159,7 @@ struct FernAppHandler {
     initial_window: Option<WindowConfig>,
     initial_created: bool,
     idle_budget: Duration,
+    idle_trace: Option<IdleTrace>,
     #[cfg(feature = "text")]
     typesetter: SharedTypesetter,
 }
@@ -51,6 +186,7 @@ impl FernAppHandler {
             initial_window: Some(initial_window),
             initial_created: false,
             idle_budget: Duration::from_millis(4),
+            idle_trace: IdleTrace::from_env(),
             #[cfg(feature = "text")]
             typesetter,
         }
@@ -70,9 +206,19 @@ impl FernAppHandler {
         }
     }
 
-    fn update_control_flow(&self, event_loop: &ActiveEventLoop) {
+    fn update_control_flow(&mut self, event_loop: &ActiveEventLoop) {
         let mut earliest_deadline: Option<Instant> = None;
+        let mut timer_windows = 0_usize;
+        let mut animation_timers = 0_usize;
+        let mut tooltip_timers = 0_usize;
         for managed in self.wm.iter() {
+            let animation_count = managed.tree.active_animation_count();
+            let tooltip_count = managed.tree.pending_tooltip_count();
+            if animation_count > 0 || tooltip_count > 0 {
+                timer_windows += 1;
+            }
+            animation_timers += animation_count;
+            tooltip_timers += tooltip_count;
             if let Some(deadline) = managed.tree.next_timer_deadline() {
                 earliest_deadline = Some(match earliest_deadline {
                     Some(current) => current.min(deadline),
@@ -86,12 +232,24 @@ impl FernAppHandler {
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);
         }
+
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_control_flow(
+                earliest_deadline.is_some(),
+                timer_windows,
+                animation_timers,
+                tooltip_timers,
+            );
+        }
     }
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
         let had_commands = self.flush_commands();
         self.process_pending(event_loop);
         if had_commands {
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_request_redraw_all();
+            }
             self.wm.request_redraw_all();
         }
         self.maybe_exit(event_loop);
@@ -116,7 +274,13 @@ impl FernAppHandler {
 
     fn handle_redraw_requested(&mut self, window_id: WindowId) {
         if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_redraw_requested();
+            }
             if managed.tree.has_idle_work() {
+                if let Some(trace) = &mut self.idle_trace {
+                    trace.note_idle_callbacks_run();
+                }
                 managed.tree.run_idle_callbacks(self.idle_budget);
             }
 
@@ -159,6 +323,9 @@ impl FernAppHandler {
 
             let clear = managed.tree.theme().colors.surface.to_array();
             let _ = managed.platform_window.render_frame(&frame, clear);
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_rendered_frame();
+            }
         }
     }
 
@@ -183,6 +350,9 @@ impl FernAppHandler {
             WindowEvent::Resized(new_size) => {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.platform_window.resize(new_size);
+                    if let Some(trace) = &mut self.idle_trace {
+                        trace.note_redraw_request("resize");
+                    }
                     managed.platform_window.request_redraw();
                 }
             }
@@ -206,6 +376,9 @@ impl FernAppHandler {
                         managed.tree.dispatch_event(evt);
                     }
                     if managed.tree.needs_redraw() {
+                        if let Some(trace) = &mut self.idle_trace {
+                            trace.note_redraw_request("cursor");
+                        }
                         managed.platform_window.request_redraw();
                     }
                 }
@@ -219,6 +392,9 @@ impl FernAppHandler {
                     ) {
                         managed.tree.dispatch_event(evt);
                     }
+                    if let Some(trace) = &mut self.idle_trace {
+                        trace.note_redraw_request("mouse_input");
+                    }
                     managed.platform_window.request_redraw();
                 }
             }
@@ -230,6 +406,9 @@ impl FernAppHandler {
                         &managed.translation_state,
                     ) {
                         managed.tree.dispatch_event(evt);
+                    }
+                    if let Some(trace) = &mut self.idle_trace {
+                        trace.note_redraw_request("mouse_wheel");
                     }
                     managed.platform_window.request_redraw();
                 }
@@ -257,6 +436,9 @@ impl FernAppHandler {
                                 managed.tree.dispatch_event(WidgetEvent::KeyUp { key, modifiers });
                             }
                         }
+                    }
+                    if let Some(trace) = &mut self.idle_trace {
+                        trace.note_redraw_request("keyboard");
                     }
                     managed.platform_window.request_redraw();
                 }
@@ -286,6 +468,10 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
         if matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_resume_time_reached();
+                trace.note_request_redraw_all();
+            }
             self.wm.request_redraw_all();
         }
         self.update_control_flow(event_loop);
@@ -294,6 +480,9 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         if let Some(handler) = &mut self.app_event_handler {
             handler(&event);
+        }
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_request_redraw_all();
         }
         self.wm.request_redraw_all();
         self.post_event(event_loop);

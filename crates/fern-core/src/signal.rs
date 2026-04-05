@@ -324,11 +324,22 @@ impl Signal<f32> {
         duration: std::time::Duration,
         easing: fern_tokens::Easing,
     ) {
+        self.animate_to_with_frame_interval(target, duration, easing, None);
+    }
+
+    pub fn animate_to_with_frame_interval(
+        &self,
+        target: f32,
+        duration: std::time::Duration,
+        easing: fern_tokens::Easing,
+        frame_interval: Option<std::time::Duration>,
+    ) {
         let mut anim = self.animation_state().borrow_mut();
         anim.pending = Some(crate::state::AnimationRequest {
             target,
             duration,
             easing,
+            frame_interval,
         });
         anim.target = Some(target);
         drop(anim);
