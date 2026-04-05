@@ -32,3 +32,16 @@ fern-render = { path = "crates/fern-render", version = "0.1.0" }
 fern-platform = { path = "crates/fern-platform", version = "0.1.0" }
 fern-app = { path = "crates/fern-app", version = "0.1.0" }
 fern-ui = { path = "crates/fern-ui", version = "0.1.0" }
+
+
+[profile.release]
+lto = "fat"
+panic = "abort"
+strip = true
+codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = true
+lto = false
