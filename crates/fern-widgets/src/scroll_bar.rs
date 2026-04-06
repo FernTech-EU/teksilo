@@ -60,6 +60,10 @@ pub struct ScrollBar {
     step_size: f32,
     /// Whether to paint the track background (false for overlay-style scrollbars).
     show_track: bool,
+    /// Ubuntu-style overlay mode: thin indicator at rest, full-size on hover.
+    overlay_mode: bool,
+    /// Thickness of the thin resting indicator in overlay mode.
+    resting_thickness: f32,
 }
 
 impl std::fmt::Debug for ScrollBar {
@@ -98,6 +102,8 @@ impl ScrollBar {
             min_thumb_length: 24.0,
             step_size: 40.0,
             show_track: true,
+            overlay_mode: false,
+            resting_thickness: 3.0,
         }
     }
 
@@ -123,6 +129,22 @@ impl ScrollBar {
     /// scrollbars that should only show the thumb.
     pub fn show_track(mut self, show: bool) -> Self {
         self.show_track = show;
+        self
+    }
+
+    /// Enable Ubuntu-style overlay mode: thin indicator at rest, full-size
+    /// scrollbar with track on hover.
+    pub fn overlay_mode(mut self, enabled: bool) -> Self {
+        self.overlay_mode = enabled;
+        if enabled {
+            self.show_track = false; // track only shown on hover
+        }
+        self
+    }
+
+    /// Set the resting indicator thickness for overlay mode (default 3px).
+    pub fn resting_thickness(mut self, thickness: f32) -> Self {
+        self.resting_thickness = thickness;
         self
     }
 
@@ -442,34 +464,75 @@ impl Widget for ScrollBar {
 
         let max = self.max_scroll.get();
         if max <= 0.0 {
-            // Nothing to scroll — don't paint
             return;
         }
 
-        let radius = CornerRadius::uniform(self.thickness / 2.0);
         let dragging = self.dragging.get();
         let hovered = self.hovered.get();
+        let active = hovered || dragging;
 
-        // Track background (skipped for overlay-style scrollbars)
-        if self.show_track {
-            let track_color = ctx
-                .theme
-                .colors
-                .on_surface
-                .with_alpha(if hovered || dragging { 0.08 } else { 0.04 });
-            canvas.fill_rounded_rect(bounds, radius, track_color);
-        }
-
-        // Thumb
-        let thumb = self.thumb_rect();
-        let thumb_color = ctx.theme.colors.on_surface.with_alpha(if dragging {
-            0.6
-        } else if hovered {
-            0.4
+        if self.overlay_mode && !active {
+            // --- Resting state: thin indicator aligned to trailing edge ---
+            let thin = self.resting_thickness;
+            let thin_bounds = match self.orientation {
+                ScrollBarOrientation::Vertical => Rect::new(
+                    bounds.right() - thin,
+                    bounds.y,
+                    thin,
+                    bounds.height,
+                ),
+                ScrollBarOrientation::Horizontal => Rect::new(
+                    bounds.x,
+                    bounds.bottom() - thin,
+                    bounds.width,
+                    thin,
+                ),
+            };
+            let radius = CornerRadius::uniform(thin / 2.0);
+            // Thin thumb
+            let offset = self.thumb_offset();
+            let thumb_len = self.thumb_length();
+            let thumb_rect = match self.orientation {
+                ScrollBarOrientation::Vertical => Rect::new(
+                    thin_bounds.x,
+                    thin_bounds.y + offset,
+                    thin,
+                    thumb_len,
+                ),
+                ScrollBarOrientation::Horizontal => Rect::new(
+                    thin_bounds.x + offset,
+                    thin_bounds.y,
+                    thumb_len,
+                    thin,
+                ),
+            };
+            let thumb_color = ctx.theme.colors.on_surface.with_alpha(0.2);
+            canvas.fill_rounded_rect(thumb_rect, radius, thumb_color);
         } else {
-            0.25
-        });
-        canvas.fill_rounded_rect(thumb, radius, thumb_color);
+            // --- Full-size state (Permanent, or Overlay when hovered/dragging) ---
+            let radius = CornerRadius::uniform(self.thickness / 2.0);
+
+            // Track background
+            if self.show_track || (self.overlay_mode && active) {
+                let track_color = ctx
+                    .theme
+                    .colors
+                    .on_surface
+                    .with_alpha(if active { 0.08 } else { 0.04 });
+                canvas.fill_rounded_rect(bounds, radius, track_color);
+            }
+
+            // Thumb
+            let thumb = self.thumb_rect();
+            let thumb_color = ctx.theme.colors.on_surface.with_alpha(if dragging {
+                0.6
+            } else if hovered {
+                0.4
+            } else {
+                0.25
+            });
+            canvas.fill_rounded_rect(thumb, radius, thumb_color);
+        }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

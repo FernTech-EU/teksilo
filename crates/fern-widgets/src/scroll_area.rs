@@ -254,13 +254,12 @@ impl Widget for ScrollArea {
         ids.push(content_id);
 
         // Scrollbar visual tuning depends on mode
-        let (thickness, track) = match self.scroll_bar_style {
-            ScrollBarStyle::Overlay => (6.0, false),
-            ScrollBarStyle::Permanent => (self.scroll_bar_thickness, true),
-        };
+        let is_overlay = self.scroll_bar_style == ScrollBarStyle::Overlay;
+        let thickness = self.scroll_bar_thickness; // full thickness for both modes
+        let track = !is_overlay; // Permanent shows track always; overlay shows on hover
 
         // Create vertical scrollbar
-        let v_scrollbar = ScrollBar::new(
+        let mut v_scrollbar = ScrollBar::new(
             ScrollBarOrientation::Vertical,
             self.scroll_y.clone(),
             self.max_scroll_y.clone(),
@@ -268,11 +267,14 @@ impl Widget for ScrollArea {
         )
         .thickness(thickness)
         .show_track(track);
+        if is_overlay {
+            v_scrollbar = v_scrollbar.overlay_mode(true);
+        }
         let v_id = ctx.add(v_scrollbar);
         ids.push(v_id);
 
         // Create horizontal scrollbar
-        let h_scrollbar = ScrollBar::new(
+        let mut h_scrollbar = ScrollBar::new(
             ScrollBarOrientation::Horizontal,
             self.scroll_x.clone(),
             self.max_scroll_x.clone(),
@@ -280,6 +282,9 @@ impl Widget for ScrollArea {
         )
         .thickness(thickness)
         .show_track(track);
+        if is_overlay {
+            h_scrollbar = h_scrollbar.overlay_mode(true);
+        }
         let h_id = ctx.add(h_scrollbar);
         ids.push(h_id);
 
@@ -494,11 +499,8 @@ impl Widget for ScrollArea {
         let v_off = self.vertical_policy == ScrollBarPolicy::AlwaysOff;
         let _h_off = self.horizontal_policy == ScrollBarPolicy::AlwaysOff;
 
-        // Scrollbar thickness for this mode
-        let sb_thickness = match self.scroll_bar_style {
-            ScrollBarStyle::Overlay => 6.0,
-            ScrollBarStyle::Permanent => self.scroll_bar_thickness,
-        };
+        // Scrollbar thickness — same for both modes (overlay paints thin at rest)
+        let sb_thickness = self.scroll_bar_thickness;
 
         // --- Step 1: Compute viewport size ---
         // In Permanent mode a non-hidden vertical scrollbar reserves space.
@@ -975,25 +977,27 @@ mod tests {
             content.width
         );
 
-        // Vertical scrollbar overlays the right edge
+        // Vertical scrollbar overlays the right edge (full thickness, paints thin at rest)
         let v_sb = tree.bounds(children[1]);
         assert!(
-            (v_sb.width - 6.0).abs() < 0.01,
-            "Overlay v_sb thickness should be 6"
+            (v_sb.width - 12.0).abs() < 0.01,
+            "Overlay v_sb should have full thickness for hover expansion, got {}",
+            v_sb.width
         );
         assert!(
-            (v_sb.x - (200.0 - 6.0)).abs() < 0.01,
+            (v_sb.x - (200.0 - 12.0)).abs() < 0.01,
             "Overlay v_sb at right edge"
         );
 
         // Horizontal scrollbar overlays the bottom edge
         let h_sb = tree.bounds(children[2]);
         assert!(
-            (h_sb.height - 6.0).abs() < 0.01,
-            "Overlay h_sb thickness should be 6"
+            (h_sb.height - 12.0).abs() < 0.01,
+            "Overlay h_sb should have full thickness for hover expansion, got {}",
+            h_sb.height
         );
         assert!(
-            (h_sb.y - (100.0 - 6.0)).abs() < 0.01,
+            (h_sb.y - (100.0 - 12.0)).abs() < 0.01,
             "Overlay h_sb at bottom edge"
         );
     }
