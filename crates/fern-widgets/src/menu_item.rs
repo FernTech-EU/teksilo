@@ -235,6 +235,8 @@ impl Widget for MenuItem {
                     int_tap.set(MenuItemState::Pressed);
                     if let Some(ref action) = *action_for_tap {
                         action(ctx);
+                        // Dismiss all overlays (context menu, submenus) after activation
+                        ctx.dismiss_all_overlays();
                     }
                 }
             })
@@ -276,6 +278,7 @@ impl Widget for MenuItem {
                         } => {
                             if let Some(ref action) = *action_for_key {
                                 action(ctx);
+                                ctx.dismiss_all_overlays();
                             }
                             interaction.set(MenuItemState::Pressed);
                             EventResponse::Handled
