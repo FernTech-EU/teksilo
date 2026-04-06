@@ -9,9 +9,13 @@ use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{DragRecognizer, GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent};
+use fern_core::gesture::{
+    DragRecognizer, GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent,
+};
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+};
 use fern_tokens::{CornerRadius, Orientation};
 
 const TRACK_HEIGHT: f32 = 4.0;
@@ -148,10 +152,17 @@ impl std::fmt::Debug for Slider {
 }
 
 impl Widget for Slider {
-    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<fern_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.value.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.value.bind_to(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -183,21 +194,39 @@ impl Widget for Slider {
         let colors = &ctx.theme.colors;
         self.cached_bounds.set(bounds);
         let radius = CornerRadius::uniform(TRACK_HEIGHT / 2.0);
-        let track_color = if self.enabled { colors.surface_tertiary } else { colors.disabled_fill };
-        let fill_color = if self.enabled { colors.primary } else { colors.disabled_text };
+        let track_color = if self.enabled {
+            colors.surface_tertiary
+        } else {
+            colors.disabled_fill
+        };
+        let fill_color = if self.enabled {
+            colors.primary
+        } else {
+            colors.disabled_text
+        };
         let thumb_pos = self.thumb_center(bounds);
 
         let (track_rect, fill_rect, thumb_cx, thumb_cy) = match self.orientation {
             Orientation::Horizontal => {
                 let ty = bounds.y + (bounds.height - TRACK_HEIGHT) / 2.0;
-                let track = Rect::new(bounds.x + THUMB_RADIUS, ty, bounds.width - THUMB_RADIUS * 2.0, TRACK_HEIGHT);
+                let track = Rect::new(
+                    bounds.x + THUMB_RADIUS,
+                    ty,
+                    bounds.width - THUMB_RADIUS * 2.0,
+                    TRACK_HEIGHT,
+                );
                 let fill_w = thumb_pos - track.x;
                 let fill = Rect::new(track.x, ty, fill_w.max(0.0), TRACK_HEIGHT);
                 (track, fill, thumb_pos, bounds.y + bounds.height / 2.0)
             }
             Orientation::Vertical => {
                 let tx = bounds.x + (bounds.width - TRACK_HEIGHT) / 2.0;
-                let track = Rect::new(tx, bounds.y + THUMB_RADIUS, TRACK_HEIGHT, bounds.height - THUMB_RADIUS * 2.0);
+                let track = Rect::new(
+                    tx,
+                    bounds.y + THUMB_RADIUS,
+                    TRACK_HEIGHT,
+                    bounds.height - THUMB_RADIUS * 2.0,
+                );
                 let fill_h = thumb_pos - track.y;
                 let fill = Rect::new(tx, track.y, TRACK_HEIGHT, fill_h.max(0.0));
                 (track, fill, bounds.x + bounds.width / 2.0, thumb_pos)
@@ -236,7 +265,12 @@ impl Widget for Slider {
                 thumb_rect.width + offset * 2.0,
                 thumb_rect.height + offset * 2.0,
             );
-            canvas.stroke_rounded_rect(ring_rect, CornerRadius::uniform(THUMB_RADIUS + offset), colors.focus_ring, 2.0);
+            canvas.stroke_rounded_rect(
+                ring_rect,
+                CornerRadius::uniform(THUMB_RADIUS + offset),
+                colors.focus_ring,
+                2.0,
+            );
         }
     }
 
@@ -353,7 +387,6 @@ impl Widget for Slider {
         builder.add_action(fern_core::accesskit::Action::Decrement);
         builder.add_action(fern_core::accesskit::Action::Focus);
     }
-
 }
 
 #[cfg(test)]
@@ -476,7 +509,13 @@ mod tests {
         let s = tree.add(Slider::new(value, 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
         let info = tree.accessibility_node(s);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Increment));
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Decrement));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Increment)
+        );
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Decrement)
+        );
     }
 }

@@ -9,7 +9,7 @@
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
@@ -45,7 +45,7 @@ impl Panel {
     }
 
     /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -137,10 +137,10 @@ impl Widget for Panel {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let bg = self.background.unwrap_or(ctx.theme.colors.surface_secondary);
-        let radius = self
-            .corner_radius
-            .unwrap_or(ctx.theme.shape.radius_md);
+        let bg = self
+            .background
+            .unwrap_or(ctx.theme.colors.surface_secondary);
+        let radius = self.corner_radius.unwrap_or(ctx.theme.shape.radius_md);
         let border_w = self.border_width.unwrap_or(0.0);
 
         canvas.fill_rounded_rect(bounds, CornerRadius::uniform(radius), bg);
@@ -158,7 +158,6 @@ impl Widget for Panel {
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
-
 }
 
 #[cfg(test)]
@@ -212,6 +211,9 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
-        assert!(!frame.shapes.is_empty(), "panel should render a background shape");
+        assert!(
+            !frame.shapes.is_empty(),
+            "panel should render a background shape"
+        );
     }
 }

@@ -160,18 +160,12 @@ impl ScrollBar {
         let offset = self.thumb_offset();
         let thumb_len = self.thumb_length();
         match self.orientation {
-            ScrollBarOrientation::Vertical => Rect::new(
-                bounds.x,
-                bounds.y + offset,
-                bounds.width,
-                thumb_len,
-            ),
-            ScrollBarOrientation::Horizontal => Rect::new(
-                bounds.x + offset,
-                bounds.y,
-                thumb_len,
-                bounds.height,
-            ),
+            ScrollBarOrientation::Vertical => {
+                Rect::new(bounds.x, bounds.y + offset, bounds.width, thumb_len)
+            }
+            ScrollBarOrientation::Horizontal => {
+                Rect::new(bounds.x + offset, bounds.y, thumb_len, bounds.height)
+            }
         }
     }
 
@@ -223,25 +217,38 @@ impl ScrollBar {
 }
 
 impl Widget for ScrollBar {
-    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<fern_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.scroll_position.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
-        self.max_scroll.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
-        self.viewport_ratio.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.scroll_position.bind_to(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
+        self.max_scroll.bind_to(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
+        self.viewport_ratio.bind_to(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
         match self.orientation {
-            ScrollBarOrientation::Vertical => Size::new(
-                self.thickness,
-                proposal.height.unwrap_or(100.0),
-            ),
-            ScrollBarOrientation::Horizontal => Size::new(
-                proposal.width.unwrap_or(100.0),
-                self.thickness,
-            ),
+            ScrollBarOrientation::Vertical => {
+                Size::new(self.thickness, proposal.height.unwrap_or(100.0))
+            }
+            ScrollBarOrientation::Horizontal => {
+                Size::new(proposal.width.unwrap_or(100.0), self.thickness)
+            }
         }
     }
 
@@ -261,11 +268,11 @@ impl Widget for ScrollBar {
 
         // Track background (skipped for overlay-style scrollbars)
         if self.show_track {
-            let track_color = ctx.theme.colors.on_surface.with_alpha(if hovered || dragging {
-                0.08
-            } else {
-                0.04
-            });
+            let track_color = ctx
+                .theme
+                .colors
+                .on_surface
+                .with_alpha(if hovered || dragging { 0.08 } else { 0.04 });
             canvas.fill_rounded_rect(bounds, radius, track_color);
         }
 
@@ -303,10 +310,8 @@ impl Widget for ScrollBar {
                 if self.point_in_thumb(*position) {
                     // Start thumb drag
                     self.dragging.set(true);
-                    self.drag_start_pointer
-                        .set(self.axis_value(*position));
-                    self.drag_start_scroll
-                        .set(self.scroll_position.get());
+                    self.drag_start_pointer.set(self.axis_value(*position));
+                    self.drag_start_scroll.set(self.scroll_position.get());
                     ctx.capture_pointer();
                 } else {
                     // Track click — page scroll toward click position
@@ -415,7 +420,6 @@ impl Widget for ScrollBar {
 
         builder.add_action(fern_core::accesskit::Action::SetValue);
     }
-
 }
 
 #[cfg(test)]
@@ -443,7 +447,10 @@ mod tests {
         let (bar, ..) = make_scrollbar();
         let mut tree = WidgetTree::new();
         let id = tree.add(bar);
-        tree.layout(SizeProposal { width: None, height: Some(400.0) });
+        tree.layout(SizeProposal {
+            width: None,
+            height: Some(400.0),
+        });
 
         let bounds = tree.bounds(id);
         // Vertical: width = thickness (12), height = proposed (400)
@@ -465,7 +472,10 @@ mod tests {
         );
         let mut tree = WidgetTree::new();
         let id = tree.add(bar);
-        tree.layout(SizeProposal { width: Some(400.0), height: None });
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: None,
+        });
 
         let bounds = tree.bounds(id);
         // Horizontal: width = proposed (400), height = thickness (12)
@@ -556,7 +566,10 @@ mod tests {
 
         let frame = tree.render();
         // When max_scroll is 0, paint returns early — no shapes
-        assert!(frame.shapes.is_empty(), "Expected no rendering when nothing to scroll");
+        assert!(
+            frame.shapes.is_empty(),
+            "Expected no rendering when nothing to scroll"
+        );
     }
 
     #[test]
@@ -588,7 +601,11 @@ mod tests {
         });
 
         let pos = position.get();
-        assert!(pos > 0.0, "Expected positive scroll after track click, got {}", pos);
+        assert!(
+            pos > 0.0,
+            "Expected positive scroll after track click, got {}",
+            pos
+        );
     }
 
     #[test]

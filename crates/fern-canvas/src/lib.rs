@@ -11,6 +11,6 @@ pub use paint::{GradientStop, ImageHandle, LineCap, Paint, StrokeStyle};
 pub use path::{Path, PathCommand};
 pub use render_frame::{
     BlendMode, DecorationKind, DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData,
-    PathEntry, RasterizedQuad, RenderFrame, ShapeKind, ShapeQuad, ShadowQuad,
+    PathEntry, RasterizedQuad, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 pub use text_backend::{AtlasInfo, MockTextBackend, TextBackend, TextLayout};

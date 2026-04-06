@@ -8,7 +8,9 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
+use fern_core::gesture::{
+    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
+};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -174,7 +176,11 @@ impl Widget for RadioButton {
             interaction.map(move |s| resolve_focus_ring(*s, &colors))
         };
         let focus_ring_width = interaction.map(|s| {
-            if *s == InteractionState::Focused { 2.0_f32 } else { 0.0 }
+            if *s == InteractionState::Focused {
+                2.0_f32
+            } else {
+                0.0
+            }
         });
         let focus_ring = RectWidget::new()
             .bind_border_color(focus_ring_color)
@@ -281,11 +287,15 @@ impl Widget for RadioButton {
                 ctx.set_cursor(CursorIcon::Default);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyDown { key: Key::Space, .. } => {
+            WidgetEvent::KeyDown {
+                key: Key::Space, ..
+            } => {
                 self.set_interaction(InteractionState::Pressed);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyUp { key: Key::Space, .. } => {
+            WidgetEvent::KeyUp {
+                key: Key::Space, ..
+            } => {
                 self.select();
                 self.set_interaction(InteractionState::Focused);
                 EventResponse::Handled
@@ -399,6 +409,9 @@ mod tests {
         let r0 = tree.add(RadioButton::new(0, selected).label("A"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let info = tree.accessibility_node(r0);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 }

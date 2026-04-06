@@ -404,16 +404,23 @@ fn rasterize_path(
             LineCap::Round => tiny_skia::LineCap::Round,
             LineCap::Square => tiny_skia::LineCap::Square,
         };
-        let dash = style.dash_pattern.as_ref().and_then(|pattern| {
-            tiny_skia::StrokeDash::new(pattern.clone(), style.dash_offset)
-        });
+        let dash = style
+            .dash_pattern
+            .as_ref()
+            .and_then(|pattern| tiny_skia::StrokeDash::new(pattern.clone(), style.dash_offset));
         let stroke = tiny_skia::Stroke {
             width: style.width * scale_factor,
             line_cap,
             dash,
             ..Default::default()
         };
-        pixmap.stroke_path(&sk_path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+        pixmap.stroke_path(
+            &sk_path,
+            &paint,
+            &stroke,
+            tiny_skia::Transform::identity(),
+            None,
+        );
     } else {
         // Fill
         pixmap.fill_path(
@@ -493,10 +500,14 @@ mod tests {
     #[test]
     fn rasterize_simple_rect_path() {
         let mut path = Path::new();
-        path.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(10.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(10.0, 10.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(0.0, 10.0)));
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(0.0, 10.0)));
         path.commands.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
@@ -513,8 +524,10 @@ mod tests {
     #[test]
     fn rasterize_stroke_path() {
         let mut path = Path::new();
-        path.commands.push(PathCommand::MoveTo(Point::new(1.0, 5.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(9.0, 5.0)));
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(1.0, 5.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(9.0, 5.0)));
 
         let style = StrokeStyle::solid(2.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
@@ -528,9 +541,12 @@ mod tests {
         atlas.begin_frame();
 
         let mut path = Path::new();
-        path.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(10.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
         path.commands.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
@@ -563,9 +579,12 @@ mod tests {
         let mut atlas = PathAtlas::new(64, 64);
 
         let mut path = Path::new();
-        path.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(8.0, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(8.0, 8.0)));
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(8.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(8.0, 8.0)));
         path.commands.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
         let bounds = [0.0, 0.0, 8.0, 8.0];

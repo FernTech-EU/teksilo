@@ -184,16 +184,14 @@ pub fn translate_mouse_wheel(
     // 3 lines per notch matches the Windows/GTK default.
     const LINES_PER_NOTCH: f32 = 3.0;
     let scroll_delta = match delta {
-        winit::event::MouseScrollDelta::LineDelta(x, y) => {
-            ScrollDelta::Lines {
-                x: -x * LINES_PER_NOTCH,
-                y: -y * LINES_PER_NOTCH,
-            }
-        }
+        winit::event::MouseScrollDelta::LineDelta(x, y) => ScrollDelta::Lines {
+            x: -x * LINES_PER_NOTCH,
+            y: -y * LINES_PER_NOTCH,
+        },
         winit::event::MouseScrollDelta::PixelDelta(pos) => ScrollDelta::Pixels {
             x: -(pos.x / state.scale_factor) as f32,
             y: -(pos.y / state.scale_factor) as f32,
-        }
+        },
     };
     Some(WidgetEvent::Scroll {
         delta: scroll_delta,
@@ -328,7 +326,8 @@ mod tests {
     fn pinch_gesture_started() {
         let mut state = TranslationState::new();
         translate_cursor_moved(100.0, 50.0, &mut state);
-        let event = translate_pinch_gesture(0.0, winit::event::TouchPhase::Started, &state).unwrap();
+        let event =
+            translate_pinch_gesture(0.0, winit::event::TouchPhase::Started, &state).unwrap();
         assert!(matches!(
             event,
             WidgetEvent::Gesture {
@@ -371,7 +370,9 @@ mod tests {
         let event =
             translate_rotation_gesture(15.0, winit::event::TouchPhase::Moved, &state).unwrap();
         if let WidgetEvent::Gesture {
-            gesture: GestureEvent::PinchChanged { rotation, scale, .. },
+            gesture: GestureEvent::PinchChanged {
+                rotation, scale, ..
+            },
         } = event
         {
             assert!((rotation - 15.0).abs() < 0.001);

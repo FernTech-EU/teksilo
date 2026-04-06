@@ -168,9 +168,20 @@ impl TextBackend for MockTextBackend {
         }
     }
 
-    fn ensure_glyphs(&mut self, _layout: &TextLayout) -> Vec<GlyphQuad> {
-        // Mock returns empty glyphs — no atlas needed for headless tests
-        Vec::new()
+    fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<GlyphQuad> {
+        // Return one fake glyph per 8px of width (matching the mock char width)
+        // so that draw_text_layout tests can verify rendering happens.
+        let char_count = (layout.width / 8.0).ceil() as usize;
+        if char_count == 0 {
+            return Vec::new();
+        }
+        (0..char_count)
+            .map(|i| GlyphQuad {
+                screen: [i as f32 * 8.0, 0.0, 8.0, layout.height],
+                atlas: [0.0, 0.0, 8.0, layout.height],
+                color: [0.0, 0.0, 0.0, 1.0],
+            })
+            .collect()
     }
 }
 
@@ -202,11 +213,12 @@ mod tests {
     }
 
     #[test]
-    fn mock_backend_ensure_glyphs_returns_empty() {
+    fn mock_backend_ensure_glyphs_returns_fake_quads() {
         let mut backend = MockTextBackend::new();
         let layout = backend.layout_single_line("Hi", &TextStyle::default(), None);
         let glyphs = backend.ensure_glyphs(&layout);
-        assert!(glyphs.is_empty());
+        // "Hi" = 2 chars * 8px = 16px width → ceil(16/8) = 2 glyphs
+        assert_eq!(glyphs.len(), 2);
     }
 
     #[test]

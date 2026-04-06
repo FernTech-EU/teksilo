@@ -9,10 +9,14 @@ use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
+use fern_core::gesture::{
+    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
+};
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing};
 
@@ -60,11 +64,8 @@ impl Toggle {
         let new_on = !self.on.get();
         self.on.set(new_on);
         let target = if new_on { 1.0 } else { 0.0 };
-        self.knob_position.animate_to(
-            target,
-            Duration::from_millis(150),
-            Easing::EaseInOut,
-        );
+        self.knob_position
+            .animate_to(target, Duration::from_millis(150), Easing::EaseInOut);
     }
 
     fn knob_x(&self, bounds: Rect) -> f32 {
@@ -92,7 +93,8 @@ impl Widget for Toggle {
         // Register bindings
         let id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.knob_position.bind_to(id, registry, BindingLevel::RepaintOnly);
+        self.knob_position
+            .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.on.bind_to(id, registry, BindingLevel::RepaintOnly);
 
         vec![] // leaf widget — no children
@@ -245,8 +247,12 @@ impl Widget for Toggle {
                 ctx.set_cursor(CursorIcon::Default);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyDown { key: Key::Space, .. } => EventResponse::Handled,
-            WidgetEvent::KeyUp { key: Key::Space, .. } => {
+            WidgetEvent::KeyDown {
+                key: Key::Space, ..
+            } => EventResponse::Handled,
+            WidgetEvent::KeyUp {
+                key: Key::Space, ..
+            } => {
                 self.toggle();
                 EventResponse::Handled
             }
@@ -286,7 +292,6 @@ impl Widget for Toggle {
         builder.add_action(fern_core::accesskit::Action::Click);
         builder.add_action(fern_core::accesskit::Action::Focus);
     }
-
 }
 
 #[cfg(test)]
@@ -359,6 +364,9 @@ mod tests {
         let t = tree.add(Toggle::new(on));
         tree.layout(SizeProposal::exact(100.0, 60.0));
         let info = tree.accessibility_node(t);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 }

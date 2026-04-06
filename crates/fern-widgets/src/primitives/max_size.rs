@@ -1,6 +1,6 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::signal::Prop;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// Layout modifier that enforces maximum dimensions on a child widget.
@@ -60,7 +60,7 @@ impl MaxSize {
     }
 
     /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -197,7 +197,11 @@ mod tests {
         let max_w = State::new(400.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
-        let max = tree.add(MaxSize::width(9999.0).bind_max_width(max_w.clone()).set_child(child));
+        let max = tree.add(
+            MaxSize::width(9999.0)
+                .bind_max_width(max_w.clone())
+                .set_child(child),
+        );
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(max).width - 400.0).abs() < 0.01);
 

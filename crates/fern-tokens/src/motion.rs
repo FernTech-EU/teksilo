@@ -92,7 +92,12 @@ mod tests {
 
     #[test]
     fn easing_boundaries() {
-        for easing in [Easing::Linear, Easing::EaseIn, Easing::EaseOut, Easing::EaseInOut] {
+        for easing in [
+            Easing::Linear,
+            Easing::EaseIn,
+            Easing::EaseOut,
+            Easing::EaseInOut,
+        ] {
             assert!((easing.apply(0.0) - 0.0).abs() < 0.001, "{:?} at 0", easing);
             assert!((easing.apply(1.0) - 1.0).abs() < 0.001, "{:?} at 1", easing);
         }
@@ -100,7 +105,12 @@ mod tests {
 
     #[test]
     fn easing_monotonic() {
-        for easing in [Easing::Linear, Easing::EaseIn, Easing::EaseOut, Easing::EaseInOut] {
+        for easing in [
+            Easing::Linear,
+            Easing::EaseIn,
+            Easing::EaseOut,
+            Easing::EaseInOut,
+        ] {
             let mut prev = 0.0;
             for i in 0..=100 {
                 let t = i as f32 / 100.0;

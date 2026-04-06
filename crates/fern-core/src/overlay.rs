@@ -253,12 +253,9 @@ impl OverlayManager {
                     content_size.width,
                     content_size.height,
                 ),
-                OverlayPlacement::AtPointer(point) => Rect::new(
-                    point.x,
-                    point.y,
-                    content_size.width,
-                    content_size.height,
-                ),
+                OverlayPlacement::AtPointer(point) => {
+                    Rect::new(point.x, point.y, content_size.width, content_size.height)
+                }
                 OverlayPlacement::NearAnchor { offset } => Rect::new(
                     anchor.x + offset.x,
                     anchor.y + anchor.height + offset.y + 4.0,
@@ -272,12 +269,7 @@ impl OverlayManager {
     /// Set the content bounds for an overlay (after its content has been laid out).
     pub fn set_content_bounds(&mut self, id: OverlayId, size: Size) {
         if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
-            overlay.bounds = Rect::new(
-                overlay.bounds.x,
-                overlay.bounds.y,
-                size.width,
-                size.height,
-            );
+            overlay.bounds = Rect::new(overlay.bounds.x, overlay.bounds.y, size.width, size.height);
         }
     }
 

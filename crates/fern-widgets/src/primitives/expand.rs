@@ -1,5 +1,5 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Alignment;
 
@@ -75,7 +75,7 @@ impl Expand {
     }
 
     /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -155,7 +155,6 @@ impl Widget for Expand {
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
-
 }
 
 #[cfg(test)]
@@ -193,7 +192,10 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let expand = tree.add(Expand::horizontal().set_child(child));
-        tree.layout(SizeProposal { width: Some(200.0), height: None });
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: None,
+        });
 
         let eb = tree.bounds(expand);
         assert!((eb.width - 200.0).abs() < 0.01);

@@ -248,7 +248,6 @@ pub enum PaintData {
     },
 }
 
-
 /// Compositing blend mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlendMode {

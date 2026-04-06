@@ -1,6 +1,6 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// Convenience layout widget that centers a single child within the
@@ -13,7 +13,10 @@ pub struct Center {
 
 impl Center {
     pub fn new() -> Self {
-        Self { child_id: None, pending_child: None }
+        Self {
+            child_id: None,
+            pending_child: None,
+        }
     }
 
     /// Set child by pre-registered ID.
@@ -23,7 +26,7 @@ impl Center {
     }
 
     /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -78,7 +81,6 @@ impl Widget for Center {
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
-
 }
 
 #[cfg(test)]

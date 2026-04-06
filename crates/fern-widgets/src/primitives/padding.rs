@@ -1,8 +1,8 @@
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
-use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::WidgetId;
+use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 
 /// A layout container that adds padding (insets) around a single child.
 #[derive(Debug)]
@@ -42,7 +42,7 @@ impl Padding {
     }
 
     /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -109,5 +109,4 @@ impl Widget for Padding {
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
-
 }

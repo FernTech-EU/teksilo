@@ -11,15 +11,19 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
+use fern_core::gesture::{
+    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
+};
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, EventContext, IntoWidgetTree, LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
 use fern_tokens::{Color, CornerRadius};
 
-use crate::primitives::{HStack, IconWidget, MaxSize, RectWidget, Spacer, TextWidget, VStack, ZStack};
+use crate::primitives::{
+    HStack, IconWidget, MaxSize, RectWidget, Spacer, TextWidget, VStack, ZStack,
+};
 
 /// Large enough to never clip content when fully expanded.
 const EXPANDED_MAX_HEIGHT: f32 = 10000.0;
@@ -31,7 +35,7 @@ pub struct Accordion {
     title: String,
     expanded: Signal<bool>,
     content_id: Option<WidgetId>,
-    pending_content: Option<Box<dyn IntoWidgetTree>>,
+    pending_content: Option<Box<dyn Widget>>,
     content_height: Option<Signal<f32>>,
     keyboard_focused: Option<Signal<bool>>,
     focus_origin: Option<FocusOrigin>,
@@ -61,7 +65,7 @@ impl Accordion {
     }
 
     /// Set an inline content widget (deferred insertion).
-    pub fn content(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn content(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_content = Some(Box::new(widget));
         self
     }
@@ -72,7 +76,11 @@ impl Accordion {
 
         // Animate the content height
         if let Some(ref height) = self.content_height {
-            let target = if new_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
+            let target = if new_expanded {
+                EXPANDED_MAX_HEIGHT
+            } else {
+                0.0
+            };
             height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
         }
     }
@@ -103,12 +111,10 @@ impl Widget for Accordion {
 
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
-        let chevron_down_id = ctx.add(
-            IconWidget::chevron_down(16.0).color(theme.colors.on_surface),
-        );
-        let chevron_right_id = ctx.add(
-            IconWidget::chevron_right(16.0).color(theme.colors.on_surface),
-        );
+        let chevron_down_id =
+            ctx.add(IconWidget::chevron_down(16.0).color(theme.colors.on_surface));
+        let chevron_right_id =
+            ctx.add(IconWidget::chevron_right(16.0).color(theme.colors.on_surface));
         ctx.visible_when(chevron_down_id, expanded.clone());
         ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
@@ -131,7 +137,11 @@ impl Widget for Accordion {
         let focus_ring_color = {
             let colors = theme.colors.clone();
             kb_focused.map(move |focused| {
-                if *focused { colors.focus_ring } else { Color::TRANSPARENT }
+                if *focused {
+                    colors.focus_ring
+                } else {
+                    Color::TRANSPARENT
+                }
             })
         };
         let focus_ring_width = kb_focused.map(|focused| if *focused { 2.0_f32 } else { 0.0 });
@@ -142,10 +152,16 @@ impl Widget for Accordion {
         let focus_rect_id = ctx.add(focus_rect);
         let header_with_ring = ctx.add(ZStack::new().add_child(focus_rect_id).add_child(header));
 
-        let mut vstack = VStack::new().spacing(theme.spacing.xs).add_child(header_with_ring);
+        let mut vstack = VStack::new()
+            .spacing(theme.spacing.xs)
+            .add_child(header_with_ring);
         if let Some(content_id) = self.content_id {
             // Wrap content in MaxSize with animated height for smooth expand/collapse
-            let initial_height = if is_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
+            let initial_height = if is_expanded {
+                EXPANDED_MAX_HEIGHT
+            } else {
+                0.0
+            };
             let height_state = ctx.animated_signal(initial_height);
             self.content_height = Some(height_state.clone());
 
@@ -204,7 +220,9 @@ impl Widget for Accordion {
                 EventResponse::Handled
             }
             WidgetEvent::PointerMove { position } => {
-                self.tap_recognizer.process(&RawPointerEvent::Move { position: *position });
+                self.tap_recognizer.process(&RawPointerEvent::Move {
+                    position: *position,
+                });
                 EventResponse::Ignored
             }
             WidgetEvent::PointerEnter => {
@@ -216,10 +234,14 @@ impl Widget for Accordion {
                 ctx.set_cursor(CursorIcon::Default);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyDown { key: Key::Space | Key::Enter, .. } => {
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyUp { key: Key::Space | Key::Enter, .. } => {
+            WidgetEvent::KeyDown {
+                key: Key::Space | Key::Enter,
+                ..
+            } => EventResponse::Handled,
+            WidgetEvent::KeyUp {
+                key: Key::Space | Key::Enter,
+                ..
+            } => {
                 self.toggle_expanded(ctx);
                 EventResponse::Handled
             }
@@ -293,9 +315,7 @@ mod tests {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let content = tree.add(TextWidget::new("Content text"));
-        let acc = tree.add(
-            Accordion::new("Details", expanded.clone()).set_content(content),
-        );
+        let acc = tree.add(Accordion::new("Details", expanded.clone()).set_content(content));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
         assert!(b.height > 0.0);
@@ -320,10 +340,11 @@ mod tests {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let content = tree.add(TextWidget::new("Some content text here"));
-        let acc = tree.add(
-            Accordion::new("Section", expanded.clone()).set_content(content),
-        );
-        tree.layout(SizeProposal { width: Some(300.0), height: None });
+        let acc = tree.add(Accordion::new("Section", expanded.clone()).set_content(content));
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
         let collapsed_height = tree.bounds(acc).height;
 
         // Click to expand
@@ -332,7 +353,10 @@ mod tests {
 
         // Tick animation to completion (accordion uses 200ms animation)
         tree.tick_animations(Duration::from_millis(250));
-        tree.layout(SizeProposal { width: Some(300.0), height: None });
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
         let expanded_height = tree.bounds(acc).height;
 
         assert!(

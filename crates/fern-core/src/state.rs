@@ -456,12 +456,16 @@ impl State<f32> {
     /// Take a pending animation request, if any. Called by the animation
     /// scheduler during its tick to start the animation.
     pub fn take_pending_animation(&self) -> Option<AnimationRequest> {
-        self.animation.as_ref().and_then(|a| a.borrow_mut().pending.take())
+        self.animation
+            .as_ref()
+            .and_then(|a| a.borrow_mut().pending.take())
     }
 
     /// Whether there is a pending animation request.
     pub fn has_pending_animation(&self) -> bool {
-        self.animation.as_ref().is_some_and(|a| a.borrow().pending.is_some())
+        self.animation
+            .as_ref()
+            .is_some_and(|a| a.borrow().pending.is_some())
     }
 }
 

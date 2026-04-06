@@ -45,7 +45,6 @@ impl Divider {
         self.color = Some(color);
         self
     }
-
 }
 
 impl Default for Divider {
@@ -86,7 +85,6 @@ impl Widget for Divider {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Splitter);
     }
-
 }
 
 #[cfg(test)]
@@ -98,7 +96,10 @@ mod tests {
     fn horizontal_divider_size() {
         let mut tree = WidgetTree::new();
         let d = tree.add(Divider::new());
-        tree.layout(SizeProposal { width: Some(200.0), height: None });
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: None,
+        });
         let b = tree.bounds(d);
         assert!((b.width - 200.0).abs() < 0.01);
         assert!((b.height - 1.0).abs() < 0.01);
@@ -108,7 +109,10 @@ mod tests {
     fn vertical_divider_size() {
         let mut tree = WidgetTree::new();
         let d = tree.add(Divider::vertical());
-        tree.layout(SizeProposal { width: None, height: Some(100.0) });
+        tree.layout(SizeProposal {
+            width: None,
+            height: Some(100.0),
+        });
         let b = tree.bounds(d);
         assert!((b.width - 1.0).abs() < 0.01);
         assert!((b.height - 100.0).abs() < 0.01);
@@ -118,7 +122,10 @@ mod tests {
     fn custom_thickness() {
         let mut tree = WidgetTree::new();
         let d = tree.add(Divider::new().thickness(3.0));
-        tree.layout(SizeProposal { width: Some(200.0), height: None });
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: None,
+        });
         let b = tree.bounds(d);
         assert!((b.height - 3.0).abs() < 0.01);
     }
@@ -129,6 +136,9 @@ mod tests {
         tree.add(Divider::new().color(Color::RED));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
-        assert!(!frame.decorations.is_empty(), "divider should paint a decoration");
+        assert!(
+            !frame.decorations.is_empty(),
+            "divider should paint a decoration"
+        );
     }
 }

@@ -248,8 +248,14 @@ impl Transform2D {
         ];
         let min_x = corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
         let min_y = corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-        let max_x = corners.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
-        let max_y = corners.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+        let max_x = corners
+            .iter()
+            .map(|p| p.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let max_y = corners
+            .iter()
+            .map(|p| p.y)
+            .fold(f32::NEG_INFINITY, f32::max);
         Rect::new(min_x, min_y, max_x - min_x, max_y - min_y)
     }
 

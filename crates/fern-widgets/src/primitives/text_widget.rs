@@ -67,11 +67,19 @@ impl TextWidget {
 }
 
 impl Widget for TextWidget {
-    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<fern_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.text.register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
-        self.color.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.text
+            .register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
+        self.color.register_if_bound(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -104,7 +112,6 @@ impl Widget for TextWidget {
         builder.set_role(fern_core::accesskit::Role::Label);
         builder.set_name(&text);
     }
-
 }
 
 #[cfg(test)]
@@ -118,7 +125,11 @@ mod tests {
         let text = State::new("Hello".to_string());
         let mut tree = WidgetTree::new();
         let w = tree.add(TextWidget::new("").bind_text(text.clone()));
-        text.bind_to(w, tree.binding_registry(), fern_core::state::BindingLevel::Relayout);
+        text.bind_to(
+            w,
+            tree.binding_registry(),
+            fern_core::state::BindingLevel::Relayout,
+        );
         tree.layout(SizeProposal::exact(200.0, 40.0));
 
         assert_eq!(tree.text_content(w), Some("Hello".to_string()));
@@ -129,7 +140,11 @@ mod tests {
         let text = State::new("Hello".to_string());
         let mut tree = WidgetTree::new();
         let w = tree.add(TextWidget::new("").bind_text(text.clone()));
-        text.bind_to(w, tree.binding_registry(), fern_core::state::BindingLevel::Relayout);
+        text.bind_to(
+            w,
+            tree.binding_registry(),
+            fern_core::state::BindingLevel::Relayout,
+        );
 
         tree.layout(SizeProposal::exact(200.0, 40.0));
         assert_eq!(tree.text_content(w), Some("Hello".to_string()));

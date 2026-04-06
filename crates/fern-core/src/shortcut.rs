@@ -68,12 +68,7 @@ impl<C: AppCommand> ShortcutMap<C> {
     }
 
     /// Bind a scoped shortcut (only active when focus is within the scope widget).
-    pub fn bind_scoped(
-        mut self,
-        shortcut: Shortcut,
-        command: C,
-        scope: WidgetId,
-    ) -> Self {
+    pub fn bind_scoped(mut self, shortcut: Shortcut, command: C, scope: WidgetId) -> Self {
         self.bindings.push(ShortcutBinding {
             shortcut,
             command,
@@ -169,8 +164,7 @@ mod tests {
 
     #[test]
     fn ctrl_shift_binding() {
-        let map = ShortcutMap::new()
-            .bind(Shortcut::ctrl_shift(Key::Z), Cmd::Redo);
+        let map = ShortcutMap::new().bind(Shortcut::ctrl_shift(Key::Z), Cmd::Redo);
 
         assert_eq!(
             map.find(&Shortcut::ctrl_shift(Key::Z), None, |_, _| false),
@@ -182,12 +176,17 @@ mod tests {
 
     #[test]
     fn unbind_removes() {
-        let mut map = ShortcutMap::new()
-            .bind(Shortcut::ctrl(Key::S), Cmd::Save);
+        let mut map = ShortcutMap::new().bind(Shortcut::ctrl(Key::S), Cmd::Save);
 
-        assert!(map.find(&Shortcut::ctrl(Key::S), None, |_, _| false).is_some());
+        assert!(
+            map.find(&Shortcut::ctrl(Key::S), None, |_, _| false)
+                .is_some()
+        );
         map.unbind(&Shortcut::ctrl(Key::S));
-        assert!(map.find(&Shortcut::ctrl(Key::S), None, |_, _| false).is_none());
+        assert!(
+            map.find(&Shortcut::ctrl(Key::S), None, |_, _| false)
+                .is_none()
+        );
     }
 
     #[test]
@@ -227,8 +226,7 @@ mod tests {
         let scope_id: WidgetId = KeyData::from_ffi(10).into();
         let focused_id: WidgetId = KeyData::from_ffi(20).into();
 
-        let map = ShortcutMap::new()
-            .bind_scoped(Shortcut::ctrl(Key::Z), Cmd::Undo, scope_id);
+        let map = ShortcutMap::new().bind_scoped(Shortcut::ctrl(Key::Z), Cmd::Undo, scope_id);
 
         // Scoped binding does not match when focused is outside scope
         let result = map.find(
@@ -250,19 +248,11 @@ mod tests {
             .bind_scoped(Shortcut::ctrl(Key::Z), Cmd::Redo, scope_id); // scoped override
 
         // When focused in scope, scoped binding wins
-        let result = map.find(
-            &Shortcut::ctrl(Key::Z),
-            Some(focused_id),
-            |_, _| true,
-        );
+        let result = map.find(&Shortcut::ctrl(Key::Z), Some(focused_id), |_, _| true);
         assert_eq!(result, Some(&Cmd::Redo));
 
         // When focused outside scope, global binding applies
-        let result = map.find(
-            &Shortcut::ctrl(Key::Z),
-            Some(focused_id),
-            |_, _| false,
-        );
+        let result = map.find(&Shortcut::ctrl(Key::Z), Some(focused_id), |_, _| false);
         assert_eq!(result, Some(&Cmd::Undo));
     }
 }

@@ -334,7 +334,11 @@ impl Widget for Checkbox {
             interaction.map(move |s| resolve_focus_ring(*s, &colors))
         };
         let focus_ring_width = interaction.map(|s| {
-            if *s == InteractionState::Focused { 2.0_f32 } else { 0.0 }
+            if *s == InteractionState::Focused {
+                2.0_f32
+            } else {
+                0.0
+            }
         });
         let focus_ring = RectWidget::new()
             .bind_border_color(focus_ring_color)
@@ -443,11 +447,15 @@ impl Widget for Checkbox {
                 ctx.set_cursor(CursorIcon::Default);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyDown { key: Key::Space, .. } => {
+            WidgetEvent::KeyDown {
+                key: Key::Space, ..
+            } => {
                 self.set_interaction(InteractionState::Pressed);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyUp { key: Key::Space, .. } => {
+            WidgetEvent::KeyUp {
+                key: Key::Space, ..
+            } => {
                 self.toggle();
                 self.set_interaction(InteractionState::Focused);
                 EventResponse::Handled
@@ -490,7 +498,9 @@ impl Widget for Checkbox {
             CheckState::Unchecked => builder.set_toggled(false),
             CheckState::Indeterminate => {
                 // AccessKit's Toggled::Mixed maps to ARIA "mixed"
-                builder.inner_mut().set_toggled(fern_core::accesskit::Toggled::Mixed);
+                builder
+                    .inner_mut()
+                    .set_toggled(fern_core::accesskit::Toggled::Mixed);
             }
         }
         if !self.enabled {
@@ -551,7 +561,9 @@ mod tests {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let cb = tree.add(
-            Checkbox::new(checked.clone()).label("Accept").enabled(false),
+            Checkbox::new(checked.clone())
+                .label("Accept")
+                .enabled(false),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -649,6 +661,9 @@ mod tests {
         let cb = tree.add(Checkbox::new(checked).label("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let info = tree.accessibility_node(cb);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 }

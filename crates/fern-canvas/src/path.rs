@@ -6,9 +6,20 @@ use fern_tokens::CornerRadius;
 pub enum PathCommand {
     MoveTo(Point),
     LineTo(Point),
-    QuadTo { control: Point, to: Point },
-    CubicTo { control1: Point, control2: Point, to: Point },
-    ArcTo { rect: Rect, start_angle: f32, sweep_angle: f32 },
+    QuadTo {
+        control: Point,
+        to: Point,
+    },
+    CubicTo {
+        control1: Point,
+        control2: Point,
+        to: Point,
+    },
+    ArcTo {
+        rect: Rect,
+        start_angle: f32,
+        sweep_angle: f32,
+    },
     Close,
 }
 
@@ -39,12 +50,20 @@ impl Path {
     }
 
     pub fn cubic_to(&mut self, control1: Point, control2: Point, to: Point) -> &mut Self {
-        self.commands.push(PathCommand::CubicTo { control1, control2, to });
+        self.commands.push(PathCommand::CubicTo {
+            control1,
+            control2,
+            to,
+        });
         self
     }
 
     pub fn arc_to(&mut self, rect: Rect, start_angle: f32, sweep_angle: f32) -> &mut Self {
-        self.commands.push(PathCommand::ArcTo { rect, start_angle, sweep_angle });
+        self.commands.push(PathCommand::ArcTo {
+            rect,
+            start_angle,
+            sweep_angle,
+        });
         self
     }
 
@@ -105,7 +124,12 @@ impl Path {
 
     /// Create a circle path.
     pub fn circle(center: Point, radius: f32) -> Self {
-        let rect = Rect::new(center.x - radius, center.y - radius, radius * 2.0, radius * 2.0);
+        let rect = Rect::new(
+            center.x - radius,
+            center.y - radius,
+            radius * 2.0,
+            radius * 2.0,
+        );
         let mut path = Self::new();
         path.arc_to(rect, 0.0, 360.0);
         path.close();
@@ -162,8 +186,13 @@ impl Path {
         let mut path = Self::new();
         let total = points * 2;
         for i in 0..total {
-            let angle = (i as f32) * std::f32::consts::PI / points as f32 - std::f32::consts::FRAC_PI_2;
-            let r = if i % 2 == 0 { outer_radius } else { inner_radius };
+            let angle =
+                (i as f32) * std::f32::consts::PI / points as f32 - std::f32::consts::FRAC_PI_2;
+            let r = if i % 2 == 0 {
+                outer_radius
+            } else {
+                inner_radius
+            };
             let p = Point::new(center.x + r * angle.cos(), center.y + r * angle.sin());
             if i == 0 {
                 path.move_to(p);
@@ -310,10 +339,7 @@ mod tests {
     #[test]
     fn rounded_rect_zero_radii_is_plain_rect() {
         use fern_tokens::CornerRadius;
-        let p = Path::rounded_rect(
-            Rect::new(0.0, 0.0, 100.0, 50.0),
-            CornerRadius::uniform(0.0),
-        );
+        let p = Path::rounded_rect(Rect::new(0.0, 0.0, 100.0, 50.0), CornerRadius::uniform(0.0));
         // No arcs with zero radii
         let arc_count = p
             .commands

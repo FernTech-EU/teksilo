@@ -2,7 +2,7 @@
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Shadow};
 
@@ -37,17 +37,17 @@ impl Card {
         }
     }
 
-    pub fn header(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn header(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_header = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
-    pub fn content(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn content(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
-    pub fn footer(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn footer(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_footer = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -188,7 +188,6 @@ impl Widget for Card {
             .flatten()
             .collect()
     }
-
 }
 
 #[cfg(test)]
@@ -213,8 +212,10 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let frame = tree.render();
         // Should have shapes for shadow + background
-        assert!(!frame.shapes.is_empty() || !frame.shadows.is_empty(),
-            "card should render shadow and/or background");
+        assert!(
+            !frame.shapes.is_empty() || !frame.shadows.is_empty(),
+            "card should render shadow and/or background"
+        );
     }
 
     #[test]

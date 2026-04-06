@@ -65,7 +65,6 @@ pub struct WidgetNode {
     pub(crate) cached_paint: Option<RenderFrame>,
 
     // --- V2 fields ---
-
     /// Attached event handlers (V2). Checked before widget.event() during dispatch.
     pub(crate) handlers: EventHandlers,
     #[allow(dead_code)] // V2 API: focusable override, takes precedence over widget.is_focusable()
@@ -237,7 +236,8 @@ impl WidgetArena {
         if self.roots_dirty {
             // Fall back to scanning when cache is stale.
             // refresh_roots() should be called from layout() for the fast path.
-            return self.nodes
+            return self
+                .nodes
                 .iter()
                 .filter(|(_, node)| node.parent.is_none())
                 .map(|(id, _)| id)
@@ -249,7 +249,8 @@ impl WidgetArena {
     /// Refresh the cached roots list. Call once per frame from layout().
     pub fn refresh_roots(&mut self) {
         if self.roots_dirty {
-            self.cached_roots = self.nodes
+            self.cached_roots = self
+                .nodes
                 .iter()
                 .filter(|(_, node)| node.parent.is_none())
                 .map(|(id, _)| id)
@@ -332,11 +333,15 @@ impl WidgetArena {
     }
 
     pub fn any_needs_layout(&self) -> bool {
-        self.nodes.values().any(|n| n.activation == ActivationState::Active && n.dirty.needs_layout)
+        self.nodes
+            .values()
+            .any(|n| n.activation == ActivationState::Active && n.dirty.needs_layout)
     }
 
     pub fn any_needs_paint(&self) -> bool {
-        self.nodes.values().any(|n| n.activation == ActivationState::Active && n.dirty.needs_paint)
+        self.nodes
+            .values()
+            .any(|n| n.activation == ActivationState::Active && n.dirty.needs_paint)
     }
 
     pub fn mark_needs_paint(&mut self, id: WidgetId) {
@@ -370,12 +375,7 @@ impl WidgetArena {
     pub fn is_enabled(&self, id: WidgetId) -> bool {
         self.nodes
             .get(id)
-            .map(|n| {
-                n.enabled_state
-                    .as_ref()
-                    .map(|s| s.get())
-                    .unwrap_or(true)
-            })
+            .map(|n| n.enabled_state.as_ref().map(|s| s.get()).unwrap_or(true))
             .unwrap_or(true)
     }
 
@@ -403,10 +403,7 @@ impl WidgetArena {
     pub fn take_widget(&mut self, id: WidgetId) -> Option<Box<dyn Widget>> {
         let node = self.nodes.get_mut(id)?;
         // Replace with a minimal placeholder
-        let taken = std::mem::replace(
-            &mut node.widget,
-            Box::new(PlaceholderWidget),
-        );
+        let taken = std::mem::replace(&mut node.widget, Box::new(PlaceholderWidget));
         Some(taken)
     }
 

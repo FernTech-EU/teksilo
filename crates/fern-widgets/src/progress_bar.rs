@@ -117,9 +117,11 @@ impl Widget for ProgressBar {
         // Register bindings
         let id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.value.register_if_bound(id, registry, BindingLevel::RepaintOnly);
+        self.value
+            .register_if_bound(id, registry, BindingLevel::RepaintOnly);
         if self.indeterminate {
-            self.indeterminate_pos.bind_to(id, registry, BindingLevel::RepaintOnly);
+            self.indeterminate_pos
+                .bind_to(id, registry, BindingLevel::RepaintOnly);
             // Kick off the animation loop
             self.indeterminate_pos.animate_to_with_frame_interval(
                 1.0,
@@ -154,7 +156,9 @@ impl Widget for ProgressBar {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let track_color = self.track_color.unwrap_or(ctx.theme.colors.surface_tertiary);
+        let track_color = self
+            .track_color
+            .unwrap_or(ctx.theme.colors.surface_tertiary);
         let fill_color = self.fill_color.unwrap_or(ctx.theme.colors.primary);
         let radius = CornerRadius::uniform(ctx.theme.shape.radius_sm);
 
@@ -202,7 +206,12 @@ impl Widget for ProgressBar {
                     }
                     Orientation::Vertical => {
                         let fill_h = bounds.height * value;
-                        Rect::new(bounds.x, bounds.y + bounds.height - fill_h, bounds.width, fill_h)
+                        Rect::new(
+                            bounds.x,
+                            bounds.y + bounds.height - fill_h,
+                            bounds.width,
+                            fill_h,
+                        )
                     }
                 };
                 canvas.fill_rounded_rect(fill_rect, radius, fill_color);
@@ -217,7 +226,6 @@ impl Widget for ProgressBar {
         builder.set_min_numeric_value(0.0);
         builder.set_max_numeric_value(1.0);
     }
-
 }
 
 #[cfg(test)]
@@ -230,7 +238,10 @@ mod tests {
     fn progress_bar_size() {
         let mut tree = WidgetTree::new();
         let pb = tree.add(ProgressBar::new(0.5));
-        tree.layout(SizeProposal { width: Some(200.0), height: None });
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: None,
+        });
         let b = tree.bounds(pb);
         assert!((b.width - 200.0).abs() < 0.01);
         assert!((b.height - 4.0).abs() < 0.01);
@@ -262,7 +273,11 @@ mod tests {
         // Shape width is approximately 100 (half of 200)
         let fill = &fill_shapes[0];
         let fill_width = fill.screen[2]; // [x, y, w, h]
-        assert!((fill_width - 100.0).abs() < 1.0, "fill width should be ~100, got {}", fill_width);
+        assert!(
+            (fill_width - 100.0).abs() < 1.0,
+            "fill width should be ~100, got {}",
+            fill_width
+        );
     }
 
     #[test]
@@ -303,6 +318,9 @@ mod tests {
         let frame2 = tree.render();
         let fill2 = frame2.shapes[1].screen;
 
-        assert_ne!(fill1, fill2, "indeterminate fill should move between frames");
+        assert_ne!(
+            fill1, fill2,
+            "indeterminate fill should move between frames"
+        );
     }
 }

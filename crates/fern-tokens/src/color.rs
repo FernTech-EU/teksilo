@@ -81,9 +81,7 @@ impl Color {
     pub fn from_hex(hex: &str) -> Self {
         let hex = hex.strip_prefix('#').unwrap_or(hex);
         let len = hex.len();
-        let parse_byte = |s: &str| -> f32 {
-            u8::from_str_radix(s, 16).unwrap_or(0) as f32 / 255.0
-        };
+        let parse_byte = |s: &str| -> f32 { u8::from_str_radix(s, 16).unwrap_or(0) as f32 / 255.0 };
         match len {
             6 => Self {
                 r: parse_byte(&hex[0..2]),

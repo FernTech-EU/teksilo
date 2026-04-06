@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::state::{BindingLevel, BindingRegistry, Binding};
+use crate::state::{Binding, BindingLevel, BindingRegistry};
 use crate::widget_id::WidgetId;
 
 // ---------------------------------------------------------------------------
@@ -145,10 +145,7 @@ impl<T: 'static> Signal<T> {
                     remover: {
                         let inner = inner.clone();
                         Rc::new(move |observer_id| {
-                            inner
-                                .borrow_mut()
-                                .observers
-                                .retain(|e| e.id != observer_id);
+                            inner.borrow_mut().observers.retain(|e| e.id != observer_id);
                         })
                     },
                 }
@@ -162,10 +159,9 @@ impl<T: 'static> Signal<T> {
     /// Whether two Signal handles point to the same underlying value.
     pub fn same(a: &Self, b: &Self) -> bool {
         match (&a.kind, &b.kind) {
-            (
-                SignalKind::Mutable { inner: a, .. },
-                SignalKind::Mutable { inner: b, .. },
-            ) => Rc::ptr_eq(a, b),
+            (SignalKind::Mutable { inner: a, .. }, SignalKind::Mutable { inner: b, .. }) => {
+                Rc::ptr_eq(a, b)
+            }
             _ => false,
         }
     }
@@ -372,9 +368,9 @@ impl Signal<f32> {
     /// Take a pending animation request, if any.
     pub fn take_pending_animation(&self) -> Option<crate::state::AnimationRequest> {
         match &self.kind {
-            SignalKind::Mutable { animation, .. } => {
-                animation.as_ref().and_then(|a| a.borrow_mut().pending.take())
-            }
+            SignalKind::Mutable { animation, .. } => animation
+                .as_ref()
+                .and_then(|a| a.borrow_mut().pending.take()),
             _ => None,
         }
     }
@@ -382,9 +378,9 @@ impl Signal<f32> {
     /// Whether there is a pending animation request.
     pub fn has_pending_animation(&self) -> bool {
         match &self.kind {
-            SignalKind::Mutable { animation, .. } => {
-                animation.as_ref().is_some_and(|a| a.borrow().pending.is_some())
-            }
+            SignalKind::Mutable { animation, .. } => animation
+                .as_ref()
+                .is_some_and(|a| a.borrow().pending.is_some()),
             _ => false,
         }
     }
@@ -419,12 +415,11 @@ impl<T> Clone for Signal<T> {
 impl<T: std::fmt::Debug + 'static> std::fmt::Debug for Signal<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
-            SignalKind::Mutable { inner, .. } => {
-                f.debug_struct("Signal::Mutable")
-                    .field("value", &inner.borrow().value)
-                    .field("dirty", &inner.borrow().dirty)
-                    .finish()
-            }
+            SignalKind::Mutable { inner, .. } => f
+                .debug_struct("Signal::Mutable")
+                .field("value", &inner.borrow().value)
+                .field("dirty", &inner.borrow().dirty)
+                .finish(),
             SignalKind::Derived { .. } => f.write_str("Signal::Derived(..)"),
         }
     }
@@ -765,7 +760,11 @@ mod tests {
     fn signal_animated_f32() {
         let s = Signal::<f32>::new_animated(0.0);
         assert!(!s.has_pending_animation());
-        s.animate_to(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::Linear);
+        s.animate_to(
+            100.0,
+            std::time::Duration::from_millis(200),
+            fern_tokens::Easing::Linear,
+        );
         assert!(s.has_pending_animation());
         assert_eq!(s.animation_target(), Some(100.0));
         let req = s.take_pending_animation().unwrap();

@@ -13,7 +13,9 @@ use fern_core::gesture::{
     GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
 };
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+};
 use fern_tokens::{Color, CornerRadius};
 
 /// Padding inside each segment.
@@ -130,10 +132,17 @@ impl std::fmt::Debug for SegmentedControl {
 }
 
 impl Widget for SegmentedControl {
-    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<fern_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.selected.bind_to(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.selected.bind_to(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -266,7 +275,10 @@ impl Widget for SegmentedControl {
                 ctx.set_cursor(CursorIcon::Default);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyDown { key: Key::ArrowRight, .. } => {
+            WidgetEvent::KeyDown {
+                key: Key::ArrowRight,
+                ..
+            } => {
                 let n = self.segment_count();
                 if n > 0 {
                     let current = self.selected.get();
@@ -274,11 +286,15 @@ impl Widget for SegmentedControl {
                 }
                 EventResponse::Handled
             }
-            WidgetEvent::KeyDown { key: Key::ArrowLeft, .. } => {
+            WidgetEvent::KeyDown {
+                key: Key::ArrowLeft,
+                ..
+            } => {
                 let n = self.segment_count();
                 if n > 0 {
                     let current = self.selected.get();
-                    self.selected.set(if current == 0 { n - 1 } else { current - 1 });
+                    self.selected
+                        .set(if current == 0 { n - 1 } else { current - 1 });
                 }
                 EventResponse::Handled
             }
@@ -302,7 +318,8 @@ impl Widget for SegmentedControl {
                     let n = self.segment_count();
                     if n > 0 {
                         let current = self.selected.get();
-                        self.selected.set(if current == 0 { n - 1 } else { current - 1 });
+                        self.selected
+                            .set(if current == 0 { n - 1 } else { current - 1 });
                     }
                     EventResponse::Handled
                 } else {
@@ -326,7 +343,6 @@ impl Widget for SegmentedControl {
         builder.add_action(fern_core::accesskit::Action::Increment);
         builder.add_action(fern_core::accesskit::Action::Decrement);
     }
-
 }
 
 #[cfg(test)]
@@ -448,7 +464,13 @@ mod tests {
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let info = tree.accessibility_node(sc);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Increment));
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Decrement));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Increment)
+        );
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Decrement)
+        );
     }
 }

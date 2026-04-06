@@ -131,9 +131,7 @@ impl std::fmt::Debug for Button {
 fn resolve_bg(style: ButtonStyle, state: InteractionState, colors: &ColorTokens) -> Color {
     match (style, state) {
         (_, InteractionState::Disabled) => colors.disabled_fill,
-        (ButtonStyle::Filled, InteractionState::Idle | InteractionState::Focused) => {
-            colors.primary
-        }
+        (ButtonStyle::Filled, InteractionState::Idle | InteractionState::Focused) => colors.primary,
         (ButtonStyle::Filled, InteractionState::Hovered) => colors.primary_hover,
         (ButtonStyle::Filled, InteractionState::Pressed) => colors.primary_pressed,
         (ButtonStyle::Outlined, InteractionState::Hovered) => colors.primary.with_alpha(0.08),
@@ -387,8 +385,8 @@ mod tests {
     use fern_canvas::SizeProposal;
     use fern_core::app_command::AppCommand;
     use fern_core::event::{Modifiers, PointerButton};
-    use fern_tokens::Theme;
     use fern_core::widget_tree::WidgetTree;
+    use fern_tokens::Theme;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -452,9 +450,7 @@ mod tests {
     #[test]
     fn disabled_ignores_click() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(
-            Button::new("Save").on_click(TestCmd::Save).enabled(false),
-        );
+        let btn = tree.add(Button::new("Save").on_click(TestCmd::Save).enabled(false));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let called = Rc::new(Cell::new(false));
         let c = called.clone();
@@ -469,7 +465,10 @@ mod tests {
         let info = tree.accessibility_node(btn);
         assert_eq!(info.role(), fern_core::accesskit::Role::Button);
         assert_eq!(info.name(), Some("Save"));
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 
     #[test]
@@ -499,7 +498,10 @@ mod tests {
     fn button_sizes_to_content() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let btn = tree.add(Button::new("X"));
-        tree.layout(SizeProposal { width: None, height: None });
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
         let bounds = tree.bounds(btn);
         // Should not fill the full 400x400 proposal
         assert!(bounds.width < 400.0);
@@ -545,8 +547,10 @@ mod tests {
         let focused_shapes = frame_focused.shapes.clone();
 
         // The border should change (focus ring color appears)
-        assert_ne!(idle_shapes, focused_shapes,
-            "keyboard focus should change the button's visual appearance (focus ring)");
+        assert_ne!(
+            idle_shapes, focused_shapes,
+            "keyboard focus should change the button's visual appearance (focus ring)"
+        );
     }
 
     #[test]
@@ -573,8 +577,10 @@ mod tests {
 
         // After click, button goes to Hovered (not Focused), so no focus ring
         // The shapes should be the hover state, not a focus-ring state
-        assert_eq!(hover_shapes, frame_after_click.shapes,
-            "pointer click should return to hover state, not show focus ring");
+        assert_eq!(
+            hover_shapes, frame_after_click.shapes,
+            "pointer click should return to hover state, not show focus ring"
+        );
     }
 
     #[test]

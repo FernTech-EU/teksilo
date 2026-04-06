@@ -1,6 +1,6 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::HAlignment;
 
@@ -42,16 +42,13 @@ impl VStack {
     }
 
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(
-        mut self,
-        iter: impl IntoIterator<Item = impl IntoWidgetTree>,
-    ) -> Self {
+    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
             self.pending.push(PendingChild::Deferred(Box::new(widget)));
         }
@@ -59,13 +56,12 @@ impl VStack {
     }
 
     /// Conditionally add a child. No-op if None.
-    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+    pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));
         }
         self
     }
-
 }
 
 impl Default for VStack {
@@ -204,10 +200,13 @@ impl Widget for VStack {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let pending = std::mem::take(&mut self.pending);
         if !pending.is_empty() {
-            self.child_ids = pending.into_iter().map(|child| match child {
-                PendingChild::Id(id) => id,
-                PendingChild::Deferred(w) => ctx.add_boxed(w),
-            }).collect();
+            self.child_ids = pending
+                .into_iter()
+                .map(|child| match child {
+                    PendingChild::Id(id) => id,
+                    PendingChild::Deferred(w) => ctx.add_boxed(w),
+                })
+                .collect();
         }
         self.child_ids.clone()
     }
@@ -330,11 +329,7 @@ mod tests {
     fn mixed_add_child_and_inline_child() {
         let mut tree = WidgetTree::new();
         let pre = tree.add(FixedLeaf(80.0, 20.0));
-        let stack = tree.add(
-            VStack::new()
-                .add_child(pre)
-                .child(FixedLeaf(80.0, 40.0)),
-        );
+        let stack = tree.add(VStack::new().add_child(pre).child(FixedLeaf(80.0, 40.0)));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         let kids = tree.children(stack);
@@ -379,10 +374,7 @@ mod tests {
     #[test]
     fn child_opt_some_adds_child() {
         let mut tree = WidgetTree::new();
-        let stack = tree.add(
-            VStack::new()
-                .child_opt(Some(FixedLeaf(80.0, 25.0))),
-        );
+        let stack = tree.add(VStack::new().child_opt(Some(FixedLeaf(80.0, 25.0))));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         let kids = tree.children(stack);
@@ -420,13 +412,8 @@ mod tests {
         use crate::primitives::padding::Padding;
 
         let mut tree = WidgetTree::new();
-        let stack = tree.add(
-            VStack::new()
-                .child(
-                    Padding::uniform(10.0)
-                        .child(FixedLeaf(80.0, 30.0)),
-                ),
-        );
+        let stack =
+            tree.add(VStack::new().child(Padding::uniform(10.0).child(FixedLeaf(80.0, 30.0))));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         let kids = tree.children(stack);

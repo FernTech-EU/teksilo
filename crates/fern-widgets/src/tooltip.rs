@@ -30,11 +30,8 @@ impl Widget for TooltipWidget {
         let pad = 8.0;
         if let Some(backend) = ctx.text_backend {
             let mut backend = backend.borrow_mut();
-            let layout = backend.layout_single_line(
-                &self.text,
-                &ctx.theme.typography.body_small,
-                None,
-            );
+            let layout =
+                backend.layout_single_line(&self.text, &ctx.theme.typography.body_small, None);
             Size::new(layout.width + pad * 2.0, layout.height + pad * 2.0)
         } else {
             let text_width = self.text.len() as f32 * 7.0;

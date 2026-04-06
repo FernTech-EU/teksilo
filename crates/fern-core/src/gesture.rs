@@ -45,16 +45,39 @@ pub enum GestureResult {
 /// A recognized gesture event.
 #[derive(Debug, Clone)]
 pub enum GestureEvent {
-    Tap { position: Point },
-    DoubleTap { position: Point },
-    LongPress { position: Point },
-    DragStarted { position: Point, button: PointerButton },
-    DragMoved { position: Point, delta: Vec2 },
-    DragEnded { position: Point },
-    PinchStarted { center: Point },
-    PinchChanged { center: Point, scale: f32, rotation: f32 },
+    Tap {
+        position: Point,
+    },
+    DoubleTap {
+        position: Point,
+    },
+    LongPress {
+        position: Point,
+    },
+    DragStarted {
+        position: Point,
+        button: PointerButton,
+    },
+    DragMoved {
+        position: Point,
+        delta: Vec2,
+    },
+    DragEnded {
+        position: Point,
+    },
+    PinchStarted {
+        center: Point,
+    },
+    PinchChanged {
+        center: Point,
+        scale: f32,
+        rotation: f32,
+    },
     PinchEnded,
-    Swipe { direction: SwipeDirection, velocity: f32 },
+    Swipe {
+        direction: SwipeDirection,
+        velocity: f32,
+    },
 }
 
 /// Direction of a swipe gesture.
@@ -1054,7 +1077,10 @@ mod tests {
             t0 + Duration::from_millis(100),
         );
         match result {
-            GestureResult::Recognized(GestureEvent::Swipe { direction, velocity }) => {
+            GestureResult::Recognized(GestureEvent::Swipe {
+                direction,
+                velocity,
+            }) => {
                 assert_eq!(direction, SwipeDirection::Right);
                 assert!(velocity > 100.0);
             }

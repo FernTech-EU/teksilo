@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use fern_canvas::text_backend::{AtlasInfo, TextBackend, TextLayout};
 use fern_canvas::GlyphQuad;
+use fern_canvas::text_backend::{AtlasInfo, TextBackend, TextLayout};
 use fern_tokens::TextStyle;
 use text_typeset::{FontFaceId, SingleLineResult, TextFormat, Typesetter};
 
@@ -157,7 +157,9 @@ impl TextBackend for TypesetterBridge {
         format.font_size = format.font_size.map(|s| s * sf);
 
         let physical_max = max_width.map(|w| w * sf);
-        let result: SingleLineResult = self.typesetter.layout_single_line(text, &format, physical_max);
+        let result: SingleLineResult =
+            self.typesetter
+                .layout_single_line(text, &format, physical_max);
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -305,10 +307,7 @@ mod tests {
         // "First text" has 10 characters → should produce ~10 glyphs
         // "Third text is the last measured" has 31 chars → ~31 glyphs
         // If we get ~31 glyphs, the bug is present (stale last_result)
-        assert!(
-            !glyphs.is_empty(),
-            "should produce glyphs for 'First text'"
-        );
+        assert!(!glyphs.is_empty(), "should produce glyphs for 'First text'");
         assert!(
             glyphs.len() <= 15,
             "got {} glyphs — expected ~10 for 'First text', not ~31 for the stale last_result",

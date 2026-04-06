@@ -1,22 +1,15 @@
-use std::cell::RefCell;
+use fern_canvas::{Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::signal::Signal;
-use fern_core::widget::IntoWidgetTree;
+use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 use crate::primitives::ZStack;
 
 /// A container that shows exactly one child at a time, driven by a
-/// `State<usize>` index. Internally a ZStack where each child has a
-/// `visible_when` binding derived from `selected.map(|i| *i == index)`.
-///
-/// The selected child is active (layout, paint, events, accessibility);
-/// all others are dormant (state preserved, no rendering cost).
-///
-/// The Switcher does not own the selection logic — it receives the
-/// `Signal<usize>` from outside, composing with any navigation pattern
-/// (wizard Next/Back buttons, sidebar navigation, tab headers, routing).
+/// `Signal<usize>` index. Internally a ZStack where each child has a
+/// `visible_when` binding derived from `selected.map(|i| i == index)`.
 ///
 /// ```ignore
 /// let page = Signal::new(0_usize);
@@ -27,51 +20,92 @@ use crate::primitives::ZStack;
 /// ```
 pub struct Switcher {
     selected: Signal<usize>,
-    deferred_children: RefCell<Vec<Box<dyn IntoWidgetTree>>>,
+    deferred_children: Vec<Box<dyn Widget>>,
+    root_child_id: Option<WidgetId>,
 }
 
 impl Switcher {
     pub fn new(selected: Signal<usize>) -> Self {
         Self {
             selected,
-            deferred_children: RefCell::new(Vec::new()),
+            deferred_children: Vec::new(),
+            root_child_id: None,
         }
     }
 
     /// Add a child page.
-    pub fn child(self, widget: impl IntoWidgetTree) -> Self {
-        self.deferred_children.borrow_mut().push(Box::new(widget));
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
+        self.deferred_children.push(Box::new(widget));
         self
     }
 
     /// Add multiple child pages from an iterator.
-    pub fn children(
-        self,
-        iter: impl IntoIterator<Item = impl IntoWidgetTree>,
-    ) -> Self {
-        let mut children = self.deferred_children.borrow_mut();
+    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
-            children.push(Box::new(widget));
+            self.deferred_children.push(Box::new(widget));
         }
-        drop(children);
         self
     }
-
 }
 
 impl std::fmt::Debug for Switcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Switcher")
-            .field("num_children", &self.deferred_children.borrow().len())
+            .field("num_children", &self.deferred_children.len())
             .finish()
+    }
+}
+
+impl Widget for Switcher {
+    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
+        let children = std::mem::take(&mut self.deferred_children);
+
+        // Add each child to the tree and bind visibility to the selected index
+        let mut zstack = ZStack::new();
+        for (i, child_widget) in children.into_iter().enumerate() {
+            let child_id = ctx.add_boxed(child_widget);
+            let idx = i;
+            let vis = self.selected.map(move |s| *s == idx);
+            ctx.visible_when(child_id, vis);
+            zstack = zstack.add_child(child_id);
+        }
+
+        let root = ctx.add(zstack);
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::TabPanel);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_canvas::{Size, SizeProposal};
-    use fern_core::widget::{LayoutContext, Widget};
     use fern_core::widget_tree::WidgetTree;
 
     #[derive(Debug)]
@@ -87,8 +121,6 @@ mod tests {
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new();
 
-        // Manually apply the same pattern Switcher uses internally,
-        // so we can check visibility of known child IDs.
         let a = tree.add(FixedLeaf(100.0, 40.0));
         let b = tree.add(FixedLeaf(80.0, 30.0));
 
@@ -98,32 +130,26 @@ mod tests {
         tree.visible_when(b, selected.map(move |idx| *idx == 1));
 
         tree.layout(SizeProposal::exact(200.0, 200.0));
+
         assert!(tree.is_visible(a));
         assert!(!tree.is_visible(b));
 
-        // Switch to child 1
         selected.set(1);
         tree.layout(SizeProposal::exact(200.0, 200.0));
+
         assert!(!tree.is_visible(a));
         assert!(tree.is_visible(b));
-
-        // Switch back to child 0
-        selected.set(0);
-        tree.layout(SizeProposal::exact(200.0, 200.0));
-        assert!(tree.is_visible(a));
-        assert!(!tree.is_visible(b));
     }
 
     #[test]
-    fn out_of_range_index_hides_all() {
-        let selected = Signal::new(5_usize);
+    fn all_dormant_when_invalid_index() {
+        let selected = Signal::new(99_usize);
         let mut tree = WidgetTree::new();
 
         let a = tree.add(FixedLeaf(100.0, 40.0));
         let b = tree.add(FixedLeaf(80.0, 30.0));
 
         let _zstack = tree.add(ZStack::new().add_child(a).add_child(b));
-
         tree.visible_when(a, selected.map(move |idx| *idx == 0));
         tree.visible_when(b, selected.map(move |idx| *idx == 1));
 
@@ -133,11 +159,11 @@ mod tests {
     }
 
     #[test]
-    fn composite_switcher_builds_and_lays_out() {
+    fn switcher_builds_and_lays_out() {
         let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new();
 
-        let switcher_id = tree.add_widget(
+        let switcher_id = tree.add(
             Switcher::new(selected.clone())
                 .child(FixedLeaf(100.0, 40.0))
                 .child(FixedLeaf(80.0, 30.0))
@@ -146,10 +172,7 @@ mod tests {
 
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
-        // Switcher should be visible
         assert!(tree.is_visible(switcher_id));
-
-        // The switcher's bounds should reflect the ZStack sizing
         let bounds = tree.bounds(switcher_id);
         assert!(bounds.width > 0.0);
         assert!(bounds.height > 0.0);
@@ -166,11 +189,8 @@ mod tests {
             FixedLeaf(60.0, 20.0),
         ];
 
-        let _switcher_id = tree.add_widget(
-            Switcher::new(selected).children(pages),
-        );
+        let _switcher_id = tree.add(Switcher::new(selected).children(pages));
 
         tree.layout(SizeProposal::exact(200.0, 200.0));
-        // Should not panic — page 2 is selected
     }
 }

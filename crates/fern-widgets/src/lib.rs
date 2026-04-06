@@ -26,6 +26,10 @@ pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
 pub use link::Link;
 pub use panel::Panel;
+pub use primitives::{
+    AspectRatio, Center, Divider, Expand, FixedSize, Grid, HStack, IconWidget, MaxSize, MinSize,
+    Padding, RectWidget, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
+};
 pub use progress_bar::ProgressBar;
 pub use radio_button::RadioButton;
 pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarStyle};
@@ -35,11 +39,6 @@ pub use slider::Slider;
 pub use status_bar::StatusBar;
 pub use toggle::Toggle;
 pub use toolbar::Toolbar;
-pub use primitives::{
-    AspectRatio, Center, Divider, Expand, FixedSize, Grid, HStack, IconWidget, MaxSize, MinSize,
-    Padding, RectWidget, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
-};
 
 #[cfg(test)]
 mod layout_integration_tests;
-

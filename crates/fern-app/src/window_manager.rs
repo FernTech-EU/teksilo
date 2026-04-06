@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 
 use fern_core::WidgetTree;
-use fern_platform::event_translation::TranslationState;
 use fern_platform::PlatformWindow;
+use fern_platform::event_translation::TranslationState;
 use fern_tokens::Theme;
 
 use crate::window_config::{FernWindowId, WindowConfig};
@@ -160,10 +160,7 @@ impl WindowManager {
     }
 
     /// Process pending creates and closes. Called from the event loop.
-    pub fn process_pending(
-        &mut self,
-        target: &winit::event_loop::ActiveEventLoop,
-    ) {
+    pub fn process_pending(&mut self, target: &winit::event_loop::ActiveEventLoop) {
         let creates: Vec<_> = self.pending_creates.drain(..).collect();
         for config in creates {
             self.create_window(config, target);
@@ -227,7 +224,6 @@ impl WindowManager {
     pub(crate) fn iter(&self) -> impl Iterator<Item = &ManagedWindow> {
         self.windows.values()
     }
-
 
     /// Get the winit WindowId for a FernWindowId.
     pub fn winit_id_for_fern(&self, fern_id: FernWindowId) -> Option<winit::window::WindowId> {

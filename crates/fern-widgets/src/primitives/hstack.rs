@@ -1,6 +1,6 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::VAlignment;
 
@@ -42,16 +42,13 @@ impl HStack {
     }
 
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(
-        mut self,
-        iter: impl IntoIterator<Item = impl IntoWidgetTree>,
-    ) -> Self {
+    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
             self.pending.push(PendingChild::Deferred(Box::new(widget)));
         }
@@ -59,13 +56,12 @@ impl HStack {
     }
 
     /// Conditionally add a child. No-op if None.
-    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+    pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));
         }
         self
     }
-
 }
 
 impl Default for HStack {
@@ -224,10 +220,13 @@ impl Widget for HStack {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let pending = std::mem::take(&mut self.pending);
         if !pending.is_empty() {
-            self.child_ids = pending.into_iter().map(|child| match child {
-                PendingChild::Id(id) => id,
-                PendingChild::Deferred(w) => ctx.add_boxed(w),
-            }).collect();
+            self.child_ids = pending
+                .into_iter()
+                .map(|child| match child {
+                    PendingChild::Id(id) => id,
+                    PendingChild::Deferred(w) => ctx.add_boxed(w),
+                })
+                .collect();
         }
         self.child_ids.clone()
     }
@@ -355,14 +354,16 @@ mod tests {
         let a = tree.add(FixedLeaf(60.0, 30.0));
         let b = tree.add(FixedLeaf(40.0, 30.0));
         let _stack = tree.add(HStack::new().add_child(a).add_child(b));
-        tree.layout(SizeProposal { width: None, height: Some(50.0) });
+        tree.layout(SizeProposal {
+            width: None,
+            height: Some(50.0),
+        });
 
         // In RTL, first child (a) is placed on the right, second (b) on the left.
         // HStack without spacers sizes to content: 60+40 = 100px wide.
         let ab = tree.bounds(a);
         let bb = tree.bounds(b);
-        assert!(ab.x > bb.x,
-            "a.x={} should be > b.x={} in RTL", ab.x, bb.x);
+        assert!(ab.x > bb.x, "a.x={} should be > b.x={} in RTL", ab.x, bb.x);
         // a (60px) at right edge of 100px HStack
         assert!((ab.x - 40.0).abs() < 0.01, "a.x={}", ab.x);
         // b (40px) to the left of a

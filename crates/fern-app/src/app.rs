@@ -63,7 +63,13 @@ impl IdleTrace {
         }
     }
 
-    fn note_control_flow(&mut self, has_deadline: bool, timer_windows: usize, animation_timers: usize, tooltip_timers: usize) {
+    fn note_control_flow(
+        &mut self,
+        has_deadline: bool,
+        timer_windows: usize,
+        animation_timers: usize,
+        tooltip_timers: usize,
+    ) {
         if has_deadline {
             self.control_flow_wait_until += 1;
         } else {
@@ -262,8 +268,7 @@ impl FernAppHandler {
 
             let actions = managed.platform_window.drain_accessibility_actions();
             for req in actions {
-                let target_widget =
-                    fern_core::accessibility::node_id_to_widget_id(req.target_node);
+                let target_widget = fern_core::accessibility::node_id_to_widget_id(req.target_node);
                 managed.tree.dispatch_event(WidgetEvent::AccessAction {
                     action: req.action,
                     target: Some(target_widget),
@@ -329,7 +334,12 @@ impl FernAppHandler {
         }
     }
 
-    fn handle_window_event_inner(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+    fn handle_window_event_inner(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
         let fern_id = self.wm.fern_id_for_winit(window_id);
 
         if let Some(fid) = fern_id {
@@ -418,7 +428,9 @@ impl FernAppHandler {
                     managed.current_modifiers = mods.state();
                 }
             }
-            WindowEvent::KeyboardInput { event: key_event, .. } => {
+            WindowEvent::KeyboardInput {
+                event: key_event, ..
+            } => {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     if let Some(key) = event_translation::translate_key(&key_event.logical_key) {
                         let modifiers =
@@ -433,7 +445,9 @@ impl FernAppHandler {
                                 });
                             }
                             winit::event::ElementState::Released => {
-                                managed.tree.dispatch_event(WidgetEvent::KeyUp { key, modifiers });
+                                managed
+                                    .tree
+                                    .dispatch_event(WidgetEvent::KeyUp { key, modifiers });
                             }
                         }
                     }
@@ -488,7 +502,12 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
         self.post_event(event_loop);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
         self.handle_window_event_inner(event_loop, window_id, event);
     }
 
@@ -534,9 +553,7 @@ impl AppEventProxy {
 
     /// Post an arbitrary external event.
     pub fn send_external(&self, payload: impl std::any::Any + Send + 'static) {
-        let _ = self
-            .inner
-            .send_event(AppEvent::External(Box::new(payload)));
+        let _ = self.inner.send_event(AppEvent::External(Box::new(payload)));
     }
 }
 
@@ -607,10 +624,7 @@ impl FernAppBuilder {
 
     /// Set the root widget builder for the initial window (convenience API).
     /// For multi-window apps, use `initial_window()` with a `WindowConfig`.
-    pub fn root(
-        mut self,
-        builder: impl FnOnce(&mut WidgetTree) -> WidgetId + 'static,
-    ) -> Self {
+    pub fn root(mut self, builder: impl FnOnce(&mut WidgetTree) -> WidgetId + 'static) -> Self {
         self.root_builder = Some(Box::new(builder));
         self
     }

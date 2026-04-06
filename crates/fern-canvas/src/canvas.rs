@@ -8,7 +8,7 @@ use crate::paint::{Paint, StrokeStyle};
 use crate::path::Path;
 use crate::render_frame::{
     BlendMode, DecorationKind, DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData,
-    PathEntry, RenderFrame, ShapeKind, ShapeQuad, ShadowQuad,
+    PathEntry, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 use crate::text_backend::TextBackend;
 
@@ -62,7 +62,13 @@ impl Canvas {
     }
 
     /// Draw a horizontal or vertical line as a thin decoration rect.
-    pub fn draw_line(&mut self, from: Point, to: Point, color: Color, style: impl Into<StrokeStyle>) {
+    pub fn draw_line(
+        &mut self,
+        from: Point,
+        to: Point,
+        color: Color,
+        style: impl Into<StrokeStyle>,
+    ) {
         let style = style.into();
         let width = style.width;
         let rect = if (from.y - to.y).abs() < 0.001 {
@@ -122,7 +128,12 @@ impl Canvas {
     // --- Tier 2: SDF shapes (ShapeQuad) ---
 
     /// Fill a rounded rectangle using SDF rendering.
-    pub fn fill_rounded_rect(&mut self, rect: Rect, corner_radius: CornerRadius, paint: impl Into<Paint>) {
+    pub fn fill_rounded_rect(
+        &mut self,
+        rect: Rect,
+        corner_radius: CornerRadius,
+        paint: impl Into<Paint>,
+    ) {
         let (color, paint_data) = paint_to_data(&paint.into());
         let clamped = corner_radius.clamped(rect.width, rect.height);
         let idx = self.frame.shapes.len();
@@ -481,9 +492,7 @@ impl Canvas {
 
     /// Set the blend mode for subsequent drawing operations.
     pub fn set_blend_mode(&mut self, mode: BlendMode) {
-        self.frame
-            .draw_order
-            .push(DrawCommand::SetBlendMode(mode));
+        self.frame.draw_order.push(DrawCommand::SetBlendMode(mode));
     }
 
     /// Restore the previous blend mode.
@@ -827,12 +836,7 @@ mod tests {
     #[test]
     fn fill_path_produces_path_entry() {
         let mut canvas = Canvas::new();
-        let star = crate::path::Path::star(
-            crate::geometry::Point::new(50.0, 50.0),
-            30.0,
-            15.0,
-            5,
-        );
+        let star = crate::path::Path::star(crate::geometry::Point::new(50.0, 50.0), 30.0, 15.0, 5);
         canvas.fill_path(&star, Color::RED);
         let frame = canvas.into_render_frame();
         assert_eq!(frame.paths.len(), 1);
@@ -843,10 +847,7 @@ mod tests {
     #[test]
     fn stroke_path_has_stroke_width() {
         let mut canvas = Canvas::new();
-        let circle = crate::path::Path::circle(
-            crate::geometry::Point::new(50.0, 50.0),
-            25.0,
-        );
+        let circle = crate::path::Path::circle(crate::geometry::Point::new(50.0, 50.0), 25.0);
         canvas.stroke_path(&circle, Color::BLACK, 2.0);
         let frame = canvas.into_render_frame();
         assert_eq!(frame.paths.len(), 1);
@@ -889,11 +890,9 @@ mod tests {
     fn draw_text_layout_renders_pre_measured() {
         use crate::text_backend::MockTextBackend;
         let backend = Rc::new(RefCell::new(MockTextBackend::new()));
-        let layout = backend.borrow_mut().layout_single_line(
-            "Test",
-            &TextStyle::default(),
-            None,
-        );
+        let layout = backend
+            .borrow_mut()
+            .layout_single_line("Test", &TextStyle::default(), None);
         let mut canvas = Canvas::with_text_backend(backend);
         let ok = canvas.draw_text_layout(&layout, Point::new(10.0, 20.0), Color::BLACK);
         assert!(ok);

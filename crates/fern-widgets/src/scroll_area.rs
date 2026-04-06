@@ -7,7 +7,7 @@ use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
-use fern_core::widget::{EventContext, IntoWidgetTree, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
@@ -47,7 +47,7 @@ pub enum ScrollBarPolicy {
 /// - **Overlay** (default): thin indicator painted during scrolling
 /// - **Permanent**: ScrollBar is a layout child alongside the viewport
 pub struct ScrollArea {
-    content_child: Option<Box<dyn IntoWidgetTree>>,
+    content_child: Option<Box<dyn Widget>>,
     content_child_id: Option<WidgetId>,
     scroll_bar_style: ScrollBarStyle,
     /// Per-axis scroll bar visibility policy.
@@ -106,7 +106,7 @@ impl std::fmt::Debug for ScrollArea {
 }
 
 impl ScrollArea {
-    pub fn new(child: impl IntoWidgetTree + 'static) -> Self {
+    pub fn new(child: impl Widget + 'static + 'static) -> Self {
         Self {
             content_child: Some(Box::new(child)),
             content_child_id: None,
@@ -235,7 +235,6 @@ impl ScrollArea {
             self.scroll_x.set(clamped_x);
         }
     }
-
 }
 
 impl Widget for ScrollArea {
@@ -290,8 +289,10 @@ impl Widget for ScrollArea {
         // Register bindings: scroll position changes trigger relayout (content offset moves)
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.scroll_y.bind_to(self_id, registry, BindingLevel::Relayout);
-        self.scroll_x.bind_to(self_id, registry, BindingLevel::Relayout);
+        self.scroll_y
+            .bind_to(self_id, registry, BindingLevel::Relayout);
+        self.scroll_x
+            .bind_to(self_id, registry, BindingLevel::Relayout);
 
         self.child_ids = ids.clone();
         ids
@@ -361,16 +362,18 @@ impl Widget for ScrollArea {
         let needs_v_scroll = content_size.height > bounds.height + 0.5;
 
         // Determine effective scrollbar visibility
-        let show_v = has_v && match self.vertical_policy {
-            ScrollBarPolicy::AlwaysOn => true,
-            ScrollBarPolicy::AlwaysOff => false,
-            ScrollBarPolicy::AsNeeded => needs_v_scroll,
-        };
-        let show_h = has_h && match self.horizontal_policy {
-            ScrollBarPolicy::AlwaysOn => true,
-            ScrollBarPolicy::AlwaysOff => false,
-            ScrollBarPolicy::AsNeeded => needs_h_scroll,
-        };
+        let show_v = has_v
+            && match self.vertical_policy {
+                ScrollBarPolicy::AlwaysOn => true,
+                ScrollBarPolicy::AlwaysOff => false,
+                ScrollBarPolicy::AsNeeded => needs_v_scroll,
+            };
+        let show_h = has_h
+            && match self.horizontal_policy {
+                ScrollBarPolicy::AlwaysOn => true,
+                ScrollBarPolicy::AlwaysOff => false,
+                ScrollBarPolicy::AsNeeded => needs_h_scroll,
+            };
 
         // In Permanent mode, reserve space for horizontal scrollbar if shown
         let h_reserved = match self.scroll_bar_style {
@@ -391,7 +394,8 @@ impl Widget for ScrollArea {
 
         // --- Step 2: Update shared reactive state ---
         self.content_size.set(placed_content_size);
-        self.viewport_size.set(Size::new(viewport_width, viewport_height));
+        self.viewport_size
+            .set(Size::new(viewport_width, viewport_height));
 
         let max_y = (placed_content_size.height - viewport_height).max(0.0);
         let max_x = (placed_content_size.width - viewport_width).max(0.0);
@@ -416,10 +420,7 @@ impl Widget for ScrollArea {
         let scroll_x = self.scroll_x.get();
 
         // --- Step 3: Place content ---
-        children[0].origin = Point::new(
-            bounds.x - scroll_x,
-            bounds.y - scroll_y,
-        );
+        children[0].origin = Point::new(bounds.x - scroll_x, bounds.y - scroll_y);
         children[0].size = placed_content_size;
 
         // --- Step 4: Place vertical scrollbar ---
@@ -430,7 +431,9 @@ impl Widget for ScrollArea {
                 } else {
                     bounds.right() - sb_thickness
                 };
-                let sb_h = if h_reserved > 0.0 || (self.scroll_bar_style == ScrollBarStyle::Overlay && show_h) {
+                let sb_h = if h_reserved > 0.0
+                    || (self.scroll_bar_style == ScrollBarStyle::Overlay && show_h)
+                {
                     bounds.height - sb_thickness
                 } else {
                     bounds.height
@@ -453,7 +456,9 @@ impl Widget for ScrollArea {
                 } else {
                     bounds.x
                 };
-                let sb_w = if v_reserved > 0.0 || (self.scroll_bar_style == ScrollBarStyle::Overlay && show_v) {
+                let sb_w = if v_reserved > 0.0
+                    || (self.scroll_bar_style == ScrollBarStyle::Overlay && show_v)
+                {
                     bounds.width - sb_thickness
                 } else {
                     bounds.width
@@ -485,10 +490,8 @@ impl Widget for ScrollArea {
                         // notches accumulate correctly instead of losing distance.
                         let base_y = self.scroll_y.animation_target().unwrap_or(cur_y);
                         let base_x = self.scroll_x.animation_target().unwrap_or(cur_x);
-                        let target_y = (base_y + y * self.line_height)
-                            .clamp(0.0, max_y);
-                        let target_x = (base_x + x * self.line_height)
-                            .clamp(0.0, max_x);
+                        let target_y = (base_y + y * self.line_height).clamp(0.0, max_y);
+                        let target_x = (base_x + x * self.line_height).clamp(0.0, max_x);
                         if self.smooth_scrolling {
                             self.scroll_y.animate_to(
                                 target_y,
@@ -514,7 +517,10 @@ impl Widget for ScrollArea {
                 }
                 EventResponse::Handled
             }
-            WidgetEvent::ScrollIntoView { target_bounds, margin } => {
+            WidgetEvent::ScrollIntoView {
+                target_bounds,
+                margin,
+            } => {
                 let vp = self.viewport_size.get();
                 let scroll_y = self.scroll_y.get();
                 let scroll_x = self.scroll_x.get();
@@ -657,7 +663,6 @@ mod tests {
 
         let scroll = tree.add(ScrollArea::from_id(content));
 
-
         // Viewport is 200x80 — only first 80px visible
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -759,10 +764,8 @@ mod tests {
         let mut tree = WidgetTree::new();
 
         let leaf = TallLeaf::new(180.0, 500.0);
-        let scroll = tree.add_widget(
-            ScrollArea::new(leaf)
-                .scroll_bar_style(ScrollBarStyle::Permanent),
-        );
+        let scroll =
+            tree.add_widget(ScrollArea::new(leaf).scroll_bar_style(ScrollBarStyle::Permanent));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -777,7 +780,11 @@ mod tests {
         let children = tree.children(scroll);
         assert!(!children.is_empty());
         let content_y = tree.bounds(children[0]).y;
-        assert!(content_y < 0.0, "Expected negative y after scroll, got {}", content_y);
+        assert!(
+            content_y < 0.0,
+            "Expected negative y after scroll, got {}",
+            content_y
+        );
     }
 
     #[test]
@@ -794,8 +801,10 @@ mod tests {
 
         // Viewport uses full width (no space reserved for scrollbar)
         let content_bounds = tree.bounds(children[0]);
-        assert!((content_bounds.width - 200.0).abs() < 0.01,
-            "Overlay mode should not shrink viewport");
+        assert!(
+            (content_bounds.width - 200.0).abs() < 0.01,
+            "Overlay mode should not shrink viewport"
+        );
     }
 
     #[test]
@@ -818,7 +827,10 @@ mod tests {
     }
     impl WideLeaf {
         fn new(w: f32, h: f32) -> Self {
-            Self { width: w, height: h }
+            Self {
+                width: w,
+                height: h,
+            }
         }
     }
     impl Widget for WideLeaf {
@@ -840,21 +852,37 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let children = tree.children(scroll);
-        assert_eq!(children.len(), 3, "Permanent mode should have content + v_sb + h_sb");
+        assert_eq!(
+            children.len(),
+            3,
+            "Permanent mode should have content + v_sb + h_sb"
+        );
 
         // Vertical scrollbar: right edge, height = bounds.height - h_sb_thickness
         let v_sb = tree.bounds(children[1]);
         assert!((v_sb.width - 12.0).abs() < 0.01, "v_sb width should be 12");
         assert!((v_sb.x - (200.0 - 12.0)).abs() < 0.01, "v_sb at right edge");
-        assert!((v_sb.height - (100.0 - 12.0)).abs() < 0.01,
-            "v_sb height reduced by h_sb thickness, got {}", v_sb.height);
+        assert!(
+            (v_sb.height - (100.0 - 12.0)).abs() < 0.01,
+            "v_sb height reduced by h_sb thickness, got {}",
+            v_sb.height
+        );
 
         // Horizontal scrollbar: bottom edge, width = viewport_width
         let h_sb = tree.bounds(children[2]);
-        assert!((h_sb.height - 12.0).abs() < 0.01, "h_sb height should be 12");
-        assert!((h_sb.y - (100.0 - 12.0)).abs() < 0.01, "h_sb at bottom edge");
-        assert!((h_sb.width - (200.0 - 12.0)).abs() < 0.01,
-            "h_sb width = bounds.width - v_sb, got {}", h_sb.width);
+        assert!(
+            (h_sb.height - 12.0).abs() < 0.01,
+            "h_sb height should be 12"
+        );
+        assert!(
+            (h_sb.y - (100.0 - 12.0)).abs() < 0.01,
+            "h_sb at bottom edge"
+        );
+        assert!(
+            (h_sb.width - (200.0 - 12.0)).abs() < 0.01,
+            "h_sb width = bounds.width - v_sb, got {}",
+            h_sb.width
+        );
     }
 
     #[test]
@@ -875,16 +903,18 @@ mod tests {
         // Horizontal scrollbar still exists as child but max_scroll_x == 0
         // so it paints nothing. No space reserved vertically.
         let v_sb = tree.bounds(children[1]);
-        assert!((v_sb.height - 100.0).abs() < 0.01,
-            "v_sb should use full height when no h-scroll needed, got {}", v_sb.height);
+        assert!(
+            (v_sb.height - 100.0).abs() < 0.01,
+            "v_sb should use full height when no h-scroll needed, got {}",
+            v_sb.height
+        );
     }
 
     #[test]
     fn overlay_scrollbar_does_not_reduce_viewport() {
         let mut tree = WidgetTree::new();
         let scroll = tree.add_widget(
-            ScrollArea::new(WideLeaf::new(400.0, 500.0))
-                .scroll_bar_style(ScrollBarStyle::Overlay),
+            ScrollArea::new(WideLeaf::new(400.0, 500.0)).scroll_bar_style(ScrollBarStyle::Overlay),
         );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -894,18 +924,33 @@ mod tests {
 
         // Content should use full width (overlay doesn't shrink viewport)
         let content = tree.bounds(children[0]);
-        assert!(content.width >= 400.0,
-            "Content should report its full intrinsic width, got {}", content.width);
+        assert!(
+            content.width >= 400.0,
+            "Content should report its full intrinsic width, got {}",
+            content.width
+        );
 
         // Vertical scrollbar overlays the right edge
         let v_sb = tree.bounds(children[1]);
-        assert!((v_sb.width - 6.0).abs() < 0.01, "Overlay v_sb thickness should be 6");
-        assert!((v_sb.x - (200.0 - 6.0)).abs() < 0.01, "Overlay v_sb at right edge");
+        assert!(
+            (v_sb.width - 6.0).abs() < 0.01,
+            "Overlay v_sb thickness should be 6"
+        );
+        assert!(
+            (v_sb.x - (200.0 - 6.0)).abs() < 0.01,
+            "Overlay v_sb at right edge"
+        );
 
         // Horizontal scrollbar overlays the bottom edge
         let h_sb = tree.bounds(children[2]);
-        assert!((h_sb.height - 6.0).abs() < 0.01, "Overlay h_sb thickness should be 6");
-        assert!((h_sb.y - (100.0 - 6.0)).abs() < 0.01, "Overlay h_sb at bottom edge");
+        assert!(
+            (h_sb.height - 6.0).abs() < 0.01,
+            "Overlay h_sb thickness should be 6"
+        );
+        assert!(
+            (h_sb.y - (100.0 - 6.0)).abs() < 0.01,
+            "Overlay h_sb at bottom edge"
+        );
     }
 
     #[test]
@@ -930,7 +975,11 @@ mod tests {
         // Content should have shifted left
         let children = tree.children(scroll);
         let content_x = tree.bounds(children[0]).x;
-        assert!(content_x < 0.0, "Expected negative x after h-scroll, got {}", content_x);
+        assert!(
+            content_x < 0.0,
+            "Expected negative x after h-scroll, got {}",
+            content_x
+        );
     }
 
     // --- ScrollBarPolicy tests ---
@@ -950,13 +999,24 @@ mod tests {
         let children = tree.children(scroll);
         // v_scrollbar should be collapsed to zero
         let v_sb = tree.bounds(children[1]);
-        assert!((v_sb.width).abs() < 0.01, "v_sb should be zero-width, got {}", v_sb.width);
-        assert!((v_sb.height).abs() < 0.01, "v_sb should be zero-height, got {}", v_sb.height);
+        assert!(
+            (v_sb.width).abs() < 0.01,
+            "v_sb should be zero-width, got {}",
+            v_sb.width
+        );
+        assert!(
+            (v_sb.height).abs() < 0.01,
+            "v_sb should be zero-height, got {}",
+            v_sb.height
+        );
 
         // Content should use full width (no space reserved)
         let content = tree.bounds(children[0]);
-        assert!((content.width - 200.0).abs() < 0.01,
-            "Content should use full width when v_sb is off, got {}", content.width);
+        assert!(
+            (content.width - 200.0).abs() < 0.01,
+            "Content should use full width when v_sb is off, got {}",
+            content.width
+        );
     }
 
     #[test]
@@ -974,12 +1034,19 @@ mod tests {
         let children = tree.children(scroll);
         // h_scrollbar should be collapsed to zero
         let h_sb = tree.bounds(children[2]);
-        assert!((h_sb.width).abs() < 0.01, "h_sb should be zero-width, got {}", h_sb.width);
+        assert!(
+            (h_sb.width).abs() < 0.01,
+            "h_sb should be zero-width, got {}",
+            h_sb.width
+        );
 
         // v_scrollbar should use full height (no h_sb reservation)
         let v_sb = tree.bounds(children[1]);
-        assert!((v_sb.height - 100.0).abs() < 0.01,
-            "v_sb should use full height when h_sb off, got {}", v_sb.height);
+        assert!(
+            (v_sb.height - 100.0).abs() < 0.01,
+            "v_sb should use full height when h_sb off, got {}",
+            v_sb.height
+        );
     }
 
     #[test]
@@ -998,8 +1065,11 @@ mod tests {
         let children = tree.children(scroll);
         let v_sb = tree.bounds(children[1]);
         // Scrollbar should be visible despite content fitting
-        assert!((v_sb.width - 12.0).abs() < 0.01,
-            "v_sb should be visible (12px) even when content fits, got {}", v_sb.width);
+        assert!(
+            (v_sb.width - 12.0).abs() < 0.01,
+            "v_sb should be visible (12px) even when content fits, got {}",
+            v_sb.width
+        );
     }
 
     // --- widget_resizable tests ---
@@ -1008,39 +1078,47 @@ mod tests {
     fn widget_resizable_stretches_small_content() {
         let mut tree = WidgetTree::new();
         // Content is 100x50, viewport is 200x100
-        let scroll = tree.add_widget(
-            ScrollArea::new(TallLeaf::new(100.0, 50.0))
-                .widget_resizable(true),
-        );
+        let scroll =
+            tree.add_widget(ScrollArea::new(TallLeaf::new(100.0, 50.0)).widget_resizable(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let children = tree.children(scroll);
         let content = tree.bounds(children[0]);
         // Content should be stretched to fill viewport
-        assert!(content.width >= 200.0 - 0.01,
-            "Resizable content width should fill viewport, got {}", content.width);
-        assert!(content.height >= 100.0 - 0.01,
-            "Resizable content height should fill viewport, got {}", content.height);
+        assert!(
+            content.width >= 200.0 - 0.01,
+            "Resizable content width should fill viewport, got {}",
+            content.width
+        );
+        assert!(
+            content.height >= 100.0 - 0.01,
+            "Resizable content height should fill viewport, got {}",
+            content.height
+        );
     }
 
     #[test]
     fn widget_resizable_does_not_shrink_large_content() {
         let mut tree = WidgetTree::new();
         // Content is larger than viewport
-        let scroll = tree.add_widget(
-            ScrollArea::new(WideLeaf::new(400.0, 500.0))
-                .widget_resizable(true),
-        );
+        let scroll =
+            tree.add_widget(ScrollArea::new(WideLeaf::new(400.0, 500.0)).widget_resizable(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let children = tree.children(scroll);
         let content = tree.bounds(children[0]);
-        assert!(content.width >= 400.0 - 0.01,
-            "Large content should not be shrunk, got {}", content.width);
-        assert!(content.height >= 500.0 - 0.01,
-            "Large content should not be shrunk, got {}", content.height);
+        assert!(
+            content.width >= 400.0 - 0.01,
+            "Large content should not be shrunk, got {}",
+            content.width
+        );
+        assert!(
+            content.height >= 500.0 - 0.01,
+            "Large content should not be shrunk, got {}",
+            content.height
+        );
     }
 
     // --- smooth scrolling tests ---
@@ -1048,10 +1126,8 @@ mod tests {
     #[test]
     fn smooth_scrolling_line_events_use_animation() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
-            ScrollArea::new(TallLeaf::new(200.0, 1000.0))
-                .smooth_scrolling(true),
-        );
+        let scroll =
+            tree.add_widget(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1074,17 +1150,23 @@ mod tests {
         let children = tree.children(scroll);
         let content_y = tree.bounds(children[0]).y;
         // Should have scrolled partially (target = 5 * 20 = 100px)
-        assert!(content_y < 0.0, "Expected partial scroll, got y={}", content_y);
-        assert!(content_y > -100.0, "Should not have reached target yet, got y={}", content_y);
+        assert!(
+            content_y < 0.0,
+            "Expected partial scroll, got y={}",
+            content_y
+        );
+        assert!(
+            content_y > -100.0,
+            "Should not have reached target yet, got y={}",
+            content_y
+        );
     }
 
     #[test]
     fn smooth_scrolling_disabled_jumps_immediately() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
-            ScrollArea::new(TallLeaf::new(200.0, 1000.0))
-                .smooth_scrolling(false),
-        );
+        let scroll =
+            tree.add_widget(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(false));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1098,8 +1180,11 @@ mod tests {
         let children = tree.children(scroll);
         let content_y = tree.bounds(children[0]).y;
         // Should jump immediately to target (5 * 20 = 100px)
-        assert!((content_y - (-100.0)).abs() < 0.01,
-            "Should jump immediately, got y={}", content_y);
+        assert!(
+            (content_y - (-100.0)).abs() < 0.01,
+            "Should jump immediately, got y={}",
+            content_y
+        );
     }
 
     // --- preferred_size tests ---
@@ -1107,26 +1192,31 @@ mod tests {
     #[test]
     fn preferred_size_overrides_default() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
-            ScrollArea::new(TallLeaf::new(200.0, 500.0))
-                .preferred_size(500.0, 400.0),
-        );
+        let scroll = tree
+            .add_widget(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
         // With unconstrained proposal, should use preferred size
-        tree.layout(SizeProposal { width: None, height: None });
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
         let bounds = tree.bounds(scroll);
-        assert!((bounds.width - 500.0).abs() < 0.01,
-            "Should use preferred width, got {}", bounds.width);
-        assert!((bounds.height - 400.0).abs() < 0.01,
-            "Should use preferred height, got {}", bounds.height);
+        assert!(
+            (bounds.width - 500.0).abs() < 0.01,
+            "Should use preferred width, got {}",
+            bounds.width
+        );
+        assert!(
+            (bounds.height - 400.0).abs() < 0.01,
+            "Should use preferred height, got {}",
+            bounds.height
+        );
     }
 
     #[test]
     fn constrained_proposal_overrides_preferred_size() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
-            ScrollArea::new(TallLeaf::new(200.0, 500.0))
-                .preferred_size(500.0, 400.0),
-        );
+        let scroll = tree
+            .add_widget(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
         // With constrained proposal, the proposal wins
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let bounds = tree.bounds(scroll);

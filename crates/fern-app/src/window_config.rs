@@ -80,10 +80,7 @@ impl WindowConfig {
     }
 
     /// Set the root widget builder for this window.
-    pub fn root(
-        mut self,
-        builder: impl FnOnce(&mut WidgetTree) -> WidgetId + 'static,
-    ) -> Self {
+    pub fn root(mut self, builder: impl FnOnce(&mut WidgetTree) -> WidgetId + 'static) -> Self {
         self.root_builder = Some(Box::new(builder));
         self
     }

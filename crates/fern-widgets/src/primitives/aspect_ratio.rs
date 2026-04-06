@@ -3,7 +3,7 @@
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// A single-child wrapper that maintains a fixed width/height ratio.
@@ -35,7 +35,7 @@ impl AspectRatio {
         Self::new(1.0)
     }
 
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -100,7 +100,6 @@ impl Widget for AspectRatio {
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
-
 }
 
 #[cfg(test)]
@@ -121,7 +120,10 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 100.0));
         let ar = tree.add(AspectRatio::new(2.0).set_child(child)); // 2:1
-        tree.layout(SizeProposal { width: Some(200.0), height: None });
+        tree.layout(SizeProposal {
+            width: Some(200.0),
+            height: None,
+        });
 
         let b = tree.bounds(ar);
         assert!((b.width - 200.0).abs() < 0.01);
@@ -133,7 +135,10 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 100.0));
         let ar = tree.add(AspectRatio::new(2.0).set_child(child)); // 2:1
-        tree.layout(SizeProposal { width: None, height: Some(100.0) });
+        tree.layout(SizeProposal {
+            width: None,
+            height: Some(100.0),
+        });
 
         let b = tree.bounds(ar);
         // height=100, width_from_height = 100*2 = 200
@@ -148,7 +153,10 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(50.0, 50.0));
         let ar = tree.add(AspectRatio::square().set_child(child));
-        tree.layout(SizeProposal { width: None, height: Some(100.0) });
+        tree.layout(SizeProposal {
+            width: None,
+            height: Some(100.0),
+        });
 
         let b = tree.bounds(ar);
         assert!((b.width - 100.0).abs() < 0.01);
@@ -160,7 +168,13 @@ mod tests {
         let ar = AspectRatio::new(4.0 / 3.0);
         let theme = fern_tokens::Theme::light_default();
         let ctx = LayoutContext::for_testing(&theme);
-        let size = ar.size_that_fits(SizeProposal { width: Some(400.0), height: None }, &ctx);
+        let size = ar.size_that_fits(
+            SizeProposal {
+                width: Some(400.0),
+                height: None,
+            },
+            &ctx,
+        );
         assert!((size.width - 400.0).abs() < 0.01);
         assert!((size.height - 300.0).abs() < 0.01); // 400 / (4/3)
     }

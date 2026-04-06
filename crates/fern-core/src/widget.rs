@@ -12,7 +12,7 @@ pub enum PendingChild {
     /// Already in the arena — use this ID directly.
     Id(WidgetId),
     /// Not yet in the arena — insert during resolution.
-    Deferred(Box<dyn IntoWidgetTree>),
+    Deferred(Box<dyn Widget>),
 }
 
 impl std::fmt::Debug for PendingChild {
@@ -120,7 +120,10 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// arena, and again on environment change (theme switch, locale switch).
     /// Takes `&mut self` — store child IDs, signal handles, any state needed later.
     /// Returns the list of root child IDs (empty for leaf widgets).
-    fn build(&mut self, _ctx: &mut crate::build_context::BuildContext) -> Vec<crate::widget_id::WidgetId> {
+    fn build(
+        &mut self,
+        _ctx: &mut crate::build_context::BuildContext,
+    ) -> Vec<crate::widget_id::WidgetId> {
         Vec::new()
     }
 
@@ -219,11 +222,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// override this to register their bindings.
     ///
     /// **Deprecated V1:** Use `Prop<T>` which self-registers.
-    fn register_bindings(
-        &self,
-        _id: WidgetId,
-        _registry: &crate::state::BindingRegistry,
-    ) {
+    fn register_bindings(&self, _id: WidgetId, _registry: &crate::state::BindingRegistry) {
         // Default: no reactive bindings.
     }
 
@@ -277,7 +276,6 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     fn take_enabled_when(&mut self) -> Option<crate::state::Reactive<bool>> {
         None
     }
-
 }
 
 /// Trait for anything that can be added to a WidgetTree via `add_widget()`.

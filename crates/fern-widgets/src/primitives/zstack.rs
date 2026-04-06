@@ -1,8 +1,8 @@
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 
-use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::WidgetId;
+use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_tokens::Alignment;
 
 /// A layout container that stacks children on top of each other.
@@ -36,16 +36,13 @@ impl ZStack {
     }
 
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(
-        mut self,
-        iter: impl IntoIterator<Item = impl IntoWidgetTree>,
-    ) -> Self {
+    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
             self.pending.push(PendingChild::Deferred(Box::new(widget)));
         }
@@ -53,13 +50,12 @@ impl ZStack {
     }
 
     /// Conditionally add a child. No-op if None.
-    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+    pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));
         }
         self
     }
-
 }
 
 impl Default for ZStack {
@@ -133,10 +129,13 @@ impl Widget for ZStack {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let pending = std::mem::take(&mut self.pending);
         if !pending.is_empty() {
-            self.child_ids = pending.into_iter().map(|child| match child {
-                PendingChild::Id(id) => id,
-                PendingChild::Deferred(w) => ctx.add_boxed(w),
-            }).collect();
+            self.child_ids = pending
+                .into_iter()
+                .map(|child| match child {
+                    PendingChild::Id(id) => id,
+                    PendingChild::Deferred(w) => ctx.add_boxed(w),
+                })
+                .collect();
         }
         self.child_ids.clone()
     }
@@ -251,7 +250,10 @@ mod tests {
         let a = tree.add(FixedLeaf(40.0, 60.0));
         let b = tree.add(FixedLeaf(80.0, 30.0));
         let stack = tree.add(ZStack::new().add_child(a).add_child(b));
-        tree.layout(SizeProposal { width: None, height: None });
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
 
         let sb = tree.bounds(stack);
         assert!((sb.width - 80.0).abs() < 0.01);

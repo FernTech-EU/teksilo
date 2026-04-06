@@ -1,6 +1,6 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::signal::Prop;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// Layout modifier that prevents a widget from expanding beyond its natural size,
@@ -33,7 +33,7 @@ impl FixedSize {
     }
 
     /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -114,7 +114,6 @@ impl Widget for FixedSize {
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
-
 }
 
 #[cfg(test)]

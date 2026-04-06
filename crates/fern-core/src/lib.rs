@@ -23,27 +23,33 @@ pub mod widget_tree;
 pub(crate) mod test_widgets;
 
 pub use accessibility::{AccessNodeBuilder, AccessibilityInfo};
+pub use animation::AnimationScheduler;
 pub use app_command::AppCommand;
 pub use app_event::AppEvent;
-pub use idle::IdleDeadline;
-pub use overlay::{
-    DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
-};
 pub use arena::WidgetArena;
 pub use build_context::BuildContext;
 pub use environment::{Environment, LayoutDirection};
 pub use event::{EventResponse, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
+pub use focus::{FocusOrigin, FocusPolicy};
 pub use gesture::{
     DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,
     GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer,
     TapRecognizer,
 };
-pub use focus::{FocusOrigin, FocusPolicy};
+pub use idle::IdleDeadline;
+pub use overlay::{
+    DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
+};
 pub use shortcut::{Shortcut, ShortcutMap, ShortcutScope};
-pub use animation::AnimationScheduler;
 pub use signal::{ObserverHandle, Prop, Signal};
-pub use state::{AnimationRequest, BindingLevel, BindingRegistry, DerivedState, ObserverId, Reactive, ReadableState, State, StateHandle};
-pub use widget::{CursorIcon, EventContext, IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+pub use state::{
+    AnimationRequest, BindingLevel, BindingRegistry, DerivedState, ObserverId, Reactive,
+    ReadableState, State, StateHandle,
+};
+pub use widget::{
+    CursorIcon, EventContext, IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget,
+    WidgetPlacement,
+};
 pub use widget_builder::{WidgetBuilder, WidgetWithHandlers};
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;

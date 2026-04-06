@@ -94,18 +94,12 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    pub fn on_long_press(
-        mut self,
-        f: impl FnMut(Point, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_long_press(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_long_press = Some(Box::new(f));
         self
     }
 
-    pub fn on_drag(
-        mut self,
-        f: impl FnMut(GestureEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    pub fn on_drag(mut self, f: impl FnMut(GestureEvent, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_drag = Some(Box::new(f));
         self
     }
@@ -236,19 +230,11 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.paint(bounds, canvas, ctx)
     }
 
-    fn event(
-        &mut self,
-        event: &WidgetEvent,
-        ctx: &mut EventContext,
-    ) -> EventResponse {
+    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
         self.widget.event(event, ctx)
     }
 
-    fn preview_event(
-        &mut self,
-        event: &WidgetEvent,
-        ctx: &mut EventContext,
-    ) -> EventResponse {
+    fn preview_event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
         self.widget.preview_event(event, ctx)
     }
 
@@ -263,7 +249,9 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
     }
 
     fn tab_index(&self) -> Option<i32> {
-        self.handler_set.tab_index.or_else(|| self.widget.tab_index())
+        self.handler_set
+            .tab_index
+            .or_else(|| self.widget.tab_index())
     }
 
     fn children(&self) -> Vec<crate::widget_id::WidgetId> {
@@ -341,10 +329,7 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).on_tap(f)
     }
 
-    fn on_double_tap(
-        self,
-        f: impl FnMut(&mut EventContext) + 'static,
-    ) -> WidgetWithHandlers<Self> {
+    fn on_double_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_double_tap(f)
     }
 

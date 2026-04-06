@@ -17,9 +17,7 @@ use std::rc::Rc;
 
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, TextStyle};
-use fern_ui::widgets::{
-    Button, ButtonStyle, HStack, Padding, Panel, Spacer, TextWidget, VStack,
-};
+use fern_ui::widgets::{Button, ButtonStyle, HStack, Padding, Panel, Spacer, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // Application commands
@@ -43,7 +41,9 @@ struct RootContent {
 
 impl RootContent {
     fn new() -> Self {
-        Self { root_child_id: None }
+        Self {
+            root_child_id: None,
+        }
     }
 }
 
@@ -55,56 +55,103 @@ impl Widget for RootContent {
 
         let root = ctx.add(
             Padding::uniform(24.0).child(
-                VStack::new().spacing(20.0)
+                VStack::new()
+                    .spacing(20.0)
                     // Toolbar
                     .child(
                         HStack::new()
-                            .child(TextWidget::new("Text & Layout")
-                                .style(t.heading_2.clone()).color(c.on_surface))
+                            .child(
+                                TextWidget::new("Text & Layout")
+                                    .style(t.heading_2.clone())
+                                    .color(c.on_surface),
+                            )
                             .child(Spacer::new())
-                            .child(Button::new("Toggle Dark Mode")
-                                .style(ButtonStyle::Outlined)
-                                .on_click(Cmd::ToggleDarkMode))
+                            .child(
+                                Button::new("Toggle Dark Mode")
+                                    .style(ButtonStyle::Outlined)
+                                    .on_click(Cmd::ToggleDarkMode),
+                            ),
                     )
                     // Typography showcase
                     .child(
-                        VStack::new().spacing(6.0)
-                            .child(TextWidget::new("Typography Styles")
-                                .style(t.heading_3.clone()).color(c.on_surface))
-                            .child(TextWidget::new("Body text (14px) — the default reading style for content.")
-                                .style(t.body.clone()).color(c.on_surface))
-                            .child(TextWidget::new("Body small (12px) — secondary information and descriptions.")
-                                .style(t.body_small.clone()).color(c.on_surface))
-                            .child(TextWidget::new("Caption (11px) — timestamps, footnotes, and fine print.")
-                                .style(t.caption.clone()).color(c.on_surface))
-                            .child(TextWidget::new("LABEL (12px medium, +0.5 tracking) — form labels and tags.")
-                                .style(t.label.clone()).color(c.on_surface))
+                        VStack::new()
+                            .spacing(6.0)
+                            .child(
+                                TextWidget::new("Typography Styles")
+                                    .style(t.heading_3.clone())
+                                    .color(c.on_surface),
+                            )
+                            .child(
+                                TextWidget::new(
+                                    "Body text (14px) — the default reading style for content.",
+                                )
+                                .style(t.body.clone())
+                                .color(c.on_surface),
+                            )
+                            .child(
+                                TextWidget::new(
+                                    "Body small (12px) — secondary information and descriptions.",
+                                )
+                                .style(t.body_small.clone())
+                                .color(c.on_surface),
+                            )
+                            .child(
+                                TextWidget::new(
+                                    "Caption (11px) — timestamps, footnotes, and fine print.",
+                                )
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                            )
+                            .child(
+                                TextWidget::new(
+                                    "LABEL (12px medium, +0.5 tracking) — form labels and tags.",
+                                )
+                                .style(t.label.clone())
+                                .color(c.on_surface),
+                            ),
                     )
                     // Layout showcase
                     .child(
-                        VStack::new().spacing(6.0)
-                            .child(TextWidget::new("Layout Primitives")
-                                .style(t.heading_3.clone()).color(c.on_surface))
+                        VStack::new()
+                            .spacing(6.0)
                             .child(
-                                HStack::new().spacing(8.0)
-                                    .child(build_color_box(c.primary, "A"))
-                                    .child(build_color_box(c.secondary, "B"))
-                                    .child(build_color_box(c.error, "C"))
+                                TextWidget::new("Layout Primitives")
+                                    .style(t.heading_3.clone())
+                                    .color(c.on_surface),
                             )
-                            .child(TextWidget::new("HStack with spacing — three colored boxes")
-                                .style(t.caption.clone()).color(c.on_surface))
                             .child(
                                 HStack::new()
-                                    .child(TextWidget::new("Leading")
-                                        .style(t.body.clone()).color(c.on_surface))
-                                    .child(Spacer::new())
-                                    .child(TextWidget::new("Trailing")
-                                        .style(t.body.clone()).color(c.on_surface))
+                                    .spacing(8.0)
+                                    .child(build_color_box(c.primary, "A"))
+                                    .child(build_color_box(c.secondary, "B"))
+                                    .child(build_color_box(c.error, "C")),
                             )
-                            .child(TextWidget::new("Spacer pushing items to edges")
-                                .style(t.caption.clone()).color(c.on_surface))
-                    )
-            )
+                            .child(
+                                TextWidget::new("HStack with spacing — three colored boxes")
+                                    .style(t.caption.clone())
+                                    .color(c.on_surface),
+                            )
+                            .child(
+                                HStack::new()
+                                    .child(
+                                        TextWidget::new("Leading")
+                                            .style(t.body.clone())
+                                            .color(c.on_surface),
+                                    )
+                                    .child(Spacer::new())
+                                    .child(
+                                        TextWidget::new("Trailing")
+                                            .style(t.body.clone())
+                                            .color(c.on_surface),
+                                    ),
+                            )
+                            .child(
+                                TextWidget::new("Spacer pushing items to edges")
+                                    .style(t.caption.clone())
+                                    .color(c.on_surface),
+                            ),
+                    ),
+            ),
         );
         self.root_child_id = Some(root);
         vec![root]
@@ -112,7 +159,9 @@ impl Widget for RootContent {
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         match self.root_child_id {
-            Some(id) => ctx.child_size(id, proposal).unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
         }
     }
@@ -134,7 +183,7 @@ fn build_color_box(color: Color, label: &str) -> Panel {
                     line_height: 1.4,
                     letter_spacing: 0.0,
                 })
-                .color(Color::WHITE)
+                .color(Color::WHITE),
         )
 }
 
@@ -262,7 +311,10 @@ mod tests {
         tree.press_key(Key::Tab, Modifiers::NONE);
         tree.press_key(Key::Space, Modifiers::NONE);
 
-        assert!(clicked.get(), "ToggleDarkMode command should have been emitted");
+        assert!(
+            clicked.get(),
+            "ToggleDarkMode command should have been emitted"
+        );
     }
 
     #[test]
@@ -313,7 +365,10 @@ mod tests {
         // In the windowed app, commands are drained by the event loop
         let pending = tree.drain_pending_commands();
         eprintln!("Pending commands after click: {}", pending.len());
-        assert!(!pending.is_empty(), "click should produce a pending command");
+        assert!(
+            !pending.is_empty(),
+            "click should produce a pending command"
+        );
 
         // Verify it's the right command type
         let cmd = pending[0].downcast_ref::<Cmd>();
@@ -336,7 +391,9 @@ mod tests {
         let frame_dark = tree.render();
 
         // The frames should differ (different colors)
-        assert_ne!(frame_light.shapes, frame_dark.shapes,
-            "theme switch should produce different render output");
+        assert_ne!(
+            frame_light.shapes, frame_dark.shapes,
+            "theme switch should produce different render output"
+        );
     }
 }

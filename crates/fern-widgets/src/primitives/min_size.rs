@@ -1,6 +1,6 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::signal::Prop;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// Layout modifier that enforces minimum dimensions on a child widget.
@@ -60,7 +60,7 @@ impl MinSize {
     }
 
     /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -120,7 +120,6 @@ impl Widget for MinSize {
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
-
 }
 
 #[cfg(test)]
@@ -178,7 +177,11 @@ mod tests {
         let min_w = State::new(48.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
-        let min = tree.add(MinSize::width(0.0).bind_min_width(min_w.clone()).set_child(child));
+        let min = tree.add(
+            MinSize::width(0.0)
+                .bind_min_width(min_w.clone())
+                .set_child(child),
+        );
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(min).width - 48.0).abs() < 0.01);
 

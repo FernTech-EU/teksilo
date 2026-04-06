@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
-use fern_canvas::{DecorationRect, GlyphQuad, ShapeQuad, ShadowQuad};
 use fern_canvas::render_frame::PaintData;
+use fern_canvas::{DecorationRect, GlyphQuad, ShadowQuad, ShapeQuad};
 
 /// Vertex for the textured quad pipeline (glyphs, images).
 #[repr(C)]
@@ -136,7 +136,8 @@ impl SdfVertex {
         let sh = h * scale_factor;
 
         // Encode paint type and gradient data
-        let (paint_type, gradient_geo, colors, offsets) = encode_paint_data(&shape.paint_data, w, h);
+        let (paint_type, gradient_geo, colors, offsets) =
+            encode_paint_data(&shape.paint_data, w, h);
 
         let params = [sw, sh, shape.stroke_width * scale_factor, paint_type as f32];
 
@@ -155,10 +156,26 @@ impl SdfVertex {
         };
 
         [
-            SdfVertex { position: [sx, sy], local_uv: [0.0, 0.0], ..base },
-            SdfVertex { position: [sx + sw, sy], local_uv: [1.0, 0.0], ..base },
-            SdfVertex { position: [sx + sw, sy + sh], local_uv: [1.0, 1.0], ..base },
-            SdfVertex { position: [sx, sy + sh], local_uv: [0.0, 1.0], ..base },
+            SdfVertex {
+                position: [sx, sy],
+                local_uv: [0.0, 0.0],
+                ..base
+            },
+            SdfVertex {
+                position: [sx + sw, sy],
+                local_uv: [1.0, 0.0],
+                ..base
+            },
+            SdfVertex {
+                position: [sx + sw, sy + sh],
+                local_uv: [1.0, 1.0],
+                ..base
+            },
+            SdfVertex {
+                position: [sx, sy + sh],
+                local_uv: [0.0, 1.0],
+                ..base
+            },
         ]
     }
 }
@@ -186,7 +203,11 @@ fn encode_paint_data(
             let (colors, offsets) = encode_stops(stops);
             (1, geo, colors, offsets)
         }
-        PaintData::RadialGradient { center, radius, stops } => {
+        PaintData::RadialGradient {
+            center,
+            radius,
+            stops,
+        } => {
             // Normalize center and radius to UV space, accounting for aspect ratio.
             // The shader computes distance in UV space where both axes span 0..1,
             // so we normalize the radius relative to width (x-axis) and let the
@@ -201,13 +222,12 @@ fn encode_paint_data(
             let (colors, offsets) = encode_stops(stops);
             (2, geo, colors, offsets)
         }
-        PaintData::ConicGradient { center, start_angle, stops } => {
-            let geo = [
-                center[0] / width,
-                center[1] / height,
-                *start_angle,
-                0.0,
-            ];
+        PaintData::ConicGradient {
+            center,
+            start_angle,
+            stops,
+        } => {
+            let geo = [center[0] / width, center[1] / height, *start_angle, 0.0];
             let (colors, offsets) = encode_stops(stops);
             (3, geo, colors, offsets)
         }
@@ -421,8 +441,14 @@ mod tests {
                 start: [0.0, 0.0],
                 end: [100.0, 0.0],
                 stops: vec![
-                    GradientStop { offset: 0.0, color: Color::RED },
-                    GradientStop { offset: 1.0, color: Color::BLUE },
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::RED,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLUE,
+                    },
                 ],
             },
         };

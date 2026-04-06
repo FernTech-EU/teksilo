@@ -82,13 +82,32 @@ impl std::fmt::Debug for RectWidget {
 }
 
 impl Widget for RectWidget {
-    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<fern_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.background.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
-        self.border_color.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
-        self.border_width.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
-        self.corner_radius.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.background.register_if_bound(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
+        self.border_color.register_if_bound(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
+        self.border_width.register_if_bound(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
+        self.corner_radius.register_if_bound(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -112,7 +131,6 @@ impl Widget for RectWidget {
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
-
 }
 
 #[cfg(test)]
@@ -124,7 +142,11 @@ mod tests {
     #[test]
     fn static_background_paints_correctly() {
         let mut tree = WidgetTree::new();
-        tree.add(RectWidget::new().background(Color::RED).corner_radius(CornerRadius::uniform(4.0)));
+        tree.add(
+            RectWidget::new()
+                .background(Color::RED)
+                .corner_radius(CornerRadius::uniform(4.0)),
+        );
         tree.layout(SizeProposal::exact(100.0, 40.0));
         let frame = tree.render();
         assert_eq!(frame.shapes.len(), 1);
@@ -140,7 +162,11 @@ mod tests {
                 .bind_background(color.clone())
                 .corner_radius(CornerRadius::uniform(4.0)),
         );
-        color.bind_to(w, tree.binding_registry(), fern_core::state::BindingLevel::RepaintOnly);
+        color.bind_to(
+            w,
+            tree.binding_registry(),
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
         tree.layout(SizeProposal::exact(100.0, 40.0));
         let frame = tree.render();
         assert_eq!(frame.shapes[0].color, Color::BLUE.to_array());
@@ -155,7 +181,11 @@ mod tests {
                 .bind_background(color.clone())
                 .corner_radius(CornerRadius::uniform(4.0)),
         );
-        color.bind_to(w, tree.binding_registry(), fern_core::state::BindingLevel::RepaintOnly);
+        color.bind_to(
+            w,
+            tree.binding_registry(),
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
 
         tree.layout(SizeProposal::exact(100.0, 40.0));
         let frame = tree.render();

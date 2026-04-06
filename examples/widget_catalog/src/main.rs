@@ -32,9 +32,9 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, Divider, Expand, Grid,
-    HStack, IconWidget, Link, MaxSize, Padding, Panel, ProgressBar, RadioButton,
-    ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle,
-    Toolbar, TrackSize, VStack, Wrap,
+    HStack, IconWidget, Link, MaxSize, Padding, Panel, ProgressBar, RadioButton, ScrollArea,
+    SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle, Toolbar, TrackSize, VStack,
+    Wrap,
 };
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,9 @@ struct WidgetCatalog {
 
 impl WidgetCatalog {
     fn new() -> Self {
-        Self { root_child_id: None }
+        Self {
+            root_child_id: None,
+        }
     }
 }
 
@@ -94,19 +96,31 @@ impl Widget for WidgetCatalog {
                 .child(
                     VStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("H").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("H")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(Divider::new()),
                 )
                 .child(
                     HStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("V").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("V")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(Divider::vertical().thickness(2.0).color(c.primary)),
                 )
                 .child(
                     VStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("Thick").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Thick")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(Divider::new().thickness(4.0).color(c.error)),
                 ),
         );
@@ -123,10 +137,22 @@ impl Widget for WidgetCatalog {
         let primitives_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(TextWidget::new("Primitives").style(t.heading_2.clone()).color(c.on_surface))
-                .child(TextWidget::new("Divider (horizontal, vertical, thick, colored)").style(t.caption.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Primitives")
+                        .style(t.heading_2.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    TextWidget::new("Divider (horizontal, vertical, thick, colored)")
+                        .style(t.caption.clone())
+                        .color(c.on_surface),
+                )
                 .add_child(div_row)
-                .child(TextWidget::new("IconWidget (checkmark, chevrons)").style(t.caption.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("IconWidget (checkmark, chevrons)")
+                        .style(t.caption.clone())
+                        .color(c.on_surface),
+                )
                 .add_child(icon_row),
         );
 
@@ -137,11 +163,23 @@ impl Widget for WidgetCatalog {
         let layout_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(TextWidget::new("Layout Primitives").style(t.heading_2.clone()).color(c.on_surface))
-                .child(TextWidget::new("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)").style(t.caption.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Layout Primitives")
+                        .style(t.heading_2.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    TextWidget::new("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)")
+                        .style(t.caption.clone())
+                        .color(c.on_surface),
+                )
                 .child(
                     Grid::new()
-                        .columns(vec![TrackSize::Fixed(80.0), TrackSize::Fractional(1.0), TrackSize::Fractional(2.0)])
+                        .columns(vec![
+                            TrackSize::Fixed(80.0),
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(2.0),
+                        ])
                         .rows(vec![TrackSize::Auto, TrackSize::Auto])
                         .column_gap(8.0)
                         .row_gap(8.0)
@@ -152,7 +190,11 @@ impl Widget for WidgetCatalog {
                         .child(build_color_cell(c.success, "B2"))
                         .child(build_color_cell(c.warning, "C2")),
                 )
-                .child(TextWidget::new("Wrap (flow layout, 8px spacing)").style(t.caption.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Wrap (flow layout, 8px spacing)")
+                        .style(t.caption.clone())
+                        .color(c.on_surface),
+                )
                 .child(
                     Wrap::new()
                         .spacing(8.0)
@@ -177,16 +219,32 @@ impl Widget for WidgetCatalog {
         let checkbox_group = ctx.add(
             VStack::new()
                 .spacing(4.0)
-                .child(Checkbox::new(checkbox_checked.clone()).label("Accept terms").tooltip("Click to accept the terms and conditions"))
-                .child(Checkbox::new(cb_disabled_state).label("Always on (disabled)").enabled(false))
-                .child(Checkbox::tristate(tristate.clone()).label("Select all (tristate)").tooltip("Cycles: unchecked, checked, indeterminate")),
+                .child(
+                    Checkbox::new(checkbox_checked.clone())
+                        .label("Accept terms")
+                        .tooltip("Click to accept the terms and conditions"),
+                )
+                .child(
+                    Checkbox::new(cb_disabled_state)
+                        .label("Always on (disabled)")
+                        .enabled(false),
+                )
+                .child(
+                    Checkbox::tristate(tristate.clone())
+                        .label("Select all (tristate)")
+                        .tooltip("Cycles: unchecked, checked, indeterminate"),
+                ),
         );
 
         // --- RadioButton ---
         let radio_group = ctx.add(
             VStack::new()
                 .spacing(4.0)
-                .child(RadioButton::new(0, radio_selected.clone()).label("Option A").tooltip("First option"))
+                .child(
+                    RadioButton::new(0, radio_selected.clone())
+                        .label("Option A")
+                        .tooltip("First option"),
+                )
                 .child(RadioButton::new(1, radio_selected.clone()).label("Option B"))
                 .child(RadioButton::new(2, radio_selected.clone()).label("Option C")),
         );
@@ -203,27 +261,41 @@ impl Widget for WidgetCatalog {
 
         // --- Slider ---
         let slider_disabled_state = ctx.signal(30.0_f32);
-        let slider_vert = ctx.add(
-            Slider::new(slider_v_value.clone(), 0.0, 1.0)
-                .orientation(Orientation::Vertical),
-        );
+        let slider_vert = ctx
+            .add(Slider::new(slider_v_value.clone(), 0.0, 1.0).orientation(Orientation::Vertical));
         let slider_section = ctx.add(
             HStack::new()
                 .spacing(16.0)
                 .child(
                     VStack::new()
                         .spacing(8.0)
-                        .child(TextWidget::new("Horizontal").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Horizontal")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(Slider::new(slider_value.clone(), 0.0, 100.0))
-                        .child(TextWidget::new("Stepped (25)").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Stepped (25)")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(Slider::new(slider_stepped.clone(), 0.0, 100.0).step(25.0))
-                        .child(TextWidget::new("Disabled").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Disabled")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(Slider::new(slider_disabled_state, 0.0, 100.0).enabled(false)),
                 )
                 .child(
                     VStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("Vertical").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Vertical")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(MaxSize::new(f32::MAX, 120.0).set_child(slider_vert)),
                 ),
         );
@@ -231,25 +303,41 @@ impl Widget for WidgetCatalog {
         // Layout: Checkboxes | Radios | Toggles in a grid
         let form_row = ctx.add(
             Grid::new()
-                .columns(vec![TrackSize::Fractional(1.0), TrackSize::Fractional(1.0), TrackSize::Fractional(1.0)])
+                .columns(vec![
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                ])
                 .column_gap(16.0)
                 .rows(vec![TrackSize::Auto])
                 .child(
                     VStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("Checkbox").style(t.label.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Checkbox")
+                                .style(t.label.clone())
+                                .color(c.on_surface),
+                        )
                         .add_child(checkbox_group),
                 )
                 .child(
                     VStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("RadioButton").style(t.label.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("RadioButton")
+                                .style(t.label.clone())
+                                .color(c.on_surface),
+                        )
                         .add_child(radio_group),
                 )
                 .child(
                     VStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("Toggle").style(t.label.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Toggle")
+                                .style(t.label.clone())
+                                .color(c.on_surface),
+                        )
                         .add_child(toggle_group),
                 ),
         );
@@ -257,13 +345,25 @@ impl Widget for WidgetCatalog {
         let controls_section = ctx.add(
             VStack::new()
                 .spacing(12.0)
-                .child(TextWidget::new("Form Controls").style(t.heading_2.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Form Controls")
+                        .style(t.heading_2.clone())
+                        .color(c.on_surface),
+                )
                 .add_child(form_row)
                 .child(Divider::new())
-                .child(TextWidget::new("Slider").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Slider")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
                 .add_child(slider_section)
                 .child(Divider::new())
-                .child(TextWidget::new("SegmentedControl").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("SegmentedControl")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
                 .child(SegmentedControl::new(
                     vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()],
                     segment_selected.clone(),
@@ -286,17 +386,38 @@ impl Widget for WidgetCatalog {
                 .child(
                     VStack::new()
                         .spacing(8.0)
-                        .child(TextWidget::new("Determinate (65%)").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Determinate (65%)")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(ProgressBar::new(0.65))
-                        .child(TextWidget::new("Indeterminate").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Indeterminate")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(ProgressBar::indeterminate())
-                        .child(TextWidget::new("Custom colors + thick").style(t.caption.clone()).color(c.on_surface))
-                        .child(ProgressBar::new(0.4).thickness(8.0).fill_color(c.success).track_color(c.surface_tertiary)),
+                        .child(
+                            TextWidget::new("Custom colors + thick")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
+                        .child(
+                            ProgressBar::new(0.4)
+                                .thickness(8.0)
+                                .fill_color(c.success)
+                                .track_color(c.surface_tertiary),
+                        ),
                 )
                 .child(
                     VStack::new()
                         .spacing(4.0)
-                        .child(TextWidget::new("Vertical").style(t.caption.clone()).color(c.on_surface))
+                        .child(
+                            TextWidget::new("Vertical")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        )
                         .child(MaxSize::new(f32::MAX, 80.0).set_child(pb_vert)),
                 ),
         );
@@ -304,11 +425,23 @@ impl Widget for WidgetCatalog {
         let display_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(TextWidget::new("Display Widgets").style(t.heading_2.clone()).color(c.on_surface))
-                .child(TextWidget::new("ProgressBar").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Display Widgets")
+                        .style(t.heading_2.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    TextWidget::new("ProgressBar")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
                 .add_child(progress_section)
                 .child(Divider::new())
-                .child(TextWidget::new("Badge").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Badge")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
                 .child(
                     HStack::new()
                         .spacing(8.0)
@@ -326,28 +459,60 @@ impl Widget for WidgetCatalog {
         // --- Accordion (needs pre-registered content children) ---
         let acc_content1 = ctx.add(
             TextWidget::new("This content is revealed with an animated expand.")
-                .style(t.body.clone()).color(c.on_surface),
+                .style(t.body.clone())
+                .color(c.on_surface),
         );
         let acc_content2 = ctx.add(
             TextWidget::new("This section starts expanded and can be collapsed.")
-                .style(t.body.clone()).color(c.on_surface),
+                .style(t.body.clone())
+                .color(c.on_surface),
         );
 
         let containers_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(TextWidget::new("Containers").style(t.heading_2.clone()).color(c.on_surface))
-                .child(TextWidget::new("Card").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Containers")
+                        .style(t.heading_2.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    TextWidget::new("Card")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
                 .child(
                     Card::new()
-                        .header(TextWidget::new("Card Header").style(t.label.clone()).color(c.on_surface))
-                        .content(TextWidget::new("Card content with shadow and themed background.").style(t.body.clone()).color(c.on_surface))
-                        .footer(TextWidget::new("Footer text").style(t.caption.clone()).color(c.on_surface)),
+                        .header(
+                            TextWidget::new("Card Header")
+                                .style(t.label.clone())
+                                .color(c.on_surface),
+                        )
+                        .content(
+                            TextWidget::new("Card content with shadow and themed background.")
+                                .style(t.body.clone())
+                                .color(c.on_surface),
+                        )
+                        .footer(
+                            TextWidget::new("Footer text")
+                                .style(t.caption.clone())
+                                .color(c.on_surface),
+                        ),
                 )
                 .child(Divider::new())
-                .child(TextWidget::new("Accordion").style(t.label.clone()).color(c.on_surface))
-                .child(Accordion::new("Click to expand", accordion_expanded.clone()).set_content(acc_content1))
-                .child(Accordion::new("Already expanded", accordion2_expanded.clone()).set_content(acc_content2)),
+                .child(
+                    TextWidget::new("Accordion")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    Accordion::new("Click to expand", accordion_expanded.clone())
+                        .set_content(acc_content1),
+                )
+                .child(
+                    Accordion::new("Already expanded", accordion2_expanded.clone())
+                        .set_content(acc_content2),
+                ),
         );
 
         // =====================================================================
@@ -357,13 +522,28 @@ impl Widget for WidgetCatalog {
         let nav_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(TextWidget::new("Navigation").style(t.heading_2.clone()).color(c.on_surface))
-                .child(TextWidget::new("Link").style(t.label.clone()).color(c.on_surface))
+                .child(
+                    TextWidget::new("Navigation")
+                        .style(t.heading_2.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    TextWidget::new("Link")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
                 .child(
                     HStack::new()
                         .spacing(16.0)
-                        .child(Link::new("Click me").on_click(Cmd::LinkClicked).tooltip("Fires the LinkClicked command"))
-                        .child(Link::new("FernUI Documentation").url("https://github.com/jacquetc/fern-ui")),
+                        .child(
+                            Link::new("Click me")
+                                .on_click(Cmd::LinkClicked)
+                                .tooltip("Fires the LinkClicked command"),
+                        )
+                        .child(
+                            Link::new("FernUI Documentation")
+                                .url("https://github.com/jacquetc/fern-ui"),
+                        ),
                 ),
         );
 
@@ -375,9 +555,17 @@ impl Widget for WidgetCatalog {
         let toolbar = ctx.add(
             Toolbar::new().child(
                 HStack::new()
-                    .child(TextWidget::new("Widget Catalog").style(t.heading_1.clone()).color(c.on_surface))
+                    .child(
+                        TextWidget::new("Widget Catalog")
+                            .style(t.heading_1.clone())
+                            .color(c.on_surface),
+                    )
                     .child(Spacer::new())
-                    .child(Button::new("Toggle Dark Mode").style(ButtonStyle::Outlined).on_click(Cmd::ToggleDarkMode)),
+                    .child(
+                        Button::new("Toggle Dark Mode")
+                            .style(ButtonStyle::Outlined)
+                            .on_click(Cmd::ToggleDarkMode),
+                    ),
             ),
         );
 
@@ -408,7 +596,8 @@ impl Widget for WidgetCatalog {
                 .child(
                     StatusBar::new().child(
                         TextWidget::new("Milestone 3 -- All widgets demonstrated")
-                            .style(t.caption.clone()).color(c.on_surface),
+                            .style(t.caption.clone())
+                            .color(c.on_surface),
                     ),
                 ),
         );
@@ -418,7 +607,9 @@ impl Widget for WidgetCatalog {
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         match self.root_child_id {
-            Some(id) => ctx.child_size(id, proposal).unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
         }
     }
@@ -482,11 +673,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use fern_render::test_support;
     use fern_ui::core::WidgetTree;
     use fern_ui::prelude::*;
     use fern_ui::text::SharedTypesetter;
     use fern_ui::widgets::*;
-    use fern_render::test_support;
 
     use super::WidgetCatalog;
 
@@ -559,8 +750,10 @@ mod tests {
         let frame2 = tree.render();
         let cmds2 = frame2.draw_order.len();
 
-        assert_eq!(cmds1, cmds2,
-            "second render must produce same draw commands (got {cmds1} vs {cmds2})");
+        assert_eq!(
+            cmds1, cmds2,
+            "second render must produce same draw commands (got {cmds1} vs {cmds2})"
+        );
     }
 
     /// Regression test: after set_theme, render must still contain draw commands.
@@ -578,9 +771,11 @@ mod tests {
         let cmds_after = frame2.draw_order.len();
 
         // After theme switch we expect roughly the same number of commands
-        assert!(cmds_after > cmds_before / 2,
+        assert!(
+            cmds_after > cmds_before / 2,
             "draw commands after theme switch ({cmds_after}) should be \
-             close to before ({cmds_before})");
+             close to before ({cmds_before})"
+        );
     }
 
     /// Verify the ScrollArea fills the space between toolbar and status bar.
@@ -593,30 +788,47 @@ mod tests {
         // root is WidgetCatalog → VStack → [Toolbar, Expand, StatusBar]
         let vstack_children = {
             let adapter_children = tree.children(root);
-            assert_eq!(adapter_children.len(), 1, "composite adapter has one child (VStack)");
+            assert_eq!(
+                adapter_children.len(),
+                1,
+                "composite adapter has one child (VStack)"
+            );
             tree.children(adapter_children[0])
         };
-        assert_eq!(vstack_children.len(), 3, "VStack must have toolbar, expand, statusbar");
+        assert_eq!(
+            vstack_children.len(),
+            3,
+            "VStack must have toolbar, expand, statusbar"
+        );
 
         let toolbar_bounds = tree.bounds(vstack_children[0]);
         let expand_bounds = tree.bounds(vstack_children[1]);
         let status_bounds = tree.bounds(vstack_children[2]);
 
         // Expand (containing ScrollArea) should fill remaining space
-        assert!(expand_bounds.height > 400.0,
+        assert!(
+            expand_bounds.height > 400.0,
             "Expand wrapping ScrollArea should fill >400px, got {}",
-            expand_bounds.height);
+            expand_bounds.height
+        );
 
         // StatusBar should be at the bottom
-        assert!((status_bounds.y + status_bounds.height - 700.0).abs() < 1.0,
+        assert!(
+            (status_bounds.y + status_bounds.height - 700.0).abs() < 1.0,
             "StatusBar should reach bottom of window: y={}, h={}",
-            status_bounds.y, status_bounds.height);
+            status_bounds.y,
+            status_bounds.height
+        );
 
         // No overlap
-        assert!(expand_bounds.y >= toolbar_bounds.y + toolbar_bounds.height - 0.1,
-            "Expand should start below toolbar");
-        assert!(status_bounds.y >= expand_bounds.y + expand_bounds.height - 0.1,
-            "StatusBar should start below Expand");
+        assert!(
+            expand_bounds.y >= toolbar_bounds.y + toolbar_bounds.height - 0.1,
+            "Expand should start below toolbar"
+        );
+        assert!(
+            status_bounds.y >= expand_bounds.y + expand_bounds.height - 0.1,
+            "StatusBar should start below Expand"
+        );
     }
 
     #[test]
@@ -664,7 +876,12 @@ mod tests {
             (best, darkest)
         }
 
-        fn atlas_max_alpha(atlas: &[u8], atlas_width: u32, atlas_height: u32, rect: [f32; 4]) -> u8 {
+        fn atlas_max_alpha(
+            atlas: &[u8],
+            atlas_width: u32,
+            atlas_height: u32,
+            rect: [f32; 4],
+        ) -> u8 {
             let x0 = rect[0].floor().max(0.0) as u32;
             let y0 = rect[1].floor().max(0.0) as u32;
             let x1 = (rect[0] + rect[2]).ceil().max(0.0) as u32;
@@ -680,9 +897,9 @@ mod tests {
             max_alpha
         }
 
-        let Some((mut renderer, device, queue)) =
-            pollster::block_on(test_support::create_test_renderer("widget_catalog_test_device"))
-        else {
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            test_support::create_test_renderer("widget_catalog_test_device"),
+        ) else {
             return;
         };
 
@@ -746,7 +963,9 @@ mod tests {
             let (brightest, darkest) = pixel_extrema(&pixels, 900, bounds);
             let atlas_alpha: Vec<_> = matching_glyphs
                 .iter()
-                .map(|(_, atlas_rect, _)| atlas_max_alpha(&atlas.pixels, atlas.width, atlas.height, *atlas_rect))
+                .map(|(_, atlas_rect, _)| {
+                    atlas_max_alpha(&atlas.pixels, atlas.width, atlas.height, *atlas_rect)
+                })
                 .collect();
             assert!(
                 brightest[0] > 170 && brightest[1] > 170 && brightest[2] > 170,
@@ -761,5 +980,4 @@ mod tests {
             );
         }
     }
-
 }

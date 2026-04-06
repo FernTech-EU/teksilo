@@ -8,7 +8,9 @@ use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer};
+use fern_core::gesture::{
+    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
+};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -90,9 +92,7 @@ impl Link {
 
 impl std::fmt::Debug for Link {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Link")
-            .field("text", &self.text)
-            .finish()
+        f.debug_struct("Link").field("text", &self.text).finish()
     }
 }
 
@@ -136,8 +136,7 @@ impl Widget for Link {
         let text_id = ctx.add(text);
 
         // 1px underline below the text
-        let underline = RectWidget::new()
-            .bind_background(underline_color);
+        let underline = RectWidget::new().bind_background(underline_color);
         let underline_id = ctx.add(underline);
         let underline_sized = ctx.add(
             crate::primitives::FixedSize::new()
@@ -145,7 +144,12 @@ impl Widget for Link {
                 .set_child(underline_id),
         );
 
-        let content_id = ctx.add(VStack::new().spacing(0.0).add_child(text_id).add_child(underline_sized));
+        let content_id = ctx.add(
+            VStack::new()
+                .spacing(0.0)
+                .add_child(text_id)
+                .add_child(underline_sized),
+        );
 
         // Focus ring border — visible only on keyboard focus
         let border_color = {
@@ -153,7 +157,11 @@ impl Widget for Link {
             interaction.map(move |s| resolve_focus_border(*s, &colors))
         };
         let border_width = interaction.map(move |s| {
-            if *s == InteractionState::Focused { 2.0_f32 } else { 0.0 }
+            if *s == InteractionState::Focused {
+                2.0_f32
+            } else {
+                0.0
+            }
         });
         let focus_rect = RectWidget::new()
             .bind_border_color(border_color)
@@ -217,7 +225,9 @@ impl Widget for Link {
                 EventResponse::Handled
             }
             WidgetEvent::PointerMove { position } => {
-                self.tap_recognizer.process(&RawPointerEvent::Move { position: *position });
+                self.tap_recognizer.process(&RawPointerEvent::Move {
+                    position: *position,
+                });
                 EventResponse::Ignored
             }
             WidgetEvent::PointerEnter => {
@@ -231,11 +241,17 @@ impl Widget for Link {
                 ctx.set_cursor(CursorIcon::Default);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyDown { key: Key::Space | Key::Enter, .. } => {
+            WidgetEvent::KeyDown {
+                key: Key::Space | Key::Enter,
+                ..
+            } => {
                 self.set_interaction(InteractionState::Pressed);
                 EventResponse::Handled
             }
-            WidgetEvent::KeyUp { key: Key::Space | Key::Enter, .. } => {
+            WidgetEvent::KeyUp {
+                key: Key::Space | Key::Enter,
+                ..
+            } => {
                 self.fire_action(ctx);
                 self.set_interaction(InteractionState::Focused);
                 EventResponse::Handled
@@ -328,6 +344,9 @@ mod tests {
         let link = tree.add(Link::new("Go here"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(link);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 }

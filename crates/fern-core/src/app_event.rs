@@ -14,9 +14,7 @@ pub enum AppEvent {
     Command(ErasedCommand),
 
     /// A background operation completed.
-    BackgroundComplete {
-        operation_id: String,
-    },
+    BackgroundComplete { operation_id: String },
 
     /// A background operation reports progress.
     BackgroundProgress {

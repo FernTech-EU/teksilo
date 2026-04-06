@@ -5,7 +5,7 @@
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// How a grid track (row or column) is sized.
@@ -68,19 +68,19 @@ impl Grid {
         self
     }
 
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
-    pub fn children(mut self, iter: impl IntoIterator<Item = impl IntoWidgetTree>) -> Self {
+    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
             self.pending.push(PendingChild::Deferred(Box::new(widget)));
         }
         self
     }
 
-    pub fn child_opt(mut self, widget: Option<impl IntoWidgetTree>) -> Self {
+    pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
             self.pending.push(PendingChild::Deferred(Box::new(w)));
         }
@@ -109,7 +109,11 @@ impl Grid {
                     used += px;
                 }
                 TrackSize::Auto => {
-                    let size = if i < child_sizes.len() { child_sizes[i] } else { 0.0 };
+                    let size = if i < child_sizes.len() {
+                        child_sizes[i]
+                    } else {
+                        0.0
+                    };
                     resolved[i] = size;
                     used += size;
                 }
@@ -169,7 +173,8 @@ impl Widget for Grid {
             }
         }
 
-        let col_sizes = Self::resolve_tracks(&self.columns, self.column_gap, proposal.width, &col_max);
+        let col_sizes =
+            Self::resolve_tracks(&self.columns, self.column_gap, proposal.width, &col_max);
         let row_sizes = Self::resolve_tracks(&self.rows, self.row_gap, proposal.height, &row_max);
 
         let total_col_gap = self.column_gap * (num_cols as f32 - 1.0).max(0.0);
@@ -206,8 +211,10 @@ impl Widget for Grid {
             }
         }
 
-        let col_sizes = Self::resolve_tracks(&self.columns, self.column_gap, Some(bounds.width), &col_max);
-        let row_sizes = Self::resolve_tracks(&self.rows, self.row_gap, Some(bounds.height), &row_max);
+        let col_sizes =
+            Self::resolve_tracks(&self.columns, self.column_gap, Some(bounds.width), &col_max);
+        let row_sizes =
+            Self::resolve_tracks(&self.rows, self.row_gap, Some(bounds.height), &row_max);
 
         // Compute cell origins
         let mut col_origins = Vec::with_capacity(num_cols);
@@ -255,10 +262,13 @@ impl Widget for Grid {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let pending = std::mem::take(&mut self.pending);
         if !pending.is_empty() {
-            self.child_ids = pending.into_iter().map(|child| match child {
-                PendingChild::Id(id) => id,
-                PendingChild::Deferred(w) => ctx.add_boxed(w),
-            }).collect();
+            self.child_ids = pending
+                .into_iter()
+                .map(|child| match child {
+                    PendingChild::Id(id) => id,
+                    PendingChild::Deferred(w) => ctx.add_boxed(w),
+                })
+                .collect();
         }
         self.child_ids.clone()
     }
@@ -334,7 +344,11 @@ mod tests {
         let c = tree.add(FixedLeaf(10.0, 10.0));
         let _grid = tree.add(
             Grid::new()
-                .columns(vec![TrackSize::Fixed(50.0), TrackSize::Fractional(1.0), TrackSize::Fractional(2.0)])
+                .columns(vec![
+                    TrackSize::Fixed(50.0),
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(2.0),
+                ])
                 .rows(vec![TrackSize::Fixed(40.0)])
                 .add_child(a)
                 .add_child(b)

@@ -20,7 +20,8 @@ pub struct BuildContext<'a> {
 impl<'a> BuildContext<'a> {
     /// The WidgetId of the widget being built.
     pub fn self_id(&self) -> WidgetId {
-        self.composite_id.expect("self_id() called outside of build()")
+        self.composite_id
+            .expect("self_id() called outside of build()")
     }
 
     /// Add any widget to the tree.
@@ -29,8 +30,8 @@ impl<'a> BuildContext<'a> {
     }
 
     /// Add a pre-boxed widget to the tree.
-    pub fn add_boxed(&mut self, widget: Box<dyn crate::widget::IntoWidgetTree>) -> WidgetId {
-        widget.register(self.tree)
+    pub fn add_boxed(&mut self, widget: Box<dyn crate::widget::Widget>) -> WidgetId {
+        self.tree.add_boxed(widget)
     }
 
     /// Add a Level 2 widget as a child of another widget.
@@ -67,11 +68,7 @@ impl<'a> BuildContext<'a> {
     /// Register a scoped effect tied to this build cycle.
     /// The effect fires whenever the signal changes. It is automatically
     /// cleaned up on rebuild or widget destruction.
-    pub fn effect<T: Clone + 'static>(
-        &mut self,
-        signal: &Signal<T>,
-        f: impl Fn(&T) + 'static,
-    ) {
+    pub fn effect<T: Clone + 'static>(&mut self, signal: &Signal<T>, f: impl Fn(&T) + 'static) {
         let handle = signal.observe(f);
         self.effect_handles.push(handle);
     }
@@ -91,11 +88,7 @@ impl<'a> BuildContext<'a> {
     }
 
     /// Observe a state value. (V1 API — prefer `effect()`)
-    pub fn observe<T: 'static>(
-        &mut self,
-        state: &State<T>,
-        callback: impl Fn(&T) + 'static,
-    ) {
+    pub fn observe<T: 'static>(&mut self, state: &State<T>, callback: impl Fn(&T) + 'static) {
         let observer_id = state.observe(callback);
         // Register cleanup so the observer is removed on rebuild
         if let Some(composite_id) = self.composite_id {

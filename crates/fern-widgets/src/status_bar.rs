@@ -3,11 +3,11 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
-use fern_core::widget::{IntoWidgetTree, LayoutContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
-use crate::primitives::HStack;
 use crate::Panel;
+use crate::primitives::HStack;
 
 /// A status bar for displaying information at the bottom of a window.
 pub struct StatusBar {
@@ -26,7 +26,7 @@ impl StatusBar {
     }
 
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl IntoWidgetTree) -> Self {
+    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(PendingChild::Deferred(Box::new(widget)));
         self
     }
@@ -58,10 +58,13 @@ impl Widget for StatusBar {
         // Resolve pending children
         let pending = std::mem::take(&mut self.pending);
         if !pending.is_empty() {
-            self.child_ids = pending.into_iter().map(|child| match child {
-                PendingChild::Id(id) => id,
-                PendingChild::Deferred(w) => ctx.add_boxed(w),
-            }).collect();
+            self.child_ids = pending
+                .into_iter()
+                .map(|child| match child {
+                    PendingChild::Id(id) => id,
+                    PendingChild::Deferred(w) => ctx.add_boxed(w),
+                })
+                .collect();
         }
 
         let mut row = HStack::new().spacing(spacing);

@@ -1,8 +1,8 @@
 use wgpu;
 use wgpu::util::DeviceExt;
 
-use fern_canvas::geometry::Transform2D;
 use fern_canvas::RenderFrame;
+use fern_canvas::geometry::Transform2D;
 
 use crate::image_manager::ImageManager;
 use crate::path_atlas::PathAtlas;
@@ -268,21 +268,25 @@ impl Renderer {
                     // Quad batch needs bind group
                     if !$qb.is_empty() {
                         let bg = match $qs {
-                            Some(QuadSource::PathAtlas) => $path_atlas.as_ref().map(|a: &AtlasTexture| &a.bind_group),
+                            Some(QuadSource::PathAtlas) => {
+                                $path_atlas.as_ref().map(|a: &AtlasTexture| &a.bind_group)
+                            }
                             _ => $atlas.as_ref().map(|a: &AtlasTexture| &a.bind_group),
                         };
                         if let Some(bind_group) = bg {
                             let indices = crate::vertex::generate_quad_indices($qb.len() / 4);
-                            let vb = $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: None,
-                                contents: bytemuck::cast_slice(&$qb),
-                                usage: wgpu::BufferUsages::VERTEX,
-                            });
-                            let ib = $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: None,
-                                contents: bytemuck::cast_slice(&indices),
-                                usage: wgpu::BufferUsages::INDEX,
-                            });
+                            let vb =
+                                $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: None,
+                                    contents: bytemuck::cast_slice(&$qb),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                            let ib =
+                                $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: None,
+                                    contents: bytemuck::cast_slice(&indices),
+                                    usage: wgpu::BufferUsages::INDEX,
+                                });
                             $pass.set_pipeline($qp);
                             $pass.set_bind_group(0, bind_group, &[]);
                             $pass.set_vertex_buffer(0, vb.slice(..));
@@ -299,101 +303,226 @@ impl Renderer {
             for cmd in &frame.draw_order {
                 match cmd {
                     fern_canvas::DrawCommand::Decoration(idx) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
-                        let Some(rect) = frame.decorations.get(*idx) else { continue };
+                        let Some(rect) = frame.decorations.get(*idx) else {
+                            continue;
+                        };
                         let verts = RectVertex::from_decoration(rect, scale_factor);
                         for v in &verts {
                             let tp = apply_transform_pixel(v.position, &current_transform);
                             rect_batch.push(RectVertex {
                                 position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                color: [v.color[0], v.color[1], v.color[2], v.color[3] * current_opacity],
+                                color: [
+                                    v.color[0],
+                                    v.color[1],
+                                    v.color[2],
+                                    v.color[3] * current_opacity,
+                                ],
                             });
                         }
                     }
                     fern_canvas::DrawCommand::Shape(idx) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
-                        let Some(shape) = frame.shapes.get(*idx) else { continue };
+                        let Some(shape) = frame.shapes.get(*idx) else {
+                            continue;
+                        };
                         let verts = SdfVertex::from_shape_quad(shape, scale_factor);
                         for v in &verts {
                             let tp = apply_transform_pixel(v.position, &current_transform);
                             sdf_batch.push(SdfVertex {
                                 position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                color: [v.color[0], v.color[1], v.color[2], v.color[3] * current_opacity],
+                                color: [
+                                    v.color[0],
+                                    v.color[1],
+                                    v.color[2],
+                                    v.color[3] * current_opacity,
+                                ],
                                 ..*v
                             });
                         }
                     }
                     fern_canvas::DrawCommand::Glyph(idx) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
                         if let Some(atlas) = &self.atlas_texture {
                             quad_source = Some(QuadSource::GlyphAtlas);
 
-                            let Some(glyph) = frame.glyphs.get(*idx) else { continue };
-                            let verts = QuadVertex::from_glyph_quad(glyph, scale_factor, atlas.width, atlas.height);
+                            let Some(glyph) = frame.glyphs.get(*idx) else {
+                                continue;
+                            };
+                            let verts = QuadVertex::from_glyph_quad(
+                                glyph,
+                                scale_factor,
+                                atlas.width,
+                                atlas.height,
+                            );
                             for v in &verts {
                                 let tp = apply_transform_pixel(v.position, &current_transform);
                                 quad_batch.push(QuadVertex {
                                     position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                    color: [v.color[0], v.color[1], v.color[2], v.color[3] * current_opacity],
+                                    color: [
+                                        v.color[0],
+                                        v.color[1],
+                                        v.color[2],
+                                        v.color[3] * current_opacity,
+                                    ],
                                     ..*v
                                 });
                             }
                         }
                     }
                     fern_canvas::DrawCommand::Shadow(idx) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
-                        let Some(shadow) = frame.shadows.get(*idx) else { continue };
+                        let Some(shadow) = frame.shadows.get(*idx) else {
+                            continue;
+                        };
                         let verts = ShadowVertex::from_shadow_quad(shadow, scale_factor);
                         for v in &verts {
                             let tp = apply_transform_pixel(v.position, &current_transform);
                             shadow_batch.push(ShadowVertex {
                                 position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                shadow_color: [v.shadow_color[0], v.shadow_color[1], v.shadow_color[2], v.shadow_color[3] * current_opacity],
+                                shadow_color: [
+                                    v.shadow_color[0],
+                                    v.shadow_color[1],
+                                    v.shadow_color[2],
+                                    v.shadow_color[3] * current_opacity,
+                                ],
                                 ..*v
                             });
                         }
                     }
                     fern_canvas::DrawCommand::Image(idx) => {
                         // Images use per-image bind groups — flush and draw individually
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
-                        let Some(image) = frame.images.get(*idx) else { continue };
-                        self.draw_image(&mut pass, image, scale_factor, viewport_width, viewport_height, current_opacity, &current_transform);
+                        let Some(image) = frame.images.get(*idx) else {
+                            continue;
+                        };
+                        self.draw_image(
+                            &mut pass,
+                            image,
+                            scale_factor,
+                            viewport_width,
+                            viewport_height,
+                            current_opacity,
+                            &current_transform,
+                        );
                     }
                     fern_canvas::DrawCommand::Path(idx) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
                         if let Some(Some(region)) = path_regions.get(*idx) {
                             quad_source = Some(QuadSource::PathAtlas);
 
-                            let Some(entry) = frame.paths.get(*idx) else { continue };
-                            let Some(path_atlas) = self.path_atlas_texture.as_ref() else { continue };
-                            let verts = path_quad_verts(entry, region, scale_factor, path_atlas.width, path_atlas.height, current_opacity, &current_transform);
+                            let Some(entry) = frame.paths.get(*idx) else {
+                                continue;
+                            };
+                            let Some(path_atlas) = self.path_atlas_texture.as_ref() else {
+                                continue;
+                            };
+                            let verts = path_quad_verts(
+                                entry,
+                                region,
+                                scale_factor,
+                                path_atlas.width,
+                                path_atlas.height,
+                                current_opacity,
+                                &current_transform,
+                            );
                             for v in &verts {
                                 quad_batch.push(QuadVertex {
-                                    position: pixel_to_ndc(v.position, viewport_width, viewport_height),
+                                    position: pixel_to_ndc(
+                                        v.position,
+                                        viewport_width,
+                                        viewport_height,
+                                    ),
                                     ..*v
                                 });
                             }
@@ -401,10 +530,21 @@ impl Renderer {
                     }
                     // --- State changes flush all batches ---
                     fern_canvas::DrawCommand::SetClip(rect) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
                         let x = (rect.x * scale_factor).max(0.0) as u32;
                         let y = (rect.y * scale_factor).max(0.0) as u32;
@@ -428,10 +568,21 @@ impl Renderer {
                         pass.set_scissor_rect(clipped[0], clipped[1], clipped[2], clipped[3]);
                     }
                     fern_canvas::DrawCommand::ClearClip => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
                         clip_stack.pop();
                         if let Some(&[x, y, w, h]) = clip_stack.last() {
@@ -441,19 +592,41 @@ impl Renderer {
                         }
                     }
                     fern_canvas::DrawCommand::SetOpacity(opacity) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
                         opacity_stack.push(current_opacity);
                         current_opacity *= opacity;
                     }
                     fern_canvas::DrawCommand::RestoreOpacity => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
                         current_opacity = opacity_stack.pop().unwrap_or(1.0);
                     }
@@ -466,10 +639,21 @@ impl Renderer {
                         current_blend = blend_stack.pop().unwrap_or(fern_canvas::BlendMode::Normal);
                     }
                     fern_canvas::DrawCommand::SetTransform(t) => {
-                        flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                            &self.quad_pipeline, &self.shadow_pipeline,
-                            rect_batch, sdf_batch, quad_batch, shadow_batch,
-                            self.atlas_texture, self.path_atlas_texture, quad_source);
+                        flush_all!(
+                            pass,
+                            self.device,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source
+                        );
                         quad_source = None;
                         current_transform = *t;
                     }
@@ -477,10 +661,21 @@ impl Renderer {
             }
 
             // Flush remaining batches
-            flush_all!(pass, self.device, &self.rect_pipeline, &self.sdf_pipeline,
-                &self.quad_pipeline, &self.shadow_pipeline,
-                rect_batch, sdf_batch, quad_batch, shadow_batch,
-                self.atlas_texture, self.path_atlas_texture, quad_source);
+            flush_all!(
+                pass,
+                self.device,
+                &self.rect_pipeline,
+                &self.sdf_pipeline,
+                &self.quad_pipeline,
+                &self.shadow_pipeline,
+                rect_batch,
+                sdf_batch,
+                quad_batch,
+                shadow_batch,
+                self.atlas_texture,
+                self.path_atlas_texture,
+                quad_source
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -514,10 +709,26 @@ impl Renderer {
         let color = [1.0, 1.0, 1.0, opacity];
 
         let verts = [
-            QuadVertex { position: [sx, sy], tex_coord: [0.0, 0.0], color },
-            QuadVertex { position: [sx + sw, sy], tex_coord: [1.0, 0.0], color },
-            QuadVertex { position: [sx + sw, sy + sh], tex_coord: [1.0, 1.0], color },
-            QuadVertex { position: [sx, sy + sh], tex_coord: [0.0, 1.0], color },
+            QuadVertex {
+                position: [sx, sy],
+                tex_coord: [0.0, 0.0],
+                color,
+            },
+            QuadVertex {
+                position: [sx + sw, sy],
+                tex_coord: [1.0, 0.0],
+                color,
+            },
+            QuadVertex {
+                position: [sx + sw, sy + sh],
+                tex_coord: [1.0, 1.0],
+                color,
+            },
+            QuadVertex {
+                position: [sx, sy + sh],
+                tex_coord: [0.0, 1.0],
+                color,
+            },
         ];
         let indices = [0u16, 1, 2, 0, 2, 3];
 
@@ -532,20 +743,20 @@ impl Renderer {
             })
             .collect();
 
-        let vertex_buffer =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: None,
-                    contents: bytemuck::cast_slice(&ndc_verts),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-        let index_buffer =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: None,
-                    contents: bytemuck::cast_slice(&indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&ndc_verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         pass.set_pipeline(&self.quad_pipeline);
         pass.set_bind_group(0, bind_group, &[]);
@@ -646,8 +857,15 @@ impl Renderer {
     /// Register an image for rendering by name.
     pub fn register_image(&mut self, name: &str, width: u32, height: u32, pixels: &[u8]) {
         let layout = self.quad_pipeline.get_bind_group_layout(0);
-        self.image_manager
-            .register_image(name, width, height, pixels, &self.device, &self.queue, &layout);
+        self.image_manager.register_image(
+            name,
+            width,
+            height,
+            pixels,
+            &self.device,
+            &self.queue,
+            &layout,
+        );
     }
 
     /// Remove a registered image.
@@ -696,10 +914,26 @@ fn path_quad_verts(
     let uvs = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
 
     [
-        QuadVertex { position: positions[0], tex_coord: uvs[0], color },
-        QuadVertex { position: positions[1], tex_coord: uvs[1], color },
-        QuadVertex { position: positions[2], tex_coord: uvs[2], color },
-        QuadVertex { position: positions[3], tex_coord: uvs[3], color },
+        QuadVertex {
+            position: positions[0],
+            tex_coord: uvs[0],
+            color,
+        },
+        QuadVertex {
+            position: positions[1],
+            tex_coord: uvs[1],
+            color,
+        },
+        QuadVertex {
+            position: positions[2],
+            tex_coord: uvs[2],
+            color,
+        },
+        QuadVertex {
+            position: positions[3],
+            tex_coord: uvs[3],
+            color,
+        },
     ]
 }
 
@@ -780,10 +1014,7 @@ fn create_rect_pipeline(
     })
 }
 
-fn create_sdf_pipeline(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-) -> wgpu::RenderPipeline {
+fn create_sdf_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("sdf_shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sdf.wgsl").into()),
@@ -1054,16 +1285,16 @@ fn create_shadow_pipeline(
 
 #[cfg(test)]
 mod tests {
-    use fern_canvas::render_frame::{DrawCommand, GlyphQuad, PaintData, ShapeKind, ShapeQuad};
     use fern_canvas::RenderFrame;
+    use fern_canvas::render_frame::{DrawCommand, GlyphQuad, PaintData, ShapeKind, ShapeQuad};
 
     use super::*;
 
     #[test]
     fn glyph_quad_renders_over_shape_in_offscreen_target() {
-        let Some((mut renderer, device, queue)) =
-            pollster::block_on(crate::test_support::create_test_renderer("fern_render_test_device"))
-        else {
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("fern_render_test_device"),
+        ) else {
             return;
         };
 
@@ -1071,8 +1302,7 @@ mod tests {
             2,
             2,
             &[
-                255, 255, 255, 255, 255, 255, 255, 255,
-                255, 255, 255, 255, 255, 255, 255, 255,
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
             ],
         );
 
@@ -1114,7 +1344,12 @@ mod tests {
 
         let pixels = crate::test_support::read_texture_rgba(&device, &queue, &texture, 32, 32);
         let center = ((14 * 32 + 14) * 4) as usize;
-        let blue_only = [pixels[center], pixels[center + 1], pixels[center + 2], pixels[center + 3]];
+        let blue_only = [
+            pixels[center],
+            pixels[center + 1],
+            pixels[center + 2],
+            pixels[center + 3],
+        ];
 
         assert!(
             blue_only[0] > 200 && blue_only[1] > 200 && blue_only[2] > 200,

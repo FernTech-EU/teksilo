@@ -21,8 +21,7 @@ pub(crate) struct EventHandlers {
     pub on_hover: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
     pub on_key: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
-    pub on_pointer_event:
-        Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+    pub on_pointer_event: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_scroll: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_access_action:
         Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> EventResponse>>,

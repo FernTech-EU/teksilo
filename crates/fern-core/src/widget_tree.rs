@@ -17,7 +17,12 @@ use crate::widget_id::WidgetId;
 /// Type-erased shortcut lookup function.
 /// The third argument is `focused`, and the fourth is an `is_in_scope(focused, scope)` checker.
 type ShortcutLookup = Box<
-    dyn Fn(Key, Modifiers, Option<WidgetId>, &dyn Fn(WidgetId, WidgetId) -> bool) -> Option<ErasedCommand>,
+    dyn Fn(
+        Key,
+        Modifiers,
+        Option<WidgetId>,
+        &dyn Fn(WidgetId, WidgetId) -> bool,
+    ) -> Option<ErasedCommand>,
 >;
 
 #[allow(clippy::type_complexity)]
@@ -113,10 +118,7 @@ impl WidgetTree {
         self
     }
 
-    pub fn with_text_backend(
-        mut self,
-        backend: Rc<RefCell<dyn fern_canvas::TextBackend>>,
-    ) -> Self {
+    pub fn with_text_backend(mut self, backend: Rc<RefCell<dyn fern_canvas::TextBackend>>) -> Self {
         self.text_backend = Some(backend);
         self
     }
@@ -144,14 +146,22 @@ impl WidgetTree {
     /// Called automatically by `BuildContext::state()` for f32 states.
     pub fn register_animated_state(&mut self, state: &crate::state::State<f32>) {
         // Avoid duplicates
-        if !self.animated_states.iter().any(|s| crate::state::State::same(s, state)) {
+        if !self
+            .animated_states
+            .iter()
+            .any(|s| crate::state::State::same(s, state))
+        {
             self.animated_states.push(state.clone());
         }
     }
 
     /// Register a `Signal<f32>` for animation support.
     pub fn register_animated_signal(&mut self, signal: &crate::signal::Signal<f32>) {
-        if !self.animated_signals.iter().any(|s| crate::signal::Signal::same(s, signal)) {
+        if !self
+            .animated_signals
+            .iter()
+            .any(|s| crate::signal::Signal::same(s, signal))
+        {
             self.animated_signals.push(signal.clone());
         }
     }
@@ -172,13 +182,8 @@ impl WidgetTree {
     fn process_pending_animations_at(&mut self, now: std::time::Instant) {
         for state in &self.animated_states {
             if let Some(req) = state.take_pending_animation() {
-                self.animation_scheduler.animate(
-                    state,
-                    req.target,
-                    req.duration,
-                    req.easing,
-                    now,
-                );
+                self.animation_scheduler
+                    .animate(state, req.target, req.duration, req.easing, now);
             }
         }
         for signal in &self.animated_signals {
@@ -229,9 +234,12 @@ impl WidgetTree {
     /// Reconstruct all V2 widgets that have `has_built_children == true`.
     /// Called when the environment changes (theme switch, locale switch).
     fn rebuild_v2_widgets(&mut self) {
-        let ids: Vec<WidgetId> = self.arena.active_ids().into_iter().filter(|id| {
-            self.arena.get(*id).is_some_and(|n| n.has_built_children)
-        }).collect();
+        let ids: Vec<WidgetId> = self
+            .arena
+            .active_ids()
+            .into_iter()
+            .filter(|id| self.arena.get(*id).is_some_and(|n| n.has_built_children))
+            .collect();
 
         for widget_id in ids {
             // Drop effect handles (RAII cleanup of observer subscriptions)
@@ -356,9 +364,8 @@ impl WidgetTree {
     /// Lookup a shortcut, returning a type-erased command if matched.
     fn shortcut_map_lookup(&self, key: Key, modifiers: Modifiers) -> Option<ErasedCommand> {
         let lookup = self.shortcut_lookup.as_ref()?;
-        let is_in_scope = |focused: WidgetId, scope: WidgetId| -> bool {
-            self.is_descendant_of(focused, scope)
-        };
+        let is_in_scope =
+            |focused: WidgetId, scope: WidgetId| -> bool { self.is_descendant_of(focused, scope) };
         lookup(key, modifiers, self.focused, &is_in_scope)
     }
 
@@ -413,7 +420,7 @@ impl WidgetTree {
                 .into_iter()
                 .map(|child| match child {
                     crate::widget::PendingChild::Id(id) => id,
-                    crate::widget::PendingChild::Deferred(w) => w.register(self),
+                    crate::widget::PendingChild::Deferred(w) => self.add_boxed(w),
                 })
                 .collect();
             widget.set_resolved_children(resolved_ids);
@@ -461,10 +468,16 @@ impl WidgetTree {
         }
 
         // 4. Register reactive property bindings, animated states/signals, and clips_children.
-        let clips = self.arena.get(id).is_some_and(|n| n.widget.clips_children());
+        let clips = self
+            .arena
+            .get(id)
+            .is_some_and(|n| n.widget.clips_children());
         let (anim_states, anim_signals) = if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
-            (node.widget.animated_states(), node.widget.animated_signals())
+            (
+                node.widget.animated_states(),
+                node.widget.animated_signals(),
+            )
         } else {
             (Vec::new(), Vec::new())
         };
@@ -489,9 +502,14 @@ impl WidgetTree {
         id
     }
 
-    /// Add a Level 2 (Widget) to the tree.
+    /// Add a widget to the tree.
     pub fn add(&mut self, widget: impl Widget + 'static) -> WidgetId {
         self.add_widget_direct(Box::new(widget))
+    }
+
+    /// Add a pre-boxed widget to the tree.
+    pub fn add_boxed(&mut self, widget: Box<dyn Widget>) -> WidgetId {
+        self.add_widget_direct(widget)
     }
 
     /// Add a widget as a child of another widget.
@@ -507,7 +525,7 @@ impl WidgetTree {
                 .into_iter()
                 .map(|child| match child {
                     crate::widget::PendingChild::Id(id) => id,
-                    crate::widget::PendingChild::Deferred(w) => w.register(self),
+                    crate::widget::PendingChild::Deferred(w) => self.add_boxed(w),
                 })
                 .collect();
             boxed.set_resolved_children(resolved_ids);
@@ -549,10 +567,16 @@ impl WidgetTree {
         }
 
         // 4. Register reactive bindings, animated states/signals, and clips_children
-        let clips = self.arena.get(id).is_some_and(|n| n.widget.clips_children());
+        let clips = self
+            .arena
+            .get(id)
+            .is_some_and(|n| n.widget.clips_children());
         let (anim_states, anim_signals) = if let Some(node) = self.arena.get(id) {
             node.widget.register_bindings(id, &self.binding_registry);
-            (node.widget.animated_states(), node.widget.animated_signals())
+            (
+                node.widget.animated_states(),
+                node.widget.animated_signals(),
+            )
         } else {
             (Vec::new(), Vec::new())
         };
@@ -584,7 +608,11 @@ impl WidgetTree {
     /// Accepts `State<bool>`, `DerivedState<bool>`, or plain `bool`.
     pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
         let reactive = state.into();
-        reactive.register_if_bound(id, &self.binding_registry, crate::state::BindingLevel::Relayout);
+        reactive.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::state::BindingLevel::Relayout,
+        );
         if let Some(node) = self.arena.get_mut(id) {
             node.visible_state = Some(reactive);
         }
@@ -595,7 +623,11 @@ impl WidgetTree {
     /// Accepts `State<bool>`, `DerivedState<bool>`, or plain `bool`.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
         let reactive = state.into();
-        reactive.register_if_bound(id, &self.binding_registry, crate::state::BindingLevel::Relayout);
+        reactive.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::state::BindingLevel::Relayout,
+        );
         if let Some(node) = self.arena.get_mut(id) {
             node.enabled_state = Some(reactive);
         }
@@ -622,11 +654,12 @@ impl WidgetTree {
         id: WidgetId,
         f: impl Fn(&mut fern_tokens::Theme) + 'static,
     ) {
-        let had_override = self.arena.get(id).is_some_and(|n| n.theme_override.is_some());
+        let had_override = self
+            .arena
+            .get(id)
+            .is_some_and(|n| n.theme_override.is_some());
         if let Some(node) = self.arena.get_mut(id) {
-            node.theme_override = Some(crate::environment::ThemeOverride {
-                func: Box::new(f),
-            });
+            node.theme_override = Some(crate::environment::ThemeOverride { func: Box::new(f) });
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
         }
@@ -660,8 +693,7 @@ impl WidgetTree {
         if let Some(node) = self.arena.get_mut(id) {
             if let Some(binding) = &mut node.gesture_binding {
                 // Already has gestures — wrap existing handler to also call new one
-                let mut old_handler =
-                    std::mem::replace(&mut binding.handler, Box::new(|_, _| {}));
+                let mut old_handler = std::mem::replace(&mut binding.handler, Box::new(|_, _| {}));
                 binding.arena.add(recognizer);
                 binding.handler = Box::new(move |gesture, ctx| {
                     old_handler(gesture.clone(), ctx);
@@ -749,7 +781,10 @@ impl WidgetTree {
                 };
                 let node = self.arena.get(*content_id).unwrap();
                 node.widget.size_that_fits(
-                    SizeProposal { width: None, height: None },
+                    SizeProposal {
+                        width: None,
+                        height: None,
+                    },
                     &ctx,
                 )
             };
@@ -801,7 +836,9 @@ impl WidgetTree {
     /// - Scroll events → hit testing (scroll target under pointer)
     pub fn dispatch_event(&mut self, event: WidgetEvent) {
         // Overlay interception: Escape dismisses topmost overlay
-        if let WidgetEvent::KeyDown { key: Key::Escape, .. } = &event
+        if let WidgetEvent::KeyDown {
+            key: Key::Escape, ..
+        } = &event
             && !self.overlay_manager.is_empty()
         {
             self.overlay_manager.dismiss_top();
@@ -845,7 +882,12 @@ impl WidgetTree {
             WidgetEvent::PointerMove { position } => {
                 if let Some(captured) = self.pointer_captured_by {
                     // Pointer is captured — route directly, skip hover tracking
-                    self.dispatch_to_widget(captured, &WidgetEvent::PointerMove { position: *position });
+                    self.dispatch_to_widget(
+                        captured,
+                        &WidgetEvent::PointerMove {
+                            position: *position,
+                        },
+                    );
                 } else {
                     self.handle_pointer_move(*position);
                 }
@@ -1019,9 +1061,11 @@ impl WidgetTree {
                 // on_key in preview is not typical — skip for now
                 None
             }
-            _ => {
-                node.handlers.on_pointer_event.as_mut().map(|handler| handler(event, ctx))
-            }
+            _ => node
+                .handlers
+                .on_pointer_event
+                .as_mut()
+                .map(|handler| handler(event, ctx)),
         }
     }
 
@@ -1033,44 +1077,45 @@ impl WidgetTree {
         ctx: &mut EventContext,
     ) -> Option<EventResponse> {
         match event {
-            WidgetEvent::PointerEnter => {
-                node.handlers.on_hover.as_mut().map(|handler| {
-                    handler(true, ctx);
-                    EventResponse::Handled
-                })
-            }
-            WidgetEvent::PointerLeave => {
-                node.handlers.on_hover.as_mut().map(|handler| {
-                    handler(false, ctx);
-                    EventResponse::Handled
-                })
-            }
-            WidgetEvent::FocusGained { .. } => {
-                node.handlers.on_focus.as_mut().map(|handler| {
-                    handler(true, ctx);
-                    EventResponse::Handled
-                })
-            }
-            WidgetEvent::FocusLost => {
-                node.handlers.on_focus.as_mut().map(|handler| {
-                    handler(false, ctx);
-                    EventResponse::Handled
-                })
-            }
-            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
-                node.handlers.on_key.as_mut().map(|handler| handler(event, ctx))
-            }
-            WidgetEvent::Scroll { .. } => {
-                node.handlers.on_scroll.as_mut().map(|handler| handler(event, ctx))
-            }
-            WidgetEvent::AccessAction { action, .. } => {
-                node.handlers.on_access_action.as_mut().map(|handler| handler(*action, ctx))
-            }
+            WidgetEvent::PointerEnter => node.handlers.on_hover.as_mut().map(|handler| {
+                handler(true, ctx);
+                EventResponse::Handled
+            }),
+            WidgetEvent::PointerLeave => node.handlers.on_hover.as_mut().map(|handler| {
+                handler(false, ctx);
+                EventResponse::Handled
+            }),
+            WidgetEvent::FocusGained { .. } => node.handlers.on_focus.as_mut().map(|handler| {
+                handler(true, ctx);
+                EventResponse::Handled
+            }),
+            WidgetEvent::FocusLost => node.handlers.on_focus.as_mut().map(|handler| {
+                handler(false, ctx);
+                EventResponse::Handled
+            }),
+            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => node
+                .handlers
+                .on_key
+                .as_mut()
+                .map(|handler| handler(event, ctx)),
+            WidgetEvent::Scroll { .. } => node
+                .handlers
+                .on_scroll
+                .as_mut()
+                .map(|handler| handler(event, ctx)),
+            WidgetEvent::AccessAction { action, .. } => node
+                .handlers
+                .on_access_action
+                .as_mut()
+                .map(|handler| handler(*action, ctx)),
             WidgetEvent::PointerDown { .. }
             | WidgetEvent::PointerUp { .. }
             | WidgetEvent::PointerMove { .. } => {
                 // Low-level pointer escape hatch
-                node.handlers.on_pointer_event.as_mut().map(|handler| handler(event, ctx))
+                node.handlers
+                    .on_pointer_event
+                    .as_mut()
+                    .map(|handler| handler(event, ctx))
             }
             _ => None,
         }
@@ -1310,10 +1355,7 @@ impl WidgetTree {
 
     /// Get an immutable reference to a widget node (for internal use).
     #[allow(dead_code)] // V2 API: used for widget introspection
-    pub(crate) fn arena_get(
-        &self,
-        id: WidgetId,
-    ) -> Option<&crate::arena::WidgetNode> {
+    pub(crate) fn arena_get(&self, id: WidgetId) -> Option<&crate::arena::WidgetNode> {
         self.arena.get(id)
     }
 
@@ -1491,7 +1533,9 @@ impl WidgetTree {
         let children = self.arena.children(id);
         for &child_id in children {
             if self.arena.is_active(child_id) {
-                builder.inner_mut().push_child(widget_id_to_node_id(child_id));
+                builder
+                    .inner_mut()
+                    .push_child(widget_id_to_node_id(child_id));
             }
         }
 
@@ -1505,8 +1549,14 @@ impl WidgetTree {
         });
 
         // Link tooltip anchor to its tooltip content via described_by
-        if let Some(tooltip) = self.tooltips.iter().find(|t| t.anchor_id == id && t.overlay_id.is_some()) {
-            builder.inner_mut().push_described_by(widget_id_to_node_id(tooltip.content_id));
+        if let Some(tooltip) = self
+            .tooltips
+            .iter()
+            .find(|t| t.anchor_id == id && t.overlay_id.is_some())
+        {
+            builder
+                .inner_mut()
+                .push_described_by(widget_id_to_node_id(tooltip.content_id));
         }
 
         let (node_id, ak_node) = builder.build(id);
@@ -1599,7 +1649,9 @@ impl WidgetTree {
     fn process_tooltips(&mut self) {
         let sim_now = self.sim_clock;
         self.process_tooltips_impl(|entry| {
-            entry.hover_start.map(|s| sim_now.saturating_duration_since(s))
+            entry
+                .hover_start
+                .map(|s| sim_now.saturating_duration_since(s))
         });
     }
 
@@ -1607,7 +1659,9 @@ impl WidgetTree {
     fn process_tooltips_real(&mut self) {
         let real_now = std::time::Instant::now();
         self.process_tooltips_impl(|entry| {
-            entry.real_hover_start.map(|s| real_now.saturating_duration_since(s))
+            entry
+                .real_hover_start
+                .map(|s| real_now.saturating_duration_since(s))
         });
     }
 
@@ -1715,7 +1769,8 @@ impl WidgetTree {
     /// Returns the earliest deadline for a pending tooltip (if any).
     /// The event loop should use ControlFlow::WaitUntil(deadline) if this returns Some.
     pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
-        let tooltip_deadline = self.tooltips
+        let tooltip_deadline = self
+            .tooltips
             .iter()
             .filter(|e| e.overlay_id.is_none())
             .filter_map(|e| e.real_hover_start.map(|start| start + e.delay))
@@ -1741,7 +1796,10 @@ impl WidgetTree {
     }
 
     /// Show an overlay directly (for testing or framework use).
-    pub fn show_overlay(&mut self, request: crate::overlay::OverlayRequest) -> crate::overlay::OverlayId {
+    pub fn show_overlay(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+    ) -> crate::overlay::OverlayId {
         self.overlay_manager.show(request)
     }
 
@@ -2107,8 +2165,7 @@ fn layout_widget_recursive(
                 child_node.bounds = child_bounds;
             }
 
-            let child_proposal =
-                SizeProposal::exact(placement.size.width, placement.size.height);
+            let child_proposal = SizeProposal::exact(placement.size.width, placement.size.height);
             let grandchild_ids: Vec<WidgetId> = arena.children(placement.id).to_vec();
             if !grandchild_ids.is_empty() {
                 layout_widget_recursive(
@@ -2213,7 +2270,10 @@ mod tests {
     fn recursive_layout_preserves_exact_parent_placement_for_containers() {
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new());
-        let shrink = tree.add(ShrinkWrapContainer { child: leaf, inset: 8.0 });
+        let shrink = tree.add(ShrinkWrapContainer {
+            child: leaf,
+            inset: 8.0,
+        });
         let root = tree.add(StackWidget::new().add_child(shrink));
 
         tree.layout(SizeProposal::exact(120.0, 80.0));
@@ -2336,13 +2396,20 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.press_key(Key::Tab, Modifiers::NONE);
-        assert_eq!(tree.focus_origin(), Some(crate::focus::FocusOrigin::Keyboard));
+        assert_eq!(
+            tree.focus_origin(),
+            Some(crate::focus::FocusOrigin::Keyboard)
+        );
     }
 
     #[test]
     fn fill_widget_produces_shape_in_frame() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(FillWidget::new().background(Color::RED).corner_radius(CornerRadius::uniform(6.0)));
+        tree.add(
+            FillWidget::new()
+                .background(Color::RED)
+                .corner_radius(CornerRadius::uniform(6.0)),
+        );
         tree.layout(SizeProposal::exact(100.0, 40.0));
         let frame = tree.render();
         assert_eq!(frame.shapes.len(), 1);
@@ -2404,7 +2471,11 @@ mod tests {
     #[test]
     fn dormant_widget_not_rendered() {
         let mut tree = WidgetTree::new();
-        let w = tree.add(FillWidget::new().background(Color::RED).corner_radius(CornerRadius::uniform(4.0)));
+        let w = tree.add(
+            FillWidget::new()
+                .background(Color::RED)
+                .corner_radius(CornerRadius::uniform(4.0)),
+        );
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
         assert!(!frame.shapes.is_empty());
@@ -2418,7 +2489,11 @@ mod tests {
     #[test]
     fn dormancy_is_recursive() {
         let mut tree = WidgetTree::new();
-        let child = tree.add(FillWidget::new().background(Color::RED).corner_radius(CornerRadius::uniform(4.0)));
+        let child = tree.add(
+            FillWidget::new()
+                .background(Color::RED)
+                .corner_radius(CornerRadius::uniform(4.0)),
+        );
         let parent = tree.add(StackWidget::new().add_child(child));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -2520,8 +2595,7 @@ mod tests {
         let save_called = Rc::new(Cell::new(false));
         let s = save_called.clone();
 
-        let shortcuts = ShortcutMap::new()
-            .bind(Shortcut::ctrl(Key::S), TestCmd::Save);
+        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::S), TestCmd::Save);
 
         let mut tree = WidgetTree::new().with_shortcuts(shortcuts);
         tree.on_command(move |cmd: &TestCmd| {
@@ -2602,7 +2676,11 @@ mod tests {
 
         // Bind a state to the widget
         let visible = State::new(true);
-        visible.bind_to(w, tree.binding_registry(), crate::state::BindingLevel::RepaintOnly);
+        visible.bind_to(
+            w,
+            tree.binding_registry(),
+            crate::state::BindingLevel::RepaintOnly,
+        );
 
         // Change state — widget should become dirty on next layout()
         visible.set(false);
@@ -2650,13 +2728,15 @@ mod tests {
         let w = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
-        tree.attach_gesture(w, DragRecognizer::new().threshold(5.0), move |gesture, _ctx| {
-            match gesture {
+        tree.attach_gesture(
+            w,
+            DragRecognizer::new().threshold(5.0),
+            move |gesture, _ctx| match gesture {
                 crate::gesture::GestureEvent::DragStarted { .. } => ds.set(true),
                 crate::gesture::GestureEvent::DragEnded { .. } => de.set(true),
                 _ => {}
-            }
-        });
+            },
+        );
 
         // Drag from (50,25) to (80,25) — beyond threshold
         tree.drag(Point::new(50.0, 25.0), Point::new(80.0, 25.0));
@@ -2708,7 +2788,11 @@ mod tests {
             got_gesture: Rc<Cell<bool>>,
         }
         impl Widget for GestureCapture {
-            fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_canvas::Size {
+            fn size_that_fits(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> fern_canvas::Size {
                 proposal.resolve(0.0, 0.0)
             }
             fn event(&mut self, event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
@@ -2753,11 +2837,15 @@ mod tests {
                 t.set(true);
             }
         });
-        tree.attach_gesture(w, DragRecognizer::new().threshold(5.0), move |gesture, _ctx| {
-            if matches!(gesture, crate::gesture::GestureEvent::DragStarted { .. }) {
-                d.set(true);
-            }
-        });
+        tree.attach_gesture(
+            w,
+            DragRecognizer::new().threshold(5.0),
+            move |gesture, _ctx| {
+                if matches!(gesture, crate::gesture::GestureEvent::DragStarted { .. }) {
+                    d.set(true);
+                }
+            },
+        );
 
         // Click — should trigger tap, not drag
         tree.click(w);
@@ -3106,9 +3194,7 @@ mod tests {
     fn sync_accessibility_parent_child_relationship() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().label("Child"));
-        let parent = tree.add(
-            crate::test_widgets::StackWidget::new().add_child(child),
-        );
+        let parent = tree.add(crate::test_widgets::StackWidget::new().add_child(child));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let update = tree.sync_accessibility();
@@ -3350,11 +3436,7 @@ mod tests {
         let tooltip = tree.add(FillWidget::new().label("Tooltip text"));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        tree.attach_tooltip(
-            anchor,
-            tooltip,
-            std::time::Duration::from_millis(500),
-        );
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
 
         // Hover over the anchor
         let center = tree.bounds(anchor).center();
@@ -3380,11 +3462,7 @@ mod tests {
         let tooltip = tree.add(FillWidget::new().label("Tip"));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        tree.attach_tooltip(
-            anchor,
-            tooltip,
-            std::time::Duration::from_millis(500),
-        );
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
 
         // Hover and wait
         tree.pointer_move(tree.bounds(anchor).center());
@@ -3403,11 +3481,7 @@ mod tests {
         let tooltip = tree.add(FillWidget::new().label("Tip"));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        tree.attach_tooltip(
-            anchor,
-            tooltip,
-            std::time::Duration::from_millis(500),
-        );
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
 
         // Hover briefly then leave
         tree.pointer_move(tree.bounds(anchor).center());
@@ -3461,7 +3535,10 @@ mod tests {
 
         #[derive(Debug, Clone, Copy, PartialEq)]
         #[allow(dead_code)]
-        enum Cmd { ScopedAction, GlobalAction }
+        enum Cmd {
+            ScopedAction,
+            GlobalAction,
+        }
         impl crate::app_command::AppCommand for Cmd {}
 
         let fired = Rc::new(Cell::new(None));
@@ -3493,15 +3570,27 @@ mod tests {
         let state = crate::state::State::new_animated(0.0_f32);
         tree.register_animated_state(&state);
 
-        state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::Linear);
+        state.set_animated(
+            100.0,
+            std::time::Duration::from_millis(200),
+            fern_tokens::Easing::Linear,
+        );
 
         // Advance 100ms (50%)
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((*state.get() - 50.0).abs() < 2.0, "at 50%: {}", *state.get());
+        assert!(
+            (*state.get() - 50.0).abs() < 2.0,
+            "at 50%: {}",
+            *state.get()
+        );
 
         // Advance another 100ms (100%)
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((*state.get() - 100.0).abs() < 0.1, "at 100%: {}", *state.get());
+        assert!(
+            (*state.get() - 100.0).abs() < 0.1,
+            "at 100%: {}",
+            *state.get()
+        );
 
         assert!(!tree.has_active_animations());
     }
@@ -3512,11 +3601,19 @@ mod tests {
         let state = crate::state::State::new_animated(0.0_f32);
         tree.register_animated_state(&state);
 
-        state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::EaseIn);
+        state.set_animated(
+            100.0,
+            std::time::Duration::from_millis(200),
+            fern_tokens::Easing::EaseIn,
+        );
 
         // At 50%, EaseIn (t²) = 0.25 → value ≈ 25
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((*state.get() - 25.0).abs() < 2.0, "ease-in at 50%: {}", *state.get());
+        assert!(
+            (*state.get() - 25.0).abs() < 2.0,
+            "ease-in at 50%: {}",
+            *state.get()
+        );
     }
 
     #[test]
@@ -3525,17 +3622,33 @@ mod tests {
         let state = crate::state::State::new_animated(0.0_f32);
         tree.register_animated_state(&state);
 
-        state.set_animated(100.0, std::time::Duration::from_millis(200), fern_tokens::Easing::Linear);
+        state.set_animated(
+            100.0,
+            std::time::Duration::from_millis(200),
+            fern_tokens::Easing::Linear,
+        );
         tree.tick_animations(std::time::Duration::from_millis(100)); // at 50
         assert!((*state.get() - 50.0).abs() < 2.0);
 
         // New animation from current value to 0
-        state.set_animated(0.0, std::time::Duration::from_millis(100), fern_tokens::Easing::Linear);
+        state.set_animated(
+            0.0,
+            std::time::Duration::from_millis(100),
+            fern_tokens::Easing::Linear,
+        );
         tree.tick_animations(std::time::Duration::from_millis(50)); // 50% of new
-        assert!((*state.get() - 25.0).abs() < 3.0, "mid-replace: {}", *state.get());
+        assert!(
+            (*state.get() - 25.0).abs() < 3.0,
+            "mid-replace: {}",
+            *state.get()
+        );
 
         tree.tick_animations(std::time::Duration::from_millis(50)); // 100% of new
-        assert!((*state.get() - 0.0).abs() < 0.5, "end-replace: {}", *state.get());
+        assert!(
+            (*state.get() - 0.0).abs() < 0.5,
+            "end-replace: {}",
+            *state.get()
+        );
     }
 
     #[test]
@@ -3545,15 +3658,22 @@ mod tests {
         tree.register_animated_state(&state);
 
         let w = tree.add(FillWidget::new());
-        state.bind_to(w, tree.binding_registry(), crate::state::BindingLevel::Relayout);
+        state.bind_to(
+            w,
+            tree.binding_registry(),
+            crate::state::BindingLevel::Relayout,
+        );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        state.set_animated(0.0, std::time::Duration::from_millis(100), fern_tokens::Easing::Linear);
+        state.set_animated(
+            0.0,
+            std::time::Duration::from_millis(100),
+            fern_tokens::Easing::Linear,
+        );
 
         // Tick animation — state changes should mark widget dirty
         tree.tick_animations(std::time::Duration::from_millis(50));
         assert!(tree.needs_redraw());
     }
-
 }

@@ -165,7 +165,8 @@ impl AnimationScheduler {
 
     /// Cancel any active animation on the given signal.
     pub fn cancel_signal(&mut self, signal: &Signal<f32>) {
-        self.signal_animations.retain(|a| !Signal::same(&a.signal, signal));
+        self.signal_animations
+            .retain(|a| !Signal::same(&a.signal, signal));
     }
 
     /// Advance all active animations to the given time.
@@ -269,7 +270,13 @@ mod tests {
         let mut scheduler = AnimationScheduler::new();
         let start = Instant::now();
 
-        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::Linear, start);
+        scheduler.animate(
+            &state,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            start,
+        );
         assert_eq!(scheduler.active_count(), 1);
 
         // At t=0: value should still be 0 (or very close)
@@ -294,7 +301,13 @@ mod tests {
         let mut scheduler = AnimationScheduler::new();
         let start = Instant::now();
 
-        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::EaseIn, start);
+        scheduler.animate(
+            &state,
+            100.0,
+            Duration::from_millis(200),
+            Easing::EaseIn,
+            start,
+        );
 
         // At 50%, EaseIn (t²) gives 0.25, so value ≈ 25
         scheduler.tick(start + Duration::from_millis(100));
@@ -318,7 +331,13 @@ mod tests {
         let mut scheduler = AnimationScheduler::new();
         let start = Instant::now();
 
-        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::Linear, start);
+        scheduler.animate(
+            &state,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            start,
+        );
 
         // Advance to 50%
         scheduler.tick(start + Duration::from_millis(100));
@@ -327,7 +346,13 @@ mod tests {
 
         // Start a new animation from the current mid-value to 0
         let mid_time = start + Duration::from_millis(100);
-        scheduler.animate(&state, 0.0, Duration::from_millis(100), Easing::Linear, mid_time);
+        scheduler.animate(
+            &state,
+            0.0,
+            Duration::from_millis(100),
+            Easing::Linear,
+            mid_time,
+        );
         assert_eq!(scheduler.active_count(), 1); // old one replaced
 
         // At 50% of the new animation
@@ -341,7 +366,13 @@ mod tests {
         let mut scheduler = AnimationScheduler::new();
         let start = Instant::now();
 
-        scheduler.animate(&state, 100.0, Duration::from_millis(200), Easing::Linear, start);
+        scheduler.animate(
+            &state,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            start,
+        );
         assert_eq!(scheduler.active_count(), 1);
 
         scheduler.cancel(&state);
@@ -357,7 +388,13 @@ mod tests {
         let mut scheduler = AnimationScheduler::new();
         let start = Instant::now();
 
-        scheduler.animate(&state, 50.0, Duration::from_millis(200), Easing::Linear, start);
+        scheduler.animate(
+            &state,
+            50.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            start,
+        );
         assert_eq!(scheduler.active_count(), 0);
     }
 

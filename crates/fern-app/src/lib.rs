@@ -9,7 +9,7 @@ pub use window_config::{FernWindowId, WindowConfig};
 pub use window_manager::WindowManager;
 
 // Re-export key types for convenience
-pub use fern_core;
-pub use fern_tokens;
 pub use fern_canvas;
+pub use fern_core;
 pub use fern_text;
+pub use fern_tokens;

@@ -3,7 +3,9 @@ use fern_core::widget::{LayoutContext, Widget};
 use fern_core::widget_tree::WidgetTree;
 use fern_tokens::{Alignment, HAlignment, VAlignment};
 
-use crate::primitives::{Center, Expand, FixedSize, HStack, MinSize, Padding, Spacer, TextWidget, VStack, ZStack};
+use crate::primitives::{
+    Center, Expand, FixedSize, HStack, MinSize, Padding, Spacer, TextWidget, VStack, ZStack,
+};
 
 /// A leaf that always reports a fixed intrinsic size.
 #[derive(Debug)]
@@ -207,9 +209,9 @@ fn demo_layout_no_overlap_between_sections() {
     let mut tree = WidgetTree::new();
 
     // -- Toolbar --
-    let title = tree.add(TextWidget::new("Title text here"));   // 15*8=120 wide
+    let title = tree.add(TextWidget::new("Title text here")); // 15*8=120 wide
     let toolbar_spacer = tree.add(Spacer::new());
-    let btn = tree.add(FixedLeaf(140.0, 36.0));                 // mock button
+    let btn = tree.add(FixedLeaf(140.0, 36.0)); // mock button
     let toolbar = tree.add(
         HStack::new()
             .add_child(title)
@@ -218,7 +220,7 @@ fn demo_layout_no_overlap_between_sections() {
     );
 
     // -- Typography section --
-    let typo_heading = tree.add(TextWidget::new("Typography"));  // 10*8=80
+    let typo_heading = tree.add(TextWidget::new("Typography")); // 10*8=80
     let typo_body1 = tree.add(TextWidget::new("Body line one")); // 13*8=104
     let typo_body2 = tree.add(TextWidget::new("Body line two")); // 13*8=104
     let typography = tree.add(
@@ -241,10 +243,10 @@ fn demo_layout_no_overlap_between_sections() {
             .add_child(box_b)
             .add_child(box_c),
     );
-    let caption1 = tree.add(TextWidget::new("Three colored boxes"));       // 19*8=152
-    let leading = tree.add(TextWidget::new("Leading"));                    // 7*8=56
+    let caption1 = tree.add(TextWidget::new("Three colored boxes")); // 19*8=152
+    let leading = tree.add(TextWidget::new("Leading")); // 7*8=56
     let inner_spacer = tree.add(Spacer::new());
-    let trailing = tree.add(TextWidget::new("Trailing"));                  // 8*8=64
+    let trailing = tree.add(TextWidget::new("Trailing")); // 8*8=64
     let spacer_row = tree.add(
         HStack::new()
             .add_child(leading)
@@ -279,25 +281,48 @@ fn demo_layout_no_overlap_between_sections() {
     let typography_b = tree.bounds(typography);
     let showcase_b = tree.bounds(showcase);
 
-    eprintln!("toolbar:    y={:.1}, h={:.1}, bottom={:.1}", toolbar_b.y, toolbar_b.height, toolbar_b.y + toolbar_b.height);
-    eprintln!("typography: y={:.1}, h={:.1}, bottom={:.1}", typography_b.y, typography_b.height, typography_b.y + typography_b.height);
-    eprintln!("showcase:   y={:.1}, h={:.1}, bottom={:.1}", showcase_b.y, showcase_b.height, showcase_b.y + showcase_b.height);
+    eprintln!(
+        "toolbar:    y={:.1}, h={:.1}, bottom={:.1}",
+        toolbar_b.y,
+        toolbar_b.height,
+        toolbar_b.y + toolbar_b.height
+    );
+    eprintln!(
+        "typography: y={:.1}, h={:.1}, bottom={:.1}",
+        typography_b.y,
+        typography_b.height,
+        typography_b.y + typography_b.height
+    );
+    eprintln!(
+        "showcase:   y={:.1}, h={:.1}, bottom={:.1}",
+        showcase_b.y,
+        showcase_b.height,
+        showcase_b.y + showcase_b.height
+    );
 
     // Toolbar should start at y=24 (inside padding)
-    assert!((toolbar_b.y - 24.0).abs() < 0.01, "toolbar.y = {}", toolbar_b.y);
+    assert!(
+        (toolbar_b.y - 24.0).abs() < 0.01,
+        "toolbar.y = {}",
+        toolbar_b.y
+    );
 
     // Typography should start after toolbar + spacing(20)
     let expected_typo_y = toolbar_b.y + toolbar_b.height + 20.0;
     assert!(
         (typography_b.y - expected_typo_y).abs() < 0.01,
-        "typography.y = {} (expected {})", typography_b.y, expected_typo_y,
+        "typography.y = {} (expected {})",
+        typography_b.y,
+        expected_typo_y,
     );
 
     // Showcase should start after typography + spacing(20)
     let expected_showcase_y = typography_b.y + typography_b.height + 20.0;
     assert!(
         (showcase_b.y - expected_showcase_y).abs() < 0.01,
-        "showcase.y = {} (expected {})", showcase_b.y, expected_showcase_y,
+        "showcase.y = {} (expected {})",
+        showcase_b.y,
+        expected_showcase_y,
     );
 
     // === Check title and caption2 do NOT overlap ===
@@ -309,7 +334,8 @@ fn demo_layout_no_overlap_between_sections() {
     assert!(
         caption2_b.y > title_b.y + title_b.height,
         "caption2 (y={}) should be well below title (bottom={})",
-        caption2_b.y, title_b.y + title_b.height,
+        caption2_b.y,
+        title_b.y + title_b.height,
     );
 
     // === Check inner HStack with Spacer has correct width ===
@@ -324,7 +350,8 @@ fn demo_layout_no_overlap_between_sections() {
     assert!(
         (spacer_row_b.width - showcase_b.width).abs() < 0.01,
         "spacer_row width={} should match showcase width={}",
-        spacer_row_b.width, showcase_b.width,
+        spacer_row_b.width,
+        showcase_b.width,
     );
 
     // "Trailing" should be pushed to the right edge
@@ -332,14 +359,16 @@ fn demo_layout_no_overlap_between_sections() {
     assert!(
         (trailing_b.x - expected_trailing_x).abs() < 0.01,
         "trailing.x={} should be at right edge (expected {})",
-        trailing_b.x, expected_trailing_x,
+        trailing_b.x,
+        expected_trailing_x,
     );
 
     // "Leading" should be at the left edge
     assert!(
         (leading_b.x - spacer_row_b.x).abs() < 0.01,
         "leading.x={} should be at left edge (expected {})",
-        leading_b.x, spacer_row_b.x,
+        leading_b.x,
+        spacer_row_b.x,
     );
 
     // === Verify every TextWidget has a unique y position ===
@@ -361,8 +390,12 @@ fn demo_layout_no_overlap_between_sections() {
             assert!(
                 !overlap,
                 "{} (y={:.1}..{:.1}) overlaps {} (y={:.1}..{:.1})",
-                name_a, a.y, a.y + a.height,
-                name_b, b.y, b.y + b.height,
+                name_a,
+                a.y,
+                a.y + a.height,
+                name_b,
+                b.y,
+                b.y + b.height,
             );
         }
     }

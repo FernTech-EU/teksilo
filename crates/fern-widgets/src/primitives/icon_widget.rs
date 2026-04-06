@@ -106,18 +106,35 @@ impl IconWidget {
                 }
                 PathCommand::QuadTo { control, to } => {
                     scaled.quad_to(
-                        Point::new(control.x * scale_x + offset_x, control.y * scale_y + offset_y),
+                        Point::new(
+                            control.x * scale_x + offset_x,
+                            control.y * scale_y + offset_y,
+                        ),
                         Point::new(to.x * scale_x + offset_x, to.y * scale_y + offset_y),
                     );
                 }
-                PathCommand::CubicTo { control1, control2, to } => {
+                PathCommand::CubicTo {
+                    control1,
+                    control2,
+                    to,
+                } => {
                     scaled.cubic_to(
-                        Point::new(control1.x * scale_x + offset_x, control1.y * scale_y + offset_y),
-                        Point::new(control2.x * scale_x + offset_x, control2.y * scale_y + offset_y),
+                        Point::new(
+                            control1.x * scale_x + offset_x,
+                            control1.y * scale_y + offset_y,
+                        ),
+                        Point::new(
+                            control2.x * scale_x + offset_x,
+                            control2.y * scale_y + offset_y,
+                        ),
                         Point::new(to.x * scale_x + offset_x, to.y * scale_y + offset_y),
                     );
                 }
-                PathCommand::ArcTo { rect, start_angle, sweep_angle } => {
+                PathCommand::ArcTo {
+                    rect,
+                    start_angle,
+                    sweep_angle,
+                } => {
                     scaled.arc_to(
                         Rect::new(
                             rect.x * scale_x + offset_x,
@@ -147,10 +164,17 @@ impl std::fmt::Debug for IconWidget {
 }
 
 impl Widget for IconWidget {
-    fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<fern_core::widget_id::WidgetId> {
+    fn build(
+        &mut self,
+        ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<fern_core::widget_id::WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.color.register_if_bound(self_id, registry, fern_core::state::BindingLevel::RepaintOnly);
+        self.color.register_if_bound(
+            self_id,
+            registry,
+            fern_core::state::BindingLevel::RepaintOnly,
+        );
         Vec::new()
     }
 
@@ -169,7 +193,6 @@ impl Widget for IconWidget {
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
         // Icons are typically decorative — the parent widget sets the semantic role.
     }
-
 }
 
 #[cfg(test)]
