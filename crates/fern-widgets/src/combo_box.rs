@@ -154,8 +154,9 @@ impl Widget for DropdownItem {
         let hovered_leave = hovered.clone();
 
         let handler_set = HandlerSet::new()
-            .on_tap(move |_ctx: &mut EventContext| {
+            .on_tap(move |ctx: &mut EventContext| {
                 selected_signal.set(Some(index));
+                ctx.dismiss_all_overlays();
             })
             .on_hover(move |entered: bool, _ctx: &mut EventContext| {
                 if entered {
