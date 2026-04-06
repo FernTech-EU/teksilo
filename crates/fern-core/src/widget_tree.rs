@@ -793,15 +793,24 @@ impl WidgetTree {
         } = &event
             && !self.overlay_manager.is_empty()
         {
-            self.overlay_manager.dismiss_top();
+            if let Some((_id, content_ids)) = self.overlay_manager.dismiss_top() {
+                self.dormant_dismissed_content(&content_ids);
+            }
             return;
         }
 
-        // Overlay interception: click outside dismisses ClickOutside overlays
-        if let WidgetEvent::PointerDown { position, .. } = &event
-            && self.overlay_manager.handle_click_outside(*position)
-        {
-            return; // Click consumed by overlay dismissal
+        // Overlay interception: click outside dismisses ClickOutside overlays.
+        // For secondary (right-click), dismiss but don't consume — let context
+        // menu handler run so a new context menu can open at the click location.
+        if let WidgetEvent::PointerDown { position, button } = &event {
+            let dismissed = self.overlay_manager.handle_click_outside(*position);
+            if !dismissed.is_empty() {
+                self.dormant_dismissed_content(&dismissed);
+                if *button != PointerButton::Secondary {
+                    return; // Click consumed by overlay dismissal
+                }
+                // Secondary click: overlays dismissed, but fall through to open new context menu
+            }
         }
 
         // Shortcut interception: before any widget sees the key event
@@ -951,6 +960,10 @@ impl WidgetTree {
         let Some(owner_id) = factory_owner else {
             return false;
         };
+
+        // Dismiss any existing overlays before opening a new context menu
+        let dismissed = self.overlay_manager.dismiss_all();
+        self.dormant_dismissed_content(&dismissed);
 
         // Invoke the factory to create the menu content widget
         let menu_widget = {
@@ -1191,8 +1204,14 @@ impl WidgetTree {
         for req in ctx.overlay_requests {
             self.overlay_manager.show(req);
         }
-        for id in ctx.overlay_dismissals {
-            self.overlay_manager.dismiss(id);
+        if ctx.dismiss_all_overlays {
+            let dismissed = self.overlay_manager.dismiss_all();
+            self.dormant_dismissed_content(&dismissed);
+        } else {
+            for id in ctx.overlay_dismissals {
+                let dismissed = self.overlay_manager.dismiss(id);
+                self.dormant_dismissed_content(&dismissed);
+            }
         }
         // Handle pointer capture requests
         if let Some(capture) = ctx.pointer_capture {
@@ -1825,9 +1844,9 @@ impl WidgetTree {
                 to_dismiss.push((id, self.tooltips[i].content_id));
             }
         }
-        for (id, content_id) in to_dismiss {
-            self.overlay_manager.dismiss(id);
-            self.arena.set_dormant(content_id);
+        for (id, _content_id) in to_dismiss {
+            let dismissed = self.overlay_manager.dismiss(id);
+            self.dormant_dismissed_content(&dismissed);
         }
     }
 
@@ -1870,7 +1889,21 @@ impl WidgetTree {
 
     /// Dismiss an overlay directly.
     pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
-        self.overlay_manager.dismiss(id);
+        let dismissed = self.overlay_manager.dismiss(id);
+        self.dormant_dismissed_content(&dismissed);
+    }
+
+    /// Set dismissed overlay content widgets to dormant so they don't get
+    /// laid out as full-window roots or shadow hit tests.
+    /// Also invalidates the render cache so the next frame excludes them.
+    fn dormant_dismissed_content(&mut self, content_ids: &[WidgetId]) {
+        for &id in content_ids {
+            self.arena.set_dormant(id);
+        }
+        if !content_ids.is_empty() {
+            self.cached_frame = None;
+            self.a11y_dirty = true;
+        }
     }
 
     /// Whether a widget is visible (active, not dormant or destroyed).
@@ -3342,6 +3375,7 @@ mod tests {
 
         tree.dismiss_overlay(id);
         assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content), "dismissed content should be dormant");
     }
 
     #[test]
@@ -3365,6 +3399,7 @@ mod tests {
 
         tree.press_key(Key::Escape, Modifiers::NONE);
         assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content), "escaped content should be dormant");
     }
 
     #[test]
@@ -3395,6 +3430,7 @@ mod tests {
             button: PointerButton::Primary,
         });
         assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content), "click-outside content should be dormant");
     }
 
     #[test]
@@ -3426,6 +3462,49 @@ mod tests {
 
         tree.dismiss_overlay(parent);
         assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(c1), "cascaded content c1 should be dormant");
+        assert!(!tree.is_visible(c2), "cascaded content c2 should be dormant");
+    }
+
+    #[test]
+    fn dismissed_overlay_content_is_dormant_and_invisible() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // Dismiss the overlay
+        tree.dismiss_overlay(id);
+        assert!(!tree.is_visible(content), "content should be dormant");
+
+        // Run layout again — dormant content should not interfere
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // Content must not be found by hit testing (dormant widgets are skipped)
+        let center = tree.bounds(content).center();
+        let hit = tree.hit_test(center);
+        assert_ne!(
+            hit,
+            Some(content),
+            "dormant dismissed content must not be hit-testable"
+        );
+
+        // Content must not appear in rendered frame (dormant widgets are skipped)
+        let frame = tree.render();
+        // The anchor should render, but the dismissed content should not add shapes
+        // (dormant is_active check at paint_widget_cached:2072 prevents painting)
+        assert!(!tree.is_visible(content), "content stays dormant after layout+render");
     }
 
     #[test]

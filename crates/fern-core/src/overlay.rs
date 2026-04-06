@@ -125,7 +125,8 @@ impl OverlayManager {
     }
 
     /// Dismiss an overlay and all its children (cascade).
-    pub fn dismiss(&mut self, id: OverlayId) {
+    /// Returns the content widget IDs of all dismissed overlays.
+    pub fn dismiss(&mut self, id: OverlayId) -> Vec<WidgetId> {
         // Collect IDs to dismiss: the target + all descendants
         let mut to_dismiss = vec![id];
         let mut i = 0;
@@ -138,23 +139,34 @@ impl OverlayManager {
             }
             i += 1;
         }
+        let dismissed_content: Vec<WidgetId> = self
+            .stack
+            .iter()
+            .filter(|o| to_dismiss.contains(&o.id))
+            .map(|o| o.content_id)
+            .collect();
         self.stack.retain(|o| !to_dismiss.contains(&o.id));
+        dismissed_content
     }
 
     /// Dismiss the topmost overlay (e.g., on Escape).
-    pub fn dismiss_top(&mut self) -> Option<OverlayId> {
+    /// Returns the overlay ID and content widget IDs of dismissed overlays.
+    pub fn dismiss_top(&mut self) -> Option<(OverlayId, Vec<WidgetId>)> {
         if let Some(overlay) = self.stack.last() {
             let id = overlay.id;
-            self.dismiss(id);
-            Some(id)
+            let content_ids = self.dismiss(id);
+            Some((id, content_ids))
         } else {
             None
         }
     }
 
     /// Dismiss all overlays.
-    pub fn dismiss_all(&mut self) {
+    /// Returns the content widget IDs of all dismissed overlays.
+    pub fn dismiss_all(&mut self) -> Vec<WidgetId> {
+        let content_ids: Vec<WidgetId> = self.stack.iter().map(|o| o.content_id).collect();
         self.stack.clear();
+        content_ids
     }
 
     /// Whether there are any active overlays.
@@ -201,14 +213,15 @@ impl OverlayManager {
 
     /// Handle a click-outside event: if the click is outside all overlays
     /// with ClickOutside dismiss behavior, dismiss them.
-    pub fn handle_click_outside(&mut self, point: Point) -> bool {
+    /// Returns the content widget IDs of dismissed overlays (empty if none).
+    pub fn handle_click_outside(&mut self, point: Point) -> Vec<WidgetId> {
         if self.stack.is_empty() {
-            return false;
+            return Vec::new();
         }
 
         // Check if the point is inside any overlay
         if self.hit_test(point).is_some() {
-            return false;
+            return Vec::new();
         }
 
         // Dismiss all overlays with ClickOutside behavior
@@ -220,13 +233,14 @@ impl OverlayManager {
             .collect();
 
         if to_dismiss.is_empty() {
-            return false;
+            return Vec::new();
         }
 
+        let mut all_dismissed = Vec::new();
         for id in to_dismiss {
-            self.dismiss(id);
+            all_dismissed.extend(self.dismiss(id));
         }
-        true
+        all_dismissed
     }
 
     /// Compute overlay positions based on anchor bounds.
@@ -386,7 +400,7 @@ mod tests {
         });
 
         let dismissed = mgr.dismiss_top();
-        assert_eq!(dismissed, Some(b));
+        assert_eq!(dismissed.map(|(id, _)| id), Some(b));
         assert_eq!(mgr.len(), 1);
     }
 
@@ -407,11 +421,11 @@ mod tests {
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
 
         // Click inside — no dismiss
-        assert!(!mgr.handle_click_outside(Point::new(50.0, 25.0)));
+        assert!(mgr.handle_click_outside(Point::new(50.0, 25.0)).is_empty());
         assert_eq!(mgr.len(), 1);
 
         // Click outside — dismissed
-        assert!(mgr.handle_click_outside(Point::new(500.0, 500.0)));
+        assert!(!mgr.handle_click_outside(Point::new(500.0, 500.0)).is_empty());
         assert!(mgr.is_empty());
     }
 
@@ -427,7 +441,7 @@ mod tests {
             parent_overlay: None,
         });
 
-        assert!(!mgr.handle_click_outside(Point::new(500.0, 500.0)));
+        assert!(mgr.handle_click_outside(Point::new(500.0, 500.0)).is_empty());
         assert_eq!(mgr.len(), 1);
     }
 

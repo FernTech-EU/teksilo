@@ -180,6 +180,8 @@ pub struct EventContext {
     pub(crate) idle_callbacks: Vec<crate::idle::IdleCallback>,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
+    /// Whether to dismiss all overlays (e.g., after menu item activation).
+    pub(crate) dismiss_all_overlays: bool,
     /// Request to capture or release the pointer.
     pub(crate) pointer_capture: Option<bool>,
 }
@@ -201,6 +203,7 @@ impl EventContext {
             idle_callbacks: Vec::new(),
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
+            dismiss_all_overlays: false,
             pointer_capture: None,
         }
     }
@@ -239,6 +242,11 @@ impl EventContext {
     /// Dismiss an overlay by ID.
     pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
         self.overlay_dismissals.push(id);
+    }
+
+    /// Dismiss all active overlays (e.g., after a menu item is activated).
+    pub fn dismiss_all_overlays(&mut self) {
+        self.dismiss_all_overlays = true;
     }
 
     /// Request an idle callback to be run during the next idle period.
