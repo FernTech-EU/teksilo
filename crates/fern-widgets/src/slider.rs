@@ -4,18 +4,15 @@
 //! Supports keyboard adjustment and accessibility.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{
-    DragRecognizer, GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent,
-};
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
-};
+use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::HandlerSet;
 use fern_tokens::{CornerRadius, Orientation};
 
 const TRACK_HEIGHT: f32 = 4.0;
@@ -30,11 +27,10 @@ pub struct Slider {
     step: Option<f32>,
     orientation: Orientation,
     enabled: bool,
-    hovered: Cell<bool>,
-    dragging: Cell<bool>,
-    focus_origin: Option<FocusOrigin>,
-    drag_recognizer: DragRecognizer,
-    cached_bounds: Cell<Rect>,
+    hovered: Rc<Cell<bool>>,
+    dragging: Rc<Cell<bool>>,
+    focus_origin: Rc<Cell<Option<FocusOrigin>>>,
+    cached_bounds: Rc<Cell<Rect>>,
 }
 
 impl Slider {
@@ -46,11 +42,10 @@ impl Slider {
             step: None,
             orientation: Orientation::Horizontal,
             enabled: true,
-            hovered: Cell::new(false),
-            dragging: Cell::new(false),
-            focus_origin: None,
-            drag_recognizer: DragRecognizer::new(),
-            cached_bounds: Cell::new(Rect::ZERO),
+            hovered: Rc::new(Cell::new(false)),
+            dragging: Rc::new(Cell::new(false)),
+            focus_origin: Rc::new(Cell::new(None)),
+            cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
         }
     }
 
@@ -77,14 +72,6 @@ impl Slider {
         }
     }
 
-    /// Primary axis position from a pointer event.
-    fn primary_position(&self, x: f32, y: f32) -> f32 {
-        match self.orientation {
-            Orientation::Horizontal => x,
-            Orientation::Vertical => y,
-        }
-    }
-
     /// Primary axis start of bounds.
     fn primary_start(&self, bounds: Rect) -> f32 {
         match self.orientation {
@@ -107,38 +94,6 @@ impl Slider {
         self.primary_start(bounds) + THUMB_RADIUS + usable * self.normalized()
     }
 
-    fn is_on_thumb(&self, x: f32, y: f32, bounds: Rect) -> bool {
-        let pos = self.primary_position(x, y);
-        (pos - self.thumb_center(bounds)).abs() <= THUMB_RADIUS
-    }
-
-    fn set_value_from_position(&self, x: f32, y: f32, bounds: Rect) {
-        let pos = self.primary_position(x, y);
-        let usable = self.primary_length(bounds) - THUMB_RADIUS * 2.0;
-        if usable <= 0.0 {
-            return;
-        }
-        let t = ((pos - self.primary_start(bounds) - THUMB_RADIUS) / usable).clamp(0.0, 1.0);
-        let mut val = self.min + t * (self.max - self.min);
-
-        if let Some(step) = self.step
-            && step > 0.0
-        {
-            val = ((val - self.min) / step).round() * step + self.min;
-        }
-        self.value.set(val.clamp(self.min, self.max));
-    }
-
-    fn adjust_by_step(&self, positive: bool) {
-        let step = self.step.unwrap_or((self.max - self.min) * 0.01);
-        let current = self.value.get();
-        let new_val = if positive {
-            current + step
-        } else {
-            current - step
-        };
-        self.value.set(new_val.clamp(self.min, self.max));
-    }
 }
 
 impl std::fmt::Debug for Slider {
@@ -163,6 +118,197 @@ impl Widget for Slider {
             registry,
             fern_core::state::BindingLevel::RepaintOnly,
         );
+
+        let value = self.value.clone();
+        let min = self.min;
+        let max = self.max;
+        let step = self.step;
+        let orientation = self.orientation;
+        let enabled = self.enabled;
+        let hovered = self.hovered.clone();
+        let dragging = self.dragging.clone();
+        let focus_origin = self.focus_origin.clone();
+        let cached_bounds = self.cached_bounds.clone();
+
+        let adjust_by_step = {
+            let value = value.clone();
+            move |positive: bool| {
+                let s = step.unwrap_or((max - min) * 0.01);
+                let current = value.get();
+                let new_val = if positive { current + s } else { current - s };
+                value.set(new_val.clamp(min, max));
+            }
+        };
+
+        let set_value_from_position = {
+            let value = value.clone();
+            let cached_bounds = cached_bounds.clone();
+            move |x: f32, y: f32| {
+                let bounds = cached_bounds.get();
+                let pos = match orientation {
+                    Orientation::Horizontal => x,
+                    Orientation::Vertical => y,
+                };
+                let usable = match orientation {
+                    Orientation::Horizontal => bounds.width,
+                    Orientation::Vertical => bounds.height,
+                } - THUMB_RADIUS * 2.0;
+                if usable <= 0.0 {
+                    return;
+                }
+                let start = match orientation {
+                    Orientation::Horizontal => bounds.x,
+                    Orientation::Vertical => bounds.y,
+                };
+                let t = ((pos - start - THUMB_RADIUS) / usable).clamp(0.0, 1.0);
+                let mut val = min + t * (max - min);
+                if let Some(s) = step {
+                    if s > 0.0 {
+                        val = ((val - min) / s).round() * s + min;
+                    }
+                }
+                value.set(val.clamp(min, max));
+            }
+        };
+
+        let mut handlers = HandlerSet::new().focusable(enabled).cursor(CursorIcon::Pointer);
+
+        // Pointer event handler (drag to change value)
+        {
+            let dragging = dragging.clone();
+            let cached_bounds = cached_bounds.clone();
+            let value = value.clone();
+            let set_value = set_value_from_position.clone();
+            handlers = handlers.on_pointer_event(move |event, _ctx| {
+                if !enabled {
+                    return EventResponse::Ignored;
+                }
+                let bounds = cached_bounds.get();
+                match event {
+                    WidgetEvent::PointerDown { position, button } => {
+                        if *button == PointerButton::Primary {
+                            // Check if click is on the thumb
+                            let pos = match orientation {
+                                Orientation::Horizontal => position.x,
+                                Orientation::Vertical => position.y,
+                            };
+                            let usable = match orientation {
+                                Orientation::Horizontal => bounds.width,
+                                Orientation::Vertical => bounds.height,
+                            } - THUMB_RADIUS * 2.0;
+                            let start = match orientation {
+                                Orientation::Horizontal => bounds.x,
+                                Orientation::Vertical => bounds.y,
+                            };
+                            let range = max - min;
+                            let normalized = if range > 0.0 {
+                                ((value.get() - min) / range).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            let thumb_center = start + THUMB_RADIUS + usable * normalized;
+                            let on_thumb = (pos - thumb_center).abs() <= THUMB_RADIUS;
+                            if !on_thumb {
+                                set_value(position.x, position.y);
+                            }
+                            dragging.set(true);
+                        }
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::PointerUp { .. } => {
+                        dragging.set(false);
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::PointerMove { position } => {
+                        if dragging.get() {
+                            set_value(position.x, position.y);
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Hover handler
+        {
+            let hovered = hovered.clone();
+            handlers = handlers.on_hover(move |entered, _ctx| {
+                hovered.set(entered);
+            });
+        }
+
+        // Key handler
+        {
+            let adjust = adjust_by_step.clone();
+            let value = value.clone();
+            handlers = handlers.on_key(move |event, _ctx| {
+                if !enabled {
+                    return EventResponse::Ignored;
+                }
+                match event {
+                    WidgetEvent::KeyDown { key, .. } => match key {
+                        Key::ArrowRight | Key::ArrowUp => {
+                            adjust(true);
+                            EventResponse::Handled
+                        }
+                        Key::ArrowLeft | Key::ArrowDown => {
+                            adjust(false);
+                            EventResponse::Handled
+                        }
+                        Key::Home => {
+                            value.set(min);
+                            EventResponse::Handled
+                        }
+                        Key::End => {
+                            value.set(max);
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    },
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Focus handler
+        {
+            let focus_origin = focus_origin.clone();
+            let hovered_for_focus = hovered.clone();
+            handlers = handlers.on_focus(move |gained, _ctx| {
+                if gained {
+                    let origin = if hovered_for_focus.get() {
+                        FocusOrigin::Pointer
+                    } else {
+                        FocusOrigin::Keyboard
+                    };
+                    focus_origin.set(Some(origin));
+                } else {
+                    focus_origin.set(None);
+                }
+            });
+        }
+
+        // Access action handler
+        {
+            let adjust = adjust_by_step.clone();
+            handlers = handlers.on_access_action(move |action, _ctx| match action {
+                fern_core::accesskit::Action::Increment => {
+                    adjust(true);
+                    EventResponse::Handled
+                }
+                fern_core::accesskit::Action::Decrement => {
+                    adjust(false);
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            });
+        }
+
+        ctx.apply_self_handlers(handlers);
+
         Vec::new()
     }
 
@@ -257,7 +403,7 @@ impl Widget for Slider {
         canvas.fill_rounded_rect(thumb_rect, CornerRadius::uniform(THUMB_RADIUS), thumb_color);
 
         // Focus ring with offset so it's visible over the primary-colored thumb
-        if self.focus_origin == Some(FocusOrigin::Keyboard) {
+        if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
             let offset = 3.0;
             let ring_rect = Rect::new(
                 thumb_rect.x - offset,
@@ -272,107 +418,6 @@ impl Widget for Slider {
                 2.0,
             );
         }
-    }
-
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        if !self.enabled {
-            return EventResponse::Ignored;
-        }
-
-        let bounds = self.cached_bounds.get();
-
-        match event {
-            WidgetEvent::PointerDown { position, button } => {
-                self.drag_recognizer.process(&RawPointerEvent::Down {
-                    position: *position,
-                    button: *button,
-                });
-                if *button == PointerButton::Primary {
-                    if !self.is_on_thumb(position.x, position.y, bounds) {
-                        self.set_value_from_position(position.x, position.y, bounds);
-                    }
-                    // Both thumb and track clicks start a drag
-                    self.dragging.set(true);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerUp { position, button } => {
-                self.drag_recognizer.process(&RawPointerEvent::Up {
-                    position: *position,
-                    button: *button,
-                });
-                self.dragging.set(false);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerMove { position } => {
-                let result = self.drag_recognizer.process(&RawPointerEvent::Move {
-                    position: *position,
-                });
-                if self.dragging.get() {
-                    self.set_value_from_position(position.x, position.y, bounds);
-                }
-                match result {
-                    GestureResult::Recognized(GestureEvent::DragMoved { .. }) => {
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
-            }
-            WidgetEvent::PointerEnter => {
-                self.hovered.set(true);
-                ctx.set_cursor(CursorIcon::Pointer);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerLeave => {
-                self.hovered.set(false);
-                self.drag_recognizer.reset();
-                ctx.set_cursor(CursorIcon::Default);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyDown { key, .. } => match key {
-                Key::ArrowRight | Key::ArrowUp => {
-                    self.adjust_by_step(true);
-                    EventResponse::Handled
-                }
-                Key::ArrowLeft | Key::ArrowDown => {
-                    self.adjust_by_step(false);
-                    EventResponse::Handled
-                }
-                Key::Home => {
-                    self.value.set(self.min);
-                    EventResponse::Handled
-                }
-                Key::End => {
-                    self.value.set(self.max);
-                    EventResponse::Handled
-                }
-                _ => EventResponse::Ignored,
-            },
-            WidgetEvent::FocusGained { origin } => {
-                self.focus_origin = Some(*origin);
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusLost => {
-                self.focus_origin = None;
-                EventResponse::Handled
-            }
-            WidgetEvent::AccessAction { action, .. } => match *action {
-                fern_core::accesskit::Action::Increment => {
-                    self.adjust_by_step(true);
-                    EventResponse::Handled
-                }
-                fern_core::accesskit::Action::Decrement => {
-                    self.adjust_by_step(false);
-                    EventResponse::Handled
-                }
-                _ => EventResponse::Ignored,
-            },
-            _ => EventResponse::Ignored,
-        }
-    }
-
-    fn is_focusable(&self) -> bool {
-        self.enabled
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

@@ -1,14 +1,13 @@
 //! BuildContext — context available during Widget::build().
 //!
-//! This module provides the `BuildContext` used by both V1 composites
-//! and V2 widgets during their `build()` method. It offers Signal-based
-//! APIs alongside the legacy State-based APIs.
+//! Provides Signal-based APIs for creating reactive state, registering
+//! effects, and adding child widgets during the build lifecycle.
 
 use crate::signal::{ObserverHandle, Signal};
 use crate::state::{BindingRegistry, State};
 use crate::widget_id::WidgetId;
 
-/// Context available during Widget::build() or CompositeWidget::build().
+/// Context available during Widget::build().
 pub struct BuildContext<'a> {
     pub(crate) tree: &'a mut crate::widget_tree::WidgetTree,
     pub(crate) composite_id: Option<WidgetId>,
@@ -24,9 +23,9 @@ impl<'a> BuildContext<'a> {
             .expect("self_id() called outside of build()")
     }
 
-    /// Add any widget to the tree.
-    pub fn add(&mut self, widget: impl crate::widget::IntoWidgetTree) -> WidgetId {
-        self.tree.add_widget(widget)
+    /// Add a widget to the tree.
+    pub fn add(&mut self, widget: impl crate::widget::Widget + 'static) -> WidgetId {
+        self.tree.add(widget)
     }
 
     /// Add a pre-boxed widget to the tree.
@@ -128,5 +127,13 @@ impl<'a> BuildContext<'a> {
         delay: std::time::Duration,
     ) {
         self.tree.attach_tooltip(anchor_id, content_id, delay);
+    }
+
+    /// Apply a `HandlerSet` to the composite widget being built (self).
+    /// This transfers attached event handlers, focusable flag, cursor, etc.
+    /// to the widget's arena node, replacing `event()` and `is_focusable()` overrides.
+    pub fn apply_self_handlers(&mut self, handler_set: crate::widget_builder::HandlerSet) {
+        let id = self.self_id();
+        self.tree.apply_handler_set(id, handler_set);
     }
 }

@@ -67,14 +67,14 @@ pub struct WidgetNode {
     // --- V2 fields ---
     /// Attached event handlers (V2). Checked before widget.event() during dispatch.
     pub(crate) handlers: EventHandlers,
-    #[allow(dead_code)] // V2 API: focusable override, takes precedence over widget.is_focusable()
-    pub(crate) v2_focusable: Option<bool>,
-    #[allow(dead_code)] // V2 API: tab index override
-    pub(crate) v2_tab_index: Option<i32>,
+    /// Focusable override set via HandlerSet. Takes precedence over widget.is_focusable().
+    pub(crate) node_focusable: Option<bool>,
+    /// Tab index override set via HandlerSet.
+    pub(crate) node_tab_index: Option<i32>,
     #[allow(dead_code)] // V2 API: spacer flag, set by Spacer during insertion
-    pub(crate) v2_is_spacer: bool,
-    #[allow(dead_code)] // V2 API: cursor override
-    pub(crate) v2_cursor: Option<CursorIcon>,
+    pub(crate) node_is_spacer: bool,
+    /// Cursor override set via HandlerSet.
+    pub(crate) node_cursor: Option<CursorIcon>,
     /// Whether build() returned children (for rebuild on environment change).
     pub(crate) has_built_children: bool,
     /// RAII observer handles for effects registered during build().
@@ -142,10 +142,10 @@ impl WidgetArena {
             clips_children: false,
             cached_paint: None,
             handlers: EventHandlers::new(),
-            v2_focusable: None,
-            v2_tab_index: None,
-            v2_is_spacer: false,
-            v2_cursor: None,
+            node_focusable: None,
+            node_tab_index: None,
+            node_is_spacer: false,
+            node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),
         });
@@ -183,10 +183,10 @@ impl WidgetArena {
             clips_children: false,
             cached_paint: None,
             handlers: EventHandlers::new(),
-            v2_focusable: None,
-            v2_tab_index: None,
-            v2_is_spacer: false,
-            v2_cursor: None,
+            node_focusable: None,
+            node_tab_index: None,
+            node_is_spacer: false,
+            node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),
         });
@@ -390,6 +390,30 @@ impl WidgetArena {
     pub fn set_clips_children(&mut self, id: WidgetId, clips: bool) {
         if let Some(node) = self.get_mut(id) {
             node.clips_children = clips;
+        }
+    }
+
+    /// Apply a `HandlerSet` to an existing node, transferring handlers and metadata.
+    /// Called from `BuildContext::apply_self_handlers()` during `build()`.
+    pub(crate) fn apply_handler_set(
+        &mut self,
+        id: WidgetId,
+        handler_set: crate::widget_builder::HandlerSet,
+    ) {
+        if let Some(node) = self.get_mut(id) {
+            node.handlers = handler_set.handlers;
+            if let Some(focusable) = handler_set.focusable {
+                node.node_focusable = Some(focusable);
+            }
+            if let Some(tab_index) = handler_set.tab_index {
+                node.node_tab_index = Some(tab_index);
+            }
+            if let Some(cursor) = handler_set.cursor {
+                node.node_cursor = Some(cursor);
+            }
+            if let Some(clips) = handler_set.clips_children {
+                node.clips_children = clips;
+            }
         }
     }
 

@@ -7,7 +7,8 @@ use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
@@ -295,6 +296,165 @@ impl Widget for ScrollArea {
             .bind_to(self_id, registry, BindingLevel::Relayout);
 
         self.child_ids = ids.clone();
+
+        // Set up handlers
+        let scroll_y = self.scroll_y.clone();
+        let scroll_x = self.scroll_x.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let max_scroll_x = self.max_scroll_x.clone();
+        let viewport_size = self.viewport_size.clone();
+        let line_height = self.line_height;
+        let smooth_scrolling = self.smooth_scrolling;
+        let smooth_scroll_duration = self.smooth_scroll_duration;
+
+        let clamp_and_set = {
+            let scroll_y = scroll_y.clone();
+            let scroll_x = scroll_x.clone();
+            let max_scroll_y = max_scroll_y.clone();
+            let max_scroll_x = max_scroll_x.clone();
+            move || {
+                let max_y = max_scroll_y.get();
+                let max_x = max_scroll_x.get();
+                let cur_y = scroll_y.get();
+                let cur_x = scroll_x.get();
+                let clamped_y = cur_y.clamp(0.0, max_y);
+                let clamped_x = cur_x.clamp(0.0, max_x);
+                if (clamped_y - cur_y).abs() > f32::EPSILON {
+                    scroll_y.set(clamped_y);
+                }
+                if (clamped_x - cur_x).abs() > f32::EPSILON {
+                    scroll_x.set(clamped_x);
+                }
+            }
+        };
+
+        let mut handlers = HandlerSet::new().clips_children(true);
+
+        // Scroll handler (handles both Scroll and ScrollIntoView)
+        {
+            let scroll_y = scroll_y.clone();
+            let scroll_x = scroll_x.clone();
+            let max_scroll_y = max_scroll_y.clone();
+            let max_scroll_x = max_scroll_x.clone();
+            let viewport_size = viewport_size.clone();
+            let clamp_and_set = clamp_and_set.clone();
+            handlers = handlers.on_scroll(move |event, _ctx| {
+                match event {
+                    WidgetEvent::Scroll { delta, .. } => {
+                        let max_y = max_scroll_y.get();
+                        let max_x = max_scroll_x.get();
+                        let cur_y = scroll_y.get();
+                        let cur_x = scroll_x.get();
+
+                        match delta {
+                            ScrollDelta::Lines { x, y } => {
+                                let base_y = scroll_y.animation_target().unwrap_or(cur_y);
+                                let base_x = scroll_x.animation_target().unwrap_or(cur_x);
+                                let target_y = (base_y + y * line_height).clamp(0.0, max_y);
+                                let target_x = (base_x + x * line_height).clamp(0.0, max_x);
+                                if smooth_scrolling {
+                                    scroll_y.animate_to(
+                                        target_y,
+                                        smooth_scroll_duration,
+                                        Easing::EaseOut,
+                                    );
+                                    scroll_x.animate_to(
+                                        target_x,
+                                        smooth_scroll_duration,
+                                        Easing::EaseOut,
+                                    );
+                                } else {
+                                    scroll_y.set(target_y);
+                                    scroll_x.set(target_x);
+                                }
+                            }
+                            ScrollDelta::Pixels { x, y } => {
+                                scroll_y.set(cur_y + y);
+                                scroll_x.set(cur_x + x);
+                                clamp_and_set();
+                            }
+                        }
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::ScrollIntoView {
+                        target_bounds,
+                        margin,
+                    } => {
+                        let vp = viewport_size.get();
+                        let sy = scroll_y.get();
+                        let sx = scroll_x.get();
+
+                        let viewport_top = sy;
+                        let viewport_bottom = viewport_top + vp.height;
+                        let target_top = target_bounds.y + sy - margin;
+                        let target_bottom = target_top + target_bounds.height + margin * 2.0;
+
+                        let mut new_y = sy;
+                        if target_top < viewport_top {
+                            new_y = target_top;
+                        } else if target_bottom > viewport_bottom {
+                            new_y = target_bottom - vp.height;
+                        }
+
+                        let viewport_left = sx;
+                        let viewport_right = viewport_left + vp.width;
+                        let target_left = target_bounds.x + sx - margin;
+                        let target_right = target_left + target_bounds.width + margin * 2.0;
+
+                        let mut new_x = sx;
+                        if target_left < viewport_left {
+                            new_x = target_left;
+                        } else if target_right > viewport_right {
+                            new_x = target_right - vp.width;
+                        }
+
+                        scroll_y.set(new_y);
+                        scroll_x.set(new_x);
+                        clamp_and_set();
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Access action handler
+        {
+            let scroll_y = scroll_y.clone();
+            let scroll_x = scroll_x.clone();
+            let viewport_size = viewport_size.clone();
+            let clamp_and_set = clamp_and_set.clone();
+            handlers = handlers.on_access_action(move |action, _ctx| match action {
+                fern_core::accesskit::Action::ScrollDown => {
+                    let step = viewport_size.get().height * 0.9;
+                    scroll_y.set(scroll_y.get() + step);
+                    clamp_and_set();
+                    EventResponse::Handled
+                }
+                fern_core::accesskit::Action::ScrollUp => {
+                    let step = viewport_size.get().height * 0.9;
+                    scroll_y.set(scroll_y.get() - step);
+                    clamp_and_set();
+                    EventResponse::Handled
+                }
+                fern_core::accesskit::Action::ScrollRight => {
+                    let step = viewport_size.get().width * 0.9;
+                    scroll_x.set(scroll_x.get() + step);
+                    clamp_and_set();
+                    EventResponse::Handled
+                }
+                fern_core::accesskit::Action::ScrollLeft => {
+                    let step = viewport_size.get().width * 0.9;
+                    scroll_x.set(scroll_x.get() - step);
+                    clamp_and_set();
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            });
+        }
+
+        ctx.apply_self_handlers(handlers);
+
         ids
     }
 
@@ -476,123 +636,8 @@ impl Widget for ScrollArea {
         // ScrollBar child widgets handle all painting in both modes.
     }
 
-    fn event(&mut self, event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        match event {
-            WidgetEvent::Scroll { delta, .. } => {
-                let max_y = self.max_scroll_y.get();
-                let max_x = self.max_scroll_x.get();
-                let cur_y = self.scroll_y.get();
-                let cur_x = self.scroll_x.get();
-
-                match delta {
-                    ScrollDelta::Lines { x, y } => {
-                        // Use the animation target (if mid-flight) so rapid wheel
-                        // notches accumulate correctly instead of losing distance.
-                        let base_y = self.scroll_y.animation_target().unwrap_or(cur_y);
-                        let base_x = self.scroll_x.animation_target().unwrap_or(cur_x);
-                        let target_y = (base_y + y * self.line_height).clamp(0.0, max_y);
-                        let target_x = (base_x + x * self.line_height).clamp(0.0, max_x);
-                        if self.smooth_scrolling {
-                            self.scroll_y.animate_to(
-                                target_y,
-                                self.smooth_scroll_duration,
-                                Easing::EaseOut,
-                            );
-                            self.scroll_x.animate_to(
-                                target_x,
-                                self.smooth_scroll_duration,
-                                Easing::EaseOut,
-                            );
-                        } else {
-                            self.scroll_y.set(target_y);
-                            self.scroll_x.set(target_x);
-                        }
-                    }
-                    ScrollDelta::Pixels { x, y } => {
-                        // Trackpad pixel deltas are already smooth — apply directly
-                        self.scroll_y.set(cur_y + y);
-                        self.scroll_x.set(cur_x + x);
-                        self.clamp_and_set_scroll();
-                    }
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::ScrollIntoView {
-                target_bounds,
-                margin,
-            } => {
-                let vp = self.viewport_size.get();
-                let scroll_y = self.scroll_y.get();
-                let scroll_x = self.scroll_x.get();
-
-                // Vertical: scroll minimum amount to make target + margin visible
-                let viewport_top = scroll_y;
-                let viewport_bottom = viewport_top + vp.height;
-                let target_top = target_bounds.y + scroll_y - margin;
-                let target_bottom = target_top + target_bounds.height + margin * 2.0;
-
-                let mut new_y = scroll_y;
-                if target_top < viewport_top {
-                    new_y = target_top;
-                } else if target_bottom > viewport_bottom {
-                    new_y = target_bottom - vp.height;
-                }
-
-                // Horizontal: same logic
-                let viewport_left = scroll_x;
-                let viewport_right = viewport_left + vp.width;
-                let target_left = target_bounds.x + scroll_x - margin;
-                let target_right = target_left + target_bounds.width + margin * 2.0;
-
-                let mut new_x = scroll_x;
-                if target_left < viewport_left {
-                    new_x = target_left;
-                } else if target_right > viewport_right {
-                    new_x = target_right - vp.width;
-                }
-
-                self.scroll_y.set(new_y);
-                self.scroll_x.set(new_x);
-                self.clamp_and_set_scroll();
-                EventResponse::Handled
-            }
-            WidgetEvent::AccessAction { action, .. } => match *action {
-                fern_core::accesskit::Action::ScrollDown => {
-                    let step = self.viewport_size.get().height * 0.9;
-                    self.scroll_y.set(self.scroll_y.get() + step);
-                    self.clamp_and_set_scroll();
-                    EventResponse::Handled
-                }
-                fern_core::accesskit::Action::ScrollUp => {
-                    let step = self.viewport_size.get().height * 0.9;
-                    self.scroll_y.set(self.scroll_y.get() - step);
-                    self.clamp_and_set_scroll();
-                    EventResponse::Handled
-                }
-                fern_core::accesskit::Action::ScrollRight => {
-                    let step = self.viewport_size.get().width * 0.9;
-                    self.scroll_x.set(self.scroll_x.get() + step);
-                    self.clamp_and_set_scroll();
-                    EventResponse::Handled
-                }
-                fern_core::accesskit::Action::ScrollLeft => {
-                    let step = self.viewport_size.get().width * 0.9;
-                    self.scroll_x.set(self.scroll_x.get() - step);
-                    self.clamp_and_set_scroll();
-                    EventResponse::Handled
-                }
-                _ => EventResponse::Ignored,
-            },
-            _ => EventResponse::Ignored,
-        }
-    }
-
     fn children(&self) -> Vec<WidgetId> {
         self.child_ids.clone()
-    }
-
-    fn clips_children(&self) -> bool {
-        true
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -745,7 +790,7 @@ mod tests {
         let mut tree = WidgetTree::new();
 
         let content = TallLeaf::new(200.0, 500.0);
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(content)
                 .scroll_bar_style(ScrollBarStyle::Permanent)
                 .scroll_bar_thickness(12.0),
@@ -765,7 +810,7 @@ mod tests {
 
         let leaf = TallLeaf::new(180.0, 500.0);
         let scroll =
-            tree.add_widget(ScrollArea::new(leaf).scroll_bar_style(ScrollBarStyle::Permanent));
+            tree.add(ScrollArea::new(leaf).scroll_bar_style(ScrollBarStyle::Permanent));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -811,7 +856,7 @@ mod tests {
     fn scroll_area_new_accepts_inline_widget() {
         let mut tree = WidgetTree::new();
         // Test the new API: pass widget directly, not a WidgetId
-        let scroll = tree.add_widget(ScrollArea::new(TallLeaf::new(200.0, 500.0)));
+        let scroll = tree.add(ScrollArea::new(TallLeaf::new(200.0, 500.0)));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -843,7 +888,7 @@ mod tests {
     fn permanent_horizontal_scrollbar_present() {
         let mut tree = WidgetTree::new();
         // Content wider and taller than viewport
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(WideLeaf::new(400.0, 500.0))
                 .scroll_bar_style(ScrollBarStyle::Permanent)
                 .scroll_bar_thickness(12.0),
@@ -889,7 +934,7 @@ mod tests {
     fn permanent_no_horizontal_when_content_fits() {
         let mut tree = WidgetTree::new();
         // Content taller but NOT wider than viewport (accounting for v_sb)
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(TallLeaf::new(180.0, 500.0))
                 .scroll_bar_style(ScrollBarStyle::Permanent)
                 .scroll_bar_thickness(12.0),
@@ -913,7 +958,7 @@ mod tests {
     #[test]
     fn overlay_scrollbar_does_not_reduce_viewport() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(WideLeaf::new(400.0, 500.0)).scroll_bar_style(ScrollBarStyle::Overlay),
         );
 
@@ -956,7 +1001,7 @@ mod tests {
     #[test]
     fn horizontal_scroll_via_wheel() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(WideLeaf::new(400.0, 100.0))
                 .scroll_bar_style(ScrollBarStyle::Permanent)
                 .scroll_bar_thickness(12.0),
@@ -987,7 +1032,7 @@ mod tests {
     #[test]
     fn vertical_scrollbar_always_off_hides_scrollbar() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(TallLeaf::new(200.0, 500.0))
                 .scroll_bar_style(ScrollBarStyle::Permanent)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
@@ -1022,7 +1067,7 @@ mod tests {
     #[test]
     fn horizontal_scrollbar_always_off_hides_scrollbar() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(WideLeaf::new(400.0, 500.0))
                 .scroll_bar_style(ScrollBarStyle::Permanent)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
@@ -1053,7 +1098,7 @@ mod tests {
     fn scrollbar_always_on_shows_even_when_content_fits() {
         let mut tree = WidgetTree::new();
         // Content fits in viewport — normally scrollbar would hide
-        let scroll = tree.add_widget(
+        let scroll = tree.add(
             ScrollArea::new(TallLeaf::new(100.0, 50.0))
                 .scroll_bar_style(ScrollBarStyle::Permanent)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOn)
@@ -1079,7 +1124,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         // Content is 100x50, viewport is 200x100
         let scroll =
-            tree.add_widget(ScrollArea::new(TallLeaf::new(100.0, 50.0)).widget_resizable(true));
+            tree.add(ScrollArea::new(TallLeaf::new(100.0, 50.0)).widget_resizable(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1103,7 +1148,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         // Content is larger than viewport
         let scroll =
-            tree.add_widget(ScrollArea::new(WideLeaf::new(400.0, 500.0)).widget_resizable(true));
+            tree.add(ScrollArea::new(WideLeaf::new(400.0, 500.0)).widget_resizable(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1127,7 +1172,7 @@ mod tests {
     fn smooth_scrolling_line_events_use_animation() {
         let mut tree = WidgetTree::new();
         let scroll =
-            tree.add_widget(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(true));
+            tree.add(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1166,7 +1211,7 @@ mod tests {
     fn smooth_scrolling_disabled_jumps_immediately() {
         let mut tree = WidgetTree::new();
         let scroll =
-            tree.add_widget(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(false));
+            tree.add(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(false));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1193,7 +1238,7 @@ mod tests {
     fn preferred_size_overrides_default() {
         let mut tree = WidgetTree::new();
         let scroll = tree
-            .add_widget(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
+            .add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
         // With unconstrained proposal, should use preferred size
         tree.layout(SizeProposal {
             width: None,
@@ -1216,7 +1261,7 @@ mod tests {
     fn constrained_proposal_overrides_preferred_size() {
         let mut tree = WidgetTree::new();
         let scroll = tree
-            .add_widget(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
+            .add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
         // With constrained proposal, the proposal wins
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let bounds = tree.bounds(scroll);

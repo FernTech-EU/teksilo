@@ -6,19 +6,15 @@
 //!   Unchecked → Checked → Indeterminate → Unchecked. Useful for tree views
 //!   where a parent represents partially-selected children.
 //!
-//! Follows the Button pattern: Widget with TapRecognizer,
-//! InteractionState-driven reactive colors, and accessibility.
+//! V2 attached handlers — no event() override.
 
 use fern_canvas::{Path, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
-};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
 
@@ -116,8 +112,6 @@ pub struct Checkbox {
     enabled: bool,
     tooltip_text: Option<String>,
     interaction: Option<Signal<InteractionState>>,
-    focus_origin: Option<FocusOrigin>,
-    tap_recognizer: TapRecognizer,
     root_child_id: Option<WidgetId>,
 }
 
@@ -130,8 +124,6 @@ impl Checkbox {
             enabled: true,
             tooltip_text: None,
             interaction: None,
-            focus_origin: None,
-            tap_recognizer: TapRecognizer::new(),
             root_child_id: None,
         }
     }
@@ -147,8 +139,6 @@ impl Checkbox {
             enabled: true,
             tooltip_text: None,
             interaction: None,
-            focus_origin: None,
-            tap_recognizer: TapRecognizer::new(),
             root_child_id: None,
         }
     }
@@ -168,25 +158,8 @@ impl Checkbox {
         self
     }
 
-    fn toggle(&self) {
-        self.kind.toggle();
-    }
-
     fn check_state(&self) -> CheckState {
         self.kind.check_state()
-    }
-
-    fn set_interaction(&self, state: InteractionState) {
-        if let Some(ref s) = self.interaction {
-            s.set(state);
-        }
-    }
-
-    fn interaction_state(&self) -> InteractionState {
-        self.interaction
-            .as_ref()
-            .map(|s| s.get())
-            .unwrap_or(InteractionState::Idle)
     }
 }
 
@@ -262,8 +235,9 @@ impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let kind = self.kind.clone();
+        let enabled = self.enabled;
 
-        let interaction = ctx.signal(if self.enabled {
+        let interaction = ctx.signal(if enabled {
             InteractionState::Idle
         } else {
             InteractionState::Disabled
@@ -380,6 +354,87 @@ impl Widget for Checkbox {
         }
 
         self.root_child_id = Some(root_id);
+
+        // --- V2 attached handlers ---
+        let kind_tap = self.kind.clone();
+        let kind_key = self.kind.clone();
+        let kind_access = self.kind.clone();
+        let int_tap = interaction.clone();
+        let int_hover = interaction.clone();
+        let int_key = interaction.clone();
+        let int_focus = interaction.clone();
+
+        let handler_set = HandlerSet::new()
+            .on_tap({
+                move |_ctx: &mut EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    kind_tap.toggle();
+                    int_tap.set(InteractionState::Hovered);
+                }
+            })
+            .on_hover({
+                move |entered: bool, _ctx: &mut EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    if entered {
+                        int_hover.set(InteractionState::Hovered);
+                    } else {
+                        int_hover.set(InteractionState::Idle);
+                    }
+                }
+            })
+            .on_key({
+                move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
+                    if !enabled {
+                        return EventResponse::Ignored;
+                    }
+                    match event {
+                        WidgetEvent::KeyDown {
+                            key: Key::Space, ..
+                        } => {
+                            int_key.set(InteractionState::Pressed);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyUp {
+                            key: Key::Space, ..
+                        } => {
+                            kind_key.toggle();
+                            int_key.set(InteractionState::Focused);
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                }
+            })
+            .on_focus({
+                move |gained: bool, _ctx: &mut EventContext| {
+                    if gained {
+                        if int_focus.get() == InteractionState::Idle {
+                            int_focus.set(InteractionState::Focused);
+                        }
+                    } else {
+                        int_focus.set(InteractionState::Idle);
+                    }
+                }
+            })
+            .on_access_action({
+                move |action: fern_core::accesskit::Action, _ctx: &mut EventContext| -> EventResponse {
+                    if action == fern_core::accesskit::Action::Click && enabled {
+                        kind_access.toggle();
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                }
+            })
+            .focusable(enabled)
+            .cursor(CursorIcon::Pointer);
+
+        ctx.apply_self_handlers(handler_set);
+
         vec![root_id]
     }
 
@@ -403,89 +458,6 @@ impl Widget for Checkbox {
             child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
             child.size = Size::new(bounds.width, bounds.height);
         }
-    }
-
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        if !self.enabled {
-            return EventResponse::Ignored;
-        }
-
-        match event {
-            WidgetEvent::PointerDown { position, button } => {
-                self.set_interaction(InteractionState::Pressed);
-                self.tap_recognizer.process(&RawPointerEvent::Down {
-                    position: *position,
-                    button: *button,
-                });
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerUp { position, button } => {
-                let result = self.tap_recognizer.process(&RawPointerEvent::Up {
-                    position: *position,
-                    button: *button,
-                });
-                if matches!(result, GestureResult::Recognized(GestureEvent::Tap { .. })) {
-                    self.toggle();
-                }
-                self.set_interaction(InteractionState::Hovered);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerMove { position } => {
-                self.tap_recognizer.process(&RawPointerEvent::Move {
-                    position: *position,
-                });
-                EventResponse::Ignored
-            }
-            WidgetEvent::PointerEnter => {
-                self.set_interaction(InteractionState::Hovered);
-                ctx.set_cursor(CursorIcon::Pointer);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerLeave => {
-                self.set_interaction(InteractionState::Idle);
-                self.tap_recognizer.reset();
-                ctx.set_cursor(CursorIcon::Default);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyDown {
-                key: Key::Space, ..
-            } => {
-                self.set_interaction(InteractionState::Pressed);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyUp {
-                key: Key::Space, ..
-            } => {
-                self.toggle();
-                self.set_interaction(InteractionState::Focused);
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusGained { origin } => {
-                self.focus_origin = Some(*origin);
-                if self.interaction_state() == InteractionState::Idle {
-                    self.set_interaction(InteractionState::Focused);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusLost => {
-                self.focus_origin = None;
-                self.set_interaction(InteractionState::Idle);
-                EventResponse::Handled
-            }
-            WidgetEvent::AccessAction { action, .. } => {
-                if *action == fern_core::accesskit::Action::Click {
-                    self.toggle();
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-            _ => EventResponse::Ignored,
-        }
-    }
-
-    fn is_focusable(&self) -> bool {
-        self.enabled
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

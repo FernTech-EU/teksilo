@@ -54,8 +54,6 @@ pub struct WidgetTree {
     animated_states: Vec<crate::state::State<f32>>,
     /// V2 Signals registered for animation.
     animated_signals: Vec<crate::signal::Signal<f32>>,
-    /// IDs of composite widget adapters (for rebuild on theme/environment change).
-    composite_ids: Vec<WidgetId>,
     /// Observer cleanup: functions to remove observers registered during build().
     /// Keyed by composite adapter ID. Cleared and re-populated on each rebuild.
     observer_cleanups: std::collections::HashMap<WidgetId, Vec<Box<dyn Fn()>>>,
@@ -101,7 +99,6 @@ impl WidgetTree {
             overlay_manager: crate::overlay::OverlayManager::new(),
             tooltips: Vec::new(),
             layout_direction: crate::environment::LayoutDirection::default(),
-            composite_ids: Vec::new(),
             observer_cleanups: std::collections::HashMap::new(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_states: Vec::new(),
@@ -227,13 +224,13 @@ impl WidgetTree {
         self.hovered = None;
         self.focus_origin = None;
         self.tooltips.clear();
-        self.rebuild_v2_widgets();
+        self.rebuild_built_widgets();
         self.arena.mark_all_dirty();
     }
 
     /// Reconstruct all V2 widgets that have `has_built_children == true`.
     /// Called when the environment changes (theme switch, locale switch).
-    fn rebuild_v2_widgets(&mut self) {
+    fn rebuild_built_widgets(&mut self) {
         let ids: Vec<WidgetId> = self
             .arena
             .active_ids()
@@ -291,6 +288,17 @@ impl WidgetTree {
     /// Mark a widget as clipping its children to its bounds (scroll areas).
     pub fn set_clips_children(&mut self, id: WidgetId, clips: bool) {
         self.arena.set_clips_children(id, clips);
+    }
+
+    /// Apply a `HandlerSet` to an existing node in the arena.
+    /// Used by `BuildContext::apply_self_handlers()` to attach handlers
+    /// from within `build()`.
+    pub(crate) fn apply_handler_set(
+        &mut self,
+        id: WidgetId,
+        handler_set: crate::widget_builder::HandlerSet,
+    ) {
+        self.arena.apply_handler_set(id, handler_set);
     }
 
     /// Set a per-child alignment override on a widget.
@@ -401,47 +409,33 @@ impl WidgetTree {
 
     // --- Widget insertion ---
 
-    /// Add a root-level Level 2 widget to the tree.
-    /// Add any widget (Level 1 composite or Level 2 direct) to the tree.
-    /// This is the single entry point — the `IntoWidgetTree` trait routes
-    /// to the correct insertion path automatically.
-    pub fn add_widget(&mut self, widget: impl crate::widget::IntoWidgetTree) -> WidgetId {
-        Box::new(widget).register(self)
-    }
-
-    /// Insert a pre-boxed Widget directly. Used by the `IntoWidgetTree` blanket impl.
-    /// Automatically resolves deferred (inline) children, registers reactive bindings,
-    /// and processes builder-style `visible_when` / `enabled_when` metadata.
-    pub fn add_widget_direct(&mut self, mut widget: Box<dyn Widget>) -> WidgetId {
-        // 1. Resolve any deferred children before inserting this widget (V1 path).
-        let pending = widget.take_pending_children();
-        if !pending.is_empty() {
-            let resolved_ids: Vec<WidgetId> = pending
-                .into_iter()
-                .map(|child| match child {
-                    crate::widget::PendingChild::Id(id) => id,
-                    crate::widget::PendingChild::Deferred(w) => self.add_boxed(w),
-                })
-                .collect();
-            widget.set_resolved_children(resolved_ids);
-        }
-
-        // 2. Extract builder-style visibility/enabled metadata before inserting.
-        let vis_state = widget.take_visible_when();
-        let ena_state = widget.take_enabled_when();
-
-        // 3. Insert into the arena (this wires parent-child via widget.children()).
+    /// Internal: insert a widget, call build(), wire children, register clips.
+    fn insert_widget(&mut self, widget: Box<dyn Widget>) -> WidgetId {
+        // 1. Insert into the arena.
         let id = self.arena.insert(widget);
 
-        // 3b. V2 build() path — call build() to resolve pending children.
-        //     If build() returns children, wire them up and mark for future rebuild.
+        // 1b. Extract V2 attached handlers from WidgetWithHandlers wrapper.
+        {
+            if let Some(mut widget_box) = self.arena.take_widget(id) {
+                if let Some(handler_set) = widget_box.take_handler_set() {
+                    self.arena.restore_widget(id, widget_box);
+                    if let Some(node) = self.arena.get_mut(id) {
+                        node.handlers = handler_set.handlers;
+                        node.node_focusable = handler_set.focusable;
+                        node.node_tab_index = handler_set.tab_index;
+                        node.node_cursor = handler_set.cursor;
+                    }
+                } else {
+                    self.arena.restore_widget(id, widget_box);
+                }
+            }
+        }
+
+        // 2. Call build() — resolve pending children and effects.
         {
             let mut widget_box = match self.arena.take_widget(id) {
                 Some(w) => w,
-                None => {
-                    // Should not happen, but return id gracefully.
-                    return id;
-                }
+                None => return id,
             };
             let mut build_ctx = crate::build_context::BuildContext {
                 tree: self,
@@ -467,36 +461,13 @@ impl WidgetTree {
             }
         }
 
-        // 4. Register reactive property bindings, animated states/signals, and clips_children.
+        // 3. Set clips_children from widget trait method.
         let clips = self
             .arena
             .get(id)
             .is_some_and(|n| n.widget.clips_children());
-        let (anim_states, anim_signals) = if let Some(node) = self.arena.get(id) {
-            node.widget.register_bindings(id, &self.binding_registry);
-            (
-                node.widget.animated_states(),
-                node.widget.animated_signals(),
-            )
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        for state in anim_states {
-            self.register_animated_state(&state);
-        }
-        for signal in anim_signals {
-            self.register_animated_signal(&signal);
-        }
         if clips {
             self.arena.set_clips_children(id, true);
-        }
-
-        // 5. Apply deferred visible_when / enabled_when.
-        if let Some(state) = vis_state {
-            self.visible_when(id, state);
-        }
-        if let Some(state) = ena_state {
-            self.enabled_when(id, state);
         }
 
         id
@@ -504,41 +475,39 @@ impl WidgetTree {
 
     /// Add a widget to the tree.
     pub fn add(&mut self, widget: impl Widget + 'static) -> WidgetId {
-        self.add_widget_direct(Box::new(widget))
+        self.insert_widget(Box::new(widget))
     }
 
     /// Add a pre-boxed widget to the tree.
     pub fn add_boxed(&mut self, widget: Box<dyn Widget>) -> WidgetId {
-        self.add_widget_direct(widget)
+        self.insert_widget(widget)
     }
 
     /// Add a widget as a child of another widget.
-    /// Routes through the full insertion pipeline (pending children,
-    /// binding registration, visible_when/enabled_when).
     pub fn add_child(&mut self, parent: WidgetId, widget: impl Widget + 'static) -> WidgetId {
-        let mut boxed: Box<dyn Widget> = Box::new(widget);
+        let boxed: Box<dyn Widget> = Box::new(widget);
 
-        // 1. Resolve deferred children (V1 path)
-        let pending = boxed.take_pending_children();
-        if !pending.is_empty() {
-            let resolved_ids: Vec<WidgetId> = pending
-                .into_iter()
-                .map(|child| match child {
-                    crate::widget::PendingChild::Id(id) => id,
-                    crate::widget::PendingChild::Deferred(w) => self.add_boxed(w),
-                })
-                .collect();
-            boxed.set_resolved_children(resolved_ids);
-        }
-
-        // 2. Extract builder-style metadata
-        let vis_state = boxed.take_visible_when();
-        let ena_state = boxed.take_enabled_when();
-
-        // 3. Insert as child
+        // 1. Insert as child.
         let id = self.arena.insert_child(parent, boxed);
 
-        // 3b. V2 build() path — call build() to resolve pending children.
+        // 1b. Extract V2 attached handlers from WidgetWithHandlers wrapper.
+        {
+            if let Some(mut widget_box) = self.arena.take_widget(id) {
+                if let Some(handler_set) = widget_box.take_handler_set() {
+                    self.arena.restore_widget(id, widget_box);
+                    if let Some(node) = self.arena.get_mut(id) {
+                        node.handlers = handler_set.handlers;
+                        node.node_focusable = handler_set.focusable;
+                        node.node_tab_index = handler_set.tab_index;
+                        node.node_cursor = handler_set.cursor;
+                    }
+                } else {
+                    self.arena.restore_widget(id, widget_box);
+                }
+            }
+        }
+
+        // 2. Call build() — resolve pending children and effects.
         {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
                 let mut build_ctx = crate::build_context::BuildContext {
@@ -566,36 +535,13 @@ impl WidgetTree {
             }
         }
 
-        // 4. Register reactive bindings, animated states/signals, and clips_children
+        // 3. Set clips_children from widget trait method.
         let clips = self
             .arena
             .get(id)
             .is_some_and(|n| n.widget.clips_children());
-        let (anim_states, anim_signals) = if let Some(node) = self.arena.get(id) {
-            node.widget.register_bindings(id, &self.binding_registry);
-            (
-                node.widget.animated_states(),
-                node.widget.animated_signals(),
-            )
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        for state in anim_states {
-            self.register_animated_state(&state);
-        }
-        for signal in anim_signals {
-            self.register_animated_signal(&signal);
-        }
         if clips {
             self.arena.set_clips_children(id, true);
-        }
-
-        // 5. Apply visible_when / enabled_when
-        if let Some(state) = vis_state {
-            self.visible_when(id, state);
-        }
-        if let Some(state) = ena_state {
-            self.enabled_when(id, state);
         }
 
         id
@@ -1008,8 +954,8 @@ impl WidgetTree {
             let mut ctx = EventContext::new();
             let response = if let Some(node) = self.arena.get_mut(id) {
                 // V2 handlers checked first, then V1 fallback
-                Self::try_v2_handler_preview(node, event, &mut ctx)
-                    .unwrap_or_else(|| node.widget.preview_event(event, &mut ctx))
+                Self::try_handler_preview(node, event, &mut ctx)
+                    .unwrap_or(EventResponse::Ignored)
             } else {
                 EventResponse::Ignored
             };
@@ -1029,9 +975,8 @@ impl WidgetTree {
         while let Some(id) = current {
             let mut ctx = EventContext::new();
             let response = if let Some(node) = self.arena.get_mut(id) {
-                // V2 handlers checked first, then V1 fallback
-                Self::try_v2_handler_bubble(node, event, &mut ctx)
-                    .unwrap_or_else(|| node.widget.event(event, &mut ctx))
+                Self::try_handler_bubble(node, event, &mut ctx)
+                    .unwrap_or(EventResponse::Ignored)
             } else {
                 EventResponse::Ignored
             };
@@ -1050,7 +995,7 @@ impl WidgetTree {
 
     /// Try to dispatch an event to V2 handlers during the preview pass.
     /// Returns `Some(response)` if a handler was found, `None` otherwise.
-    fn try_v2_handler_preview(
+    fn try_handler_preview(
         node: &mut crate::arena::WidgetNode,
         event: &WidgetEvent,
         ctx: &mut EventContext,
@@ -1071,20 +1016,37 @@ impl WidgetTree {
 
     /// Try to dispatch an event to V2 handlers during the bubble pass.
     /// Returns `Some(response)` if a handler was found, `None` otherwise.
-    fn try_v2_handler_bubble(
+    fn try_handler_bubble(
         node: &mut crate::arena::WidgetNode,
         event: &WidgetEvent,
         ctx: &mut EventContext,
     ) -> Option<EventResponse> {
         match event {
-            WidgetEvent::PointerEnter => node.handlers.on_hover.as_mut().map(|handler| {
-                handler(true, ctx);
-                EventResponse::Handled
-            }),
-            WidgetEvent::PointerLeave => node.handlers.on_hover.as_mut().map(|handler| {
-                handler(false, ctx);
-                EventResponse::Handled
-            }),
+            WidgetEvent::PointerEnter => {
+                // Auto-set cursor from node_cursor
+                if let Some(cursor) = node.node_cursor {
+                    ctx.set_cursor(cursor);
+                }
+                node.handlers.on_hover.as_mut().map(|handler| {
+                    handler(true, ctx);
+                    EventResponse::Handled
+                }).or_else(|| {
+                    // If no on_hover but node_cursor is set, still handle to set cursor
+                    node.node_cursor.map(|_| EventResponse::Handled)
+                })
+            }
+            WidgetEvent::PointerLeave => {
+                // Reset cursor on leave if node_cursor was set
+                if node.node_cursor.is_some() {
+                    ctx.set_cursor(crate::widget::CursorIcon::Default);
+                }
+                node.handlers.on_hover.as_mut().map(|handler| {
+                    handler(false, ctx);
+                    EventResponse::Handled
+                }).or_else(|| {
+                    node.node_cursor.map(|_| EventResponse::Handled)
+                })
+            }
             WidgetEvent::FocusGained { .. } => node.handlers.on_focus.as_mut().map(|handler| {
                 handler(true, ctx);
                 EventResponse::Handled
@@ -1098,7 +1060,7 @@ impl WidgetTree {
                 .on_key
                 .as_mut()
                 .map(|handler| handler(event, ctx)),
-            WidgetEvent::Scroll { .. } => node
+            WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. } => node
                 .handlers
                 .on_scroll
                 .as_mut()
@@ -1108,10 +1070,51 @@ impl WidgetTree {
                 .on_access_action
                 .as_mut()
                 .map(|handler| handler(*action, ctx)),
-            WidgetEvent::PointerDown { .. }
-            | WidgetEvent::PointerUp { .. }
-            | WidgetEvent::PointerMove { .. } => {
+            WidgetEvent::PointerDown { position, button } => {
+                // Auto-wire TapRecognizer for on_tap handlers
+                if node.handlers.on_tap.is_some() {
+                    let arena = node.handlers.gesture_arena.get_or_insert_with(|| {
+                        let mut a = GestureArena::new();
+                        a.add(crate::gesture::TapRecognizer::new());
+                        a
+                    });
+                    arena.process(&RawPointerEvent::Down {
+                        position: *position,
+                        button: *button,
+                    });
+                    return Some(EventResponse::Handled);
+                }
                 // Low-level pointer escape hatch
+                node.handlers
+                    .on_pointer_event
+                    .as_mut()
+                    .map(|handler| handler(event, ctx))
+            }
+            WidgetEvent::PointerUp { position, button } => {
+                if let Some(ref mut arena) = node.handlers.gesture_arena {
+                    let result = arena.process(&RawPointerEvent::Up {
+                        position: *position,
+                        button: *button,
+                    });
+                    if matches!(result, Some(GestureEvent::Tap { .. })) {
+                        if let Some(ref mut handler) = node.handlers.on_tap {
+                            handler(ctx);
+                        }
+                    }
+                    return Some(EventResponse::Handled);
+                }
+                node.handlers
+                    .on_pointer_event
+                    .as_mut()
+                    .map(|handler| handler(event, ctx))
+            }
+            WidgetEvent::PointerMove { position } => {
+                if let Some(ref mut arena) = node.handlers.gesture_arena {
+                    arena.process(&RawPointerEvent::Move {
+                        position: *position,
+                    });
+                    return Some(EventResponse::Ignored);
+                }
                 node.handlers
                     .on_pointer_event
                     .as_mut()
@@ -1290,8 +1293,8 @@ impl WidgetTree {
         // Sort by tab_index if specified: widgets with a tab_index come first
         // (sorted by their index), then widgets without (in tree order).
         focusable.sort_by(|&a, &b| {
-            let ta = self.arena.get(a).and_then(|n| n.widget.tab_index());
-            let tb = self.arena.get(b).and_then(|n| n.widget.tab_index());
+            let ta = self.arena.get(a).and_then(|n| n.node_tab_index);
+            let tb = self.arena.get(b).and_then(|n| n.node_tab_index);
             match (ta, tb) {
                 (Some(ia), Some(ib)) => ia.cmp(&ib),
                 (Some(_), None) => std::cmp::Ordering::Less,
@@ -1322,12 +1325,17 @@ impl WidgetTree {
         self.focus_with_origin(focusable[next_idx], crate::focus::FocusOrigin::Keyboard);
     }
 
+    /// Check if a node is focusable (set via HandlerSet `.focusable(true)` in build).
+    fn is_node_focusable(&self, node: &crate::arena::WidgetNode) -> bool {
+        node.node_focusable.unwrap_or(false)
+    }
+
     /// Find the nearest focusable widget at or above the given ID.
     fn find_focusable_at_or_above(&self, id: WidgetId) -> Option<WidgetId> {
         let mut current = Some(id);
         while let Some(cid) = current {
             if let Some(node) = self.arena.get(cid)
-                && node.widget.is_focusable()
+                && self.is_node_focusable(node)
             {
                 return Some(cid);
             }
@@ -1342,7 +1350,7 @@ impl WidgetTree {
             return;
         }
         if let Some(node) = self.arena.get(id) {
-            if node.widget.is_focusable() {
+            if self.is_node_focusable(node) {
                 out.push(id);
             }
             for &child in &node.children {
@@ -2773,48 +2781,24 @@ mod tests {
     }
 
     #[test]
-    fn gesture_event_dispatched_as_widget_event() {
-        // Verify that recognized gestures also arrive as WidgetEvent::Gesture
-        // through the normal event dispatch path.
+    fn gesture_handler_called_on_tap() {
         use crate::gesture::TapRecognizer;
         use std::cell::Cell;
         use std::rc::Rc;
 
-        let widget_got_gesture = Rc::new(Cell::new(false));
-
-        // Use a custom widget that checks for Gesture events
-        #[derive(Debug)]
-        struct GestureCapture {
-            got_gesture: Rc<Cell<bool>>,
-        }
-        impl Widget for GestureCapture {
-            fn size_that_fits(
-                &self,
-                proposal: SizeProposal,
-                _ctx: &LayoutContext,
-            ) -> fern_canvas::Size {
-                proposal.resolve(0.0, 0.0)
-            }
-            fn event(&mut self, event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-                if matches!(event, WidgetEvent::Gesture { .. }) {
-                    self.got_gesture.set(true);
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-        }
+        let handler_called = Rc::new(Cell::new(false));
+        let h = handler_called.clone();
 
         let mut tree = WidgetTree::new();
-        let w = tree.add(GestureCapture {
-            got_gesture: widget_got_gesture.clone(),
-        });
+        let w = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
-        tree.attach_gesture(w, TapRecognizer::new(), |_, _| {});
+        tree.attach_gesture(w, TapRecognizer::new(), move |_, _| {
+            h.set(true);
+        });
 
         tree.click(w);
-        assert!(widget_got_gesture.get());
+        assert!(handler_called.get());
     }
 
     #[test]
@@ -3016,44 +3000,21 @@ mod tests {
 
     // --- Idle callback tests ---
 
-    /// A widget that requests an idle callback when it receives a click.
-    #[derive(Debug)]
-    struct IdleRequestWidget {
-        callback_called: std::rc::Rc<std::cell::Cell<bool>>,
-    }
-
-    impl Widget for IdleRequestWidget {
-        fn size_that_fits(
-            &self,
-            proposal: SizeProposal,
-            _ctx: &LayoutContext,
-        ) -> fern_canvas::Size {
-            proposal.resolve(0.0, 0.0)
-        }
-
-        fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-            if matches!(event, WidgetEvent::PointerUp { .. }) {
-                let called = self.callback_called.clone();
-                ctx.request_idle_callback(move |_deadline| {
-                    called.set(true);
-                });
-                EventResponse::Handled
-            } else {
-                EventResponse::Ignored
-            }
-        }
-    }
-
     #[test]
     fn idle_callback_requested_from_event_handler() {
+        use crate::widget_builder::WidgetBuilder;
         use std::cell::Cell;
         use std::rc::Rc;
 
         let called = Rc::new(Cell::new(false));
+        let c = called.clone();
         let mut tree = WidgetTree::new();
-        let w = tree.add(IdleRequestWidget {
-            callback_called: called.clone(),
-        });
+        let w = tree.add(FillWidget::new().on_tap(move |ctx| {
+            let called = c.clone();
+            ctx.request_idle_callback(move |_deadline| {
+                called.set(true);
+            });
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         assert!(!tree.has_idle_work());
@@ -3078,25 +3039,6 @@ mod tests {
 
         let had_time = Rc::new(Cell::new(false));
         let _h = had_time.clone();
-
-        let mut tree = WidgetTree::new();
-        let w = tree.add(IdleRequestWidget {
-            callback_called: Rc::new(Cell::new(false)),
-        });
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        // Manually add an idle callback via the tree's internal queue
-        // by triggering a click (which requests one)
-        tree.click(w);
-
-        // Replace the callback with one that checks the deadline
-        // (We need to drain and re-add since click already queued one)
-        tree.run_idle_callbacks(std::time::Duration::from_millis(0)); // drain the click one
-
-        // Now add a fresh one that checks the deadline
-        // We'll do this through a second widget interaction
-        let _w2 = tree.add(FillWidget::new());
-        tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Directly test IdleDeadline
         let deadline = crate::idle::IdleDeadline::new(std::time::Duration::from_millis(100));

@@ -663,7 +663,7 @@ fn main() {
                 println!("Link clicked!");
             }
         })
-        .root(|tree| tree.add_widget(WidgetCatalog::new()))
+        .root(|tree| tree.add(WidgetCatalog::new()))
         .run();
 }
 
@@ -699,7 +699,7 @@ mod tests {
     #[test]
     fn catalog_builds_and_layouts() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add_widget(WidgetCatalog::new());
+        let root = tree.add(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let b = tree.bounds(root);
         assert!(b.width > 0.0);
@@ -709,7 +709,7 @@ mod tests {
     #[test]
     fn catalog_renders_without_crash() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog::new());
+        tree.add(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame = tree.render();
         assert!(
@@ -721,7 +721,7 @@ mod tests {
     #[test]
     fn catalog_theme_switch() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog::new());
+        tree.add(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame_light = tree.render();
 
@@ -740,7 +740,7 @@ mod tests {
     #[test]
     fn second_render_same_output() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog::new());
+        tree.add(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame1 = tree.render();
         let cmds1 = frame1.draw_order.len();
@@ -760,7 +760,7 @@ mod tests {
     #[test]
     fn theme_switch_preserves_draw_commands() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add_widget(WidgetCatalog::new());
+        tree.add(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let frame1 = tree.render();
         let cmds_before = frame1.draw_order.len();
@@ -782,7 +782,7 @@ mod tests {
     #[test]
     fn scroll_area_fills_remaining_space() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add_widget(WidgetCatalog::new());
+        let root = tree.add(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
 
         // root is WidgetCatalog → VStack → [Toolbar, Expand, StatusBar]
@@ -834,7 +834,7 @@ mod tests {
     #[test]
     fn badge_renders_text_with_real_text_backend() {
         let mut tree = tree_with_real_text_backend();
-        tree.add_widget(Badge::new("Badge text"));
+        tree.add(Badge::new("Badge text"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         let frame = tree.render();
@@ -904,7 +904,7 @@ mod tests {
         };
 
         let (mut tree, typesetter) = tree_and_typesetter();
-        tree.add_widget(WidgetCatalog::new());
+        tree.add(WidgetCatalog::new());
         tree.layout(SizeProposal::exact(900.0, 700.0));
         let mut frame = tree.render();
         let atlas = typesetter.bridge().borrow_mut().atlas_info();

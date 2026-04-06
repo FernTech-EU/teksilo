@@ -1,8 +1,9 @@
 //! Accordion — a collapsible section with clickable header.
 //!
 //! Content visibility is animated via `MaxSize::bind_max_height()` with an
-//! animated `State<f32>`. When collapsed, max_height animates to 0; when
+//! animated `Signal<f32>`. When collapsed, max_height animates to 0; when
 //! expanded, it animates to a large value (content sizes naturally within).
+//! V2 attached handlers — no event() override.
 
 use std::time::Duration;
 
@@ -10,12 +11,9 @@ use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
-};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
@@ -37,9 +35,6 @@ pub struct Accordion {
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
     content_height: Option<Signal<f32>>,
-    keyboard_focused: Option<Signal<bool>>,
-    focus_origin: Option<FocusOrigin>,
-    tap_recognizer: TapRecognizer,
     root_child_id: Option<WidgetId>,
 }
 
@@ -51,9 +46,6 @@ impl Accordion {
             content_id: None,
             pending_content: None,
             content_height: None,
-            keyboard_focused: None,
-            focus_origin: None,
-            tap_recognizer: TapRecognizer::new(),
             root_child_id: None,
         }
     }
@@ -68,21 +60,6 @@ impl Accordion {
     pub fn content(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_content = Some(Box::new(widget));
         self
-    }
-
-    fn toggle_expanded(&self, _ctx: &mut EventContext) {
-        let new_expanded = !self.expanded.get();
-        self.expanded.set(new_expanded);
-
-        // Animate the content height
-        if let Some(ref height) = self.content_height {
-            let target = if new_expanded {
-                EXPANDED_MAX_HEIGHT
-            } else {
-                0.0
-            };
-            height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
-        }
     }
 }
 
@@ -107,7 +84,6 @@ impl Widget for Accordion {
 
         // Keyboard focus state for focus ring
         let kb_focused = ctx.signal(false);
-        self.keyboard_focused = Some(kb_focused.clone());
 
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
@@ -175,6 +151,60 @@ impl Widget for Accordion {
 
         let root = ctx.add(vstack);
         self.root_child_id = Some(root);
+
+        // --- V2 attached handlers ---
+        let expanded_tap = self.expanded.clone();
+        let expanded_key = self.expanded.clone();
+        let height_tap = self.content_height.clone();
+        let height_key = self.content_height.clone();
+        let kb_focused_focus = kb_focused.clone();
+
+        let handler_set = HandlerSet::new()
+            .on_tap({
+                move |_ctx: &mut EventContext| {
+                    let new_expanded = !expanded_tap.get();
+                    expanded_tap.set(new_expanded);
+                    if let Some(ref height) = height_tap {
+                        let target = if new_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
+                        height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
+                    }
+                }
+            })
+            .on_key({
+                move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
+                    match event {
+                        WidgetEvent::KeyDown {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => EventResponse::Handled,
+                        WidgetEvent::KeyUp {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => {
+                            let new_expanded = !expanded_key.get();
+                            expanded_key.set(new_expanded);
+                            if let Some(ref height) = height_key {
+                                let target = if new_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
+                                height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
+                            }
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                }
+            })
+            .on_focus({
+                move |gained: bool, _ctx: &mut EventContext| {
+                    // Only show focus ring for keyboard focus (approximation:
+                    // always show on gain, clear on loss — the V1 code checked origin)
+                    kb_focused_focus.set(gained);
+                }
+            })
+            .focusable(true)
+            .cursor(CursorIcon::Pointer);
+
+        ctx.apply_self_handlers(handler_set);
+
         vec![root]
     }
 
@@ -198,73 +228,6 @@ impl Widget for Accordion {
             child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
             child.size = Size::new(bounds.width, bounds.height);
         }
-    }
-
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        match event {
-            WidgetEvent::PointerDown { position, button } => {
-                self.tap_recognizer.process(&RawPointerEvent::Down {
-                    position: *position,
-                    button: *button,
-                });
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerUp { position, button } => {
-                let result = self.tap_recognizer.process(&RawPointerEvent::Up {
-                    position: *position,
-                    button: *button,
-                });
-                if matches!(result, GestureResult::Recognized(GestureEvent::Tap { .. })) {
-                    self.toggle_expanded(ctx);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerMove { position } => {
-                self.tap_recognizer.process(&RawPointerEvent::Move {
-                    position: *position,
-                });
-                EventResponse::Ignored
-            }
-            WidgetEvent::PointerEnter => {
-                ctx.set_cursor(CursorIcon::Pointer);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerLeave => {
-                self.tap_recognizer.reset();
-                ctx.set_cursor(CursorIcon::Default);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyDown {
-                key: Key::Space | Key::Enter,
-                ..
-            } => EventResponse::Handled,
-            WidgetEvent::KeyUp {
-                key: Key::Space | Key::Enter,
-                ..
-            } => {
-                self.toggle_expanded(ctx);
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusGained { origin } => {
-                self.focus_origin = Some(*origin);
-                if let Some(ref s) = self.keyboard_focused {
-                    s.set(*origin == FocusOrigin::Keyboard);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusLost => {
-                self.focus_origin = None;
-                if let Some(ref s) = self.keyboard_focused {
-                    s.set(false);
-                }
-                EventResponse::Handled
-            }
-            _ => EventResponse::Ignored,
-        }
-    }
-
-    fn is_focusable(&self) -> bool {
-        true
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

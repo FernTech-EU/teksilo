@@ -32,7 +32,8 @@ pub struct HandlerSet {
 }
 
 impl HandlerSet {
-    fn new() -> Self {
+    /// Create an empty handler set for use in `BuildContext::apply_self_handlers()`.
+    pub fn new() -> Self {
         Self {
             handlers: EventHandlers::new(),
             focusable: None,
@@ -43,6 +44,86 @@ impl HandlerSet {
             tooltip_text: None,
             clips_children: None,
         }
+    }
+
+    // -- Builder methods (mirror WidgetWithHandlers) --
+
+    /// Set the on_tap handler.
+    pub fn on_tap(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+        self.handlers.on_tap = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_hover handler.
+    pub fn on_hover(mut self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self {
+        self.handlers.on_hover = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_key handler.
+    pub fn on_key(
+        mut self,
+        f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
+    ) -> Self {
+        self.handlers.on_key = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_focus handler.
+    pub fn on_focus(mut self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self {
+        self.handlers.on_focus = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_pointer_event handler (low-level escape hatch).
+    pub fn on_pointer_event(
+        mut self,
+        f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
+    ) -> Self {
+        self.handlers.on_pointer_event = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_scroll handler.
+    pub fn on_scroll(
+        mut self,
+        f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
+    ) -> Self {
+        self.handlers.on_scroll = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_access_action handler.
+    pub fn on_access_action(
+        mut self,
+        f: impl FnMut(accesskit::Action, &mut EventContext) -> EventResponse + 'static,
+    ) -> Self {
+        self.handlers.on_access_action = Some(Box::new(f));
+        self
+    }
+
+    /// Set the focusable flag.
+    pub fn focusable(mut self, focusable: bool) -> Self {
+        self.focusable = Some(focusable);
+        self
+    }
+
+    /// Set the cursor icon.
+    pub fn cursor(mut self, cursor: CursorIcon) -> Self {
+        self.cursor = Some(cursor);
+        self
+    }
+
+    /// Set the clips_children flag.
+    pub fn clips_children(mut self, clips: bool) -> Self {
+        self.clips_children = Some(clips);
+        self
+    }
+}
+
+impl Default for HandlerSet {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -230,28 +311,8 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.paint(bounds, canvas, ctx)
     }
 
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        self.widget.event(event, ctx)
-    }
-
-    fn preview_event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        self.widget.preview_event(event, ctx)
-    }
-
     fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
         self.widget.accessibility(builder)
-    }
-
-    fn is_focusable(&self) -> bool {
-        self.handler_set
-            .focusable
-            .unwrap_or_else(|| self.widget.is_focusable())
-    }
-
-    fn tab_index(&self) -> Option<i32> {
-        self.handler_set
-            .tab_index
-            .or_else(|| self.widget.tab_index())
     }
 
     fn children(&self) -> Vec<crate::widget_id::WidgetId> {
@@ -268,53 +329,8 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
             .unwrap_or_else(|| self.widget.clips_children())
     }
 
-    fn is_composite(&self) -> bool {
-        self.widget.is_composite()
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
-    }
-
-    fn register_bindings(
-        &self,
-        id: crate::widget_id::WidgetId,
-        registry: &crate::state::BindingRegistry,
-    ) {
-        self.widget.register_bindings(id, registry)
-    }
-
-    fn animated_states(&self) -> Vec<crate::state::State<f32>> {
-        self.widget.animated_states()
-    }
-
-    fn animated_signals(&self) -> Vec<crate::signal::Signal<f32>> {
-        self.widget.animated_signals()
-    }
-
-    fn take_pending_children(&mut self) -> Vec<crate::widget::PendingChild> {
-        self.widget.take_pending_children()
-    }
-
-    fn set_resolved_children(&mut self, ids: Vec<crate::widget_id::WidgetId>) {
-        self.widget.set_resolved_children(ids)
-    }
-
-    fn take_visible_when(&mut self) -> Option<crate::state::Reactive<bool>> {
-        // Prefer V2 handler_set, fall back to V1
-        if let Some(prop) = self.handler_set.visible_when.take() {
-            Some(prop.into())
-        } else {
-            self.widget.take_visible_when()
-        }
-    }
-
-    fn take_enabled_when(&mut self) -> Option<crate::state::Reactive<bool>> {
-        if let Some(prop) = self.handler_set.enabled_when.take() {
-            Some(prop.into())
-        } else {
-            self.widget.take_enabled_when()
-        }
+    fn take_handler_set(&mut self) -> Option<HandlerSet> {
+        Some(self.take_handler_set())
     }
 }
 
@@ -389,31 +405,31 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).on_access_action(f)
     }
 
-    fn v2_focusable(self, focusable: bool) -> WidgetWithHandlers<Self> {
+    fn focusable(self, focusable: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).focusable(focusable)
     }
 
-    fn v2_tab_index(self, index: i32) -> WidgetWithHandlers<Self> {
+    fn tab_index(self, index: i32) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).tab_index(index)
     }
 
-    fn v2_cursor(self, cursor: CursorIcon) -> WidgetWithHandlers<Self> {
+    fn cursor(self, cursor: CursorIcon) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).cursor(cursor)
     }
 
-    fn v2_visible_when(self, signal: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
+    fn visible_when(self, signal: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).visible_when(signal)
     }
 
-    fn v2_enabled_when(self, signal: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
+    fn enabled_when(self, signal: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).enabled_when(signal)
     }
 
-    fn v2_tooltip(self, text: impl Into<String>) -> WidgetWithHandlers<Self> {
+    fn tooltip(self, text: impl Into<String>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).tooltip(text)
     }
 
-    fn v2_clips_children(self, clips: bool) -> WidgetWithHandlers<Self> {
+    fn clips_children_on(self, clips: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).clips_children(clips)
     }
 }

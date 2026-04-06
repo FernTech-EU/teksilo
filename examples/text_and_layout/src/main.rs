@@ -211,7 +211,7 @@ fn main() {
                 }
             }
         })
-        .root(|tree| tree.add_widget(RootContent::new()))
+        .root(|tree| tree.add(RootContent::new()))
         .run();
 }
 
@@ -304,7 +304,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let _root = tree.add_widget(RootContent::new());
+        let _root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
 
         // Tab to the button (first focusable) and activate via Space
@@ -331,7 +331,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let _root = tree.add_widget(RootContent::new());
+        let _root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
 
         // Tab to button to discover its ID, then click it
@@ -354,7 +354,7 @@ mod tests {
         use super::{Cmd, RootContent};
 
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let _root = tree.add_widget(RootContent::new());
+        let _root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
 
         // Tab to button and click
@@ -381,7 +381,7 @@ mod tests {
         use super::RootContent;
 
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add_widget(RootContent::new());
+        let root = tree.add(RootContent::new());
         tree.layout(SizeProposal::exact(600.0, 500.0));
         let frame_light = tree.render();
 

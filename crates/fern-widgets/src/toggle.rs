@@ -9,14 +9,12 @@ use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
-};
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+    CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing};
 
@@ -33,7 +31,6 @@ pub struct Toggle {
     enabled: bool,
     hovered: Signal<bool>,
     focus_origin: Signal<Option<FocusOrigin>>,
-    tap_recognizer: TapRecognizer,
 }
 
 impl Toggle {
@@ -46,7 +43,6 @@ impl Toggle {
             enabled: true,
             hovered: Signal::new(false),
             focus_origin: Signal::new(None),
-            tap_recognizer: TapRecognizer::new(),
         }
     }
 
@@ -58,14 +54,6 @@ impl Toggle {
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
-    }
-
-    fn toggle(&self) {
-        let new_on = !self.on.get();
-        self.on.set(new_on);
-        let target = if new_on { 1.0 } else { 0.0 };
-        self.knob_position
-            .animate_to(target, Duration::from_millis(150), Easing::EaseInOut);
     }
 
     fn knob_x(&self, bounds: Rect) -> f32 {
@@ -96,6 +84,97 @@ impl Widget for Toggle {
         self.knob_position
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.on.bind_to(id, registry, BindingLevel::RepaintOnly);
+
+        // Set up handlers
+        let on = self.on.clone();
+        let knob_position = self.knob_position.clone();
+        let hovered = self.hovered.clone();
+        let focus_origin = self.focus_origin.clone();
+        let enabled = self.enabled;
+
+        let toggle = {
+            let on = on.clone();
+            let knob_position = knob_position.clone();
+            move || {
+                let new_on = !on.get();
+                on.set(new_on);
+                let target = if new_on { 1.0 } else { 0.0 };
+                knob_position.animate_to(target, Duration::from_millis(150), Easing::EaseInOut);
+            }
+        };
+
+        let mut handlers = HandlerSet::new().focusable(enabled).cursor(CursorIcon::Pointer);
+
+        // Tap handler
+        {
+            let toggle = toggle.clone();
+            handlers = handlers.on_tap(move |_ctx| {
+                if enabled {
+                    toggle();
+                }
+            });
+        }
+
+        // Hover handler
+        {
+            let hovered = hovered.clone();
+            handlers = handlers.on_hover(move |entered, _ctx| {
+                hovered.set(entered);
+            });
+        }
+
+        // Key handler
+        {
+            let toggle = toggle.clone();
+            handlers = handlers.on_key(move |event, _ctx| {
+                if !enabled {
+                    return EventResponse::Ignored;
+                }
+                match event {
+                    WidgetEvent::KeyDown { key: Key::Space, .. } => EventResponse::Handled,
+                    WidgetEvent::KeyUp { key: Key::Space, .. } => {
+                        toggle();
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Focus handler
+        // Infer origin from hover state: if hovered when focus is gained, it was
+        // via pointer click (no focus ring needed). Otherwise it was keyboard/programmatic.
+        {
+            let focus_origin = focus_origin.clone();
+            let hovered_for_focus = hovered.clone();
+            handlers = handlers.on_focus(move |gained, _ctx| {
+                if gained {
+                    let origin = if hovered_for_focus.get() {
+                        FocusOrigin::Pointer
+                    } else {
+                        FocusOrigin::Keyboard
+                    };
+                    focus_origin.set(Some(origin));
+                } else {
+                    focus_origin.set(None);
+                }
+            });
+        }
+
+        // Access action handler
+        {
+            let toggle = toggle.clone();
+            handlers = handlers.on_access_action(move |action, _ctx| {
+                if action == fern_core::accesskit::Action::Click && enabled {
+                    toggle();
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            });
+        }
+
+        ctx.apply_self_handlers(handlers);
 
         vec![] // leaf widget — no children
     }
@@ -205,79 +284,6 @@ impl Widget for Toggle {
             );
             canvas.draw_text(label, text_rect, &ctx.theme.typography.body, text_color);
         }
-    }
-
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        if !self.enabled {
-            return EventResponse::Ignored;
-        }
-
-        match event {
-            WidgetEvent::PointerDown { position, button } => {
-                self.tap_recognizer.process(&RawPointerEvent::Down {
-                    position: *position,
-                    button: *button,
-                });
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerUp { position, button } => {
-                let result = self.tap_recognizer.process(&RawPointerEvent::Up {
-                    position: *position,
-                    button: *button,
-                });
-                if matches!(result, GestureResult::Recognized(GestureEvent::Tap { .. })) {
-                    self.toggle();
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerMove { position } => {
-                self.tap_recognizer.process(&RawPointerEvent::Move {
-                    position: *position,
-                });
-                EventResponse::Ignored
-            }
-            WidgetEvent::PointerEnter => {
-                self.hovered.set(true);
-                ctx.set_cursor(CursorIcon::Pointer);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerLeave => {
-                self.hovered.set(false);
-                self.tap_recognizer.reset();
-                ctx.set_cursor(CursorIcon::Default);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyDown {
-                key: Key::Space, ..
-            } => EventResponse::Handled,
-            WidgetEvent::KeyUp {
-                key: Key::Space, ..
-            } => {
-                self.toggle();
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusGained { origin } => {
-                self.focus_origin.set(Some(*origin));
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusLost => {
-                self.focus_origin.set(None);
-                EventResponse::Handled
-            }
-            WidgetEvent::AccessAction { action, .. } => {
-                if *action == fern_core::accesskit::Action::Click {
-                    self.toggle();
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-            _ => EventResponse::Ignored,
-        }
-    }
-
-    fn is_focusable(&self) -> bool {
-        self.enabled
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

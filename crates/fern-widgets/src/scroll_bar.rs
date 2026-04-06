@@ -1,10 +1,12 @@
 use std::cell::Cell;
+use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget};
+use fern_core::widget::{LayoutContext, PaintContext, Widget};
+use fern_core::widget_builder::HandlerSet;
 use fern_tokens::CornerRadius;
 
 /// Orientation of the scroll bar.
@@ -39,15 +41,15 @@ pub struct ScrollBar {
 
     // --- interaction state ---
     /// Whether the pointer is over the scroll bar.
-    hovered: Cell<bool>,
+    hovered: Rc<Cell<bool>>,
     /// Whether the thumb is being dragged.
-    dragging: Cell<bool>,
+    dragging: Rc<Cell<bool>>,
     /// Pointer position at drag start (in scroll bar local coords).
-    drag_start_pointer: Cell<f32>,
+    drag_start_pointer: Rc<Cell<f32>>,
     /// Scroll position at drag start.
-    drag_start_scroll: Cell<f32>,
+    drag_start_scroll: Rc<Cell<f32>>,
     /// Current bounds, cached from last layout for event handling.
-    cached_bounds: Cell<Rect>,
+    cached_bounds: Rc<Cell<Rect>>,
 
     // --- visual tuning ---
     /// Thickness of the scroll bar (width for vertical, height for horizontal).
@@ -87,11 +89,11 @@ impl ScrollBar {
             scroll_position,
             max_scroll,
             viewport_ratio,
-            hovered: Cell::new(false),
-            dragging: Cell::new(false),
-            drag_start_pointer: Cell::new(0.0),
-            drag_start_scroll: Cell::new(0.0),
-            cached_bounds: Cell::new(Rect::ZERO),
+            hovered: Rc::new(Cell::new(false)),
+            dragging: Rc::new(Cell::new(false)),
+            drag_start_pointer: Rc::new(Cell::new(0.0)),
+            drag_start_scroll: Rc::new(Cell::new(0.0)),
+            cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
             thickness: 12.0,
             min_thumb_length: 24.0,
             step_size: 40.0,
@@ -169,51 +171,6 @@ impl ScrollBar {
         }
     }
 
-    /// Extract the coordinate along the scroll axis from a point.
-    fn axis_value(&self, point: Point) -> f32 {
-        match self.orientation {
-            ScrollBarOrientation::Vertical => point.y,
-            ScrollBarOrientation::Horizontal => point.x,
-        }
-    }
-
-    /// Whether a point is inside the thumb.
-    fn point_in_thumb(&self, point: Point) -> bool {
-        self.thumb_rect().contains(point)
-    }
-
-    /// Set scroll position, clamped to valid range.
-    fn set_scroll(&self, value: f32) {
-        let max = self.max_scroll.get();
-        self.scroll_position.set(value.clamp(0.0, max));
-    }
-
-    /// Scroll one page toward the given point (track click behavior).
-    fn page_scroll_toward(&self, point: Point) {
-        let click_axis = self.axis_value(point);
-        let thumb = self.thumb_rect();
-        let thumb_center = match self.orientation {
-            ScrollBarOrientation::Vertical => thumb.y + thumb.height / 2.0,
-            ScrollBarOrientation::Horizontal => thumb.x + thumb.width / 2.0,
-        };
-
-        let max = self.max_scroll.get();
-        if max <= 0.0 {
-            return;
-        }
-
-        // Page scroll: move by one viewport's worth in the direction of the click
-        // viewport_ratio = viewport / content, max = content - viewport
-        // viewport = max * ratio / (1 - ratio)
-        let ratio = self.viewport_ratio.get().clamp(0.001, 0.999);
-        let viewport_scroll = max * ratio / (1.0 - ratio);
-        let current = self.scroll_position.get();
-        if click_axis < thumb_center {
-            self.set_scroll(current - viewport_scroll);
-        } else {
-            self.set_scroll(current + viewport_scroll);
-        }
-    }
 }
 
 impl Widget for ScrollBar {
@@ -238,6 +195,233 @@ impl Widget for ScrollBar {
             registry,
             fern_core::state::BindingLevel::RepaintOnly,
         );
+
+        let scroll_position = self.scroll_position.clone();
+        let max_scroll = self.max_scroll.clone();
+        let viewport_ratio = self.viewport_ratio.clone();
+        let orientation = self.orientation;
+        let hovered = self.hovered.clone();
+        let dragging = self.dragging.clone();
+        let drag_start_pointer = self.drag_start_pointer.clone();
+        let drag_start_scroll = self.drag_start_scroll.clone();
+        let cached_bounds = self.cached_bounds.clone();
+        let step_size = self.step_size;
+        let min_thumb_length = self.min_thumb_length;
+
+        let axis_value = move |point: Point| -> f32 {
+            match orientation {
+                ScrollBarOrientation::Vertical => point.y,
+                ScrollBarOrientation::Horizontal => point.x,
+            }
+        };
+
+        let set_scroll = {
+            let scroll_position = scroll_position.clone();
+            let max_scroll = max_scroll.clone();
+            move |value: f32| {
+                let max = max_scroll.get();
+                scroll_position.set(value.clamp(0.0, max));
+            }
+        };
+
+        let track_length = {
+            let cached_bounds = cached_bounds.clone();
+            move || -> f32 {
+                let bounds = cached_bounds.get();
+                match orientation {
+                    ScrollBarOrientation::Vertical => bounds.height,
+                    ScrollBarOrientation::Horizontal => bounds.width,
+                }
+            }
+        };
+
+        let thumb_length = {
+            let viewport_ratio = viewport_ratio.clone();
+            let track_length = track_length.clone();
+            move || -> f32 {
+                let ratio = viewport_ratio.get().clamp(0.0, 1.0);
+                let track = track_length();
+                (track * ratio).max(min_thumb_length).min(track)
+            }
+        };
+
+        let thumb_rect = {
+            let cached_bounds = cached_bounds.clone();
+            let scroll_position = scroll_position.clone();
+            let max_scroll = max_scroll.clone();
+            let track_length = track_length.clone();
+            let thumb_length = thumb_length.clone();
+            move || -> Rect {
+                let bounds = cached_bounds.get();
+                let max = max_scroll.get();
+                let offset = if max <= 0.0 {
+                    0.0
+                } else {
+                    let pos = scroll_position.get();
+                    let ratio = (pos / max).clamp(0.0, 1.0);
+                    let available = track_length() - thumb_length();
+                    ratio * available
+                };
+                let tl = thumb_length();
+                match orientation {
+                    ScrollBarOrientation::Vertical => {
+                        Rect::new(bounds.x, bounds.y + offset, bounds.width, tl)
+                    }
+                    ScrollBarOrientation::Horizontal => {
+                        Rect::new(bounds.x + offset, bounds.y, tl, bounds.height)
+                    }
+                }
+            }
+        };
+
+        let mut handlers = HandlerSet::new().focusable(true);
+
+        // Pointer event handler
+        {
+            let dragging = dragging.clone();
+            let drag_start_pointer = drag_start_pointer.clone();
+            let drag_start_scroll = drag_start_scroll.clone();
+            let scroll_position = scroll_position.clone();
+            let max_scroll = max_scroll.clone();
+            let viewport_ratio = viewport_ratio.clone();
+            let set_scroll = set_scroll.clone();
+            let thumb_rect = thumb_rect.clone();
+            let track_length = track_length.clone();
+            let thumb_length = thumb_length.clone();
+            handlers = handlers.on_pointer_event(move |event, ctx| {
+                let max = max_scroll.get();
+                if max <= 0.0 {
+                    return EventResponse::Ignored;
+                }
+                match event {
+                    WidgetEvent::PointerDown {
+                        position,
+                        button: PointerButton::Primary,
+                    } => {
+                        let tr = thumb_rect();
+                        if tr.contains(*position) {
+                            // Start thumb drag
+                            dragging.set(true);
+                            drag_start_pointer.set(axis_value(*position));
+                            drag_start_scroll.set(scroll_position.get());
+                            ctx.capture_pointer();
+                        } else {
+                            // Track click — page scroll toward click position
+                            let click_axis = axis_value(*position);
+                            let thumb_center = match orientation {
+                                ScrollBarOrientation::Vertical => tr.y + tr.height / 2.0,
+                                ScrollBarOrientation::Horizontal => tr.x + tr.width / 2.0,
+                            };
+                            let ratio = viewport_ratio.get().clamp(0.001, 0.999);
+                            let viewport_scroll = max * ratio / (1.0 - ratio);
+                            let current = scroll_position.get();
+                            if click_axis < thumb_center {
+                                set_scroll(current - viewport_scroll);
+                            } else {
+                                set_scroll(current + viewport_scroll);
+                            }
+                        }
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::PointerMove { position } => {
+                        if dragging.get() {
+                            let current = axis_value(*position);
+                            let delta_pixels = current - drag_start_pointer.get();
+                            let available = track_length() - thumb_length();
+                            if available > 0.0 {
+                                let scroll_delta = delta_pixels * max / available;
+                                set_scroll(drag_start_scroll.get() + scroll_delta);
+                            }
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                    WidgetEvent::PointerUp {
+                        button: PointerButton::Primary,
+                        ..
+                    } => {
+                        if dragging.get() {
+                            dragging.set(false);
+                            ctx.release_pointer();
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Hover handler
+        {
+            let hovered = hovered.clone();
+            handlers = handlers.on_hover(move |entered, _ctx| {
+                hovered.set(entered);
+            });
+        }
+
+        // Key handler
+        {
+            let scroll_position = scroll_position.clone();
+            let max_scroll = max_scroll.clone();
+            let set_scroll = set_scroll.clone();
+            handlers = handlers.on_key(move |event, _ctx| {
+                let max = max_scroll.get();
+                if max <= 0.0 {
+                    return EventResponse::Ignored;
+                }
+                match event {
+                    WidgetEvent::KeyDown { key, .. } => {
+                        use fern_core::event::Key;
+                        let step = step_size;
+                        match (orientation, key) {
+                            (ScrollBarOrientation::Vertical, Key::ArrowUp) => {
+                                set_scroll(scroll_position.get() - step);
+                                EventResponse::Handled
+                            }
+                            (ScrollBarOrientation::Vertical, Key::ArrowDown) => {
+                                set_scroll(scroll_position.get() + step);
+                                EventResponse::Handled
+                            }
+                            (ScrollBarOrientation::Horizontal, Key::ArrowLeft) => {
+                                set_scroll(scroll_position.get() - step);
+                                EventResponse::Handled
+                            }
+                            (ScrollBarOrientation::Horizontal, Key::ArrowRight) => {
+                                set_scroll(scroll_position.get() + step);
+                                EventResponse::Handled
+                            }
+                            (_, Key::Home) => {
+                                set_scroll(0.0);
+                                EventResponse::Handled
+                            }
+                            (_, Key::End) => {
+                                set_scroll(max);
+                                EventResponse::Handled
+                            }
+                            _ => EventResponse::Ignored,
+                        }
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Access action handler
+        {
+            handlers = handlers.on_access_action(move |action, _ctx| {
+                if action == fern_core::accesskit::Action::SetValue {
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            });
+        }
+
+        ctx.apply_self_handlers(handlers);
+
         Vec::new()
     }
 
@@ -286,113 +470,6 @@ impl Widget for ScrollBar {
             0.25
         });
         canvas.fill_rounded_rect(thumb, radius, thumb_color);
-    }
-
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        let max = self.max_scroll.get();
-        if max <= 0.0 {
-            return EventResponse::Ignored;
-        }
-
-        match event {
-            WidgetEvent::PointerEnter => {
-                self.hovered.set(true);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerLeave => {
-                self.hovered.set(false);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerDown {
-                position,
-                button: PointerButton::Primary,
-            } => {
-                if self.point_in_thumb(*position) {
-                    // Start thumb drag
-                    self.dragging.set(true);
-                    self.drag_start_pointer.set(self.axis_value(*position));
-                    self.drag_start_scroll.set(self.scroll_position.get());
-                    ctx.capture_pointer();
-                } else {
-                    // Track click — page scroll toward click position
-                    self.page_scroll_toward(*position);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerMove { position } => {
-                if self.dragging.get() {
-                    let current = self.axis_value(*position);
-                    let delta_pixels = current - self.drag_start_pointer.get();
-
-                    // Convert pixel delta to scroll delta
-                    let available = self.track_length() - self.thumb_length();
-                    if available > 0.0 {
-                        let scroll_delta = delta_pixels * max / available;
-                        self.set_scroll(self.drag_start_scroll.get() + scroll_delta);
-                    }
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-            WidgetEvent::PointerUp {
-                button: PointerButton::Primary,
-                ..
-            } => {
-                if self.dragging.get() {
-                    self.dragging.set(false);
-                    ctx.release_pointer();
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-            WidgetEvent::KeyDown { key, .. } => {
-                use fern_core::event::Key;
-                let step = self.step_size;
-                match (self.orientation, key) {
-                    (ScrollBarOrientation::Vertical, Key::ArrowUp) => {
-                        self.set_scroll(self.scroll_position.get() - step);
-                        EventResponse::Handled
-                    }
-                    (ScrollBarOrientation::Vertical, Key::ArrowDown) => {
-                        self.set_scroll(self.scroll_position.get() + step);
-                        EventResponse::Handled
-                    }
-                    (ScrollBarOrientation::Horizontal, Key::ArrowLeft) => {
-                        self.set_scroll(self.scroll_position.get() - step);
-                        EventResponse::Handled
-                    }
-                    (ScrollBarOrientation::Horizontal, Key::ArrowRight) => {
-                        self.set_scroll(self.scroll_position.get() + step);
-                        EventResponse::Handled
-                    }
-                    (_, Key::Home) => {
-                        self.set_scroll(0.0);
-                        EventResponse::Handled
-                    }
-                    (_, Key::End) => {
-                        self.set_scroll(max);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
-            }
-            WidgetEvent::AccessAction { action, .. } => {
-                if *action == fern_core::accesskit::Action::SetValue {
-                    // AccessKit SetValue — the actual value would come from
-                    // the action data in a real implementation. For now, no-op.
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-            _ => EventResponse::Ignored,
-        }
-    }
-
-    fn is_focusable(&self) -> bool {
-        true
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

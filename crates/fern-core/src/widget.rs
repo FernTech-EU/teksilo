@@ -146,36 +146,8 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         // Default: nothing to paint (layout-only containers).
     }
 
-    /// Handle an event during the bubble (target → root) pass.
-    ///
-    /// **Deprecated V1:** Use attached handlers via `WidgetBuilder` instead.
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
-    }
-
-    /// Handle an event during the preview (root → target) pass.
-    ///
-    /// **Deprecated V1:** Use attached handlers via `WidgetBuilder` instead.
-    fn preview_event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
-    }
-
     /// Declare this widget's accessibility identity.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
-
-    /// Whether this widget can receive keyboard focus.
-    ///
-    /// **Deprecated V1:** Use `.focusable(true)` via `WidgetBuilder`.
-    fn is_focusable(&self) -> bool {
-        false
-    }
-
-    /// Optional tab index override (default: tree order).
-    ///
-    /// **Deprecated V1:** Use `.tab_index(n)` via `WidgetBuilder`.
-    fn tab_index(&self) -> Option<i32> {
-        None
-    }
 
     /// Return the child widget IDs that this widget manages.
     fn children(&self) -> Vec<WidgetId> {
@@ -183,110 +155,20 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     }
 
     /// Whether this widget is a flexible spacer (claims remaining space in stacks).
-    ///
-    /// **Deprecated V1:** Use `.spacer(true)` via `WidgetBuilder`.
     fn is_spacer(&self) -> bool {
         false
     }
 
-    /// Whether this widget clips its children to its bounds. When true, the
-    /// framework sets `clips_children` on the arena node automatically,
-    /// enabling viewport clipping in the renderer and `ScrollIntoView`
-    /// dispatch. Override this in scroll containers and similar widgets.
-    ///
-    /// **Deprecated V1:** Use `WidgetBuilder::clips_children()`.
+    /// Whether this widget clips its children to its bounds.
     fn clips_children(&self) -> bool {
         false
     }
 
-    /// Whether this widget is a composite adapter that needs rebuild on
-    /// environment changes (theme switch, locale switch).
-    ///
-    /// **Deprecated V1:** No longer needed — all widgets are unified.
-    fn is_composite(&self) -> bool {
-        false
-    }
-
-    /// Downcast to `&mut dyn Any` for type-specific operations (e.g. composite rebuild).
-    ///
-    /// **Deprecated V1:** No longer needed — all widgets are unified.
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        // This default implementation won't work for all types because of object safety.
-        // Concrete types that need downcasting override this.
-        panic!("as_any_mut not implemented for this widget")
-    }
-
-    /// Register any reactive property bindings for dirty tracking.
-    /// Called automatically by `BuildContext::add()` after the widget
-    /// receives its WidgetId. Widgets with `Reactive::Bound` fields
-    /// override this to register their bindings.
-    ///
-    /// **Deprecated V1:** Use `Prop<T>` which self-registers.
-    fn register_bindings(&self, _id: WidgetId, _registry: &crate::state::BindingRegistry) {
-        // Default: no reactive bindings.
-    }
-
-    /// Return any `State<f32>` values that may be animated via `set_animated`.
-    /// Called automatically during widget insertion to register them with the
-    /// animation scheduler. Override this if your widget uses `set_animated`
-    /// on internally owned states.
-    ///
-    /// **Deprecated V1:** Use `Signal<f32>::new_animated()` and `animated_signals()`.
-    fn animated_states(&self) -> Vec<crate::state::State<f32>> {
-        Vec::new()
-    }
-
-    /// Return any `Signal<f32>` values that may be animated via `animate_to`.
-    /// Called automatically during widget insertion to register them with the
-    /// animation scheduler.
-    fn animated_signals(&self) -> Vec<crate::signal::Signal<f32>> {
-        Vec::new()
-    }
-
-    /// Take any deferred children out of this widget for resolution.
-    /// Called by `WidgetTree::add_widget_direct()` before inserting the widget.
-    /// Containers override this to drain their pending children list.
-    ///
-    /// **Deprecated V1:** Use `build()` to resolve children.
-    fn take_pending_children(&mut self) -> Vec<PendingChild> {
-        Vec::new()
-    }
-
-    /// Wire resolved child IDs back into the widget after pending children
-    /// have been inserted into the arena. Containers override this to set
-    /// their internal `child_ids` field.
-    ///
-    /// **Deprecated V1:** Use `build()` to resolve children.
-    fn set_resolved_children(&mut self, _ids: Vec<WidgetId>) {
-        // Default: no children to wire.
-    }
-
-    /// Take a deferred `visible_when` binding stored by the builder pattern.
-    /// Called after insertion to register with the tree.
-    ///
-    /// **Deprecated V1:** Use `WidgetBuilder::visible_when()`.
-    fn take_visible_when(&mut self) -> Option<crate::state::Reactive<bool>> {
+    /// Extract attached handler set from a `WidgetWithHandlers` wrapper.
+    /// Called during arena insertion to transfer handlers to the `WidgetNode`.
+    /// Default: returns `None` (no attached handlers).
+    fn take_handler_set(&mut self) -> Option<crate::widget_builder::HandlerSet> {
         None
-    }
-
-    /// Take a deferred `enabled_when` binding stored by the builder pattern.
-    /// Called after insertion to register with the tree.
-    ///
-    /// **Deprecated V1:** Use `WidgetBuilder::enabled_when()`.
-    fn take_enabled_when(&mut self) -> Option<crate::state::Reactive<bool>> {
-        None
-    }
-}
-
-/// Trait for anything that can be added to a WidgetTree via `add_widget()`.
-/// Blanket-implemented for all `Widget` types.
-pub trait IntoWidgetTree: 'static {
-    fn register(self: Box<Self>, tree: &mut crate::widget_tree::WidgetTree) -> WidgetId;
-}
-
-impl<W: Widget + 'static> IntoWidgetTree for W {
-    fn register(self: Box<Self>, tree: &mut crate::widget_tree::WidgetTree) -> WidgetId {
-        tree.add_widget_direct(self)
     }
 }
 

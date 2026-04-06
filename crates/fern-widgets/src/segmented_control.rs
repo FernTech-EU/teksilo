@@ -4,18 +4,15 @@
 //! for position-based click-to-select.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
-};
 use fern_core::signal::Signal;
-use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
-};
+use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::HandlerSet;
 use fern_tokens::{Color, CornerRadius};
 
 /// Padding inside each segment.
@@ -30,11 +27,10 @@ pub struct SegmentedControl {
     labels: Vec<String>,
     selected: Signal<usize>,
     enabled: bool,
-    hovered_segment: Cell<Option<usize>>,
-    last_click_x: Cell<f32>,
-    focus_origin: Option<FocusOrigin>,
-    tap_recognizer: TapRecognizer,
-    cached_bounds: Cell<Rect>,
+    hovered_segment: Rc<Cell<Option<usize>>>,
+    last_click_x: Rc<Cell<f32>>,
+    focus_origin: Rc<Cell<Option<FocusOrigin>>>,
+    cached_bounds: Rc<Cell<Rect>>,
 }
 
 impl SegmentedControl {
@@ -43,11 +39,10 @@ impl SegmentedControl {
             labels,
             selected,
             enabled: true,
-            hovered_segment: Cell::new(None),
-            last_click_x: Cell::new(0.0),
-            focus_origin: None,
-            tap_recognizer: TapRecognizer::new(),
-            cached_bounds: Cell::new(Rect::ZERO),
+            hovered_segment: Rc::new(Cell::new(None)),
+            last_click_x: Rc::new(Cell::new(0.0)),
+            focus_origin: Rc::new(Cell::new(None)),
+            cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
         }
     }
 
@@ -66,16 +61,6 @@ impl SegmentedControl {
             return 0.0;
         }
         bounds.width / n as f32
-    }
-
-    fn segment_index_at(&self, x: f32, bounds: Rect) -> usize {
-        let n = self.segment_count();
-        if n == 0 || bounds.width <= 0.0 {
-            return 0;
-        }
-        let relative = (x - bounds.x).max(0.0);
-        let index = (relative / self.segment_width(bounds)).floor() as usize;
-        index.min(n - 1)
     }
 
     fn segment_rect(&self, index: usize, bounds: Rect) -> Rect {
@@ -143,6 +128,141 @@ impl Widget for SegmentedControl {
             registry,
             fern_core::state::BindingLevel::RepaintOnly,
         );
+
+        let selected = self.selected.clone();
+        let enabled = self.enabled;
+        let n = self.segment_count();
+        let hovered_segment = self.hovered_segment.clone();
+        let last_click_x = self.last_click_x.clone();
+        let focus_origin = self.focus_origin.clone();
+        let cached_bounds = self.cached_bounds.clone();
+
+        let mut handlers = HandlerSet::new().focusable(enabled).cursor(CursorIcon::Pointer);
+
+        // Pointer event handler (click to select segment)
+        {
+            let selected = selected.clone();
+            let cached_bounds = cached_bounds.clone();
+            let last_click_x = last_click_x.clone();
+            let hovered_segment = hovered_segment.clone();
+            handlers = handlers.on_pointer_event(move |event, _ctx| {
+                if !enabled {
+                    return EventResponse::Ignored;
+                }
+                let bounds = cached_bounds.get();
+                match event {
+                    WidgetEvent::PointerDown { position, .. } => {
+                        last_click_x.set(position.x);
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::PointerUp { .. } => {
+                        // Simple click detection: use last_click_x to determine segment
+                        if n > 0 && bounds.width > 0.0 {
+                            let seg_w = bounds.width / n as f32;
+                            let relative = (last_click_x.get() - bounds.x).max(0.0);
+                            let index = (relative / seg_w).floor() as usize;
+                            selected.set(index.min(n - 1));
+                        }
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::PointerMove { position } => {
+                        if n > 0 && bounds.width > 0.0 {
+                            let seg_w = bounds.width / n as f32;
+                            let relative = (position.x - bounds.x).max(0.0);
+                            let index = (relative / seg_w).floor() as usize;
+                            let idx = index.min(n - 1);
+                            let old = hovered_segment.get();
+                            if old != Some(idx) {
+                                hovered_segment.set(Some(idx));
+                            }
+                        }
+                        EventResponse::Ignored
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Hover handler
+        {
+            let hovered_segment = hovered_segment.clone();
+            handlers = handlers.on_hover(move |entered, _ctx| {
+                if !entered {
+                    hovered_segment.set(None);
+                }
+            });
+        }
+
+        // Key handler
+        {
+            let selected = selected.clone();
+            handlers = handlers.on_key(move |event, _ctx| {
+                if !enabled || n == 0 {
+                    return EventResponse::Ignored;
+                }
+                match event {
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowRight,
+                        ..
+                    } => {
+                        let current = selected.get();
+                        selected.set((current + 1) % n);
+                        EventResponse::Handled
+                    }
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowLeft,
+                        ..
+                    } => {
+                        let current = selected.get();
+                        selected.set(if current == 0 { n - 1 } else { current - 1 });
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+
+        // Focus handler
+        {
+            let focus_origin = focus_origin.clone();
+            let hovered_segment = hovered_segment.clone();
+            handlers = handlers.on_focus(move |gained, _ctx| {
+                if gained {
+                    let origin = if hovered_segment.get().is_some() {
+                        FocusOrigin::Pointer
+                    } else {
+                        FocusOrigin::Keyboard
+                    };
+                    focus_origin.set(Some(origin));
+                } else {
+                    focus_origin.set(None);
+                }
+            });
+        }
+
+        // Access action handler
+        {
+            let selected = selected.clone();
+            handlers = handlers.on_access_action(move |action, _ctx| {
+                if n == 0 {
+                    return EventResponse::Ignored;
+                }
+                if action == fern_core::accesskit::Action::Increment {
+                    let current = selected.get();
+                    selected.set((current + 1) % n);
+                    EventResponse::Handled
+                } else if action == fern_core::accesskit::Action::Decrement {
+                    let current = selected.get();
+                    selected.set(if current == 0 { n - 1 } else { current - 1 });
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            });
+        }
+
+        ctx.apply_self_handlers(handlers);
+
         Vec::new()
     }
 
@@ -217,7 +337,7 @@ impl Widget for SegmentedControl {
         }
 
         // Focus ring around the whole control
-        if self.focus_origin == Some(FocusOrigin::Keyboard) {
+        if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
             canvas.stroke_rounded_rect(
                 bounds,
                 CornerRadius::uniform(shape.radius_sm),
@@ -225,113 +345,6 @@ impl Widget for SegmentedControl {
                 2.0,
             );
         }
-    }
-
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        if !self.enabled {
-            return EventResponse::Ignored;
-        }
-
-        let bounds = self.cached_bounds.get();
-
-        match event {
-            WidgetEvent::PointerDown { position, button } => {
-                self.last_click_x.set(position.x);
-                self.tap_recognizer.process(&RawPointerEvent::Down {
-                    position: *position,
-                    button: *button,
-                });
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerUp { position, button } => {
-                let result = self.tap_recognizer.process(&RawPointerEvent::Up {
-                    position: *position,
-                    button: *button,
-                });
-                if matches!(result, GestureResult::Recognized(GestureEvent::Tap { .. })) {
-                    let index = self.segment_index_at(self.last_click_x.get(), bounds);
-                    self.selected.set(index);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerMove { position } => {
-                self.tap_recognizer.process(&RawPointerEvent::Move {
-                    position: *position,
-                });
-                let index = self.segment_index_at(position.x, bounds);
-                let old = self.hovered_segment.get();
-                if old != Some(index) {
-                    self.hovered_segment.set(Some(index));
-                }
-                EventResponse::Ignored
-            }
-            WidgetEvent::PointerEnter => {
-                ctx.set_cursor(CursorIcon::Pointer);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerLeave => {
-                self.hovered_segment.set(None);
-                self.tap_recognizer.reset();
-                ctx.set_cursor(CursorIcon::Default);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyDown {
-                key: Key::ArrowRight,
-                ..
-            } => {
-                let n = self.segment_count();
-                if n > 0 {
-                    let current = self.selected.get();
-                    self.selected.set((current + 1) % n);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyDown {
-                key: Key::ArrowLeft,
-                ..
-            } => {
-                let n = self.segment_count();
-                if n > 0 {
-                    let current = self.selected.get();
-                    self.selected
-                        .set(if current == 0 { n - 1 } else { current - 1 });
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusGained { origin } => {
-                self.focus_origin = Some(*origin);
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusLost => {
-                self.focus_origin = None;
-                EventResponse::Handled
-            }
-            WidgetEvent::AccessAction { action, .. } => {
-                if *action == fern_core::accesskit::Action::Increment {
-                    let n = self.segment_count();
-                    if n > 0 {
-                        let current = self.selected.get();
-                        self.selected.set((current + 1) % n);
-                    }
-                    EventResponse::Handled
-                } else if *action == fern_core::accesskit::Action::Decrement {
-                    let n = self.segment_count();
-                    if n > 0 {
-                        let current = self.selected.get();
-                        self.selected
-                            .set(if current == 0 { n - 1 } else { current - 1 });
-                    }
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-            _ => EventResponse::Ignored,
-        }
-    }
-
-    fn is_focusable(&self) -> bool {
-        self.enabled
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

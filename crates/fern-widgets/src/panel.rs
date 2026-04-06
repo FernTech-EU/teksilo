@@ -3,7 +3,7 @@
 //! Like Qt's QFrame: a single-child wrapper that provides visual framing.
 //! Visual properties come from the theme by default but can be overridden.
 //!
-//! Panel is a Level 2 Widget (not a CompositeWidget) because its internal
+//! Panel is a Level 2 Widget (not a Widget) because its internal
 //! structure is fixed and doesn't need reactive state or rebuild on theme change.
 //! It reads theme tokens during layout and paint directly from the context.
 

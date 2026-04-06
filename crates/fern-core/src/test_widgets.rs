@@ -6,8 +6,7 @@ use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_tokens::{Color, CornerRadius};
 
 use crate::accessibility::AccessNodeBuilder;
-use crate::event::{EventResponse, WidgetEvent};
-use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use crate::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use crate::widget_id::WidgetId;
 
 /// A minimal leaf widget for testing. Fills proposed size, optionally paints a shape.
@@ -67,8 +66,16 @@ impl Widget for FillWidget {
         }
     }
 
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
+    fn build(
+        &mut self,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Vec<crate::widget_id::WidgetId> {
+        if self.focusable {
+            ctx.apply_self_handlers(
+                crate::widget_builder::HandlerSet::new().focusable(true),
+            );
+        }
+        Vec::new()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -76,10 +83,6 @@ impl Widget for FillWidget {
             builder.set_role(accesskit::Role::Label);
             builder.set_name(label.as_str());
         }
-    }
-
-    fn is_focusable(&self) -> bool {
-        self.focusable
     }
 }
 
@@ -118,10 +121,6 @@ impl Widget for StackWidget {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
-    }
-
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -171,10 +170,6 @@ impl Widget for InsetWidget {
                 (bounds.height - self.inset * 2.0).max(0.0),
             );
         }
-    }
-
-    fn event(&mut self, _event: &WidgetEvent, _ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
     }
 
     fn children(&self) -> Vec<WidgetId> {

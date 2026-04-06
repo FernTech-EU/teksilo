@@ -4,7 +4,7 @@
 //! - Non-generic (closure-based type erasure, Approach B)
 //! - Signal-based reactive state (V2 API)
 //! - Theme resolved at paint time (not captured at build time)
-//! - Pointer interaction via TapRecognizer
+//! - V2 attached handlers (HandlerSet) — no event() override
 //! - Bindings auto-registered via register_bindings (no manual bind_to)
 //! - Minimum touch target size from theme
 
@@ -13,12 +13,9 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::focus::FocusOrigin;
-use fern_core::gesture::{
-    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapRecognizer,
-};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, WidgetPlacement};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, ColorTokens, CornerRadius};
 
@@ -63,8 +60,6 @@ pub struct Button {
     tooltip_text: Option<String>,
     /// Interaction state signal — set during build().
     interaction: Signal<InteractionState>,
-    focus_origin: Option<FocusOrigin>,
-    tap_recognizer: TapRecognizer,
     /// Root child ID — set during build().
     root_child_id: Option<WidgetId>,
 }
@@ -78,8 +73,6 @@ impl Button {
             enabled: true,
             tooltip_text: None,
             interaction: Signal::new(InteractionState::Idle),
-            focus_origin: None,
-            tap_recognizer: TapRecognizer::new(),
             root_child_id: None,
         }
     }
@@ -107,12 +100,6 @@ impl Button {
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
-    }
-
-    fn fire_action(&self, ctx: &mut EventContext) {
-        if let Some(ref action) = self.action {
-            action(ctx);
-        }
     }
 }
 
@@ -182,9 +169,10 @@ impl fern_core::widget::Widget for Button {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
         let style = self.style;
+        let enabled = self.enabled;
 
         // Create interaction signal
-        let interaction = ctx.signal(if self.enabled {
+        let interaction = ctx.signal(if enabled {
             InteractionState::Idle
         } else {
             InteractionState::Disabled
@@ -250,6 +238,105 @@ impl fern_core::widget::Widget for Button {
         }
 
         self.root_child_id = Some(root_id);
+
+        // --- V2 attached handlers ---
+        let action = self.action.take();
+        let int_tap = interaction.clone();
+        let int_hover_enter = interaction.clone();
+        let int_hover_leave = interaction.clone();
+        let int_key = interaction.clone();
+        let int_focus = interaction.clone();
+        let action_key = action.as_ref().map(|_| ());
+        // Re-wrap action into Rc so it can be shared between tap, key, and access handlers
+        let action_rc: std::rc::Rc<Option<CommandFactory>> = std::rc::Rc::new(action);
+        let action_for_tap = action_rc.clone();
+        let action_for_key = action_rc.clone();
+        let action_for_access = action_rc.clone();
+
+        let handler_set = HandlerSet::new()
+            .on_tap({
+                let interaction = int_tap;
+                move |ctx: &mut EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    if let Some(ref action) = *action_for_tap {
+                        action(ctx);
+                    }
+                    interaction.set(InteractionState::Hovered);
+                }
+            })
+            .on_hover({
+                let int_enter = int_hover_enter;
+                let int_leave = int_hover_leave;
+                move |entered: bool, _ctx: &mut EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    if entered {
+                        int_enter.set(InteractionState::Hovered);
+                    } else {
+                        int_leave.set(InteractionState::Idle);
+                    }
+                }
+            })
+            .on_key({
+                let interaction = int_key;
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    if !enabled {
+                        return EventResponse::Ignored;
+                    }
+                    match event {
+                        WidgetEvent::KeyDown {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => {
+                            interaction.set(InteractionState::Pressed);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyUp {
+                            key: Key::Space | Key::Enter,
+                            ..
+                        } => {
+                            if let Some(ref action) = *action_for_key {
+                                action(ctx);
+                            }
+                            interaction.set(InteractionState::Focused);
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                }
+            })
+            .on_focus({
+                let interaction = int_focus;
+                move |gained: bool, _ctx: &mut EventContext| {
+                    if gained {
+                        if interaction.get() == InteractionState::Idle {
+                            interaction.set(InteractionState::Focused);
+                        }
+                    } else {
+                        interaction.set(InteractionState::Idle);
+                    }
+                }
+            })
+            .on_access_action({
+                move |action: fern_core::accesskit::Action, ctx: &mut EventContext| -> EventResponse {
+                    if action == fern_core::accesskit::Action::Click && enabled {
+                        if let Some(ref act) = *action_for_access {
+                            act(ctx);
+                        }
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    }
+                }
+            })
+            .focusable(enabled)
+            .cursor(CursorIcon::Pointer);
+
+        ctx.apply_self_handlers(handler_set);
+
         vec![root_id]
     }
 
@@ -274,91 +361,6 @@ impl fern_core::widget::Widget for Button {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
-    }
-
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        if !self.enabled {
-            return EventResponse::Ignored;
-        }
-
-        match event {
-            WidgetEvent::PointerDown { position, button } => {
-                self.interaction.set(InteractionState::Pressed);
-                self.tap_recognizer.process(&RawPointerEvent::Down {
-                    position: *position,
-                    button: *button,
-                });
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerUp { position, button } => {
-                let result = self.tap_recognizer.process(&RawPointerEvent::Up {
-                    position: *position,
-                    button: *button,
-                });
-                if matches!(result, GestureResult::Recognized(GestureEvent::Tap { .. })) {
-                    self.fire_action(ctx);
-                }
-                self.interaction.set(InteractionState::Hovered);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerMove { position } => {
-                self.tap_recognizer.process(&RawPointerEvent::Move {
-                    position: *position,
-                });
-                EventResponse::Ignored
-            }
-            WidgetEvent::PointerEnter => {
-                self.interaction.set(InteractionState::Hovered);
-                ctx.set_cursor(CursorIcon::Pointer);
-                EventResponse::Handled
-            }
-            WidgetEvent::PointerLeave => {
-                self.interaction.set(InteractionState::Idle);
-                self.tap_recognizer.reset();
-                ctx.set_cursor(CursorIcon::Default);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyDown {
-                key: Key::Space | Key::Enter,
-                ..
-            } => {
-                self.interaction.set(InteractionState::Pressed);
-                EventResponse::Handled
-            }
-            WidgetEvent::KeyUp {
-                key: Key::Space | Key::Enter,
-                ..
-            } => {
-                self.fire_action(ctx);
-                self.interaction.set(InteractionState::Focused);
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusGained { origin } => {
-                self.focus_origin = Some(*origin);
-                if self.interaction.get() == InteractionState::Idle {
-                    self.interaction.set(InteractionState::Focused);
-                }
-                EventResponse::Handled
-            }
-            WidgetEvent::FocusLost => {
-                self.focus_origin = None;
-                self.interaction.set(InteractionState::Idle);
-                EventResponse::Handled
-            }
-            WidgetEvent::AccessAction { action, .. } => {
-                if *action == fern_core::accesskit::Action::Click {
-                    self.fire_action(ctx);
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            }
-            _ => EventResponse::Ignored,
-        }
-    }
-
-    fn is_focusable(&self) -> bool {
-        self.enabled
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -530,7 +532,7 @@ mod tests {
     fn focus_origin_keyboard() {
         let (mut tree, _btn) = setup();
         tree.press_key(Key::Tab, Modifiers::NONE);
-        assert_eq!(tree.focus_origin(), Some(FocusOrigin::Keyboard));
+        assert_eq!(tree.focus_origin(), Some(fern_core::focus::FocusOrigin::Keyboard));
     }
 
     #[test]
@@ -591,7 +593,7 @@ mod tests {
             position: center,
             button: PointerButton::Primary,
         });
-        assert_eq!(tree.focus_origin(), Some(FocusOrigin::Pointer));
+        assert_eq!(tree.focus_origin(), Some(fern_core::focus::FocusOrigin::Pointer));
     }
 
     #[test]

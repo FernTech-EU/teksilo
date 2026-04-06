@@ -47,10 +47,9 @@ pub use state::{
     ReadableState, State, StateHandle,
 };
 pub use widget::{
-    CursorIcon, EventContext, IntoWidgetTree, LayoutContext, PaintContext, PendingChild, Widget,
-    WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
-pub use widget_builder::{WidgetBuilder, WidgetWithHandlers};
+pub use widget_builder::{HandlerSet, WidgetBuilder, WidgetWithHandlers};
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 
