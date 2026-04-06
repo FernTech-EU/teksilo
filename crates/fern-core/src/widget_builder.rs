@@ -20,6 +20,9 @@ use crate::widget::{CursorIcon, EventContext, Widget};
 
 /// Temporary storage for handlers and metadata accumulated via builder
 /// methods. Transferred to the `WidgetNode` during arena insertion.
+/// Type alias for a context menu content factory.
+pub type ContextMenuFactory = Box<dyn Fn() -> Box<dyn Widget>>;
+
 pub struct HandlerSet {
     pub(crate) handlers: EventHandlers,
     pub(crate) focusable: Option<bool>,
@@ -29,6 +32,7 @@ pub struct HandlerSet {
     pub(crate) enabled_when: Option<Prop<bool>>,
     pub(crate) tooltip_text: Option<String>,
     pub(crate) clips_children: Option<bool>,
+    pub(crate) context_menu_factory: Option<ContextMenuFactory>,
 }
 
 impl HandlerSet {
@@ -43,6 +47,7 @@ impl HandlerSet {
             enabled_when: None,
             tooltip_text: None,
             clips_children: None,
+            context_menu_factory: None,
         }
     }
 
@@ -117,6 +122,16 @@ impl HandlerSet {
     /// Set the clips_children flag.
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.clips_children = Some(clips);
+        self
+    }
+
+    /// Set a context menu factory. The factory is invoked on right-click
+    /// to produce the overlay content widget (typically a `MenuList`).
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn() -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.context_menu_factory = Some(Box::new(factory));
         self
     }
 }
@@ -269,6 +284,14 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.handler_set.clips_children = Some(clips);
+        self
+    }
+
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn() -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.handler_set.context_menu_factory = Some(Box::new(factory));
         self
     }
 }
@@ -431,6 +454,13 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     fn clips_children_on(self, clips: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).clips_children(clips)
+    }
+
+    fn context_menu(
+        self,
+        factory: impl Fn() -> Box<dyn Widget> + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).context_menu(factory)
     }
 }
 

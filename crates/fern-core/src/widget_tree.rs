@@ -424,6 +424,9 @@ impl WidgetTree {
                         node.node_focusable = handler_set.focusable;
                         node.node_tab_index = handler_set.tab_index;
                         node.node_cursor = handler_set.cursor;
+                        if handler_set.context_menu_factory.is_some() {
+                            node.context_menu_factory = handler_set.context_menu_factory;
+                        }
                     }
                 } else {
                     self.arena.restore_widget(id, widget_box);
@@ -500,6 +503,9 @@ impl WidgetTree {
                         node.node_focusable = handler_set.focusable;
                         node.node_tab_index = handler_set.tab_index;
                         node.node_cursor = handler_set.cursor;
+                        if handler_set.context_menu_factory.is_some() {
+                            node.context_menu_factory = handler_set.context_menu_factory;
+                        }
                     }
                 } else {
                     self.arena.restore_widget(id, widget_box);
@@ -838,8 +844,14 @@ impl WidgetTree {
                     self.handle_pointer_move(*position);
                 }
             }
-            WidgetEvent::PointerDown { position, .. } => {
+            WidgetEvent::PointerDown { position, button } => {
                 if let Some(target) = self.hit_test(*position) {
+                    // Context menu: right-click walks up for a context_menu_factory
+                    if *button == PointerButton::Secondary {
+                        if self.show_context_menu_for(target, *position) {
+                            return; // Context menu shown — consume the event
+                        }
+                    }
                     // Focus the nearest focusable widget (target or ancestor)
                     if let Some(focusable) = self.find_focusable_at_or_above(target) {
                         self.focus_with_origin(focusable, crate::focus::FocusOrigin::Pointer);
@@ -913,6 +925,51 @@ impl WidgetTree {
             | WidgetEvent::FocusLost => {}
         }
         self.flush_commands();
+    }
+
+    /// Walk up from `target` looking for a context_menu_factory.
+    /// If found, invoke it and show the result as an overlay at `position`.
+    fn show_context_menu_for(&mut self, target: WidgetId, position: Point) -> bool {
+        // Walk up from target to root looking for a context menu factory
+        let mut current = Some(target);
+        let factory_owner = loop {
+            match current {
+                None => break None,
+                Some(id) => {
+                    if self
+                        .arena
+                        .get(id)
+                        .is_some_and(|n| n.context_menu_factory.is_some())
+                    {
+                        break Some(id);
+                    }
+                    current = self.arena.get(id).and_then(|n| n.parent);
+                }
+            }
+        };
+
+        let Some(owner_id) = factory_owner else {
+            return false;
+        };
+
+        // Invoke the factory to create the menu content widget
+        let menu_widget = {
+            let node = self.arena.get(owner_id).unwrap();
+            let factory = node.context_menu_factory.as_ref().unwrap();
+            factory()
+        };
+
+        // Add the menu widget to the arena and show as overlay
+        let content_id = self.add_boxed(menu_widget);
+        self.overlay_manager.show(crate::overlay::OverlayRequest {
+            content_id,
+            anchor: owner_id,
+            placement: crate::overlay::OverlayPlacement::AtPointer(position),
+            dismiss: crate::overlay::DismissBehavior::ClickOutside,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+        true
     }
 
     fn handle_pointer_move(&mut self, position: Point) {

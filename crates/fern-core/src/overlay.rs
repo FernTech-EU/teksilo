@@ -34,6 +34,8 @@ pub enum OverlayPlacement {
     AtPointer(Point),
     /// Near the anchor with a preferred alignment and offset (tooltip).
     NearAnchor { offset: Vec2 },
+    /// Below the anchor if space allows, otherwise above (combo box dropdown).
+    BelowPreferred { viewport_height: f32 },
 }
 
 /// When an overlay is dismissed.
@@ -262,6 +264,21 @@ impl OverlayManager {
                     content_size.width,
                     content_size.height,
                 ),
+                OverlayPlacement::BelowPreferred { viewport_height } => {
+                    let below_y = anchor.y + anchor.height + 4.0;
+                    let fits_below = below_y + content_size.height <= *viewport_height;
+                    let y = if fits_below {
+                        below_y
+                    } else {
+                        anchor.y - content_size.height - 4.0
+                    };
+                    Rect::new(
+                        anchor.x,
+                        y,
+                        content_size.width.max(anchor.width),
+                        content_size.height,
+                    )
+                }
             };
         }
     }
