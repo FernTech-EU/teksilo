@@ -33,6 +33,10 @@ enum Cmd {
     NewFile,
     OpenFile,
     SaveFile,
+    AlignLeft,
+    AlignCenter,
+    AlignRight,
+    AlignJustify,
 }
 
 impl AppCommand for Cmd {}
@@ -216,7 +220,17 @@ impl Widget for Root {
                                                 MenuItem::new("Select All")
                                                     .on_activate(Cmd::SelectAll)
                                                     .shortcut_label("Ctrl+A"),
-                                            ),
+                                            )
+                                            .separator()
+                                            .item(MenuItem::submenu("Alignment", || {
+                                                Box::new(
+                                                    MenuList::new()
+                                                        .item(MenuItem::new("Left").on_activate(Cmd::AlignLeft))
+                                                        .item(MenuItem::new("Center").on_activate(Cmd::AlignCenter))
+                                                        .item(MenuItem::new("Right").on_activate(Cmd::AlignRight))
+                                                        .item(MenuItem::new("Justify").on_activate(Cmd::AlignJustify)),
+                                                )
+                                            })),
                                     )
                                 }),
                         )
@@ -339,7 +353,7 @@ impl Widget for Root {
                 .add_child(menu_showcase_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content));
-        let scroll = ctx.add(ScrollArea::from_id(padded));
+        let scroll = ctx.add(ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarStyle::Overlay));
 
         let root = ctx.add(
             VStack::new()
@@ -701,6 +715,76 @@ mod tests {
         assert!(
             tree.active_overlays().is_empty(),
             "clicking outside should dismiss context menu"
+        );
+    }
+
+    #[test]
+    fn menu_item_activation_dismisses_overlay() {
+        use fern_ui::core::event::PointerButton;
+        use fern_ui::widgets::Panel;
+
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let panel = tree.add(
+            Panel::new()
+                .padding(20.0)
+                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .context_menu(|| {
+                    Box::new(
+                        MenuList::new()
+                            .item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                    )
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Open context menu
+        let center = tree.bounds(panel).center();
+        tree.pointer_down_button(center, PointerButton::Secondary);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(tree.active_overlays().len(), 1, "menu should be open");
+
+        // Click the menu item — find it via overlay content
+        let content_ids = tree.overlay_manager().active_content_ids();
+        tree.click(content_ids[0]);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "menu should be dismissed after item activation"
+        );
+    }
+
+    #[test]
+    fn right_click_replaces_context_menu() {
+        use fern_ui::core::event::PointerButton;
+        use fern_ui::widgets::Panel;
+
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let panel = tree.add(
+            Panel::new()
+                .padding(20.0)
+                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .context_menu(|| {
+                    Box::new(
+                        MenuList::new()
+                            .item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                    )
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Open context menu at one position
+        let center = tree.bounds(panel).center();
+        tree.pointer_down_button(center, PointerButton::Secondary);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // Right-click elsewhere on the same panel — should replace, not stack
+        let other = fern_ui::prelude::Point::new(center.x + 20.0, center.y + 20.0);
+        tree.pointer_down_button(other, PointerButton::Secondary);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "right-click should replace existing context menu, not stack"
         );
     }
 
