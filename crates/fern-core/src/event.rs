@@ -105,6 +105,84 @@ impl Modifiers {
     }
 }
 
+impl std::fmt::Display for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Key::Space => f.write_str("Space"),
+            Key::Enter => f.write_str("Enter"),
+            Key::Escape => f.write_str("Esc"),
+            Key::Tab => f.write_str("Tab"),
+            Key::Backspace => f.write_str("Backspace"),
+            Key::Delete => f.write_str("Del"),
+            Key::ArrowUp => f.write_str("Up"),
+            Key::ArrowDown => f.write_str("Down"),
+            Key::ArrowLeft => f.write_str("Left"),
+            Key::ArrowRight => f.write_str("Right"),
+            Key::Home => f.write_str("Home"),
+            Key::End => f.write_str("End"),
+            Key::PageUp => f.write_str("PageUp"),
+            Key::PageDown => f.write_str("PageDown"),
+            Key::A => f.write_str("A"),
+            Key::B => f.write_str("B"),
+            Key::C => f.write_str("C"),
+            Key::D => f.write_str("D"),
+            Key::E => f.write_str("E"),
+            Key::F => f.write_str("F"),
+            Key::G => f.write_str("G"),
+            Key::H => f.write_str("H"),
+            Key::I => f.write_str("I"),
+            Key::J => f.write_str("J"),
+            Key::K => f.write_str("K"),
+            Key::L => f.write_str("L"),
+            Key::M => f.write_str("M"),
+            Key::N => f.write_str("N"),
+            Key::O => f.write_str("O"),
+            Key::P => f.write_str("P"),
+            Key::Q => f.write_str("Q"),
+            Key::R => f.write_str("R"),
+            Key::S => f.write_str("S"),
+            Key::T => f.write_str("T"),
+            Key::U => f.write_str("U"),
+            Key::V => f.write_str("V"),
+            Key::W => f.write_str("W"),
+            Key::X => f.write_str("X"),
+            Key::Y => f.write_str("Y"),
+            Key::Z => f.write_str("Z"),
+            Key::F1 => f.write_str("F1"),
+            Key::F2 => f.write_str("F2"),
+            Key::F3 => f.write_str("F3"),
+            Key::F4 => f.write_str("F4"),
+            Key::F5 => f.write_str("F5"),
+            Key::F6 => f.write_str("F6"),
+            Key::F7 => f.write_str("F7"),
+            Key::F8 => f.write_str("F8"),
+            Key::F9 => f.write_str("F9"),
+            Key::F10 => f.write_str("F10"),
+            Key::F11 => f.write_str("F11"),
+            Key::F12 => f.write_str("F12"),
+            Key::Character(c) => write!(f, "{}", c.to_uppercase()),
+        }
+    }
+}
+
+impl std::fmt::Display for Modifiers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.ctrl() {
+            f.write_str("Ctrl+")?;
+        }
+        if self.alt() {
+            f.write_str("Alt+")?;
+        }
+        if self.shift() {
+            f.write_str("Shift+")?;
+        }
+        if self.super_key() {
+            f.write_str("Super+")?;
+        }
+        Ok(())
+    }
+}
+
 impl std::ops::BitOr for Modifiers {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self {

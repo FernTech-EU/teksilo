@@ -129,6 +129,12 @@ impl<'a> BuildContext<'a> {
         self.tree.attach_tooltip(anchor_id, content_id, delay);
     }
 
+    /// Set a widget as dormant (inactive). Used to pre-create overlay content
+    /// that will be activated later via `EventContext::activate()`.
+    pub fn set_dormant(&mut self, id: WidgetId) {
+        self.tree.set_dormant(id);
+    }
+
     /// Apply a `HandlerSet` to the composite widget being built (self).
     /// This transfers attached event handlers, focusable flag, cursor, etc.
     /// to the widget's arena node, replacing `event()` and `is_focusable()` overrides.

@@ -80,6 +80,8 @@ pub struct WidgetNode {
     /// RAII observer handles for effects registered during build().
     /// Dropped on rebuild or widget destruction.
     pub(crate) effect_handles: Vec<ObserverHandle>,
+    /// Context menu factory — invoked on right-click to produce overlay content.
+    pub(crate) context_menu_factory: Option<crate::widget_builder::ContextMenuFactory>,
 }
 
 impl std::fmt::Debug for WidgetNode {
@@ -148,6 +150,7 @@ impl WidgetArena {
             node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),
+            context_menu_factory: None,
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -189,6 +192,7 @@ impl WidgetArena {
             node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),
+            context_menu_factory: None,
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -413,6 +417,9 @@ impl WidgetArena {
             }
             if let Some(clips) = handler_set.clips_children {
                 node.clips_children = clips;
+            }
+            if handler_set.context_menu_factory.is_some() {
+                node.context_menu_factory = handler_set.context_menu_factory;
             }
         }
     }
