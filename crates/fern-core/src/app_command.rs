@@ -2,7 +2,7 @@ use std::any::Any;
 use std::fmt::Debug;
 
 /// Trait bound for application-defined command enums.
-pub trait AppCommand: 'static + Send + Clone + Debug {}
+pub trait AppCommand: 'static + Send + Clone + Debug + PartialEq {}
 
 /// Type-erased command wrapper for storing commands in the widget tree.
 pub struct ErasedCommand(Box<dyn Any + Send>);

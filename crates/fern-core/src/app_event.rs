@@ -35,7 +35,7 @@ mod tests {
     fn app_event_command_variant() {
         use crate::app_command::AppCommand;
 
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, PartialEq)]
         struct TestCmd;
         impl AppCommand for TestCmd {}
 
