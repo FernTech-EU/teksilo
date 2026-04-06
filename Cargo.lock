@@ -1655,6 +1655,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "menus-and-dropdowns"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -3,7 +3,10 @@ pub mod badge;
 pub mod button;
 pub mod card;
 pub mod checkbox;
+pub mod combo_box;
 pub mod link;
+pub mod menu_item;
+pub mod menu_list;
 pub mod panel;
 pub mod primitives;
 pub mod progress_bar;
@@ -22,9 +25,12 @@ pub use tooltip::TooltipWidget;
 pub use accordion::Accordion;
 pub use badge::Badge;
 pub use button::{Button, ButtonStyle};
+pub use combo_box::ComboBox;
 pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
 pub use link::Link;
+pub use menu_item::MenuItem;
+pub use menu_list::{MenuList, MenuSeparator};
 pub use panel::Panel;
 pub use primitives::{
     AspectRatio, Center, Divider, Expand, FixedSize, Grid, HStack, IconWidget, MaxSize, MinSize,

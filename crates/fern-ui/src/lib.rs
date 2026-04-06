@@ -17,7 +17,7 @@ pub mod prelude {
     pub use fern_core::{
         AccessNodeBuilder, AppCommand, BuildContext, CursorIcon, DerivedState, EventContext,
         EventResponse, FocusPolicy, Key, LayoutContext, Modifiers, PaintContext, Shortcut,
-        ShortcutMap, State, Widget, WidgetEvent, WidgetId,
+        ShortcutMap, State, Widget, WidgetBuilder, WidgetEvent, WidgetId,
     };
 
     // Geometry (lives in fern-canvas)

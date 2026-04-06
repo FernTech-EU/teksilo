@@ -31,10 +31,10 @@ use std::rc::Rc;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
-    Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, Divider, Expand, Grid,
-    HStack, IconWidget, Link, MaxSize, Padding, Panel, ProgressBar, RadioButton, ScrollArea,
-    SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle, Toolbar, TrackSize, VStack,
-    Wrap,
+    Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
+    Grid, HStack, IconWidget, Link, MaxSize, MenuList, MenuItem, Padding, Panel, ProgressBar,
+    RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle,
+    Toolbar, TrackSize, VStack, Wrap,
 };
 
 // ---------------------------------------------------------------------------
@@ -45,6 +45,9 @@ use fern_ui::widgets::{
 enum Cmd {
     ToggleDarkMode,
     LinkClicked,
+    Cut,
+    Copy,
+    Paste,
 }
 
 impl AppCommand for Cmd {}
@@ -548,6 +551,73 @@ impl Widget for WidgetCatalog {
         );
 
         // =====================================================================
+        // Section 7: Menus & Dropdowns (Milestone 4)
+        // =====================================================================
+
+        let combo_selected = ctx.signal(None::<usize>);
+        let menus_section = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new("Menus & Dropdowns")
+                        .style(t.heading_2.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    TextWidget::new("ComboBox")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    HStack::new().spacing(16.0).child(
+                        ComboBox::new(
+                            vec!["Apple", "Banana", "Cherry", "Date", "Elderberry"],
+                            combo_selected.clone(),
+                        )
+                        .placeholder("Select a fruit..."),
+                    ),
+                )
+                .child(
+                    TextWidget::new("Context Menu (right-click the panel below)")
+                        .style(t.label.clone())
+                        .color(c.on_surface),
+                )
+                .child(
+                    Panel::new()
+                        .background(c.surface_secondary)
+                        .corner_radius(8.0)
+                        .padding(16.0)
+                        .child(
+                            TextWidget::new("Right-click here for a context menu")
+                                .style(t.body.clone())
+                                .color(c.on_surface),
+                        )
+                        .context_menu(|| {
+                            Box::new(
+                                MenuList::new()
+                                    .item(
+                                        MenuItem::new("Cut")
+                                            .on_activate(Cmd::Cut)
+                                            .shortcut_label("Ctrl+X"),
+                                    )
+                                    .item(
+                                        MenuItem::new("Copy")
+                                            .on_activate(Cmd::Copy)
+                                            .shortcut_label("Ctrl+C"),
+                                    )
+                                    .item(
+                                        MenuItem::new("Paste")
+                                            .on_activate(Cmd::Paste)
+                                            .shortcut_label("Ctrl+V"),
+                                    )
+                                    .separator()
+                                    .item(MenuItem::new("Disabled item").enabled(false)),
+                            )
+                        }),
+                ),
+        );
+
+        // =====================================================================
         // Assemble all sections
         // =====================================================================
 
@@ -583,7 +653,9 @@ impl Widget for WidgetCatalog {
                 .child(Divider::new().thickness(2.0))
                 .add_child(containers_section)
                 .child(Divider::new().thickness(2.0))
-                .add_child(nav_section),
+                .add_child(nav_section)
+                .child(Divider::new().thickness(2.0))
+                .add_child(menus_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
         let scroll = ctx.add(ScrollArea::from_id(padded));
@@ -595,7 +667,7 @@ impl Widget for WidgetCatalog {
                 .child(Expand::new().fills_stack().set_child(scroll))
                 .child(
                     StatusBar::new().child(
-                        TextWidget::new("Milestone 3 -- All widgets demonstrated")
+                        TextWidget::new("Milestone 4 -- All widgets demonstrated")
                             .style(t.caption.clone())
                             .color(c.on_surface),
                     ),
@@ -662,6 +734,9 @@ fn main() {
             Cmd::LinkClicked => {
                 println!("Link clicked!");
             }
+            Cmd::Cut => println!("Cut"),
+            Cmd::Copy => println!("Copy"),
+            Cmd::Paste => println!("Paste"),
         })
         .root(|tree| tree.add(WidgetCatalog::new()))
         .run();
