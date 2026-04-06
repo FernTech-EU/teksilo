@@ -27,6 +27,12 @@ impl Shortcut {
     }
 }
 
+impl std::fmt::Display for Shortcut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.modifiers, self.key)
+    }
+}
+
 /// Whether a shortcut binding is global or scoped to a widget subtree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutScope {
@@ -120,6 +126,15 @@ impl<C: AppCommand> ShortcutMap<C> {
             .iter()
             .find(|b| b.shortcut == *shortcut && b.scope == ShortcutScope::Global)
             .map(|b| &b.command)
+    }
+
+    /// Reverse lookup: find the shortcut bound to a command.
+    /// Returns the first global binding that matches.
+    pub fn find_shortcut_for(&self, command: &C) -> Option<&Shortcut> {
+        self.bindings
+            .iter()
+            .find(|b| b.scope == ShortcutScope::Global && &b.command == command)
+            .map(|b| &b.shortcut)
     }
 
     pub fn is_empty(&self) -> bool {
