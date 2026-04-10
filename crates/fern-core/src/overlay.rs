@@ -90,6 +90,13 @@ pub(crate) struct ActiveOverlay {
     pub parent_overlay: Option<OverlayId>,
     /// Computed bounds after positioning.
     pub bounds: Rect,
+    /// Widget that had focus before this overlay was shown.
+    /// Used to restore focus when the overlay is dismissed.
+    pub focus_restore: Option<WidgetId>,
+    /// When pointer-leave dismissal started (real time).
+    pub pointer_leave_started_real: Option<std::time::Instant>,
+    /// When pointer-leave dismissal started (simulated time).
+    pub pointer_leave_started_sim: Option<std::time::Instant>,
 }
 
 /// Manages the overlay stack — creation, positioning, dismissal, cascading.
@@ -120,9 +127,89 @@ impl OverlayManager {
             layer: request.layer,
             parent_overlay: request.parent_overlay,
             bounds: Rect::ZERO,
+            focus_restore: None,
+            pointer_leave_started_real: None,
+            pointer_leave_started_sim: None,
         };
         self.stack.push(overlay);
         id
+    }
+
+    pub(crate) fn is_descendant_of(&self, child: OverlayId, ancestor: OverlayId) -> bool {
+        let mut current = self
+            .stack
+            .iter()
+            .find(|overlay| overlay.id == child)
+            .and_then(|overlay| overlay.parent_overlay);
+
+        while let Some(parent) = current {
+            if parent == ancestor {
+                return true;
+            }
+            current = self
+                .stack
+                .iter()
+                .find(|overlay| overlay.id == parent)
+                .and_then(|overlay| overlay.parent_overlay);
+        }
+
+        false
+    }
+
+    /// Dismiss an overlay and all its children (cascade), returning the
+    /// dismissed content widget IDs and the overlay's focus_restore target.
+    pub fn dismiss_with_focus_restore(
+        &mut self,
+        id: OverlayId,
+    ) -> (Vec<WidgetId>, Option<WidgetId>) {
+        let focus_restore = self
+            .stack
+            .iter()
+            .find(|overlay| overlay.id == id)
+            .and_then(|overlay| overlay.focus_restore);
+        let dismissed = self.dismiss(id);
+        (dismissed, focus_restore)
+    }
+
+    /// Dismiss all descendant overlays of `parent`, optionally preserving the
+    /// subtree rooted at `preserve`.
+    pub fn dismiss_descendants_of(
+        &mut self,
+        parent: OverlayId,
+        preserve: Option<OverlayId>,
+    ) -> (Vec<WidgetId>, Option<WidgetId>) {
+        let mut to_dismiss = Vec::new();
+
+        for overlay in &self.stack {
+            if !self.is_descendant_of(overlay.id, parent) {
+                continue;
+            }
+            if preserve.is_some_and(|keep| overlay.id == keep || self.is_descendant_of(overlay.id, keep)) {
+                continue;
+            }
+            to_dismiss.push(overlay.id);
+        }
+
+        if to_dismiss.is_empty() {
+            return (Vec::new(), None);
+        }
+
+        let focus_restore = self
+            .stack
+            .iter()
+            .rev()
+            .find(|overlay| to_dismiss.contains(&overlay.id))
+            .and_then(|overlay| overlay.focus_restore);
+
+        let dismissed_content: Vec<WidgetId> = self
+            .stack
+            .iter()
+            .filter(|overlay| to_dismiss.contains(&overlay.id))
+            .map(|overlay| overlay.content_id)
+            .collect();
+        self.stack.retain(|overlay| !to_dismiss.contains(&overlay.id));
+
+        (dismissed_content, focus_restore)
     }
 
     /// Dismiss an overlay and all its children (cascade).
@@ -151,14 +238,22 @@ impl OverlayManager {
     }
 
     /// Dismiss the topmost overlay (e.g., on Escape).
-    /// Returns the overlay ID and content widget IDs of dismissed overlays.
-    pub fn dismiss_top(&mut self) -> Option<(OverlayId, Vec<WidgetId>)> {
+    /// Returns the overlay ID, content widget IDs, and focus_restore target.
+    pub fn dismiss_top(&mut self) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
         if let Some(overlay) = self.stack.last() {
             let id = overlay.id;
+            let focus_restore = overlay.focus_restore;
             let content_ids = self.dismiss(id);
-            Some((id, content_ids))
+            Some((id, content_ids, focus_restore))
         } else {
             None
+        }
+    }
+
+    /// Set the focus_restore target for the topmost overlay.
+    pub fn set_top_focus_restore(&mut self, focus_restore: WidgetId) {
+        if let Some(overlay) = self.stack.last_mut() {
+            overlay.focus_restore = Some(focus_restore);
         }
     }
 
@@ -225,11 +320,11 @@ impl OverlayManager {
             return Vec::new();
         }
 
-        // Dismiss all overlays with ClickOutside behavior
+        // Dismiss all overlays that should close on an outside click.
         let to_dismiss: Vec<OverlayId> = self
             .stack
             .iter()
-            .filter(|o| matches!(o.dismiss, DismissBehavior::ClickOutside))
+            .filter(|o| matches!(o.dismiss, DismissBehavior::ClickOutside | DismissBehavior::PointerLeave { .. }))
             .map(|o| o.id)
             .collect();
 
@@ -423,7 +518,7 @@ mod tests {
         });
 
         let dismissed = mgr.dismiss_top();
-        assert_eq!(dismissed.map(|(id, _)| id), Some(b));
+        assert_eq!(dismissed.map(|(id, _, _)| id), Some(b));
         assert_eq!(mgr.len(), 1);
     }
 

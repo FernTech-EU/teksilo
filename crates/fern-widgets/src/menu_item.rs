@@ -36,6 +36,7 @@ enum MenuItemState {
 /// crosses other menu items while moving toward a submenu, those items
 /// don't open their submenus because the delay hasn't elapsed yet.
 const DEFAULT_SUBMENU_OPEN_DELAY: Duration = Duration::from_millis(200);
+const DEFAULT_SUBMENU_CLOSE_DELAY: Duration = Duration::from_millis(150);
 
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
 pub struct MenuItem {
@@ -266,31 +267,58 @@ impl Widget for MenuItem {
             let sub_id = submenu_content_id.unwrap();
             let open_delay = self.submenu_open_delay;
 
-            handler_set = handler_set.on_hover({
-                let int_hover = int_hover.clone();
-                move |entered: bool, ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
-                    if entered {
-                        int_hover.set(MenuItemState::Hovered);
-                        ctx.show_overlay_after(
-                            OverlayRequest {
-                                content_id: sub_id,
-                                anchor: self_id,
-                                placement: OverlayPlacement::TrailingEdge,
-                                dismiss: DismissBehavior::ClickOutside,
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
+            handler_set = handler_set
+                .on_tap({
+                    let int_hover = int_hover.clone();
+                    move |ctx: &mut EventContext| {
+                        if !enabled {
+                            return;
+                        }
+                        // Click on submenu trigger opens it immediately
+                        ctx.dismiss_child_overlays_except(sub_id);
+                        ctx.activate(sub_id);
+                        ctx.show_overlay(OverlayRequest {
+                            content_id: sub_id,
+                            anchor: self_id,
+                            placement: OverlayPlacement::TrailingEdge,
+                            dismiss: DismissBehavior::PointerLeave {
+                                delay: DEFAULT_SUBMENU_CLOSE_DELAY,
                             },
-                            open_delay,
-                        );
-                    } else {
-                        int_hover.set(MenuItemState::Idle);
-                        ctx.cancel_delayed_overlay(sub_id);
+                            layer: OverlayLayer::InTree,
+                            parent_overlay: None,
+                        });
+                        ctx.request_focus(sub_id);
                     }
-                }
-            });
+                })
+                .on_hover({
+                    let int_hover = int_hover.clone();
+                    move |entered: bool, ctx: &mut EventContext| {
+                        if !enabled {
+                            return;
+                        }
+                        if entered {
+                            int_hover.set(MenuItemState::Hovered);
+                            ctx.dismiss_child_overlays_except(sub_id);
+                            ctx.show_overlay_after_with_focus(
+                                OverlayRequest {
+                                    content_id: sub_id,
+                                    anchor: self_id,
+                                    placement: OverlayPlacement::TrailingEdge,
+                                    dismiss: DismissBehavior::PointerLeave {
+                                        delay: DEFAULT_SUBMENU_CLOSE_DELAY,
+                                    },
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                },
+                                open_delay,
+                                sub_id,
+                            );
+                        } else {
+                            int_hover.set(MenuItemState::Idle);
+                            ctx.cancel_delayed_overlay(sub_id);
+                        }
+                    }
+                });
         } else {
             // --- Regular menu item: tap to activate ---
             let action_for_tap = action_rc.clone();
@@ -310,11 +338,12 @@ impl Widget for MenuItem {
                     }
                 })
                 .on_hover({
-                    move |entered: bool, _ctx: &mut EventContext| {
+                    move |entered: bool, ctx: &mut EventContext| {
                         if !enabled {
                             return;
                         }
                         if entered {
+                            ctx.dismiss_child_overlays();
                             int_hover.set(MenuItemState::Hovered);
                         } else {
                             int_hover.set(MenuItemState::Idle);
@@ -340,19 +369,46 @@ impl Widget for MenuItem {
                             action(ctx);
                             ctx.dismiss_all_overlays();
                         } else if let Some(sub_id) = sub_id {
-                            // Enter/Space on submenu trigger opens it immediately
+                            ctx.dismiss_child_overlays_except(sub_id);
                             ctx.activate(sub_id);
                             ctx.show_overlay(OverlayRequest {
                                 content_id: sub_id,
                                 anchor: self_id,
                                 placement: OverlayPlacement::TrailingEdge,
-                                dismiss: DismissBehavior::ClickOutside,
+                                dismiss: DismissBehavior::PointerLeave {
+                                    delay: DEFAULT_SUBMENU_CLOSE_DELAY,
+                                },
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
                             });
+                            ctx.request_focus(sub_id);
                         }
                         interaction.set(MenuItemState::Pressed);
                         EventResponse::Handled
+                    }
+                    // ArrowRight opens submenu (ignored on regular items)
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowRight,
+                        ..
+                    } => {
+                        if let Some(sub_id) = sub_id {
+                            ctx.dismiss_child_overlays_except(sub_id);
+                            ctx.activate(sub_id);
+                            ctx.show_overlay(OverlayRequest {
+                                content_id: sub_id,
+                                anchor: self_id,
+                                placement: OverlayPlacement::TrailingEdge,
+                                dismiss: DismissBehavior::PointerLeave {
+                                    delay: DEFAULT_SUBMENU_CLOSE_DELAY,
+                                },
+                                layer: OverlayLayer::InTree,
+                                parent_overlay: None,
+                            });
+                            ctx.request_focus(sub_id);
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
                     }
                     _ => EventResponse::Ignored,
                 }
@@ -416,10 +472,10 @@ mod tests {
     use super::*;
     use fern_canvas::Point;
     use fern_core::app_command::AppCommand;
-    use fern_core::event::PointerButton;
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
     use std::cell::Cell;
+    use std::cell::RefCell;
     use std::rc::Rc;
 
     #[derive(Debug, Clone, PartialEq)]
@@ -434,6 +490,47 @@ mod tests {
         let item = tree.add(MenuItem::new(label).on_activate(cmd));
         tree.layout(SizeProposal::exact(200.0, 40.0));
         (tree, item)
+    }
+
+    fn capture_commands(tree: &mut WidgetTree) -> Rc<RefCell<Vec<TestCmd>>> {
+        let commands = Rc::new(RefCell::new(Vec::new()));
+        let captured = commands.clone();
+        tree.on_command(move |cmd: &TestCmd| {
+            captured.borrow_mut().push(cmd.clone());
+        });
+        commands
+    }
+
+    fn collect_descendants(tree: &WidgetTree, root: WidgetId, out: &mut Vec<WidgetId>) {
+        out.push(root);
+        for child in tree.children(root) {
+            collect_descendants(tree, child, out);
+        }
+    }
+
+    fn descendants(tree: &WidgetTree, root: WidgetId) -> Vec<WidgetId> {
+        let mut out = Vec::new();
+        collect_descendants(tree, root, &mut out);
+        out
+    }
+
+    fn find_menu_item(tree: &WidgetTree, root: WidgetId, label: &str) -> WidgetId {
+        descendants(tree, root)
+            .into_iter()
+            .find(|&id| {
+                let info = tree.accessibility_node(id);
+                info.role() == fern_core::accesskit::Role::MenuItem && info.name() == Some(label)
+            })
+            .unwrap_or_else(|| panic!("menu item '{label}' not found"))
+    }
+
+    fn overlay_contains_label(tree: &WidgetTree, label: &str) -> bool {
+        tree.overlay_manager().active_content_ids().into_iter().any(|root| {
+            descendants(tree, root).into_iter().any(|id| {
+                let info = tree.accessibility_node(id);
+                info.name() == Some(label)
+            })
+        })
     }
 
     #[test]
@@ -611,6 +708,7 @@ mod tests {
     #[test]
     fn submenu_opens_after_delay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let commands = capture_commands(&mut tree);
         let item = tree.add(
             MenuItem::submenu("More", || {
                 Box::new(
@@ -636,6 +734,12 @@ mod tests {
             1,
             "submenu should open after delay elapses"
         );
+
+        tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        assert_eq!(&*commands.borrow(), &[TestCmd::Cut]);
     }
 
     #[test]
@@ -669,6 +773,7 @@ mod tests {
     #[test]
     fn submenu_opens_on_enter_key() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let commands = capture_commands(&mut tree);
         let item = tree.add(MenuItem::submenu("More", || {
             Box::new(
                 crate::menu_list::MenuList::new()
@@ -689,6 +794,103 @@ mod tests {
             1,
             "Enter key should open submenu immediately"
         );
+
+        tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        assert_eq!(&*commands.borrow(), &[TestCmd::Cut]);
+    }
+
+    #[test]
+    fn hovering_regular_sibling_closes_open_submenu() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let menu = tree.add(
+            crate::menu_list::MenuList::new()
+                .item(MenuItem::submenu("More", || {
+                    Box::new(
+                        crate::menu_list::MenuList::new()
+                            .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                    )
+                }))
+                .item(MenuItem::new("Paste").on_activate(TestCmd::Paste)),
+        );
+        tree.layout(SizeProposal::exact(240.0, 120.0));
+
+        let submenu_item = find_menu_item(&tree, menu, "More");
+        let regular_item = find_menu_item(&tree, menu, "Paste");
+
+        tree.pointer_move(tree.bounds(submenu_item).center());
+        tree.advance_time(std::time::Duration::from_millis(250));
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(overlay_contains_label(&tree, "Sub"));
+
+        tree.pointer_move(tree.bounds(regular_item).center());
+
+        assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn hovering_sibling_submenu_replaces_previous_branch() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let menu = tree.add(
+            crate::menu_list::MenuList::new()
+                .item(MenuItem::submenu("More", || {
+                    Box::new(
+                        crate::menu_list::MenuList::new()
+                            .item(MenuItem::new("Sub A").on_activate(TestCmd::Cut)),
+                    )
+                }))
+                .item(MenuItem::submenu("Recent", || {
+                    Box::new(
+                        crate::menu_list::MenuList::new()
+                            .item(MenuItem::new("Sub B").on_activate(TestCmd::Paste)),
+                    )
+                })),
+        );
+        tree.layout(SizeProposal::exact(240.0, 120.0));
+
+        let first = find_menu_item(&tree, menu, "More");
+        let second = find_menu_item(&tree, menu, "Recent");
+
+        tree.pointer_move(tree.bounds(first).center());
+        tree.advance_time(std::time::Duration::from_millis(250));
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(overlay_contains_label(&tree, "Sub A"));
+
+        tree.pointer_move(tree.bounds(second).center());
+        assert!(tree.active_overlays().is_empty());
+
+        tree.advance_time(std::time::Duration::from_millis(250));
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(overlay_contains_label(&tree, "Sub B"));
+        assert!(!overlay_contains_label(&tree, "Sub A"));
+    }
+
+    #[test]
+    fn moving_pointer_outside_closes_open_submenu_after_delay() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let menu = tree.add(
+            crate::menu_list::MenuList::new().item(MenuItem::submenu("More", || {
+                Box::new(
+                    crate::menu_list::MenuList::new()
+                        .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                )
+            })),
+        );
+        tree.layout(SizeProposal::exact(240.0, 80.0));
+
+        let submenu_item = find_menu_item(&tree, menu, "More");
+        tree.pointer_move(tree.bounds(submenu_item).center());
+        tree.advance_time(std::time::Duration::from_millis(250));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.pointer_move(Point::new(1000.0, 1000.0));
+        tree.advance_time(std::time::Duration::from_millis(100));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.advance_time(std::time::Duration::from_millis(100));
+        assert!(tree.active_overlays().is_empty());
     }
 
     #[test]

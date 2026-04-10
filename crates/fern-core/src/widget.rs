@@ -182,12 +182,28 @@ pub struct EventContext {
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
     /// Whether to dismiss all overlays (e.g., after menu item activation).
     pub(crate) dismiss_all_overlays: bool,
+    /// Whether to dismiss just the topmost overlay (e.g., ArrowLeft in submenu).
+    pub(crate) dismiss_top: bool,
     /// Request to capture or release the pointer.
     pub(crate) pointer_capture: Option<bool>,
-    /// Delayed overlay requests (content_id, request, delay).
-    pub(crate) delayed_overlay_requests: Vec<(crate::overlay::OverlayRequest, std::time::Duration)>,
+    /// Delayed overlay requests (request, delay, optional focus target).
+    pub(crate) delayed_overlay_requests:
+        Vec<(
+            crate::overlay::OverlayRequest,
+            std::time::Duration,
+            Option<crate::widget_id::WidgetId>,
+        )>,
+    /// Dismiss descendant overlays of the source widget's containing overlay.
+    /// Optionally preserve the subtree rooted at a specific content widget ID.
+    pub(crate) dismiss_descendant_overlays: Vec<Option<crate::widget_id::WidgetId>>,
     /// Cancel pending delayed overlays by content widget ID.
     pub(crate) cancel_delayed_overlays: Vec<crate::widget_id::WidgetId>,
+    /// Widget IDs that need repainting (cross-widget signal propagation).
+    pub(crate) repaint_requests: Vec<crate::widget_id::WidgetId>,
+    /// Synthetic clicks to dispatch on target widgets after event processing.
+    pub(crate) synthetic_clicks: Vec<crate::widget_id::WidgetId>,
+    /// Focus requests — transfer focus to a specific widget (e.g., overlay content on open).
+    pub(crate) focus_requests: Vec<crate::widget_id::WidgetId>,
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -208,9 +224,14 @@ impl EventContext {
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
             dismiss_all_overlays: false,
+            dismiss_top: false,
             pointer_capture: None,
             delayed_overlay_requests: Vec::new(),
+            dismiss_descendant_overlays: Vec::new(),
             cancel_delayed_overlays: Vec::new(),
+            repaint_requests: Vec::new(),
+            synthetic_clicks: Vec::new(),
+            focus_requests: Vec::new(),
         }
     }
 
@@ -255,6 +276,25 @@ impl EventContext {
         self.dismiss_all_overlays = true;
     }
 
+    /// Dismiss the topmost overlay only (e.g., closing a submenu while
+    /// keeping the parent menu open).
+    pub fn dismiss_top_overlay(&mut self) {
+        self.dismiss_top = true;
+    }
+
+    /// Dismiss descendant overlays of the source widget's containing overlay.
+    /// Useful for closing sibling submenu branches while keeping the current
+    /// parent menu open.
+    pub fn dismiss_child_overlays(&mut self) {
+        self.dismiss_descendant_overlays.push(None);
+    }
+
+    /// Dismiss descendant overlays of the source widget's containing overlay,
+    /// preserving the subtree rooted at `content_id` if it is already open.
+    pub fn dismiss_child_overlays_except(&mut self, content_id: crate::widget_id::WidgetId) {
+        self.dismiss_descendant_overlays.push(Some(content_id));
+    }
+
     /// Request an idle callback to be run during the next idle period.
     /// Use this for incremental work that takes 5-50ms — too short for a
     /// background thread, too long for a single frame.
@@ -276,7 +316,38 @@ impl EventContext {
         request: crate::overlay::OverlayRequest,
         delay: std::time::Duration,
     ) {
-        self.delayed_overlay_requests.push((request, delay));
+        self.delayed_overlay_requests.push((request, delay, None));
+    }
+
+    /// Show an overlay after a delay and move focus when it opens.
+    pub fn show_overlay_after_with_focus(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        delay: std::time::Duration,
+        focus_target: crate::widget_id::WidgetId,
+    ) {
+        self.delayed_overlay_requests
+            .push((request, delay, Some(focus_target)));
+    }
+
+    /// Request a repaint on a specific widget. Use this when an event handler
+    /// on one widget changes state that affects a different widget's appearance
+    /// (e.g., keyboard navigation highlighting items in an overlay).
+    pub fn request_repaint(&mut self, id: crate::widget_id::WidgetId) {
+        self.repaint_requests.push(id);
+    }
+
+    /// Programmatically click a widget (synthetic PointerDown + PointerUp at
+    /// its center). Use this for keyboard activation of a child widget, e.g.,
+    /// Enter on a keyboard-focused menu item.
+    pub fn synthetic_click(&mut self, id: crate::widget_id::WidgetId) {
+        self.synthetic_clicks.push(id);
+    }
+
+    /// Transfer focus to a specific widget. Use this when opening overlay
+    /// content (menus, dialogs) that should receive keyboard events.
+    pub fn request_focus(&mut self, id: crate::widget_id::WidgetId) {
+        self.focus_requests.push(id);
     }
 
     /// Cancel a pending delayed overlay by its content widget ID.

@@ -145,13 +145,14 @@ impl GestureRecognizer for TapRecognizer {
                     let dx = position.x - down.x;
                     let dy = position.y - down.y;
                     if (dx * dx + dy * dy).sqrt() > self.max_distance {
+                        self.down_position = None;
                         return GestureResult::Failed;
                     }
                 }
                 GestureResult::Pending
             }
             RawPointerEvent::Up { position, .. } => {
-                if let Some(down) = self.down_position {
+                if let Some(down) = self.down_position.take() {
                     let dx = position.x - down.x;
                     let dy = position.y - down.y;
                     if (dx * dx + dy * dy).sqrt() <= self.max_distance {

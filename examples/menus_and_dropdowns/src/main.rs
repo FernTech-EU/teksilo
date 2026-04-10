@@ -13,8 +13,8 @@ use std::rc::Rc;
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonStyle, ComboBox, Divider, Expand, HStack, IconWidget, MenuList, MenuItem,
-    Padding, Panel, ScrollArea, Spacer, StatusBar, TextWidget, Toolbar, VStack,
+    Button, ButtonStyle, ComboBox, Divider, Expand, HStack, IconWidget, MenuBar, MenuList,
+    MenuItem, Padding, Panel, ScrollArea, Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 
 // ---------------------------------------------------------------------------
@@ -355,8 +355,105 @@ impl Widget for Root {
         let padded = ctx.add(Padding::uniform(24.0).set_child(content));
         let scroll = ctx.add(ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarStyle::Overlay));
 
+        let menu_bar = ctx.add(
+            MenuBar::new()
+                .leading_slot(
+                    IconWidget::chevron_right(16.0)
+                        .color(c.primary),
+                )
+                .menu("File", || {
+                    Box::new(
+                        MenuList::new()
+                            .item(
+                                MenuItem::new("New")
+                                    .on_activate(Cmd::NewFile)
+                                    .shortcut_label("Ctrl+N"),
+                            )
+                            .item(
+                                MenuItem::new("Open")
+                                    .on_activate(Cmd::OpenFile)
+                                    .shortcut_label("Ctrl+O"),
+                            )
+                            .item(
+                                MenuItem::new("Save")
+                                    .on_activate(Cmd::SaveFile)
+                                    .shortcut_label("Ctrl+S"),
+                            )
+                            .separator()
+                            .item(MenuItem::new("Quit").on_activate(Cmd::ToggleDarkMode)),
+                    )
+                })
+                .menu("Edit", || {
+                    Box::new(
+                        MenuList::new()
+                            .item(
+                                MenuItem::new("Undo")
+                                    .on_activate(Cmd::Undo)
+                                    .shortcut_label("Ctrl+Z"),
+                            )
+                            .item(
+                                MenuItem::new("Redo")
+                                    .on_activate(Cmd::Redo)
+                                    .shortcut_label("Ctrl+Shift+Z"),
+                            )
+                            .separator()
+                            .item(
+                                MenuItem::new("Cut")
+                                    .on_activate(Cmd::Cut)
+                                    .shortcut_label("Ctrl+X"),
+                            )
+                            .item(
+                                MenuItem::new("Copy")
+                                    .on_activate(Cmd::Copy)
+                                    .shortcut_label("Ctrl+C"),
+                            )
+                            .item(
+                                MenuItem::new("Paste")
+                                    .on_activate(Cmd::Paste)
+                                    .shortcut_label("Ctrl+V"),
+                            )
+                            .separator()
+                            .item(
+                                MenuItem::new("Select All")
+                                    .on_activate(Cmd::SelectAll)
+                                    .shortcut_label("Ctrl+A"),
+                            ),
+                    )
+                })
+                .menu("View", || {
+                    Box::new(
+                        MenuList::new()
+                            .item(MenuItem::submenu("Alignment", || {
+                                Box::new(
+                                    MenuList::new()
+                                        .item(MenuItem::new("Left").on_activate(Cmd::AlignLeft))
+                                        .item(
+                                            MenuItem::new("Center")
+                                                .on_activate(Cmd::AlignCenter),
+                                        )
+                                        .item(
+                                            MenuItem::new("Right").on_activate(Cmd::AlignRight),
+                                        )
+                                        .item(
+                                            MenuItem::new("Justify")
+                                                .on_activate(Cmd::AlignJustify),
+                                        ),
+                                )
+                            }))
+                            .separator()
+                            .item(MenuItem::new("Toggle Dark Mode").on_activate(Cmd::ToggleDarkMode)),
+                    )
+                })
+                .trailing_slot(
+                    Button::new("Settings")
+                        .style(ButtonStyle::Flat)
+                        .on_click(Cmd::ToggleDarkMode),
+                ),
+        );
+
         let root = ctx.add(
             VStack::new()
+                .add_child(menu_bar)
                 .add_child(toolbar)
                 .child(Expand::new().fills_stack().set_child(scroll))
                 .child(
