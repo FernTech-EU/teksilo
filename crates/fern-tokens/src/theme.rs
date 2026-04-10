@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::color::Color;
 use crate::motion::MotionTokens;
+use crate::os_theme_colors::OsThemeColors;
 use crate::shape::ShapeTokens;
 use crate::spacing::SpacingTokens;
 use crate::typography::TypographyTokens;
@@ -134,6 +135,135 @@ impl ColorTokens {
             highlight: Color::from_rgba(1.0, 0.92, 0.23, 0.2),
         }
     }
+
+    /// Build a full color token set from OS-reported colors.
+    ///
+    /// Starts from the matching built-in theme (light or dark) based on
+    /// `color_scheme`, then overlays any color fields that were actually
+    /// read from the OS. Missing fields keep their built-in default values.
+    pub fn from_os_colors(os: &OsThemeColors) -> Self {
+        let is_dark = os.color_scheme.is_dark();
+        let mut tokens = if is_dark {
+            Self::dark_default()
+        } else {
+            Self::light_default()
+        };
+
+        // Accent → primary family + focus/selection/info
+        if let Some(accent) = os.accent {
+            tokens.primary = accent;
+            tokens.primary_hover = if is_dark {
+                accent.lighten(0.10)
+            } else {
+                accent.darken(0.10)
+            };
+            tokens.primary_pressed = if is_dark {
+                accent.lighten(0.20)
+            } else {
+                accent.darken(0.20)
+            };
+            // Pick on_primary for contrast: white on dark accents, dark on light accents
+            tokens.on_primary = if accent.relative_luminance() > 0.4 {
+                Color::from_hex("#212121")
+            } else {
+                Color::WHITE
+            };
+            tokens.focus_ring = accent.with_alpha(0.75);
+            tokens.selection = accent.with_alpha(0.20);
+            tokens.info = accent;
+            tokens.on_info = tokens.on_primary;
+        }
+
+        // Window background → surface family
+        if let Some(bg) = os.window_bg {
+            tokens.surface = bg;
+            tokens.surface_secondary = if is_dark {
+                bg.lighten(0.04)
+            } else {
+                bg.darken(0.02)
+            };
+            tokens.surface_tertiary = if is_dark {
+                bg.lighten(0.08)
+            } else {
+                bg.darken(0.04)
+            };
+        }
+
+        // Window foreground → on_surface family
+        if let Some(fg) = os.window_fg {
+            tokens.on_surface = fg;
+            tokens.on_surface_secondary = if is_dark {
+                fg.darken(0.25)
+            } else {
+                fg.lighten(0.25)
+            };
+        }
+
+        // Button colors → secondary family
+        if let Some(btn_bg) = os.button_bg {
+            tokens.secondary = btn_bg;
+            tokens.secondary_hover = if is_dark {
+                btn_bg.lighten(0.10)
+            } else {
+                btn_bg.darken(0.10)
+            };
+            tokens.secondary_pressed = if is_dark {
+                btn_bg.lighten(0.20)
+            } else {
+                btn_bg.darken(0.20)
+            };
+        }
+        if let Some(btn_fg) = os.button_fg {
+            tokens.on_secondary = btn_fg;
+        }
+
+        // Selection colors
+        if let Some(sel_bg) = os.selection_bg {
+            tokens.selection = sel_bg.with_alpha(0.25);
+            tokens.on_selection = os.selection_fg.unwrap_or(tokens.on_surface);
+            // If no accent was provided, derive it from the selection color
+            if os.accent.is_none() {
+                tokens.primary = sel_bg;
+                tokens.primary_hover = if is_dark {
+                    sel_bg.lighten(0.10)
+                } else {
+                    sel_bg.darken(0.10)
+                };
+                tokens.primary_pressed = if is_dark {
+                    sel_bg.lighten(0.20)
+                } else {
+                    sel_bg.darken(0.20)
+                };
+                tokens.on_primary = if sel_bg.relative_luminance() > 0.4 {
+                    Color::from_hex("#212121")
+                } else {
+                    Color::WHITE
+                };
+                tokens.focus_ring = sel_bg.with_alpha(0.75);
+                tokens.info = sel_bg;
+                tokens.on_info = tokens.on_primary;
+            }
+        }
+
+        // Tooltip colors
+        if let Some(tt_bg) = os.tooltip_bg {
+            tokens.tooltip_surface = tt_bg;
+        }
+        if let Some(tt_fg) = os.tooltip_fg {
+            tokens.tooltip_text = tt_fg;
+        }
+
+        // Derive border from surface if we have OS surfaces
+        if os.window_bg.is_some() || os.window_fg.is_some() {
+            tokens.border = tokens.on_surface.with_alpha(0.12);
+            tokens.border_strong = tokens.on_surface.with_alpha(0.25);
+            tokens.disabled_fill = tokens.on_surface.with_alpha(0.08);
+            tokens.disabled_text = tokens.on_surface.with_alpha(0.38);
+            tokens.scrim = Color::new(0.0, 0.0, 0.0, if is_dark { 0.64 } else { 0.32 });
+        }
+
+        tokens
+    }
 }
 
 /// The complete theme containing all design tokens.
@@ -205,5 +335,94 @@ mod tests {
         let colors = ColorTokens::light_default();
         // on_primary should be white or very light for a dark primary
         assert_ne!(colors.primary, colors.on_primary);
+    }
+
+    #[test]
+    fn from_os_colors_no_colors_returns_light_default() {
+        let os = OsThemeColors::default(); // NoPreference, all None
+        let tokens = ColorTokens::from_os_colors(&os);
+        let light = ColorTokens::light_default();
+        assert_eq!(tokens.surface, light.surface);
+        assert_eq!(tokens.primary, light.primary);
+    }
+
+    #[test]
+    fn from_os_colors_dark_scheme_returns_dark_base() {
+        let os = OsThemeColors {
+            color_scheme: crate::os_theme_colors::ColorSchemePreference::Dark,
+            ..Default::default()
+        };
+        let tokens = ColorTokens::from_os_colors(&os);
+        let dark = ColorTokens::dark_default();
+        assert_eq!(tokens.surface, dark.surface);
+    }
+
+    #[test]
+    fn from_os_colors_accent_overrides_primary() {
+        let accent = Color::from_hex("#FF5500");
+        let os = OsThemeColors {
+            accent: Some(accent),
+            ..Default::default()
+        };
+        let tokens = ColorTokens::from_os_colors(&os);
+        assert_eq!(tokens.primary, accent);
+        // on_primary should contrast with the accent
+        assert_ne!(tokens.primary, tokens.on_primary);
+        // Focus ring should derive from accent
+        assert!((tokens.focus_ring.a() - 0.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn from_os_colors_window_bg_overrides_surface() {
+        let bg = Color::from_hex("#AABBCC");
+        let os = OsThemeColors {
+            window_bg: Some(bg),
+            ..Default::default()
+        };
+        let tokens = ColorTokens::from_os_colors(&os);
+        assert_eq!(tokens.surface, bg);
+        // Secondary/tertiary should be derived, not equal
+        assert_ne!(tokens.surface, tokens.surface_secondary);
+        assert_ne!(tokens.surface, tokens.surface_tertiary);
+    }
+
+    #[test]
+    fn from_os_colors_selection_derives_primary_when_no_accent() {
+        let sel = Color::from_hex("#3DAEE9");
+        let os = OsThemeColors {
+            selection_bg: Some(sel),
+            ..Default::default()
+        };
+        let tokens = ColorTokens::from_os_colors(&os);
+        // Without an explicit accent, primary should be derived from selection
+        assert_eq!(tokens.primary, sel);
+    }
+
+    #[test]
+    fn from_os_colors_accent_takes_precedence_over_selection() {
+        let accent = Color::from_hex("#FF0000");
+        let sel = Color::from_hex("#00FF00");
+        let os = OsThemeColors {
+            accent: Some(accent),
+            selection_bg: Some(sel),
+            ..Default::default()
+        };
+        let tokens = ColorTokens::from_os_colors(&os);
+        // Accent should win for primary
+        assert_eq!(tokens.primary, accent);
+    }
+
+    #[test]
+    fn from_os_colors_tooltip_colors() {
+        let tt_bg = Color::from_hex("#333333");
+        let tt_fg = Color::from_hex("#EEEEEE");
+        let os = OsThemeColors {
+            tooltip_bg: Some(tt_bg),
+            tooltip_fg: Some(tt_fg),
+            ..Default::default()
+        };
+        let tokens = ColorTokens::from_os_colors(&os);
+        assert_eq!(tokens.tooltip_surface, tt_bg);
+        assert_eq!(tokens.tooltip_text, tt_fg);
     }
 }

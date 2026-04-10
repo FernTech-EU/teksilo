@@ -30,5 +30,5 @@ pub mod prelude {
     pub use fern_tokens::{Color, CornerRadius, Theme};
 
     // App
-    pub use fern_app::FernAppBuilder;
+    pub use fern_app::{FernAppBuilder, ThemeMode};
 }

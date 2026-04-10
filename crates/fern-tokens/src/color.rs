@@ -122,6 +122,42 @@ impl Color {
     pub fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
     }
+
+    /// Mix two colors linearly. `t=0.0` returns `self`, `t=1.0` returns `other`.
+    /// Alpha is also interpolated.
+    pub fn mix(self, other: Color, t: f32) -> Color {
+        let t = t.clamp(0.0, 1.0);
+        let inv = 1.0 - t;
+        Color {
+            r: self.r * inv + other.r * t,
+            g: self.g * inv + other.g * t,
+            b: self.b * inv + other.b * t,
+            a: self.a * inv + other.a * t,
+        }
+    }
+
+    /// Darken the color by mixing with black. `amount=0.0` is unchanged, `1.0` is black.
+    pub fn darken(self, amount: f32) -> Color {
+        self.mix(Color::new(0.0, 0.0, 0.0, self.a), amount)
+    }
+
+    /// Lighten the color by mixing with white. `amount=0.0` is unchanged, `1.0` is white.
+    pub fn lighten(self, amount: f32) -> Color {
+        self.mix(Color::new(1.0, 1.0, 1.0, self.a), amount)
+    }
+
+    /// Compute the relative luminance (WCAG 2.x formula).
+    /// Returns a value in 0.0..=1.0 where 0 is black and 1 is white.
+    pub fn relative_luminance(self) -> f32 {
+        fn linearize(c: f32) -> f32 {
+            if c <= 0.03928 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * linearize(self.r) + 0.7152 * linearize(self.g) + 0.0722 * linearize(self.b)
+    }
 }
 
 impl Default for Color {
@@ -203,5 +239,86 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         let deserialized: Color = serde_json::from_str(&json).unwrap();
         assert_eq!(c, deserialized);
+    }
+
+    #[test]
+    fn mix_endpoints() {
+        let a = Color::RED;
+        let b = Color::BLUE;
+        // t=0 returns self
+        let m0 = a.mix(b, 0.0);
+        assert!((m0.r() - 1.0).abs() < f32::EPSILON);
+        assert!(m0.b().abs() < f32::EPSILON);
+        // t=1 returns other
+        let m1 = a.mix(b, 1.0);
+        assert!(m1.r().abs() < f32::EPSILON);
+        assert!((m1.b() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mix_midpoint() {
+        let a = Color::BLACK;
+        let b = Color::WHITE;
+        let mid = a.mix(b, 0.5);
+        assert!((mid.r() - 0.5).abs() < f32::EPSILON);
+        assert!((mid.g() - 0.5).abs() < f32::EPSILON);
+        assert!((mid.b() - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn mix_clamps_t() {
+        let a = Color::RED;
+        let b = Color::BLUE;
+        // t > 1 should clamp to 1
+        let m = a.mix(b, 2.0);
+        assert!(m.r().abs() < f32::EPSILON);
+        assert!((m.b() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn darken_zero_unchanged() {
+        let c = Color::from_hex("#3584e4");
+        let d = c.darken(0.0);
+        assert!((d.r() - c.r()).abs() < f32::EPSILON);
+        assert!((d.g() - c.g()).abs() < f32::EPSILON);
+        assert!((d.b() - c.b()).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn darken_one_is_black() {
+        let c = Color::from_hex("#3584e4");
+        let d = c.darken(1.0);
+        assert!(d.r().abs() < f32::EPSILON);
+        assert!(d.g().abs() < f32::EPSILON);
+        assert!(d.b().abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn lighten_one_is_white() {
+        let c = Color::from_hex("#3584e4");
+        let l = c.lighten(1.0);
+        assert!((l.r() - 1.0).abs() < f32::EPSILON);
+        assert!((l.g() - 1.0).abs() < f32::EPSILON);
+        assert!((l.b() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn relative_luminance_black_is_zero() {
+        assert!(Color::BLACK.relative_luminance().abs() < 0.001);
+    }
+
+    #[test]
+    fn relative_luminance_white_is_one() {
+        assert!((Color::WHITE.relative_luminance() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn relative_luminance_ordering() {
+        // White > light gray > dark gray > black
+        let light = Color::from_rgb(0.8, 0.8, 0.8);
+        let dark = Color::from_rgb(0.2, 0.2, 0.2);
+        assert!(Color::WHITE.relative_luminance() > light.relative_luminance());
+        assert!(light.relative_luminance() > dark.relative_luminance());
+        assert!(dark.relative_luminance() > Color::BLACK.relative_luminance());
     }
 }

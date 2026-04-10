@@ -4,12 +4,25 @@ use fern_core::app_event::AppEvent;
 use fern_core::event::WidgetEvent;
 use fern_core::{WidgetId, WidgetTree};
 use fern_platform::event_translation;
-use fern_tokens::Theme;
+use fern_tokens::{ColorTokens, Theme};
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
+
+/// How the application resolves its theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThemeMode {
+    /// Use a specific fixed theme (current behavior, default).
+    #[default]
+    Manual,
+    /// Follow the OS light/dark preference using FernUI's built-in themes.
+    FollowSystem,
+    /// Adopt colors read directly from the OS/DE config files (GNOME/KDE/Cinnamon).
+    /// Falls back to `FollowSystem` on unsupported platforms or DEs.
+    Native,
+}
 
 #[cfg(feature = "text")]
 use fern_text::SharedTypesetter;
@@ -166,6 +179,7 @@ struct FernAppHandler {
     initial_created: bool,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
+    theme_mode: ThemeMode,
     #[cfg(feature = "text")]
     typesetter: SharedTypesetter,
 }
@@ -173,12 +187,14 @@ struct FernAppHandler {
 impl FernAppHandler {
     fn new(
         theme: Theme,
+        theme_mode: ThemeMode,
         command_handler: Option<WindowCommandHandler>,
         app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
         initial_window: WindowConfig,
         #[cfg(feature = "text")] typesetter: SharedTypesetter,
     ) -> Self {
         let mut wm = WindowManager::new(theme);
+        wm.set_theme_mode(theme_mode);
 
         #[cfg(feature = "text")]
         {
@@ -193,6 +209,7 @@ impl FernAppHandler {
             initial_created: false,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
+            theme_mode,
             #[cfg(feature = "text")]
             typesetter,
         }
@@ -460,10 +477,43 @@ impl FernAppHandler {
             WindowEvent::RedrawRequested => {
                 self.handle_redraw_requested(window_id);
             }
+            WindowEvent::ThemeChanged(winit_theme) => {
+                self.handle_theme_changed(winit_theme);
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    managed.platform_window.request_redraw();
+                }
+            }
             _ => {}
         }
 
         self.post_event(event_loop);
+    }
+
+    fn handle_theme_changed(&mut self, winit_theme: winit::window::Theme) {
+        match self.theme_mode {
+            ThemeMode::Manual => {} // ignore OS theme changes
+            ThemeMode::FollowSystem => {
+                let theme = match winit_theme {
+                    winit::window::Theme::Dark => Theme::dark_default(),
+                    winit::window::Theme::Light => Theme::light_default(),
+                };
+                self.wm.set_theme(theme);
+            }
+            ThemeMode::Native => {
+                // Re-query OS colors and rebuild theme
+                let os = fern_platform::os_theme::query_os_theme_colors();
+                let base = if os.color_scheme.is_dark() {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                };
+                let theme = Theme {
+                    colors: ColorTokens::from_os_colors(&os),
+                    ..base
+                };
+                self.wm.set_theme(theme);
+            }
+        }
     }
 }
 
@@ -563,6 +613,7 @@ pub(crate) type WindowCommandHandler = Box<dyn FnMut(&ErasedCommand, &mut Comman
 /// Builder for a FernUI application.
 pub struct FernAppBuilder {
     theme: Theme,
+    theme_mode: ThemeMode,
     #[cfg(feature = "text")]
     typesetter: Option<SharedTypesetter>,
     command_handler: Option<WindowCommandHandler>,
@@ -578,6 +629,7 @@ impl FernAppBuilder {
     pub fn new() -> Self {
         Self {
             theme: Theme::light_default(),
+            theme_mode: ThemeMode::Manual,
             #[cfg(feature = "text")]
             typesetter: None,
             command_handler: None,
@@ -590,8 +642,20 @@ impl FernAppBuilder {
         }
     }
 
+    /// Set a fixed theme (implies `ThemeMode::Manual`).
     pub fn theme(mut self, theme: Theme) -> Self {
         self.theme = theme;
+        self.theme_mode = ThemeMode::Manual;
+        self
+    }
+
+    /// Set how the application resolves its theme.
+    ///
+    /// - `ThemeMode::Manual` — use the theme set via `.theme()` (default).
+    /// - `ThemeMode::FollowSystem` — auto-switch between light/dark built-in themes.
+    /// - `ThemeMode::Native` — read colors from OS desktop environment config.
+    pub fn theme_mode(mut self, mode: ThemeMode) -> Self {
+        self.theme_mode = mode;
         self
     }
 
@@ -695,6 +759,7 @@ impl FernAppBuilder {
 
         let mut app = FernAppHandler::new(
             self.theme,
+            self.theme_mode,
             self.command_handler,
             self.app_event_handler,
             initial_config,

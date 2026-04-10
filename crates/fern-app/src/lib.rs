@@ -3,7 +3,7 @@ pub mod command_context;
 pub mod window_config;
 pub mod window_manager;
 
-pub use app::{AppEventProxy, FernAppBuilder, HeadlessApp};
+pub use app::{AppEventProxy, FernAppBuilder, HeadlessApp, ThemeMode};
 pub use command_context::CommandContext;
 pub use window_config::{FernWindowId, WindowConfig};
 pub use window_manager::WindowManager;

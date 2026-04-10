@@ -11,7 +11,9 @@ use fern_core::WidgetTree;
 use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
 use fern_platform::event_translation::TranslationState;
-use fern_tokens::Theme;
+use fern_tokens::{ColorTokens, Theme};
+
+use crate::app::ThemeMode;
 
 use crate::window_config::{FernWindowId, WindowConfig};
 
@@ -47,6 +49,8 @@ pub struct WindowManager {
     pending_closes: Vec<FernWindowId>,
     /// OS-level accessibility preferences, queried once at startup.
     a11y_prefs: AccessibilityPreferences,
+    /// How the app resolves its theme (Manual, FollowSystem, Native).
+    theme_mode: ThemeMode,
 }
 
 impl WindowManager {
@@ -63,7 +67,18 @@ impl WindowManager {
             pending_creates: Vec::new(),
             pending_closes: Vec::new(),
             a11y_prefs,
+            theme_mode: ThemeMode::Manual,
         }
+    }
+
+    /// Set the theme mode (called by FernAppHandler during initialization).
+    pub fn set_theme_mode(&mut self, mode: ThemeMode) {
+        self.theme_mode = mode;
+    }
+
+    /// Get the current theme mode.
+    pub fn theme_mode(&self) -> ThemeMode {
+        self.theme_mode
     }
 
     #[cfg(feature = "text")]
@@ -97,10 +112,37 @@ impl WindowManager {
         let mut translation_state = TranslationState::new();
         translation_state.set_scale_factor(scale_factor);
 
+        // Resolve the initial theme from ThemeMode before building the tree
+        let initial_theme = match self.theme_mode {
+            ThemeMode::Manual => self.theme.clone(),
+            ThemeMode::FollowSystem => {
+                match window.theme() {
+                    Some(winit::window::Theme::Dark) => Theme::dark_default(),
+                    _ => Theme::light_default(),
+                }
+            }
+            ThemeMode::Native => {
+                let os = fern_platform::os_theme::query_os_theme_colors();
+                let base = if os.color_scheme.is_dark() {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                };
+                Theme {
+                    colors: ColorTokens::from_os_colors(&os),
+                    ..base
+                }
+            }
+        };
+        // Update the shared theme so all subsequent windows use the same base
+        if self.theme_mode != ThemeMode::Manual {
+            self.theme = initial_theme.clone();
+        }
+
         // Create with AccessKit adapter (shows window after adapter is ready)
         let pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
 
-        let mut tree = WidgetTree::new().with_theme(self.theme.clone());
+        let mut tree = WidgetTree::new().with_theme(initial_theme);
         tree.set_accessibility_preferences(
             self.a11y_prefs.high_contrast,
             self.a11y_prefs.reduced_motion,

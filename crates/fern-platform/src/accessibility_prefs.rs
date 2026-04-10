@@ -58,6 +58,7 @@ impl AccessibilityPreferences {
 #[cfg(target_os = "linux")]
 mod platform {
     use super::AccessibilityPreferences;
+    use crate::linux_helpers::{read_gsettings, read_portal_u32};
 
     pub(super) fn query() -> AccessibilityPreferences {
         let mut prefs = AccessibilityPreferences::default();
@@ -100,53 +101,6 @@ mod platform {
         }
 
         prefs
-    }
-
-    /// Read a u32 value from the XDG Desktop Portal Settings via `busctl`.
-    ///
-    /// The portal method `org.freedesktop.portal.Settings.ReadOne` returns
-    /// a `Variant<Variant<u32>>`. `busctl` prints this as e.g. `v u 1`.
-    fn read_portal_u32(namespace: &str, key: &str) -> Option<u32> {
-        let output = std::process::Command::new("busctl")
-            .args([
-                "--user",
-                "call",
-                "org.freedesktop.portal.Desktop",
-                "/org/freedesktop/portal/desktop",
-                "org.freedesktop.portal.Settings",
-                "ReadOne",
-                "ss",
-                namespace,
-                key,
-            ])
-            .output()
-            .ok()?;
-
-        if !output.status.success() {
-            return None;
-        }
-
-        // Output format: "v u <value>\n" — extract the last whitespace-separated token
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.split_whitespace().last()?.parse::<u32>().ok()
-    }
-
-    /// Read a gsettings value via the `gsettings` CLI tool.
-    ///
-    /// Returns the raw string output (trimmed, with surrounding quotes stripped).
-    fn read_gsettings(schema: &str, key: &str) -> Option<String> {
-        let output = std::process::Command::new("gsettings")
-            .args(["get", schema, key])
-            .output()
-            .ok()?;
-
-        if !output.status.success() {
-            return None;
-        }
-
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        // gsettings wraps strings in single quotes: 'Adwaita'
-        Some(value.trim_matches('\'').to_string())
     }
 }
 

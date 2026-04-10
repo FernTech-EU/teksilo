@@ -7,6 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+fern-tokens = { workspace = true }
 fern-core = { workspace = true }
 fern-canvas = { workspace = true }
 fern-render = { workspace = true }
