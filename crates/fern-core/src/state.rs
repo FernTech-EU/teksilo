@@ -155,77 +155,6 @@ impl<T: Clone + 'static> std::fmt::Debug for StateHandle<T> {
     }
 }
 
-// --- Reactive<T> ---
-
-/// Compatibility property type for State-based APIs.
-/// Prefer `crate::signal::Prop<T>` in new widget and binding code.
-pub enum Reactive<T: Clone + 'static> {
-    /// A fixed value, set at build time.
-    Static(T),
-    /// Bound to a reactive state; value is read lazily on each use.
-    Bound(StateHandle<T>),
-}
-
-impl<T: Clone + 'static> Reactive<T> {
-    /// Resolve the current value.
-    pub fn get(&self) -> T {
-        match self {
-            Reactive::Static(v) => v.clone(),
-            Reactive::Bound(handle) => handle.read(),
-        }
-    }
-
-    /// Register dirty tracking for this reactive if it is bound.
-    /// Called by Widget::register_bindings(). The `level` determines
-    /// whether a state change triggers repaint-only or full relayout.
-    pub fn register_if_bound(
-        &self,
-        widget_id: WidgetId,
-        registry: &BindingRegistry,
-        level: BindingLevel,
-    ) {
-        if let Reactive::Bound(handle) = self {
-            handle.register(widget_id, registry, level);
-        }
-    }
-}
-
-impl<T: Clone + 'static> Clone for Reactive<T> {
-    fn clone(&self) -> Self {
-        match self {
-            Reactive::Static(v) => Reactive::Static(v.clone()),
-            Reactive::Bound(h) => Reactive::Bound(h.clone()),
-        }
-    }
-}
-
-impl<T: Clone + std::fmt::Debug + 'static> std::fmt::Debug for Reactive<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Reactive::Static(v) => write!(f, "Static({:?})", v),
-            Reactive::Bound(_) => f.write_str("Bound(..)"),
-        }
-    }
-}
-
-impl<T: Clone + 'static> From<T> for Reactive<T> {
-    fn from(value: T) -> Self {
-        Reactive::Static(value)
-    }
-}
-
-impl<T: Clone + 'static> From<State<T>> for Reactive<T> {
-    fn from(s: State<T>) -> Self {
-        Reactive::Bound(StateHandle::from(s))
-    }
-}
-
-impl<T: Clone + 'static> From<DerivedState<T>> for Reactive<T> {
-    fn from(d: DerivedState<T>) -> Self {
-        Reactive::Bound(StateHandle::from(d))
-    }
-}
-
 impl<T: Clone + 'static> From<State<T>> for StateHandle<T> {
     fn from(s: State<T>) -> Self {
         let dirty_inner = s.inner.clone();
@@ -665,33 +594,6 @@ mod tests {
         assert!(registry.flush_dirty().is_empty());
     }
 
-    // --- Reactive<T> tests ---
-
-    #[test]
-    fn reactive_static_returns_value() {
-        let r: Reactive<i32> = Reactive::Static(42);
-        assert_eq!(r.get(), 42);
-    }
-
-    #[test]
-    fn reactive_bound_from_state_reads_current() {
-        let s = State::new(10);
-        let r: Reactive<i32> = s.clone().into();
-        assert_eq!(r.get(), 10);
-        s.set(20);
-        assert_eq!(r.get(), 20);
-    }
-
-    #[test]
-    fn reactive_bound_from_derived_reads_computed() {
-        let s = State::new(5);
-        let doubled = s.map(|v| v * 2);
-        let r: Reactive<i32> = doubled.into();
-        assert_eq!(r.get(), 10);
-        s.set(7);
-        assert_eq!(r.get(), 14);
-    }
-
     #[test]
     fn state_handle_from_state() {
         let s = State::new(99);
@@ -730,13 +632,6 @@ mod tests {
         assert_eq!(dirty.len(), 1);
         assert_eq!(dirty[0].0, fake_id);
         assert_eq!(dirty[0].1, BindingLevel::Relayout);
-    }
-
-    #[test]
-    fn reactive_from_plain_value() {
-        // From<T> conversion
-        let r: Reactive<f32> = 2.75.into();
-        assert!((r.get() - 2.75).abs() < 0.001);
     }
 
     #[test]

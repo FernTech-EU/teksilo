@@ -1,7 +1,7 @@
 //! Unified reactivity primitives for FernUI.
 //!
 //! `Signal<T>` replaces `State<T>` + `DerivedState<T>` with a single type.
-//! `Prop<T>` replaces `Reactive<T>` as the widget property type.
+//! `Prop<T>` is the widget property type for static values and signal bindings.
 //! `ObserverHandle` is an RAII guard — dropping it removes the observer callback.
 
 use std::cell::{Ref, RefCell};
@@ -522,7 +522,7 @@ impl<T: std::fmt::Debug + 'static> std::fmt::Debug for Signal<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Bridge conversions: State<T> → Signal<T>, Signal<T> → Reactive<T>
+// Bridge conversions: State<T> → Signal<T>
 // ---------------------------------------------------------------------------
 
 impl<T: Clone + 'static> From<crate::state::State<T>> for Signal<T> {
@@ -558,7 +558,7 @@ impl<T: Clone + 'static> From<crate::state::DerivedState<T>> for Signal<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Prop<T> — replaces Reactive<T>
+// Prop<T> — widget property type
 // ---------------------------------------------------------------------------
 
 /// A property value that is either static or bound to a reactive signal.
