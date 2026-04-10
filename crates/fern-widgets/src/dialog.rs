@@ -9,6 +9,8 @@ use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
 use crate::button::{Button, ButtonStyle};
+use crate::overlay_trigger::OverlayTrigger;
+use crate::primitives::{Divider, TextWidget, VStack};
 
 const DIALOG_PADDING: f32 = 24.0;
 const DIALOG_MIN_WIDTH: f32 = 320.0;
@@ -96,12 +98,137 @@ impl Widget for DialogSurface {
     }
 }
 
+pub struct DialogContent {
+    title: Option<String>,
+    supporting_text: Option<String>,
+    pending_body: Option<Box<dyn Widget>>,
+    pending_footer: Option<Box<dyn Widget>>,
+    root_child_id: Option<WidgetId>,
+}
+
+impl DialogContent {
+    pub fn new() -> Self {
+        Self {
+            title: None,
+            supporting_text: None,
+            pending_body: None,
+            pending_footer: None,
+            root_child_id: None,
+        }
+    }
+
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    pub fn supporting_text(mut self, text: impl Into<String>) -> Self {
+        self.supporting_text = Some(text.into());
+        self
+    }
+
+    pub fn body(mut self, body: impl Widget + 'static) -> Self {
+        self.pending_body = Some(Box::new(body));
+        self
+    }
+
+    pub fn footer(mut self, footer: impl Widget + 'static) -> Self {
+        self.pending_footer = Some(Box::new(footer));
+        self
+    }
+}
+
+impl Default for DialogContent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for DialogContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DialogContent")
+            .field("title", &self.title)
+            .field("supporting_text", &self.supporting_text)
+            .finish()
+    }
+}
+
+impl Widget for DialogContent {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let theme = ctx.theme().clone();
+        let mut stack = VStack::new().spacing(16.0);
+
+        if self.title.is_some() || self.supporting_text.is_some() {
+            let mut header = VStack::new().spacing(8.0);
+            if let Some(title) = self.title.clone() {
+                header = header.child(
+                    TextWidget::new(title)
+                        .style(theme.typography.heading_3.clone())
+                        .color(theme.colors.on_surface),
+                );
+            }
+            if let Some(text) = self.supporting_text.clone() {
+                header = header.child(
+                    TextWidget::new(text)
+                        .style(theme.typography.body.clone())
+                        .color(theme.colors.on_surface_secondary),
+                );
+            }
+            let header_id = ctx.add(header);
+            stack = stack.add_child(header_id);
+        }
+
+        if let Some(body) = self.pending_body.take() {
+            let body_id = ctx.add_boxed(body);
+            stack = stack.add_child(body_id);
+        }
+
+        if let Some(footer) = self.pending_footer.take() {
+            let divider_id = ctx.add(Divider::new());
+            let footer_id = ctx.add_boxed(footer);
+            stack = stack.add_child(divider_id).add_child(footer_id);
+        }
+
+        let root = ctx.add(stack);
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+}
+
 pub struct Dialog {
     label: String,
     style: ButtonStyle,
     enabled: bool,
     dismiss: DismissBehavior,
     pending_content: Option<Box<dyn Widget>>,
+    pending_trigger: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -113,6 +240,7 @@ impl Dialog {
             enabled: true,
             dismiss: DismissBehavior::ClickOutside,
             pending_content: Some(Box::new(content)),
+            pending_trigger: None,
             root_child_id: None,
         }
     }
@@ -129,6 +257,11 @@ impl Dialog {
 
     pub fn dismiss_behavior(mut self, dismiss: DismissBehavior) -> Self {
         self.dismiss = dismiss;
+        self
+    }
+
+    pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
+        self.pending_trigger = Some(Box::new(trigger));
         self
     }
 }
@@ -157,70 +290,142 @@ impl Widget for Dialog {
         ));
         ctx.set_dormant(content_id);
 
-        let trigger = Button::new(label)
-            .style(style)
-            .enabled(enabled)
-            .on_tap({
-                let dismiss = dismiss.clone();
-                move |ctx| {
-                    if !enabled {
-                        return;
-                    }
-                    ctx.dismiss_all_overlays();
-                    ctx.activate(content_id);
-                    ctx.show_overlay(OverlayRequest {
-                        content_id,
-                        anchor: self_id,
-                        placement: OverlayPlacement::Centered,
-                        dismiss: dismiss.clone(),
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                    });
-                }
-            })
-            .on_key({
-                let dismiss = dismiss.clone();
-                move |event, ctx| match event {
-                    WidgetEvent::KeyUp {
-                        key: Key::Enter | Key::Space,
-                        ..
-                    } if enabled => {
-                        ctx.dismiss_all_overlays();
-                        ctx.activate(content_id);
-                        ctx.show_overlay(OverlayRequest {
-                            content_id,
-                            anchor: self_id,
-                            placement: OverlayPlacement::Centered,
-                            dismiss: dismiss.clone(),
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                        });
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
-            })
-            .on_access_action({
-                move |action, ctx| {
-                    if action == fern_core::accesskit::Action::Click && enabled {
-                        ctx.dismiss_all_overlays();
-                        ctx.activate(content_id);
-                        ctx.show_overlay(OverlayRequest {
-                            content_id,
-                            anchor: self_id,
-                            placement: OverlayPlacement::Centered,
-                            dismiss: dismiss.clone(),
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                        });
-                        EventResponse::Handled
-                    } else {
-                        EventResponse::Ignored
-                    }
-                }
-            });
+        let root_id = if let Some(trigger) = self.pending_trigger.take() {
+            ctx.add(
+                OverlayTrigger::new(
+                    trigger,
+                    fern_core::widget_builder::HandlerSet::new()
+                        .focusable(true)
+                        .cursor(fern_core::widget::CursorIcon::Pointer)
+                        .on_tap({
+                            let dismiss = dismiss.clone();
+                            move |ctx| {
+                                if !enabled {
+                                    return;
+                                }
+                                ctx.dismiss_all_overlays();
+                                ctx.activate(content_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id,
+                                    anchor: self_id,
+                                    placement: OverlayPlacement::Centered,
+                                    dismiss: dismiss.clone(),
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                            }
+                        })
+                        .on_key({
+                            let dismiss = dismiss.clone();
+                            move |event, ctx| match event {
+                                WidgetEvent::KeyUp {
+                                    key: Key::Enter | Key::Space,
+                                    ..
+                                } if enabled => {
+                                    ctx.dismiss_all_overlays();
+                                    ctx.activate(content_id);
+                                    ctx.show_overlay(OverlayRequest {
+                                        content_id,
+                                        anchor: self_id,
+                                        placement: OverlayPlacement::Centered,
+                                        dismiss: dismiss.clone(),
+                                        layer: OverlayLayer::InTree,
+                                        parent_overlay: None,
+                                    });
+                                    EventResponse::Handled
+                                }
+                                _ => EventResponse::Ignored,
+                            }
+                        })
+                        .on_access_action({
+                            move |action, ctx| {
+                                if action == fern_core::accesskit::Action::Click && enabled {
+                                    ctx.dismiss_all_overlays();
+                                    ctx.activate(content_id);
+                                    ctx.show_overlay(OverlayRequest {
+                                        content_id,
+                                        anchor: self_id,
+                                        placement: OverlayPlacement::Centered,
+                                        dismiss: dismiss.clone(),
+                                        layer: OverlayLayer::InTree,
+                                        parent_overlay: None,
+                                    });
+                                    EventResponse::Handled
+                                } else {
+                                    EventResponse::Ignored
+                                }
+                            }
+                        }),
+                )
+                .name(label),
+            )
+        } else {
+            ctx.add(
+                Button::new(label)
+                    .style(style)
+                    .enabled(enabled)
+                    .on_tap({
+                        let dismiss = dismiss.clone();
+                        move |ctx| {
+                            if !enabled {
+                                return;
+                            }
+                            ctx.dismiss_all_overlays();
+                            ctx.activate(content_id);
+                            ctx.show_overlay(OverlayRequest {
+                                content_id,
+                                anchor: self_id,
+                                placement: OverlayPlacement::Centered,
+                                dismiss: dismiss.clone(),
+                                layer: OverlayLayer::InTree,
+                                parent_overlay: None,
+                            });
+                        }
+                    })
+                    .on_key({
+                        let dismiss = dismiss.clone();
+                        move |event, ctx| match event {
+                            WidgetEvent::KeyUp {
+                                key: Key::Enter | Key::Space,
+                                ..
+                            } if enabled => {
+                                ctx.dismiss_all_overlays();
+                                ctx.activate(content_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id,
+                                    anchor: self_id,
+                                    placement: OverlayPlacement::Centered,
+                                    dismiss: dismiss.clone(),
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                                EventResponse::Handled
+                            }
+                            _ => EventResponse::Ignored,
+                        }
+                    })
+                    .on_access_action({
+                        move |action, ctx| {
+                            if action == fern_core::accesskit::Action::Click && enabled {
+                                ctx.dismiss_all_overlays();
+                                ctx.activate(content_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id,
+                                    anchor: self_id,
+                                    placement: OverlayPlacement::Centered,
+                                    dismiss: dismiss.clone(),
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                                EventResponse::Handled
+                            } else {
+                                EventResponse::Ignored
+                            }
+                        }
+                    }),
+            )
+        };
 
-        let root_id = ctx.add(trigger);
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
@@ -306,5 +511,44 @@ mod tests {
         let dialog = tree.find_by_role(fern_core::accesskit::Role::Dialog).unwrap();
         let info = tree.accessibility_node(dialog);
         assert_eq!(info.role(), fern_core::accesskit::Role::Dialog);
+    }
+
+    #[test]
+    fn custom_trigger_opens_dialog_overlay() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Open dialog").unwrap();
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+        });
+
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn dialog_content_helper_builds_dialog_sections() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Dialog::new(
+            "Open dialog",
+            DialogContent::new()
+                .title("Review Changes")
+                .supporting_text("Confirm the staged updates before continuing.")
+                .body(FixedLeaf(220.0, 120.0))
+                .footer(Button::new("Close")),
+        ));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Open dialog").unwrap();
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        assert!(tree.find_by_label("Review Changes").is_some());
+        assert!(tree.find_by_label("Close").is_some());
     }
 }

@@ -1,4 +1,4 @@
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -9,19 +9,87 @@ use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
 use crate::button::{Button, ButtonStyle};
+use crate::overlay_trigger::OverlayTrigger;
 
 const SURFACE_PADDING: f32 = 16.0;
 
 struct PopoverSurface {
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
+    placement: OverlayPlacement,
+    show_caret: bool,
+    caret_size: f32,
 }
 
 impl PopoverSurface {
-    fn new(content: Box<dyn Widget>) -> Self {
+    fn new(
+        content: Box<dyn Widget>,
+        placement: OverlayPlacement,
+        show_caret: bool,
+        caret_size: f32,
+    ) -> Self {
         Self {
             content_id: None,
             pending_content: Some(content),
+            placement,
+            show_caret,
+            caret_size,
+        }
+    }
+
+    fn caret_insets(&self) -> (f32, f32) {
+        if !self.show_caret {
+            return (0.0, 0.0);
+        }
+
+        match self.placement {
+            OverlayPlacement::Below
+            | OverlayPlacement::BelowPreferred
+            | OverlayPlacement::NearAnchor { .. } => (self.caret_size, 0.0),
+            OverlayPlacement::Above => (0.0, self.caret_size),
+            _ => (0.0, 0.0),
+        }
+    }
+
+    fn panel_bounds(&self, bounds: Rect) -> Rect {
+        let (top, bottom) = self.caret_insets();
+        Rect::new(
+            bounds.x,
+            bounds.y + top,
+            bounds.width,
+            (bounds.height - top - bottom).max(0.0),
+        )
+    }
+
+    fn caret_path(&self, bounds: Rect) -> Option<Path> {
+        if !self.show_caret {
+            return None;
+        }
+
+        let panel = self.panel_bounds(bounds);
+        let center_x = panel.x + panel.width.min(56.0) / 2.0 + 18.0;
+        let half = self.caret_size;
+        let mut path = Path::new();
+
+        match self.placement {
+            OverlayPlacement::Below
+            | OverlayPlacement::BelowPreferred
+            | OverlayPlacement::NearAnchor { .. } => {
+                path.move_to(Point::new(center_x - half, panel.y));
+                path.line_to(Point::new(center_x, bounds.y));
+                path.line_to(Point::new(center_x + half, panel.y));
+                path.close();
+                Some(path)
+            }
+            OverlayPlacement::Above => {
+                let bottom = panel.bottom();
+                path.move_to(Point::new(center_x - half, bottom));
+                path.line_to(Point::new(center_x, bottom + self.caret_size));
+                path.line_to(Point::new(center_x + half, bottom));
+                path.close();
+                Some(path)
+            }
+            _ => None,
         }
     }
 }
@@ -42,17 +110,20 @@ impl Widget for PopoverSurface {
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let inset = SURFACE_PADDING * 2.0;
+        let (caret_top, caret_bottom) = self.caret_insets();
         self.content_id
             .and_then(|id| {
                 ctx.child_size(
                     id,
                     SizeProposal {
                         width: proposal.width.map(|width| (width - inset).max(0.0)),
-                        height: proposal.height.map(|height| (height - inset).max(0.0)),
+                        height: proposal
+                            .height
+                            .map(|height| (height - inset - caret_top - caret_bottom).max(0.0)),
                     },
                 )
             })
-            .map(|size| Size::new(size.width + inset, size.height + inset))
+            .map(|size| Size::new(size.width + inset, size.height + inset + caret_top + caret_bottom))
             .unwrap_or_else(|| proposal.resolve(200.0, 80.0))
     }
 
@@ -63,24 +134,30 @@ impl Widget for PopoverSurface {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        let panel = self.panel_bounds(bounds);
         for child in children.iter_mut() {
-            child.origin = fern_canvas::Point::new(bounds.x + SURFACE_PADDING, bounds.y + SURFACE_PADDING);
+            child.origin = fern_canvas::Point::new(panel.x + SURFACE_PADDING, panel.y + SURFACE_PADDING);
             child.size = Size::new(
-                (bounds.width - SURFACE_PADDING * 2.0).max(0.0),
-                (bounds.height - SURFACE_PADDING * 2.0).max(0.0),
+                (panel.width - SURFACE_PADDING * 2.0).max(0.0),
+                (panel.height - SURFACE_PADDING * 2.0).max(0.0),
             );
         }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let panel = self.panel_bounds(bounds);
         let radius = CornerRadius::uniform(ctx.theme.shape.radius_md);
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.surface);
+        canvas.fill_rounded_rect(panel, radius, ctx.theme.colors.surface);
         canvas.stroke_rounded_rect(
-            bounds,
+            panel,
             radius,
             ctx.theme.colors.border,
             ctx.theme.shape.border_width,
         );
+        if let Some(path) = self.caret_path(bounds) {
+            canvas.fill_path(&path, ctx.theme.colors.surface);
+            canvas.stroke_path(&path, ctx.theme.colors.border, ctx.theme.shape.border_width);
+        }
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -99,6 +176,9 @@ pub struct Popover {
     placement: OverlayPlacement,
     dismiss: DismissBehavior,
     pending_content: Option<Box<dyn Widget>>,
+    pending_trigger: Option<Box<dyn Widget>>,
+    show_caret: bool,
+    caret_size: f32,
     root_child_id: Option<WidgetId>,
 }
 
@@ -111,6 +191,9 @@ impl Popover {
             placement: OverlayPlacement::BelowPreferred,
             dismiss: DismissBehavior::ClickOutside,
             pending_content: Some(Box::new(content)),
+            pending_trigger: None,
+            show_caret: true,
+            caret_size: 10.0,
             root_child_id: None,
         }
     }
@@ -134,6 +217,21 @@ impl Popover {
         self.dismiss = dismiss;
         self
     }
+
+    pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
+        self.pending_trigger = Some(Box::new(trigger));
+        self
+    }
+
+    pub fn caret(mut self, show_caret: bool) -> Self {
+        self.show_caret = show_caret;
+        self
+    }
+
+    pub fn caret_size(mut self, caret_size: f32) -> Self {
+        self.caret_size = caret_size.max(0.0);
+        self
+    }
 }
 
 impl std::fmt::Debug for Popover {
@@ -153,80 +251,159 @@ impl Widget for Popover {
         let enabled = self.enabled;
         let placement = self.placement.clone();
         let dismiss = self.dismiss.clone();
+        let show_caret = self.show_caret;
+        let caret_size = self.caret_size;
         let style = self.style;
         let content_id = ctx.add(PopoverSurface::new(
             self.pending_content
                 .take()
                 .expect("Popover built without content"),
+            placement.clone(),
+            show_caret,
+            caret_size,
         ));
         ctx.set_dormant(content_id);
 
-        let trigger = Button::new(label)
-            .style(style)
-            .enabled(enabled)
-            .on_tap({
-                let placement = placement.clone();
-                let dismiss = dismiss.clone();
-                move |ctx| {
-                    if !enabled {
-                        return;
-                    }
-                    ctx.dismiss_all_overlays();
-                    ctx.activate(content_id);
-                    ctx.show_overlay(OverlayRequest {
-                        content_id,
-                        anchor: self_id,
-                        placement: placement.clone(),
-                        dismiss: dismiss.clone(),
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                    });
-                }
-            })
-            .on_key({
-                let placement = placement.clone();
-                let dismiss = dismiss.clone();
-                move |event, ctx| match event {
-                    WidgetEvent::KeyUp {
-                        key: Key::Enter | Key::Space,
-                        ..
-                    } if enabled => {
-                        ctx.dismiss_all_overlays();
-                        ctx.activate(content_id);
-                        ctx.show_overlay(OverlayRequest {
-                            content_id,
-                            anchor: self_id,
-                            placement: placement.clone(),
-                            dismiss: dismiss.clone(),
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                        });
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
-            })
-            .on_access_action({
-                move |action, ctx| {
-                    if action == fern_core::accesskit::Action::Click && enabled {
-                        ctx.dismiss_all_overlays();
-                        ctx.activate(content_id);
-                        ctx.show_overlay(OverlayRequest {
-                            content_id,
-                            anchor: self_id,
-                            placement: placement.clone(),
-                            dismiss: dismiss.clone(),
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                        });
-                        EventResponse::Handled
-                    } else {
-                        EventResponse::Ignored
-                    }
-                }
-            });
+        let root_id = if let Some(trigger) = self.pending_trigger.take() {
+            ctx.add(
+                OverlayTrigger::new(
+                    trigger,
+                    fern_core::widget_builder::HandlerSet::new()
+                        .focusable(true)
+                        .cursor(fern_core::widget::CursorIcon::Pointer)
+                        .on_tap({
+                            let placement = placement.clone();
+                            let dismiss = dismiss.clone();
+                            move |ctx| {
+                                if !enabled {
+                                    return;
+                                }
+                                ctx.dismiss_all_overlays();
+                                ctx.activate(content_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id,
+                                    anchor: self_id,
+                                    placement: placement.clone(),
+                                    dismiss: dismiss.clone(),
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                            }
+                        })
+                        .on_key({
+                            let placement = placement.clone();
+                            let dismiss = dismiss.clone();
+                            move |event, ctx| match event {
+                                WidgetEvent::KeyUp {
+                                    key: Key::Enter | Key::Space,
+                                    ..
+                                } if enabled => {
+                                    ctx.dismiss_all_overlays();
+                                    ctx.activate(content_id);
+                                    ctx.show_overlay(OverlayRequest {
+                                        content_id,
+                                        anchor: self_id,
+                                        placement: placement.clone(),
+                                        dismiss: dismiss.clone(),
+                                        layer: OverlayLayer::InTree,
+                                        parent_overlay: None,
+                                    });
+                                    EventResponse::Handled
+                                }
+                                _ => EventResponse::Ignored,
+                            }
+                        })
+                        .on_access_action({
+                            move |action, ctx| {
+                                if action == fern_core::accesskit::Action::Click && enabled {
+                                    ctx.dismiss_all_overlays();
+                                    ctx.activate(content_id);
+                                    ctx.show_overlay(OverlayRequest {
+                                        content_id,
+                                        anchor: self_id,
+                                        placement: placement.clone(),
+                                        dismiss: dismiss.clone(),
+                                        layer: OverlayLayer::InTree,
+                                        parent_overlay: None,
+                                    });
+                                    EventResponse::Handled
+                                } else {
+                                    EventResponse::Ignored
+                                }
+                            }
+                        }),
+                )
+                .name(label),
+            )
+        } else {
+            ctx.add(
+                Button::new(label)
+                    .style(style)
+                    .enabled(enabled)
+                    .on_tap({
+                        let placement = placement.clone();
+                        let dismiss = dismiss.clone();
+                        move |ctx| {
+                            if !enabled {
+                                return;
+                            }
+                            ctx.dismiss_all_overlays();
+                            ctx.activate(content_id);
+                            ctx.show_overlay(OverlayRequest {
+                                content_id,
+                                anchor: self_id,
+                                placement: placement.clone(),
+                                dismiss: dismiss.clone(),
+                                layer: OverlayLayer::InTree,
+                                parent_overlay: None,
+                            });
+                        }
+                    })
+                    .on_key({
+                        let placement = placement.clone();
+                        let dismiss = dismiss.clone();
+                        move |event, ctx| match event {
+                            WidgetEvent::KeyUp {
+                                key: Key::Enter | Key::Space,
+                                ..
+                            } if enabled => {
+                                ctx.dismiss_all_overlays();
+                                ctx.activate(content_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id,
+                                    anchor: self_id,
+                                    placement: placement.clone(),
+                                    dismiss: dismiss.clone(),
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                                EventResponse::Handled
+                            }
+                            _ => EventResponse::Ignored,
+                        }
+                    })
+                    .on_access_action({
+                        move |action, ctx| {
+                            if action == fern_core::accesskit::Action::Click && enabled {
+                                ctx.dismiss_all_overlays();
+                                ctx.activate(content_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id,
+                                    anchor: self_id,
+                                    placement: placement.clone(),
+                                    dismiss: dismiss.clone(),
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                                EventResponse::Handled
+                            } else {
+                                EventResponse::Ignored
+                            }
+                        }
+                    }),
+            )
+        };
 
-        let root_id = ctx.add(trigger);
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
@@ -303,5 +480,55 @@ mod tests {
         tree.press_key(Key::Escape, fern_core::event::Modifiers::NONE);
 
         assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn custom_trigger_opens_popover_overlay() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Popover::new("Show popover", FixedLeaf(140.0, 60.0)).trigger(FixedLeaf(128.0, 36.0)));
+        tree.layout(SizeProposal::exact(480.0, 320.0));
+
+        let trigger = tree.find_by_label("Show popover").unwrap();
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+        });
+
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn caret_increases_popover_height_for_below_placement() {
+        let mut plain_tree = WidgetTree::new().with_theme(Theme::light_default());
+        plain_tree.add(
+            Popover::new("Show popover", FixedLeaf(140.0, 60.0))
+                .placement(OverlayPlacement::Below)
+                .caret(false),
+        );
+        plain_tree.layout(SizeProposal::exact(480.0, 320.0));
+        let trigger = plain_tree.find_by_label("Show popover").unwrap();
+        plain_tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+        });
+        plain_tree.layout(SizeProposal::exact(480.0, 320.0));
+        let plain_bounds = plain_tree.bounds(plain_tree.overlay_manager().active_content_ids()[0]);
+
+        let mut caret_tree = WidgetTree::new().with_theme(Theme::light_default());
+        caret_tree.add(
+            Popover::new("Show popover", FixedLeaf(140.0, 60.0))
+                .placement(OverlayPlacement::Below)
+                .caret_size(12.0),
+        );
+        caret_tree.layout(SizeProposal::exact(480.0, 320.0));
+        let trigger = caret_tree.find_by_label("Show popover").unwrap();
+        caret_tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+        });
+        caret_tree.layout(SizeProposal::exact(480.0, 320.0));
+        let caret_bounds = caret_tree.bounds(caret_tree.overlay_manager().active_content_ids()[0]);
+
+        assert!(caret_bounds.height >= plain_bounds.height + 11.0);
     }
 }
