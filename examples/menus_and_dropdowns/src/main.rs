@@ -657,15 +657,20 @@ mod tests {
     }
 
     #[test]
-    fn submenu_opens_on_hover() {
+    fn submenu_opens_on_hover_after_delay() {
+        use std::time::Duration;
+
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::submenu("Open Recent", || {
-            Box::new(
-                MenuList::new()
-                    .item(MenuItem::new("File 1").on_activate(TestCmd::Action))
-                    .item(MenuItem::new("File 2").on_activate(TestCmd::Action)),
-            )
-        }));
+        let item = tree.add(
+            MenuItem::submenu("Open Recent", || {
+                Box::new(
+                    MenuList::new()
+                        .item(MenuItem::new("File 1").on_activate(TestCmd::Action))
+                        .item(MenuItem::new("File 2").on_activate(TestCmd::Action)),
+                )
+            })
+            .submenu_delay(Duration::from_millis(100)),
+        );
         tree.layout(SizeProposal::exact(200.0, 40.0));
 
         assert!(tree.active_overlays().is_empty());
@@ -673,12 +678,14 @@ mod tests {
         // Hover over the submenu trigger
         let center = tree.bounds(item).center();
         tree.pointer_move(center);
-        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        // Advance past the delay — widget tree processes pending overlays
+        tree.advance_time(Duration::from_millis(150));
 
         assert_eq!(
             tree.active_overlays().len(),
             1,
-            "hovering on submenu item should open submenu overlay"
+            "hovering on submenu item should open submenu overlay after delay"
         );
     }
 
