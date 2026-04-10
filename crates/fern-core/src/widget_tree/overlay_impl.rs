@@ -1,0 +1,328 @@
+use super::*;
+
+use crate::accessibility::AccessNodeBuilder;
+
+impl WidgetTree {
+    /// Attach a tooltip to a widget. The tooltip content widget must already
+    /// be in the tree (typically added as a dormant widget during build).
+    pub fn attach_tooltip(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+    ) {
+        self.arena.set_dormant(content_id);
+        self.tooltips.push(TooltipEntry {
+            anchor_id,
+            content_id,
+            delay,
+            hover_start: None,
+            real_hover_start: None,
+            overlay_id: None,
+        });
+    }
+
+    pub(super) fn process_tooltips(&mut self) {
+        let sim_now = self.sim_clock;
+        self.process_tooltips_impl(|entry| {
+            entry
+                .hover_start
+                .map(|start| sim_now.saturating_duration_since(start))
+        });
+    }
+
+    pub(super) fn process_tooltips_real(&mut self) {
+        let real_now = std::time::Instant::now();
+        self.process_tooltips_impl(|entry| {
+            entry
+                .real_hover_start
+                .map(|start| real_now.saturating_duration_since(start))
+        });
+    }
+
+    fn process_tooltips_impl(
+        &mut self,
+        elapsed_fn: impl Fn(&TooltipEntry) -> Option<std::time::Duration>,
+    ) {
+        let mut to_show = Vec::new();
+        for entry in &mut self.tooltips {
+            if entry.overlay_id.is_some() {
+                continue;
+            }
+            if !self.arena.is_active(entry.anchor_id) {
+                continue;
+            }
+            if let Some(elapsed) = elapsed_fn(entry)
+                && elapsed >= entry.delay
+            {
+                to_show.push((entry.anchor_id, entry.content_id));
+                entry.hover_start = None;
+                entry.real_hover_start = None;
+            }
+        }
+        for (anchor_id, content_id) in to_show {
+            self.arena.activate(content_id);
+            let oid = self.overlay_manager.show(crate::overlay::OverlayRequest {
+                content_id,
+                anchor: anchor_id,
+                placement: crate::overlay::OverlayPlacement::NearAnchor {
+                    offset: fern_canvas::Vec2::new(0.0, 8.0),
+                },
+                dismiss: crate::overlay::DismissBehavior::PointerLeave {
+                    delay: std::time::Duration::from_millis(100),
+                },
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+            });
+            if let Some(entry) = self.tooltips.iter_mut().find(|e| e.content_id == content_id) {
+                entry.overlay_id = Some(oid);
+            }
+        }
+    }
+
+    pub(super) fn process_delayed_overlays(&mut self) {
+        let sim_now = self.sim_clock;
+        self.process_delayed_overlays_impl(|p| sim_now.saturating_duration_since(p.sim_requested_at));
+    }
+
+    pub(super) fn process_delayed_overlays_real(&mut self) {
+        let real_now = std::time::Instant::now();
+        self.process_delayed_overlays_impl(|p| {
+            real_now.saturating_duration_since(p.real_requested_at)
+        });
+    }
+
+    fn process_delayed_overlays_impl(
+        &mut self,
+        elapsed_fn: impl Fn(&PendingDelayedOverlay) -> std::time::Duration,
+    ) {
+        let mut ready_indices = Vec::new();
+        for (index, pending) in self.pending_delayed_overlays.iter().enumerate() {
+            if elapsed_fn(pending) >= pending.delay {
+                ready_indices.push(index);
+            }
+        }
+
+        let mut ready = Vec::new();
+        for &index in ready_indices.iter().rev() {
+            ready.push(self.pending_delayed_overlays.remove(index));
+        }
+        ready.reverse();
+
+        for pending in ready {
+            let content_id = pending.request.content_id;
+            self.arena.activate(content_id);
+            let current_focus = self.focused;
+            self.overlay_manager.show(pending.request);
+            if let Some(focus_id) = current_focus {
+                self.overlay_manager.set_top_focus_restore(focus_id);
+            }
+            self.arena.mark_needs_paint(content_id);
+            if let Some(focus_target) = pending.focus_target {
+                if self.arena.is_active(focus_target) {
+                    self.focus(focus_target);
+                }
+            }
+        }
+    }
+
+    pub(super) fn overlay_ancestor_for_widget(
+        &self,
+        widget_id: WidgetId,
+    ) -> Option<crate::overlay::OverlayId> {
+        self.overlay_manager
+            .stack
+            .iter()
+            .rev()
+            .find(|overlay| self.is_descendant_of(widget_id, overlay.content_id))
+            .map(|overlay| overlay.id)
+    }
+
+    fn menu_ancestor_for_widget(&self, widget_id: WidgetId) -> Option<WidgetId> {
+        let mut current = Some(widget_id);
+        while let Some(id) = current {
+            if let Some(node) = self.arena.get(id) {
+                let mut builder = AccessNodeBuilder::new();
+                node.widget.accessibility(&mut builder);
+                if builder.role() == accesskit::Role::Menu {
+                    return Some(id);
+                }
+            }
+            current = self.arena.parent(id);
+        }
+        None
+    }
+
+    pub(super) fn dismiss_child_overlays_for_source(
+        &mut self,
+        source_widget: WidgetId,
+        preserve_content: Option<WidgetId>,
+    ) {
+        if let Some(parent_overlay) = self.overlay_ancestor_for_widget(source_widget) {
+            let preserve_overlay = preserve_content
+                .and_then(|content_id| self.overlay_manager.find_by_content(content_id));
+            let (dismissed, focus_restore) = self
+                .overlay_manager
+                .dismiss_descendants_of(parent_overlay, preserve_overlay);
+            self.dormant_dismissed_content(&dismissed);
+            if let Some(restore_id) = focus_restore {
+                if self.arena.is_active(restore_id) {
+                    self.focus(restore_id);
+                }
+            }
+            return;
+        }
+
+        let Some(menu_root) = self.menu_ancestor_for_widget(source_widget) else {
+            return;
+        };
+        let preserve_overlay = preserve_content
+            .and_then(|content_id| self.overlay_manager.find_by_content(content_id));
+        let overlay_ids: Vec<crate::overlay::OverlayId> = self
+            .overlay_manager
+            .stack
+            .iter()
+            .filter(|overlay| {
+                overlay.parent_overlay.is_none()
+                    && self.is_descendant_of(overlay.anchor, menu_root)
+                    && !preserve_overlay.is_some_and(|keep| {
+                        overlay.id == keep || self.overlay_manager.is_descendant_of(overlay.id, keep)
+                    })
+            })
+            .map(|overlay| overlay.id)
+            .collect();
+
+        for overlay_id in overlay_ids {
+            let (dismissed, focus_restore) = self.overlay_manager.dismiss_with_focus_restore(overlay_id);
+            self.dormant_dismissed_content(&dismissed);
+            if let Some(restore_id) = focus_restore {
+                if self.arena.is_active(restore_id) {
+                    self.focus(restore_id);
+                }
+            }
+        }
+    }
+
+    pub(super) fn is_descendant_of(&self, widget_id: WidgetId, ancestor: WidgetId) -> bool {
+        if widget_id == ancestor {
+            return true;
+        }
+        let mut current = self.arena.parent(widget_id);
+        while let Some(parent_id) = current {
+            if parent_id == ancestor {
+                return true;
+            }
+            current = self.arena.parent(parent_id);
+        }
+        false
+    }
+
+    pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
+        let matching: Vec<usize> = self
+            .tooltips
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| self.is_descendant_of(widget_id, entry.anchor_id))
+            .map(|(index, _)| index)
+            .collect();
+        let now = self.sim_clock;
+        let real_now = std::time::Instant::now();
+        for index in matching {
+            self.tooltips[index].hover_start = Some(now);
+            self.tooltips[index].real_hover_start = Some(real_now);
+            self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
+        }
+    }
+
+    pub(super) fn tooltip_pointer_leave(&mut self, widget_id: WidgetId) {
+        let matching: Vec<usize> = self
+            .tooltips
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| self.is_descendant_of(widget_id, entry.anchor_id))
+            .map(|(index, _)| index)
+            .collect();
+        let mut to_dismiss = Vec::new();
+        for index in matching {
+            self.tooltips[index].hover_start = None;
+            self.tooltips[index].real_hover_start = None;
+            if let Some(id) = self.tooltips[index].overlay_id.take() {
+                to_dismiss.push((id, self.tooltips[index].content_id));
+            }
+        }
+        for (overlay_id, _content_id) in to_dismiss {
+            let dismissed = self.overlay_manager.dismiss(overlay_id);
+            self.dormant_dismissed_content(&dismissed);
+        }
+    }
+
+    /// Returns the earliest deadline for a pending tooltip or delayed overlay (if any).
+    pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
+        let tooltip_deadline = self
+            .tooltips
+            .iter()
+            .filter(|entry| entry.overlay_id.is_none())
+            .filter_map(|entry| entry.real_hover_start.map(|start| start + entry.delay))
+            .min();
+        let delayed_overlay_deadline = self
+            .pending_delayed_overlays
+            .iter()
+            .map(|pending| pending.real_requested_at + pending.delay)
+            .min();
+        let animation_deadline = self.animation_scheduler.next_deadline();
+
+        [tooltip_deadline, delayed_overlay_deadline, animation_deadline]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
+    pub fn overlay_manager(&self) -> &crate::overlay::OverlayManager {
+        &self.overlay_manager
+    }
+
+    pub fn active_overlays(&self) -> Vec<crate::overlay::OverlayId> {
+        self.overlay_manager.active_ids()
+    }
+
+    pub fn show_overlay(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+    ) -> crate::overlay::OverlayId {
+        self.overlay_manager.show(request)
+    }
+
+    pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
+        let dismissed = self.overlay_manager.dismiss(id);
+        self.dormant_dismissed_content(&dismissed);
+    }
+
+    pub(super) fn dormant_dismissed_content(&mut self, content_ids: &[WidgetId]) {
+        for &id in content_ids {
+            let focused_in_subtree = self.focused.filter(|focused| self.is_descendant_of(*focused, id));
+            let hovered_in_subtree = self.hovered.filter(|hovered| self.is_descendant_of(*hovered, id));
+
+            if let Some(focused) = focused_in_subtree {
+                self.dispatch_to_widget(focused, &WidgetEvent::FocusLost);
+                if self.focused.is_some_and(|current| self.is_descendant_of(current, id)) {
+                    self.focused = None;
+                    self.focus_origin = None;
+                }
+            }
+
+            self.arena.set_dormant(id);
+
+            if hovered_in_subtree.is_some() {
+                self.hovered = None;
+            }
+        }
+        if !content_ids.is_empty() {
+            self.cached_frame = None;
+            self.a11y_dirty = true;
+        }
+    }
+
+    pub fn is_visible(&self, id: WidgetId) -> bool {
+        self.arena.is_active(id)
+    }
+}

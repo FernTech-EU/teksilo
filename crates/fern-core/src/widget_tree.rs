@@ -4,13 +4,16 @@ use std::rc::Rc;
 use fern_canvas::{Canvas, Point, Rect, RenderFrame, SizeProposal};
 use fern_tokens::Theme;
 
-use crate::accessibility::{AccessNodeBuilder, AccessibilityInfo};
 use crate::app_command::{AppCommand, ErasedCommand};
 use crate::arena::{GestureBinding, WidgetArena};
 use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
 use crate::gesture::{GestureArena, GestureEvent, GestureRecognizer, RawPointerEvent};
 use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use crate::widget_id::WidgetId;
+
+mod accessibility_impl;
+mod overlay_impl;
+mod test_api;
 
 /// The main widget tree orchestrating arena, layout, events, accessibility, and paint.
 /// Provides both the runtime API and the headless test API.
@@ -27,6 +30,54 @@ type ShortcutLookup = Box<
 
 /// Type-erased reverse lookup: given a command (as `&dyn Any`), find its shortcut.
 type ShortcutReverseLookup = Box<dyn Fn(&dyn std::any::Any) -> Option<crate::shortcut::Shortcut>>;
+
+enum AnimatedRegistration {
+    State(crate::state::WeakAnimatedState),
+    Signal(crate::signal::WeakAnimatedSignal),
+}
+
+enum PendingAnimationRegistration {
+    State(crate::state::State<f32>, crate::state::AnimationRequest),
+    Signal(crate::signal::Signal<f32>, crate::state::AnimationRequest),
+}
+
+impl AnimatedRegistration {
+    fn same_state(&self, state: &crate::state::State<f32>) -> bool {
+        match self {
+            Self::State(weak_state) => weak_state.same_state(state),
+            Self::Signal(_) => false,
+        }
+    }
+
+    fn same_signal(&self, signal: &crate::signal::Signal<f32>) -> bool {
+        match self {
+            Self::State(_) => false,
+            Self::Signal(weak_signal) => weak_signal.same_signal(signal),
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        match self {
+            Self::State(weak_state) => weak_state.upgrade().is_some(),
+            Self::Signal(weak_signal) => weak_signal.upgrade().is_some(),
+        }
+    }
+
+    fn take_pending_animation(&self) -> Option<PendingAnimationRegistration> {
+        match self {
+            Self::State(weak_state) => {
+                let state = weak_state.upgrade()?;
+                let request = state.take_pending_animation()?;
+                Some(PendingAnimationRegistration::State(state, request))
+            }
+            Self::Signal(weak_signal) => {
+                let signal = weak_signal.upgrade()?;
+                let request = signal.take_pending_animation()?;
+                Some(PendingAnimationRegistration::Signal(signal, request))
+            }
+        }
+    }
+}
 
 #[allow(clippy::type_complexity)]
 pub struct WidgetTree {
@@ -52,15 +103,10 @@ pub struct WidgetTree {
     focus_origin: Option<crate::focus::FocusOrigin>,
     /// Layout direction for RTL/LTR support.
     layout_direction: crate::environment::LayoutDirection,
-    /// Animation scheduler for smooth State<f32> transitions.
+    /// Animation scheduler for smooth animated state and signal transitions.
     animation_scheduler: crate::animation::AnimationScheduler,
-    /// States registered for animation (checked each frame for pending requests).
-    animated_states: Vec<crate::state::State<f32>>,
-    /// V2 Signals registered for animation.
-    animated_signals: Vec<crate::signal::Signal<f32>>,
-    /// Observer cleanup: functions to remove observers registered during build().
-    /// Keyed by composite adapter ID. Cleared and re-populated on each rebuild.
-    observer_cleanups: std::collections::HashMap<WidgetId, Vec<Box<dyn Fn()>>>,
+    /// Weakly tracked animated values from both V1 and V2 APIs.
+    animated_values: Vec<AnimatedRegistration>,
     /// Cached accessibility tree update — only rebuilt when layout changes.
     cached_a11y: Option<accesskit::TreeUpdate>,
     /// Whether the accessibility tree needs rebuilding (set when layout runs).
@@ -121,10 +167,8 @@ impl WidgetTree {
             overlay_manager: crate::overlay::OverlayManager::new(),
             tooltips: Vec::new(),
             layout_direction: crate::environment::LayoutDirection::default(),
-            observer_cleanups: std::collections::HashMap::new(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),
-            animated_states: Vec::new(),
-            animated_signals: Vec::new(),
+            animated_values: Vec::new(),
             cached_a11y: None,
             a11y_dirty: true,
             cached_frame: None,
@@ -150,12 +194,15 @@ impl WidgetTree {
             return false;
         };
 
-        if self.arena.is_active(overlay.anchor) && self.arena.bounds(overlay.anchor).contains(position) {
+        if self.arena.is_active(overlay.anchor)
+            && self.arena.bounds(overlay.anchor).contains(position)
+        {
             return true;
         }
 
         self.overlay_manager.stack.iter().any(|candidate| {
-            (candidate.id == overlay_id || self.overlay_manager.is_descendant_of(candidate.id, overlay_id))
+            (candidate.id == overlay_id
+                || self.overlay_manager.is_descendant_of(candidate.id, overlay_id))
                 && candidate.bounds.contains(position)
         })
     }
@@ -165,7 +212,12 @@ impl WidgetTree {
             .overlay_manager
             .stack
             .iter()
-            .filter(|overlay| matches!(overlay.dismiss, crate::overlay::DismissBehavior::PointerLeave { .. }))
+            .filter(|overlay| {
+                matches!(
+                    overlay.dismiss,
+                    crate::overlay::DismissBehavior::PointerLeave { .. }
+                )
+            })
             .map(|overlay| overlay.id)
             .collect();
 
@@ -238,7 +290,8 @@ impl WidgetTree {
         }
 
         for overlay_id in to_dismiss {
-            let (dismissed, focus_restore) = self.overlay_manager.dismiss_with_focus_restore(overlay_id);
+            let (dismissed, focus_restore) =
+                self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed);
             if let Some(restore_id) = focus_restore {
                 if self.arena.is_active(restore_id) {
@@ -270,34 +323,37 @@ impl WidgetTree {
     }
 
     /// Whether a render pass is needed (any widget needs layout or paint).
-    /// Unlike `needs_redraw`, this doesn't consider active animations — only
-    /// whether the tree has actual dirty widgets that need rendering.
     pub fn needs_render(&self) -> bool {
         self.arena.any_needs_layout() || self.arena.any_needs_paint()
     }
 
     /// Register a `State<f32>` for animation support. The framework checks
-    /// registered states each frame for pending `set_animated` requests.
-    /// Called automatically by `BuildContext::state()` for f32 states.
+    /// registered values each frame for pending `set_animated` requests.
+    /// Called automatically by `BuildContext::animated_state()`.
     pub fn register_animated_state(&mut self, state: &crate::state::State<f32>) {
-        // Avoid duplicates
+        self.animated_values.retain(|registration| registration.is_alive());
         if !self
-            .animated_states
+            .animated_values
             .iter()
-            .any(|s| crate::state::State::same(s, state))
+            .any(|registration| registration.same_state(state))
+            && let Some(weak_state) = state.weak_handle()
         {
-            self.animated_states.push(state.clone());
+            self.animated_values
+                .push(AnimatedRegistration::State(weak_state));
         }
     }
 
     /// Register a `Signal<f32>` for animation support.
     pub fn register_animated_signal(&mut self, signal: &crate::signal::Signal<f32>) {
+        self.animated_values.retain(|registration| registration.is_alive());
         if !self
-            .animated_signals
+            .animated_values
             .iter()
-            .any(|s| crate::signal::Signal::same(s, signal))
+            .any(|registration| registration.same_signal(signal))
+            && let Some(weak_signal) = signal.weak_handle()
         {
-            self.animated_signals.push(signal.clone());
+            self.animated_values
+                .push(AnimatedRegistration::Signal(weak_signal));
         }
     }
 
@@ -315,22 +371,32 @@ impl WidgetTree {
 
     /// Pick up pending animations using the given time (for sim clock).
     fn process_pending_animations_at(&mut self, now: std::time::Instant) {
-        for state in &self.animated_states {
-            if let Some(req) = state.take_pending_animation() {
-                self.animation_scheduler
-                    .animate(state, req.target, req.duration, req.easing, now);
+        let mut pending = Vec::new();
+        self.animated_values.retain(|registration| {
+            if let Some(animation) = registration.take_pending_animation() {
+                pending.push(animation);
+                true
+            } else {
+                registration.is_alive()
             }
-        }
-        for signal in &self.animated_signals {
-            if let Some(req) = signal.take_pending_animation() {
-                self.animation_scheduler.animate_signal_with_frame_interval(
-                    signal,
-                    req.target,
-                    req.duration,
-                    req.easing,
-                    req.frame_interval,
-                    now,
-                );
+        });
+
+        for animation in pending {
+            match animation {
+                PendingAnimationRegistration::State(state, req) => {
+                    self.animation_scheduler
+                        .animate(&state, req.target, req.duration, req.easing, now);
+                }
+                PendingAnimationRegistration::Signal(signal, req) => {
+                    self.animation_scheduler.animate_signal_with_frame_interval(
+                        &signal,
+                        req.target,
+                        req.duration,
+                        req.easing,
+                        req.frame_interval,
+                        now,
+                    );
+                }
             }
         }
     }
@@ -480,19 +546,6 @@ impl WidgetTree {
     /// Set a per-child alignment override on a widget.
     pub fn set_alignment(&mut self, id: WidgetId, alignment: fern_tokens::Alignment) {
         self.arena.set_alignment_override(id, alignment);
-    }
-
-    /// Register an observer cleanup function for a composite.
-    /// Called during build() when ctx.observe() is used.
-    pub(crate) fn register_observer_cleanup(
-        &mut self,
-        composite_id: WidgetId,
-        cleanup: Box<dyn Fn()>,
-    ) {
-        self.observer_cleanups
-            .entry(composite_id)
-            .or_default()
-            .push(cleanup);
     }
 
     /// Get the binding registry for registering State→Widget bindings.
@@ -1880,665 +1933,6 @@ impl WidgetTree {
         frame
     }
 
-    // --- Accessibility ---
-
-    /// Build an AccessKit `TreeUpdate` from the current state of all active
-    /// widgets. Call this once per frame, between layout and paint, and push
-    /// the result to the `accesskit_winit::Adapter`.
-    /// Caches the result and only rebuilds when layout has changed.
-    pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
-        // Return cached result if nothing changed since last sync
-        if !self.a11y_dirty
-            && let Some(cached) = &self.cached_a11y
-        {
-            return cached.clone();
-        }
-
-        let update = self.build_accessibility_tree();
-        self.cached_a11y = Some(update.clone());
-        self.a11y_dirty = false;
-        update
-    }
-
-    fn build_accessibility_tree(&self) -> accesskit::TreeUpdate {
-        use crate::accessibility::{root_node_id, widget_id_to_node_id};
-
-        let roots = self.arena.roots();
-        let mut nodes: Vec<(accesskit::NodeId, accesskit::Node)> = Vec::new();
-
-        // Build a virtual root node whose children are the tree roots
-        let mut root = accesskit::Node::new(accesskit::Role::Window);
-        for &root_id in &roots {
-            if self.arena.is_active(root_id) {
-                root.push_child(widget_id_to_node_id(root_id));
-            }
-        }
-        nodes.push((root_node_id(), root));
-
-        // Walk all active widgets and build their AccessKit nodes
-        for &root_id in &roots {
-            self.build_accessibility_recursive(root_id, &mut nodes);
-        }
-
-        // Focus: use the focused widget if still active, or fall back to root
-        let focus = self
-            .focused
-            .filter(|id| self.arena.is_active(*id))
-            .map(widget_id_to_node_id)
-            .unwrap_or_else(root_node_id);
-
-        accesskit::TreeUpdate {
-            nodes,
-            tree: Some(accesskit::Tree::new(root_node_id())),
-            tree_id: accesskit::TreeId::ROOT,
-            focus,
-        }
-    }
-
-    fn build_accessibility_recursive(
-        &self,
-        id: WidgetId,
-        nodes: &mut Vec<(accesskit::NodeId, accesskit::Node)>,
-    ) {
-        use crate::accessibility::widget_id_to_node_id;
-
-        if !self.arena.is_active(id) {
-            return;
-        }
-
-        let node = self.arena.get(id).unwrap();
-        let mut builder = AccessNodeBuilder::new();
-        node.widget.accessibility(&mut builder);
-
-        // Add children to the AccessKit node
-        let children = self.arena.children(id);
-        for &child_id in children {
-            if self.arena.is_active(child_id) {
-                builder
-                    .inner_mut()
-                    .push_child(widget_id_to_node_id(child_id));
-            }
-        }
-
-        // Set bounds from layout
-        let bounds = self.arena.bounds(id);
-        builder.inner_mut().set_bounds(accesskit::Rect {
-            x0: bounds.x as f64,
-            y0: bounds.y as f64,
-            x1: (bounds.x + bounds.width) as f64,
-            y1: (bounds.y + bounds.height) as f64,
-        });
-
-        // Link tooltip anchor to its tooltip content via described_by
-        if let Some(tooltip) = self
-            .tooltips
-            .iter()
-            .find(|t| t.anchor_id == id && t.overlay_id.is_some())
-        {
-            builder
-                .inner_mut()
-                .push_described_by(widget_id_to_node_id(tooltip.content_id));
-        }
-
-        let (node_id, ak_node) = builder.build(id);
-        nodes.push((node_id, ak_node));
-
-        // Recurse into children
-        for &child_id in children {
-            self.build_accessibility_recursive(child_id, nodes);
-        }
-    }
-
-    pub fn accessibility_node(&self, id: WidgetId) -> AccessibilityInfo {
-        let node = self.arena.get(id).unwrap();
-        let mut builder = AccessNodeBuilder::new();
-        node.widget.accessibility(&mut builder);
-        let role = builder.role();
-        let name = builder.name().map(|s| s.to_string());
-        let actions = builder.actions().to_vec();
-        let mut info = AccessibilityInfo::new(role, name, actions);
-        if let Some(toggled) = builder.toggled() {
-            info = info.with_toggled(toggled);
-        }
-        if let Some(expanded) = builder.expanded() {
-            info = info.with_expanded(expanded);
-        }
-        info
-    }
-
-    pub fn find_by_role(&self, role: accesskit::Role) -> Option<WidgetId> {
-        for id in self.arena.active_ids() {
-            let node = self.arena.get(id).unwrap();
-            let mut builder = AccessNodeBuilder::new();
-            node.widget.accessibility(&mut builder);
-            if builder.role() == role {
-                return Some(id);
-            }
-        }
-        None
-    }
-
-    pub fn find_by_label(&self, label: &str) -> Option<WidgetId> {
-        for id in self.arena.active_ids() {
-            let node = self.arena.get(id).unwrap();
-            let mut builder = AccessNodeBuilder::new();
-            node.widget.accessibility(&mut builder);
-            if builder.name() == Some(label) {
-                return Some(id);
-            }
-        }
-        None
-    }
-
-    /// Find a widget that supports a specific AccessKit action.
-    pub fn find_by_action(&self, action: accesskit::Action) -> Option<WidgetId> {
-        for id in self.arena.active_ids() {
-            let node = self.arena.get(id).unwrap();
-            let mut builder = AccessNodeBuilder::new();
-            node.widget.accessibility(&mut builder);
-            if builder.actions().contains(&action) {
-                return Some(id);
-            }
-        }
-        None
-    }
-
-    // --- Tooltip management ---
-
-    /// Attach a tooltip to a widget. The tooltip content widget must already
-    /// be in the tree (typically added as a dormant widget during build).
-    pub fn attach_tooltip(
-        &mut self,
-        anchor_id: WidgetId,
-        content_id: WidgetId,
-        delay: std::time::Duration,
-    ) {
-        // Start the content dormant
-        self.arena.set_dormant(content_id);
-        self.tooltips.push(TooltipEntry {
-            anchor_id,
-            content_id,
-            delay,
-            hover_start: None,
-            real_hover_start: None,
-            overlay_id: None,
-        });
-    }
-
-    /// Process tooltip timers. Called from advance_time and from dispatch_event.
-    /// Process tooltip timers using simulated clock (for tests via advance_time).
-    fn process_tooltips(&mut self) {
-        let sim_now = self.sim_clock;
-        self.process_tooltips_impl(|entry| {
-            entry
-                .hover_start
-                .map(|s| sim_now.saturating_duration_since(s))
-        });
-    }
-
-    /// Process tooltip timers using real clock (for windowed apps via layout).
-    fn process_tooltips_real(&mut self) {
-        let real_now = std::time::Instant::now();
-        self.process_tooltips_impl(|entry| {
-            entry
-                .real_hover_start
-                .map(|s| real_now.saturating_duration_since(s))
-        });
-    }
-
-    fn process_tooltips_impl(
-        &mut self,
-        elapsed_fn: impl Fn(&TooltipEntry) -> Option<std::time::Duration>,
-    ) {
-        let mut to_show = Vec::new();
-
-        for entry in &self.tooltips {
-            if entry.overlay_id.is_some() {
-                continue;
-            }
-            if let Some(dur) = elapsed_fn(entry)
-                && dur >= entry.delay
-            {
-                to_show.push((entry.anchor_id, entry.content_id));
-            }
-        }
-
-        for (anchor_id, content_id) in to_show {
-            // Activate the tooltip content widget
-            self.arena.activate(content_id);
-            let id = self.overlay_manager.show(crate::overlay::OverlayRequest {
-                content_id,
-                anchor: anchor_id,
-                placement: crate::overlay::OverlayPlacement::NearAnchor {
-                    offset: fern_canvas::Vec2::new(0.0, 4.0),
-                },
-                dismiss: crate::overlay::DismissBehavior::PointerLeave {
-                    delay: std::time::Duration::from_millis(100),
-                },
-                layer: crate::overlay::OverlayLayer::InTree,
-                parent_overlay: None,
-            });
-            // Record the overlay ID
-            for entry in &mut self.tooltips {
-                if entry.anchor_id == anchor_id {
-                    entry.overlay_id = Some(id);
-                }
-            }
-        }
-    }
-
-    // --- Delayed overlay processing (submenu hover-open delays) ---
-
-    /// Process delayed overlay requests using simulated clock (for tests).
-    fn process_delayed_overlays(&mut self) {
-        let sim_now = self.sim_clock;
-        self.process_delayed_overlays_impl(|p| sim_now.saturating_duration_since(p.sim_requested_at));
-    }
-
-    /// Process delayed overlay requests using real clock (for windowed apps).
-    fn process_delayed_overlays_real(&mut self) {
-        let real_now = std::time::Instant::now();
-        self.process_delayed_overlays_impl(|p| {
-            real_now.saturating_duration_since(p.real_requested_at)
-        });
-    }
-
-    fn process_delayed_overlays_impl(
-        &mut self,
-        elapsed_fn: impl Fn(&PendingDelayedOverlay) -> std::time::Duration,
-    ) {
-        // Collect indices of ready overlays
-        let ready: Vec<usize> = self
-            .pending_delayed_overlays
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| elapsed_fn(p) >= p.delay)
-            .map(|(i, _)| i)
-            .collect();
-
-        if ready.is_empty() {
-            return;
-        }
-
-        // Remove ready entries (in reverse order to preserve indices)
-        let mut pending: Vec<PendingDelayedOverlay> = Vec::new();
-        for i in ready.into_iter().rev() {
-            pending.push(self.pending_delayed_overlays.remove(i));
-        }
-
-        // Activate content and show overlays
-        for p in pending {
-            let content_id = p.request.content_id;
-            self.arena.activate(content_id);
-            let current_focus = self.focused;
-            self.overlay_manager.show(p.request);
-            if let Some(focus_id) = current_focus {
-                self.overlay_manager.set_top_focus_restore(focus_id);
-            }
-            self.arena.mark_needs_paint(content_id);
-            if let Some(focus_target) = p.focus_target {
-                if self.arena.is_active(focus_target) {
-                    self.focus(focus_target);
-                }
-            }
-        }
-    }
-
-    fn overlay_ancestor_for_widget(&self, widget_id: WidgetId) -> Option<crate::overlay::OverlayId> {
-        self.overlay_manager
-            .stack
-            .iter()
-            .rev()
-            .find(|overlay| self.is_descendant_of(widget_id, overlay.content_id))
-            .map(|overlay| overlay.id)
-    }
-
-    fn menu_ancestor_for_widget(&self, widget_id: WidgetId) -> Option<WidgetId> {
-        let mut current = Some(widget_id);
-        while let Some(id) = current {
-            if let Some(node) = self.arena.get(id) {
-                let mut builder = AccessNodeBuilder::new();
-                node.widget.accessibility(&mut builder);
-                if builder.role() == accesskit::Role::Menu {
-                    return Some(id);
-                }
-            }
-            current = self.arena.parent(id);
-        }
-        None
-    }
-
-    fn dismiss_child_overlays_for_source(
-        &mut self,
-        source_widget: WidgetId,
-        preserve_content: Option<WidgetId>,
-    ) {
-        if let Some(parent_overlay) = self.overlay_ancestor_for_widget(source_widget) {
-            let preserve_overlay = preserve_content
-                .and_then(|content_id| self.overlay_manager.find_by_content(content_id));
-            let (dismissed, focus_restore) = self
-                .overlay_manager
-                .dismiss_descendants_of(parent_overlay, preserve_overlay);
-            self.dormant_dismissed_content(&dismissed);
-            if let Some(restore_id) = focus_restore {
-                if self.arena.is_active(restore_id) {
-                    self.focus(restore_id);
-                }
-            }
-            return;
-        }
-
-        let Some(menu_root) = self.menu_ancestor_for_widget(source_widget) else {
-            return;
-        };
-        let preserve_overlay = preserve_content
-            .and_then(|content_id| self.overlay_manager.find_by_content(content_id));
-        let overlay_ids: Vec<crate::overlay::OverlayId> = self
-            .overlay_manager
-            .stack
-            .iter()
-            .filter(|overlay| {
-                overlay.parent_overlay.is_none()
-                    && self.is_descendant_of(overlay.anchor, menu_root)
-                    && !preserve_overlay
-                        .is_some_and(|keep| overlay.id == keep || self.overlay_manager.is_descendant_of(overlay.id, keep))
-            })
-            .map(|overlay| overlay.id)
-            .collect();
-
-        for overlay_id in overlay_ids {
-            let (dismissed, focus_restore) = self.overlay_manager.dismiss_with_focus_restore(overlay_id);
-            self.dormant_dismissed_content(&dismissed);
-            if let Some(restore_id) = focus_restore {
-                if self.arena.is_active(restore_id) {
-                    self.focus(restore_id);
-                }
-            }
-        }
-    }
-
-    /// Handle pointer enter/leave for tooltip hover tracking.
-    /// Check if widget_id is the anchor or a descendant of the anchor.
-    fn is_descendant_of(&self, widget_id: WidgetId, ancestor: WidgetId) -> bool {
-        if widget_id == ancestor {
-            return true;
-        }
-        let mut current = self.arena.parent(widget_id);
-        while let Some(pid) = current {
-            if pid == ancestor {
-                return true;
-            }
-            current = self.arena.parent(pid);
-        }
-        false
-    }
-
-    fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
-        // Collect matching indices first to avoid borrow conflict
-        let matching: Vec<usize> = self
-            .tooltips
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| self.is_descendant_of(widget_id, e.anchor_id))
-            .map(|(i, _)| i)
-            .collect();
-        // Record both simulated and real time for tooltip hover start.
-        // Tests use sim_clock via advance_time; real apps use Instant::now via layout.
-        let now = self.sim_clock;
-        let real_now = std::time::Instant::now();
-        for i in matching {
-            self.tooltips[i].hover_start = Some(now);
-            self.tooltips[i].real_hover_start = Some(real_now);
-            // Mark anchor as needing paint so the event loop keeps
-            // redrawing until the tooltip delay elapses.
-            self.arena.mark_needs_paint(self.tooltips[i].anchor_id);
-        }
-    }
-
-    fn tooltip_pointer_leave(&mut self, widget_id: WidgetId) {
-        let matching: Vec<usize> = self
-            .tooltips
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| self.is_descendant_of(widget_id, e.anchor_id))
-            .map(|(i, _)| i)
-            .collect();
-        let mut to_dismiss = Vec::new();
-        for i in matching {
-            self.tooltips[i].hover_start = None;
-            self.tooltips[i].real_hover_start = None;
-            if let Some(id) = self.tooltips[i].overlay_id.take() {
-                to_dismiss.push((id, self.tooltips[i].content_id));
-            }
-        }
-        for (id, _content_id) in to_dismiss {
-            let dismissed = self.overlay_manager.dismiss(id);
-            self.dormant_dismissed_content(&dismissed);
-        }
-    }
-
-    /// Returns the earliest deadline for a pending tooltip or delayed overlay (if any).
-    /// The event loop should use ControlFlow::WaitUntil(deadline) if this returns Some.
-    pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
-        let tooltip_deadline = self
-            .tooltips
-            .iter()
-            .filter(|e| e.overlay_id.is_none())
-            .filter_map(|e| e.real_hover_start.map(|start| start + e.delay))
-            .min();
-        let delayed_overlay_deadline = self
-            .pending_delayed_overlays
-            .iter()
-            .map(|p| p.real_requested_at + p.delay)
-            .min();
-        let animation_deadline = self.animation_scheduler.next_deadline();
-
-        [tooltip_deadline, delayed_overlay_deadline, animation_deadline]
-            .into_iter()
-            .flatten()
-            .min()
-    }
-
-    /// Get the overlay manager (read-only, for querying).
-    pub fn overlay_manager(&self) -> &crate::overlay::OverlayManager {
-        &self.overlay_manager
-    }
-
-    /// Get active overlay IDs (for testing).
-    pub fn active_overlays(&self) -> Vec<crate::overlay::OverlayId> {
-        self.overlay_manager.active_ids()
-    }
-
-    /// Show an overlay directly (for testing or framework use).
-    pub fn show_overlay(
-        &mut self,
-        request: crate::overlay::OverlayRequest,
-    ) -> crate::overlay::OverlayId {
-        self.overlay_manager.show(request)
-    }
-
-    /// Dismiss an overlay directly.
-    pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
-        let dismissed = self.overlay_manager.dismiss(id);
-        self.dormant_dismissed_content(&dismissed);
-    }
-
-    /// Set dismissed overlay content widgets to dormant so they don't get
-    /// laid out as full-window roots or shadow hit tests.
-    /// Also invalidates the render cache so the next frame excludes them.
-    fn dormant_dismissed_content(&mut self, content_ids: &[WidgetId]) {
-        for &id in content_ids {
-            let focused_in_subtree = self.focused.filter(|focused| self.is_descendant_of(*focused, id));
-            let hovered_in_subtree = self.hovered.filter(|hovered| self.is_descendant_of(*hovered, id));
-
-            if let Some(focused) = focused_in_subtree {
-                self.dispatch_to_widget(focused, &WidgetEvent::FocusLost);
-                if self.focused.is_some_and(|current| self.is_descendant_of(current, id)) {
-                    self.focused = None;
-                    self.focus_origin = None;
-                }
-            }
-
-            self.arena.set_dormant(id);
-
-            if hovered_in_subtree.is_some() {
-                self.hovered = None;
-            }
-        }
-        if !content_ids.is_empty() {
-            self.cached_frame = None;
-            self.a11y_dirty = true;
-        }
-    }
-
-    /// Whether a widget is visible (active, not dormant or destroyed).
-    pub fn is_visible(&self, id: WidgetId) -> bool {
-        self.arena.is_active(id)
-    }
-
-    /// Get the text content of a widget from its accessibility name.
-    /// Equivalent to the label set via `AccessNodeBuilder::set_name`.
-    pub fn text_content(&self, id: WidgetId) -> Option<String> {
-        let node = self.arena.get(id)?;
-        let mut builder = AccessNodeBuilder::new();
-        node.widget.accessibility(&mut builder);
-        builder.name().map(|s| s.to_string())
-    }
-
-    /// Get the text value of a widget from its accessibility value.
-    /// Equivalent to the value set via `AccessNodeBuilder::set_value`.
-    pub fn text_value(&self, id: WidgetId) -> Option<String> {
-        let node = self.arena.get(id)?;
-        let mut builder = AccessNodeBuilder::new();
-        node.widget.accessibility(&mut builder);
-        builder.value().map(|s| s.to_string())
-    }
-
-    // --- Test helpers ---
-
-    /// Simulate a click at the center of a widget.
-    pub fn click(&mut self, id: WidgetId) {
-        let center = self.arena.bounds(id).center();
-        self.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-        });
-        self.dispatch_event(WidgetEvent::PointerUp {
-            position: center,
-            button: PointerButton::Primary,
-        });
-    }
-
-    /// Simulate pointer movement to a position.
-    pub fn pointer_move(&mut self, position: Point) {
-        self.dispatch_event(WidgetEvent::PointerMove { position });
-    }
-
-    /// Simulate a key press (down + up).
-    pub fn press_key(&mut self, key: Key, modifiers: Modifiers) {
-        self.dispatch_event(WidgetEvent::KeyDown {
-            key,
-            modifiers,
-            text: None,
-        });
-        self.dispatch_event(WidgetEvent::KeyUp { key, modifiers });
-    }
-
-    /// Simulate typing text into the focused widget.
-    pub fn type_text(&mut self, _widget: WidgetId, text: &str) {
-        for ch in text.chars() {
-            self.dispatch_event(WidgetEvent::KeyDown {
-                key: Key::Character(ch),
-                modifiers: Modifiers::NONE,
-                text: Some(ch.to_string()),
-            });
-        }
-    }
-
-    /// Simulate a pointer down at a specific position with a specific button.
-    pub fn pointer_down_button(&mut self, position: Point, button: PointerButton) {
-        self.dispatch_event(WidgetEvent::PointerDown { position, button });
-    }
-
-    /// Simulate a pointer up at a specific position with a specific button.
-    pub fn pointer_up_button(&mut self, position: Point, button: PointerButton) {
-        self.dispatch_event(WidgetEvent::PointerUp { position, button });
-    }
-
-    /// Simulate a drag from one position to another.
-    pub fn drag(&mut self, from: Point, to: Point) {
-        self.dispatch_event(WidgetEvent::PointerDown {
-            position: from,
-            button: PointerButton::Primary,
-        });
-        self.dispatch_event(WidgetEvent::PointerMove { position: to });
-        self.dispatch_event(WidgetEvent::PointerUp {
-            position: to,
-            button: PointerButton::Primary,
-        });
-    }
-
-    /// Get bounds of a child by index.
-    pub fn child_bounds(&self, parent: WidgetId, index: usize) -> Rect {
-        let children = self.children(parent);
-        self.bounds(children[index])
-    }
-
-    /// Get a child widget ID by index.
-    pub fn child_widget(&self, parent: WidgetId, index: usize) -> WidgetId {
-        self.children(parent)[index]
-    }
-
-    /// Advance simulated time (for tooltip/animation testing).
-    /// Advance the simulated clock by the given duration.
-    /// Triggers time-dependent behavior such as long-press gesture recognition
-    /// and tooltip timers. Enables deterministic testing without real delays.
-    pub fn advance_time(&mut self, duration: std::time::Duration) {
-        self.sim_clock += duration;
-        self.process_tooltips();
-        self.process_delayed_overlays();
-        self.process_pointer_leave_overlays();
-    }
-
-    /// Get the current simulated clock value.
-    pub fn simulated_now(&self) -> std::time::Instant {
-        self.sim_clock
-    }
-
-    /// Mark a widget as needing repaint.
-    pub fn mark_needs_paint(&mut self, id: WidgetId) {
-        self.arena.mark_needs_paint(id);
-    }
-
-    /// Set a widget subtree as dormant.
-    pub fn set_dormant(&mut self, id: WidgetId) {
-        self.arena.set_dormant(id);
-        self.arena.mark_ancestors_need_layout(id);
-        self.cached_frame = None;
-        self.a11y_dirty = true;
-    }
-
-    /// Activate a dormant widget subtree.
-    pub fn activate(&mut self, id: WidgetId) {
-        self.arena.activate(id);
-        self.arena.mark_ancestors_need_layout(id);
-        self.cached_frame = None;
-        self.a11y_dirty = true;
-    }
-
-    /// Invalidate all per-widget paint caches and the assembled frame cache.
-    /// Forces every widget to repaint on the next `render()` call.
-    /// Used when external state (e.g. glyph atlas eviction) makes cached
-    /// paint output stale.
-    pub fn invalidate_all_paints(&mut self) {
-        for id in self.arena.active_ids() {
-            if let Some(node) = self.arena.get_mut(id) {
-                node.dirty.needs_paint = true;
-                node.cached_paint = None;
-            }
-        }
-        self.cached_frame = None;
-    }
 }
 
 impl Default for WidgetTree {
@@ -3996,7 +3390,7 @@ mod tests {
         );
 
         // Content must not appear in rendered frame (dormant widgets are skipped)
-        let frame = tree.render();
+        let _frame = tree.render();
         // The anchor should render, but the dismissed content should not add shapes
         // (dormant is_active check at paint_widget_cached:2072 prevents painting)
         assert!(!tree.is_visible(content), "content stays dormant after layout+render");
