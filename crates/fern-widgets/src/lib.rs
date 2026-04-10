@@ -18,6 +18,8 @@ pub mod scroll_bar;
 pub mod segmented_control;
 pub mod slider;
 pub mod status_bar;
+pub mod split_view;
+pub mod tab_widget;
 pub mod toggle;
 pub mod toolbar;
 pub mod tooltip;

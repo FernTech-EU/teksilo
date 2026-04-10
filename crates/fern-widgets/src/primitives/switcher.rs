@@ -39,6 +39,12 @@ impl Switcher {
         self
     }
 
+    /// Add a pre-boxed child page.
+    pub fn child_boxed(mut self, widget: Box<dyn Widget>) -> Self {
+        self.deferred_children.push(widget);
+        self
+    }
+
     /// Add multiple child pages from an iterator.
     pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
@@ -95,7 +101,7 @@ impl Widget for Switcher {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::TabPanel);
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {
