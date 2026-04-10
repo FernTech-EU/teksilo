@@ -156,3 +156,129 @@ impl WidgetTree {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_widgets::FillWidget;
+
+    #[test]
+    fn focus_widget() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+        assert_eq!(tree.focused(), Some(widget));
+    }
+
+    #[test]
+    fn focus_change() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(a);
+        assert_eq!(tree.focused(), Some(a));
+        tree.focus(b);
+        assert_eq!(tree.focused(), Some(b));
+    }
+
+    #[test]
+    fn tab_cycles_through_focusable_widgets() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let c = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert_eq!(tree.focused(), None);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(b));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(c));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+    }
+
+    #[test]
+    fn shift_tab_cycles_backwards() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let c = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(tree.focused(), Some(c));
+
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(tree.focused(), Some(b));
+    }
+
+    #[test]
+    fn tab_skips_non_focusable_widgets() {
+        let mut tree = WidgetTree::new();
+        let _not_focusable = tree.add(FillWidget::new());
+        let a = tree.add(FillWidget::new().focusable());
+        let _also_not = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(b));
+    }
+
+    #[test]
+    fn tab_focus_has_keyboard_origin() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focus_origin(), Some(crate::focus::FocusOrigin::Keyboard));
+    }
+
+    #[test]
+    fn dormant_widget_not_in_focus_cycle() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        let c = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.focus(a);
+        tree.set_dormant(b);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(c));
+    }
+
+    #[test]
+    fn tab_cycles_focus_in_tree_order() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let b = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.focus(a);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(b));
+
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(tree.focused(), Some(a));
+    }
+}

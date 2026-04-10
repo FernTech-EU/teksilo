@@ -170,3 +170,222 @@ fn paint_widget_cached(
         frame.draw_order.push(fern_canvas::DrawCommand::ClearClip);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_widgets::{FillWidget, StackWidget};
+    use fern_tokens::{Color, CornerRadius, Theme};
+
+    #[derive(Debug)]
+    struct ThemeAwareWidget;
+
+    impl Widget for ThemeAwareWidget {
+        fn size_that_fits(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_canvas::Size {
+            proposal.resolve(0.0, 0.0)
+        }
+
+        fn paint(
+            &self,
+            bounds: fern_canvas::Rect,
+            canvas: &mut fern_canvas::Canvas,
+            ctx: &PaintContext,
+        ) {
+            canvas.fill_rounded_rect(
+                bounds,
+                fern_tokens::CornerRadius::uniform(4.0),
+                ctx.theme.colors.primary,
+            );
+        }
+    }
+
+    #[test]
+    fn fill_widget_produces_shape_in_frame() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(
+            FillWidget::new()
+                .background(Color::RED)
+                .corner_radius(CornerRadius::uniform(6.0)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+        let frame = tree.render();
+        assert_eq!(frame.shapes.len(), 1);
+        assert_eq!(frame.shapes[0].shape, fern_canvas::ShapeKind::RoundedRect);
+    }
+
+    #[test]
+    fn empty_tree_renders_empty_frame() {
+        let mut tree = WidgetTree::new();
+        let frame = tree.render();
+        assert!(frame.is_empty());
+    }
+
+    #[test]
+    fn render_clears_paint_dirty() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().background(Color::RED));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(tree.needs_paint());
+        tree.render();
+        assert!(!tree.needs_paint());
+    }
+
+    #[test]
+    fn dormant_widget_not_rendered() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new()
+                .background(Color::RED)
+                .corner_radius(CornerRadius::uniform(4.0)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+        assert!(!frame.shapes.is_empty());
+
+        tree.set_dormant(widget);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+        assert!(frame.shapes.is_empty());
+    }
+
+    #[test]
+    fn dormancy_is_recursive() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(
+            FillWidget::new()
+                .background(Color::RED)
+                .corner_radius(CornerRadius::uniform(4.0)),
+        );
+        let parent = tree.add(StackWidget::new().add_child(child));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let frame = tree.render();
+        assert_eq!(frame.shapes.len(), 1);
+
+        tree.set_dormant(parent);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+        assert!(frame.shapes.is_empty());
+
+        tree.activate(parent);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+        assert_eq!(frame.shapes.len(), 1);
+    }
+
+    #[test]
+    fn set_theme_marks_all_dirty() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(FillWidget::new().background(Color::RED));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.render();
+
+        assert!(!tree.needs_layout());
+        assert!(!tree.needs_paint());
+
+        tree.set_theme(Theme::dark_default());
+        assert!(tree.needs_layout());
+        assert!(tree.needs_paint());
+    }
+
+    #[test]
+    fn set_theme_changes_rendered_colors() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(ThemeAwareWidget);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let light_frame = tree.render();
+        let light_color = light_frame.shapes[0].color;
+
+        tree.set_theme(Theme::dark_default());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let dark_frame = tree.render();
+        let dark_color = dark_frame.shapes[0].color;
+
+        assert_ne!(light_color, dark_color);
+    }
+
+    #[test]
+    fn subtree_theme_override() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(ThemeAwareWidget);
+        let _child = tree.add_child(parent, ThemeAwareWidget);
+
+        tree.set_theme_override(parent, |theme| {
+            theme.colors = fern_tokens::ColorTokens::dark_default();
+        });
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let dark_primary = fern_tokens::ColorTokens::dark_default().primary.to_array();
+        assert_eq!(frame.shapes[0].color, dark_primary);
+        assert_eq!(frame.shapes[1].color, dark_primary);
+    }
+
+    #[test]
+    fn theme_override_only_affects_subtree() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+
+        let _unaffected = tree.add(ThemeAwareWidget);
+        let overridden = tree.add(ThemeAwareWidget);
+
+        tree.set_theme_override(overridden, |theme| {
+            theme.colors = fern_tokens::ColorTokens::dark_default();
+        });
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let light_primary = fern_tokens::ColorTokens::light_default().primary.to_array();
+        let dark_primary = fern_tokens::ColorTokens::dark_default().primary.to_array();
+
+        assert_eq!(frame.shapes[0].color, light_primary);
+        assert_eq!(frame.shapes[1].color, dark_primary);
+    }
+
+    #[test]
+    fn resolved_theme_reflects_overrides() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+
+        let parent = tree.add(FillWidget::new());
+        let child = tree.add_child(parent, FillWidget::new());
+
+        tree.set_theme_override(parent, |theme| {
+            theme.colors.primary = Color::RED;
+        });
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let parent_theme = tree.resolved_theme(parent);
+        assert_eq!(parent_theme.colors.primary, Color::RED);
+
+        let child_theme = tree.resolved_theme(child);
+        assert_eq!(child_theme.colors.primary, Color::RED);
+    }
+
+    #[test]
+    fn nested_theme_overrides_compose() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+
+        let grandparent = tree.add(FillWidget::new());
+        let parent = tree.add_child(grandparent, FillWidget::new());
+        let child = tree.add_child(parent, FillWidget::new());
+
+        tree.set_theme_override(grandparent, |theme| {
+            theme.colors.primary = Color::RED;
+        });
+        tree.set_theme_override(parent, |theme| {
+            theme.colors.secondary = Color::GREEN;
+        });
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let child_theme = tree.resolved_theme(child);
+        assert_eq!(child_theme.colors.primary, Color::RED);
+        assert_eq!(child_theme.colors.secondary, Color::GREEN);
+    }
+}

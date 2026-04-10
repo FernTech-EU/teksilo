@@ -122,3 +122,128 @@ impl WidgetTree {
         self.cached_frame = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::State;
+    use crate::test_widgets::{FillWidget, InsetWidget};
+
+    #[test]
+    fn child_bounds_helper() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new());
+        let parent = tree.add(InsetWidget::new(5.0).set_child(child));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let child_bounds = tree.child_bounds(parent, 0);
+        assert_eq!(child_bounds.x, 5.0);
+    }
+
+    #[test]
+    fn state_get_set_and_derived() {
+        let text = State::new(String::new());
+        let is_empty = text.map(|value| value.is_empty());
+        assert!(is_empty.get());
+        text.set("hello".to_string());
+        assert!(!is_empty.get());
+    }
+
+    #[test]
+    fn advance_time_updates_simulated_clock() {
+        let mut tree = WidgetTree::new();
+        let start = tree.simulated_now();
+
+        tree.advance_time(std::time::Duration::from_millis(500));
+        let end = tree.simulated_now();
+
+        assert_eq!(end.duration_since(start), std::time::Duration::from_millis(500));
+    }
+
+    #[test]
+    fn set_animated_interpolates_over_time() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new_animated(0.0_f32);
+        tree.register_animated_state(&state);
+
+        state.set_animated(
+            100.0,
+            std::time::Duration::from_millis(200),
+            fern_tokens::Easing::Linear,
+        );
+
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        assert!((*state.get() - 50.0).abs() < 2.0, "at 50%: {}", *state.get());
+
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        assert!((*state.get() - 100.0).abs() < 0.1, "at 100%: {}", *state.get());
+
+        assert!(!tree.has_active_animations());
+    }
+
+    #[test]
+    fn set_animated_with_easing() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new_animated(0.0_f32);
+        tree.register_animated_state(&state);
+
+        state.set_animated(
+            100.0,
+            std::time::Duration::from_millis(200),
+            fern_tokens::Easing::EaseIn,
+        );
+
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        assert!((*state.get() - 25.0).abs() < 2.0, "ease-in at 50%: {}", *state.get());
+    }
+
+    #[test]
+    fn set_animated_replaces_in_flight() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new_animated(0.0_f32);
+        tree.register_animated_state(&state);
+
+        state.set_animated(
+            100.0,
+            std::time::Duration::from_millis(200),
+            fern_tokens::Easing::Linear,
+        );
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        assert!((*state.get() - 50.0).abs() < 2.0);
+
+        state.set_animated(
+            0.0,
+            std::time::Duration::from_millis(100),
+            fern_tokens::Easing::Linear,
+        );
+        tree.tick_animations(std::time::Duration::from_millis(50));
+        assert!((*state.get() - 25.0).abs() < 3.0, "mid-replace: {}", *state.get());
+
+        tree.tick_animations(std::time::Duration::from_millis(50));
+        assert!((*state.get() - 0.0).abs() < 0.5, "end-replace: {}", *state.get());
+    }
+
+    #[test]
+    fn animation_marks_widgets_dirty() {
+        let mut tree = WidgetTree::new();
+        let state = crate::state::State::new_animated(100.0_f32);
+        tree.register_animated_state(&state);
+
+        let widget = tree.add(FillWidget::new());
+        state.bind_to(
+            widget,
+            tree.binding_registry(),
+            crate::state::BindingLevel::Relayout,
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        state.set_animated(
+            0.0,
+            std::time::Duration::from_millis(100),
+            fern_tokens::Easing::Linear,
+        );
+
+        tree.tick_animations(std::time::Duration::from_millis(50));
+        assert!(tree.needs_redraw());
+    }
+}

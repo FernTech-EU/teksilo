@@ -326,3 +326,217 @@ impl WidgetTree {
         self.arena.is_active(id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_widgets::FillWidget;
+
+    #[test]
+    fn is_visible_reflects_dormancy() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert!(tree.is_visible(widget));
+        tree.set_dormant(widget);
+        assert!(!tree.is_visible(widget));
+        tree.activate(widget);
+        assert!(tree.is_visible(widget));
+    }
+
+    #[test]
+    fn show_and_dismiss_overlay() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Overlay"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert!(tree.active_overlays().is_empty());
+
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.dismiss_overlay(id);
+        assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content));
+    }
+
+    #[test]
+    fn escape_dismisses_topmost_overlay() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().focusable());
+        let content = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(anchor);
+
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content));
+    }
+
+    #[test]
+    fn click_outside_dismisses_overlay() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let overlay = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::ClickOutside,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        tree.overlay_manager
+            .set_content_bounds(overlay, fern_canvas::Size::new(100.0, 50.0));
+
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(500.0, 500.0),
+            button: PointerButton::Primary,
+        });
+        assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content));
+    }
+
+    #[test]
+    fn cascade_dismissal() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content_a = tree.add(FillWidget::new());
+        let content_b = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let parent = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content_a,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content_b,
+            anchor: content_a,
+            placement: crate::overlay::OverlayPlacement::TrailingEdge,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: Some(parent),
+        });
+
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        tree.dismiss_overlay(parent);
+        assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content_a));
+        assert!(!tree.is_visible(content_b));
+    }
+
+    #[test]
+    fn dismissed_overlay_content_is_dormant_and_invisible() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.dismiss_overlay(id);
+        assert!(!tree.is_visible(content));
+
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let center = tree.bounds(content).center();
+        let hit = tree.hit_test(center);
+        assert_ne!(hit, Some(content));
+
+        let _frame = tree.render();
+        assert!(!tree.is_visible(content));
+    }
+
+    #[test]
+    fn tooltip_appears_after_delay() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tooltip = tree.add(FillWidget::new().label("Tooltip text"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
+
+        let center = tree.bounds(anchor).center();
+        tree.pointer_move(center);
+        assert!(tree.active_overlays().is_empty());
+
+        tree.advance_time(std::time::Duration::from_millis(600));
+
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(tree.find_by_label("Tooltip text").is_some());
+    }
+
+    #[test]
+    fn tooltip_dismissed_on_pointer_leave() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tooltip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
+
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_millis(600));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.pointer_move(Point::new(500.0, 500.0));
+        assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn tooltip_not_shown_if_pointer_leaves_before_delay() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tooltip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.attach_tooltip(anchor, tooltip, std::time::Duration::from_millis(500));
+
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_millis(200));
+        tree.pointer_move(Point::new(500.0, 500.0));
+
+        tree.advance_time(std::time::Duration::from_millis(500));
+        assert!(tree.active_overlays().is_empty());
+    }
+}

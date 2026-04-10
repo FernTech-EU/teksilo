@@ -173,3 +173,205 @@ impl WidgetTree {
         builder.value().map(|s| s.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_widgets::{FillWidget, StackWidget};
+
+    #[derive(Debug)]
+    struct ActionWidget;
+
+    impl Widget for ActionWidget {
+        fn size_that_fits(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_canvas::Size {
+            proposal.resolve(0.0, 0.0)
+        }
+
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            builder.set_role(accesskit::Role::Button);
+            builder.set_name("Save");
+            builder.add_action(accesskit::Action::Click);
+            builder.add_action(accesskit::Action::Focus);
+        }
+    }
+
+    #[derive(Debug)]
+    struct ClickableWidget;
+
+    impl Widget for ClickableWidget {
+        fn size_that_fits(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> fern_canvas::Size {
+            proposal.resolve(0.0, 0.0)
+        }
+
+        fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
+            builder.set_role(accesskit::Role::Button);
+            builder.set_name("Click Me");
+            builder.add_action(accesskit::Action::Click);
+        }
+    }
+
+    #[test]
+    fn labeled_widget_has_accessibility() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().label("Hello"));
+        tree.layout(SizeProposal::exact(100.0, 20.0));
+        let info = tree.accessibility_node(widget);
+        assert_eq!(info.role(), accesskit::Role::Label);
+        assert_eq!(info.name(), Some("Hello"));
+    }
+
+    #[test]
+    fn find_by_label_works() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().label("Save"));
+        tree.layout(SizeProposal::exact(100.0, 20.0));
+        assert_eq!(tree.find_by_label("Save"), Some(widget));
+    }
+
+    #[test]
+    fn find_by_role_works() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("Text"));
+        tree.layout(SizeProposal::exact(100.0, 20.0));
+        assert!(tree.find_by_role(accesskit::Role::Label).is_some());
+    }
+
+    #[test]
+    fn accessibility_node_collects_actions() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(ActionWidget);
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+
+        let info = tree.accessibility_node(widget);
+        assert_eq!(info.role(), accesskit::Role::Button);
+        assert_eq!(info.name(), Some("Save"));
+        assert_eq!(info.actions().len(), 2);
+        assert!(info.actions().contains(&accesskit::Action::Click));
+        assert!(info.actions().contains(&accesskit::Action::Focus));
+    }
+
+    #[test]
+    fn sync_accessibility_produces_tree_update() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("First"));
+        tree.add(FillWidget::new().label("Second"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let update = tree.sync_accessibility();
+        assert_eq!(update.nodes.len(), 3);
+        assert_eq!(update.nodes[0].0, accesskit::NodeId(0));
+        assert!(update.tree.is_some());
+    }
+
+    #[test]
+    fn sync_accessibility_excludes_dormant_widgets() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("Active"));
+        let dormant = tree.add(FillWidget::new().label("Dormant"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.set_dormant(dormant);
+
+        let update = tree.sync_accessibility();
+        assert_eq!(update.nodes.len(), 2);
+    }
+
+    #[test]
+    fn sync_accessibility_includes_focus() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable().label("Focused"));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        let update = tree.sync_accessibility();
+        let expected_focus = crate::accessibility::widget_id_to_node_id(widget);
+        assert_eq!(update.focus, expected_focus);
+    }
+
+    #[test]
+    fn sync_accessibility_parent_child_relationship() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().label("Child"));
+        let parent = tree.add(StackWidget::new().add_child(child));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let update = tree.sync_accessibility();
+        assert_eq!(update.nodes.len(), 3);
+
+        let parent_node_id = crate::accessibility::widget_id_to_node_id(parent);
+        let parent_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == parent_node_id)
+            .map(|(_, node)| node)
+            .unwrap();
+
+        let child_node_id = crate::accessibility::widget_id_to_node_id(child);
+        assert!(parent_node.children().contains(&child_node_id));
+    }
+
+    #[test]
+    fn find_by_action_finds_clickable() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(ClickableWidget);
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+
+        assert_eq!(tree.find_by_action(accesskit::Action::Click), Some(widget));
+        assert_eq!(tree.find_by_action(accesskit::Action::Focus), None);
+    }
+
+    #[test]
+    fn text_content_returns_accessibility_name() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().label("Hello World"));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert_eq!(tree.text_content(widget), Some("Hello World".to_string()));
+    }
+
+    #[test]
+    fn text_content_returns_none_without_label() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert_eq!(tree.text_content(widget), None);
+    }
+
+    #[test]
+    fn text_value_returns_accessibility_value() {
+        #[derive(Debug)]
+        struct ValueWidget;
+
+        impl Widget for ValueWidget {
+            fn size_that_fits(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> fern_canvas::Size {
+                proposal.resolve(0.0, 0.0)
+            }
+
+            fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
+                builder.set_role(accesskit::Role::Slider);
+                builder.set_name("Volume");
+                builder.set_value("75%");
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(ValueWidget);
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+
+        assert_eq!(tree.text_value(widget), Some("75%".to_string()));
+        assert_eq!(tree.text_content(widget), Some("Volume".to_string()));
+    }
+}

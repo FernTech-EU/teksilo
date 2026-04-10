@@ -553,3 +553,306 @@ impl WidgetTree {
         Some(id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_widgets::FillWidget;
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum TestCmd {
+        Save,
+    }
+
+    impl AppCommand for TestCmd {}
+
+    #[test]
+    fn pointer_enter_leave_synthesized() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert_eq!(tree.hovered, Some(widget));
+        tree.pointer_move(Point::new(200.0, 200.0));
+        assert_eq!(tree.hovered, None);
+    }
+
+    #[test]
+    fn click_dispatches_to_widget() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.click(widget);
+    }
+
+    #[test]
+    fn dormant_widget_not_hit_tested() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert_eq!(tree.hovered, Some(widget));
+
+        tree.set_dormant(widget);
+        tree.pointer_move(Point::new(200.0, 200.0));
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert_eq!(tree.hovered, None);
+    }
+
+    #[test]
+    fn shortcut_intercepts_before_widget() {
+        use crate::shortcut::{Shortcut, ShortcutMap};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let save_called = Rc::new(Cell::new(false));
+        let save_flag = save_called.clone();
+
+        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::S), TestCmd::Save);
+
+        let mut tree = WidgetTree::new().with_shortcuts(shortcuts);
+        tree.on_command(move |cmd: &TestCmd| {
+            if *cmd == TestCmd::Save {
+                save_flag.set(true);
+            }
+        });
+
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(save_called.get());
+    }
+
+    #[test]
+    fn scroll_event_dispatched_to_hovered() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: crate::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        });
+    }
+
+    #[test]
+    fn ime_event_dispatched_to_focused() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        tree.dispatch_event(WidgetEvent::ImeComposition {
+            text: "あ".to_string(),
+            cursor: None,
+        });
+        tree.dispatch_event(WidgetEvent::ImeCommit {
+            text: "あ".to_string(),
+        });
+    }
+
+    #[test]
+    fn gesture_tap_recognized_on_click() {
+        use crate::gesture::TapRecognizer;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let tapped = Rc::new(Cell::new(false));
+        let tapped_flag = tapped.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.attach_gesture(widget, TapRecognizer::new(), move |gesture, _ctx| {
+            if matches!(gesture, crate::gesture::GestureEvent::Tap { .. }) {
+                tapped_flag.set(true);
+            }
+        });
+
+        tree.click(widget);
+        assert!(tapped.get());
+    }
+
+    #[test]
+    fn gesture_drag_recognized_on_drag() {
+        use crate::gesture::DragRecognizer;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let drag_started = Rc::new(Cell::new(false));
+        let drag_ended = Rc::new(Cell::new(false));
+        let start_flag = drag_started.clone();
+        let end_flag = drag_ended.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.attach_gesture(
+            widget,
+            DragRecognizer::new().threshold(5.0),
+            move |gesture, _ctx| match gesture {
+                crate::gesture::GestureEvent::DragStarted { .. } => start_flag.set(true),
+                crate::gesture::GestureEvent::DragEnded { .. } => end_flag.set(true),
+                _ => {}
+            },
+        );
+
+        tree.drag(Point::new(50.0, 25.0), Point::new(80.0, 25.0));
+
+        assert!(drag_started.get());
+        assert!(drag_ended.get());
+    }
+
+    #[test]
+    fn gesture_handler_can_emit_commands() {
+        use crate::gesture::TapRecognizer;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let cmd_received = Rc::new(Cell::new(false));
+        let received_flag = cmd_received.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.attach_gesture(widget, TapRecognizer::new(), |_gesture, ctx| {
+            ctx.emit(TestCmd::Save);
+        });
+
+        tree.on_command(move |cmd: &TestCmd| {
+            if *cmd == TestCmd::Save {
+                received_flag.set(true);
+            }
+        });
+
+        tree.click(widget);
+        assert!(cmd_received.get());
+    }
+
+    #[test]
+    fn gesture_handler_called_on_tap() {
+        use crate::gesture::TapRecognizer;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let handler_called = Rc::new(Cell::new(false));
+        let handler_flag = handler_called.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.attach_gesture(widget, TapRecognizer::new(), move |_, _| {
+            handler_flag.set(true);
+        });
+
+        tree.click(widget);
+        assert!(handler_called.get());
+    }
+
+    #[test]
+    fn multiple_recognizers_on_same_widget() {
+        use crate::gesture::{DragRecognizer, TapRecognizer};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let tapped = Rc::new(Cell::new(false));
+        let dragged = Rc::new(Cell::new(false));
+        let tapped_flag = tapped.clone();
+        let dragged_flag = dragged.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.attach_gesture(widget, TapRecognizer::new(), move |gesture, _ctx| {
+            if matches!(gesture, crate::gesture::GestureEvent::Tap { .. }) {
+                tapped_flag.set(true);
+            }
+        });
+        tree.attach_gesture(
+            widget,
+            DragRecognizer::new().threshold(5.0),
+            move |gesture, _ctx| {
+                if matches!(gesture, crate::gesture::GestureEvent::DragStarted { .. }) {
+                    dragged_flag.set(true);
+                }
+            },
+        );
+
+        tree.click(widget);
+        assert!(tapped.get());
+        assert!(!dragged.get());
+
+        tapped.set(false);
+        dragged.set(false);
+
+        tree.drag(Point::new(50.0, 25.0), Point::new(80.0, 25.0));
+        assert!(dragged.get());
+    }
+
+    #[test]
+    fn access_action_routes_to_target_widget() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.focus(a);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: accesskit::Action::Click,
+            target: Some(b),
+        });
+    }
+
+    #[test]
+    fn access_action_falls_back_to_focused() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.focus(widget);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: accesskit::Action::Focus,
+            target: None,
+        });
+    }
+
+    #[test]
+    fn scoped_shortcut_fires_when_focused_in_subtree() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        enum Cmd {
+            GlobalAction,
+        }
+
+        impl crate::app_command::AppCommand for Cmd {}
+
+        let fired = Rc::new(Cell::new(None));
+        let fired_flag = fired.clone();
+
+        let shortcuts = crate::shortcut::ShortcutMap::new()
+            .bind(crate::shortcut::Shortcut::ctrl(Key::Z), Cmd::GlobalAction);
+
+        let mut tree = WidgetTree::new().with_shortcuts(shortcuts);
+        tree.on_command(move |cmd: &Cmd| {
+            fired_flag.set(Some(*cmd));
+        });
+
+        let parent = tree.add(FillWidget::new());
+        let child = tree.add_child(parent, FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.focus(child);
+        tree.press_key(Key::Z, Modifiers::CTRL);
+        assert_eq!(fired.get(), Some(Cmd::GlobalAction));
+    }
+}
