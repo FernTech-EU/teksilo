@@ -60,6 +60,137 @@ impl EventHandlers {
             || self.on_scroll.is_some()
             || self.on_access_action.is_some()
     }
+
+    pub fn merge(self, other: EventHandlers) -> EventHandlers {
+        EventHandlers {
+            on_tap: merge_void_handler(self.on_tap, other.on_tap),
+            on_double_tap: merge_void_handler(self.on_double_tap, other.on_double_tap),
+            on_long_press: merge_point_handler(self.on_long_press, other.on_long_press),
+            on_drag: merge_gesture_handler(self.on_drag, other.on_drag),
+            on_hover: merge_hover_handler(self.on_hover, other.on_hover),
+            on_key: merge_event_handler(self.on_key, other.on_key),
+            on_focus: merge_focus_handler(self.on_focus, other.on_focus),
+            on_pointer_event: merge_event_handler(self.on_pointer_event, other.on_pointer_event),
+            on_scroll: merge_event_handler(self.on_scroll, other.on_scroll),
+            on_access_action: merge_access_handler(self.on_access_action, other.on_access_action),
+            gesture_arena: other.gesture_arena.or(self.gesture_arena),
+        }
+    }
+}
+
+fn merge_void_handler(
+    existing: Option<Box<dyn FnMut(&mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(&mut EventContext)>>,
+) -> Option<Box<dyn FnMut(&mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |ctx| {
+            existing(ctx);
+            incoming(ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_point_handler(
+    existing: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(Point, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |point, ctx| {
+            existing(point, ctx);
+            incoming(point, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_gesture_handler(
+    existing: Option<Box<dyn FnMut(GestureEvent, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(GestureEvent, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(GestureEvent, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |event, ctx| {
+            existing(event.clone(), ctx);
+            incoming(event, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_hover_handler(
+    existing: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(bool, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |entered, ctx| {
+            existing(entered, ctx);
+            incoming(entered, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_focus_handler(
+    existing: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(bool, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |gained, ctx| {
+            existing(gained, ctx);
+            incoming(gained, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_event_handler(
+    existing: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+    incoming: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+) -> Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |event, ctx| {
+            let first = existing(event, ctx);
+            let second = incoming(event, ctx);
+            if first == EventResponse::Handled || second == EventResponse::Handled {
+                EventResponse::Handled
+            } else {
+                EventResponse::Ignored
+            }
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_access_handler(
+    existing: Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> EventResponse>>,
+    incoming: Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> EventResponse>>,
+) -> Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> EventResponse>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |action, ctx| {
+            let first = existing(action, ctx);
+            let second = incoming(action, ctx);
+            if first == EventResponse::Handled || second == EventResponse::Handled {
+                EventResponse::Handled
+            } else {
+                EventResponse::Ignored
+            }
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
 }
 
 impl Default for EventHandlers {
