@@ -271,6 +271,61 @@ impl WidgetTree {
         });
     }
 
+    fn process_auto_dismiss_overlays(&mut self) {
+        let sim_now = self.sim_clock;
+        self.process_auto_dismiss_overlays_impl(|overlay| {
+            overlay
+                .auto_dismiss_after
+                .map(|_| sim_now.saturating_duration_since(overlay.shown_at_sim))
+        });
+    }
+
+    fn process_auto_dismiss_overlays_real(&mut self) {
+        let real_now = std::time::Instant::now();
+        self.process_auto_dismiss_overlays_impl(|overlay| {
+            overlay
+                .auto_dismiss_after
+                .map(|_| real_now.saturating_duration_since(overlay.shown_at_real))
+        });
+    }
+
+    fn process_auto_dismiss_overlays_impl(
+        &mut self,
+        elapsed_fn: impl Fn(&crate::overlay::ActiveOverlay) -> Option<std::time::Duration>,
+    ) {
+        let mut to_dismiss = Vec::new();
+
+        for overlay in self.overlay_manager.stack.iter().rev() {
+            let Some(delay) = overlay.auto_dismiss_after else {
+                continue;
+            };
+
+            if to_dismiss
+                .iter()
+                .any(|ancestor| self.overlay_manager.is_descendant_of(overlay.id, *ancestor))
+            {
+                continue;
+            }
+
+            if let Some(elapsed) = elapsed_fn(overlay)
+                && elapsed >= delay
+            {
+                to_dismiss.push(overlay.id);
+            }
+        }
+
+        for overlay_id in to_dismiss {
+            let (dismissed, focus_restore) =
+                self.overlay_manager.dismiss_with_focus_restore(overlay_id);
+            self.dormant_dismissed_content(&dismissed);
+            if let Some(restore_id) = focus_restore {
+                if self.arena.is_active(restore_id) {
+                    self.focus(restore_id);
+                }
+            }
+        }
+    }
+
     fn process_pointer_leave_overlays_impl(
         &mut self,
         elapsed_fn: impl Fn(&crate::overlay::ActiveOverlay) -> Option<std::time::Duration>,
