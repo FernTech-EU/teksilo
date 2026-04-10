@@ -192,8 +192,7 @@ pub struct EventContext {
         Option<crate::widget_id::WidgetId>,
     )>,
     /// Timed overlay requests (request, auto-dismiss delay).
-    pub(crate) timed_overlay_requests:
-        Vec<(crate::overlay::OverlayRequest, std::time::Duration)>,
+    pub(crate) timed_overlay_requests: Vec<(crate::overlay::OverlayRequest, std::time::Duration)>,
     /// Dismiss descendant overlays of the source widget's containing overlay.
     /// Optionally preserve the subtree rooted at a specific content widget ID.
     pub(crate) dismiss_descendant_overlays: Vec<Option<crate::widget_id::WidgetId>>,

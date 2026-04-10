@@ -39,6 +39,10 @@ impl WidgetTree {
         !self.idle_queue.is_empty()
     }
 
+    pub fn current_cursor(&self) -> crate::widget::CursorIcon {
+        self.current_cursor
+    }
+
     /// Drain and run all pending idle callbacks with the given time budget.
     /// Called by the event loop during idle periods between frames.
     pub fn run_idle_callbacks(&mut self, budget: std::time::Duration) {

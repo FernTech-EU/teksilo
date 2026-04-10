@@ -7,7 +7,9 @@ use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
@@ -386,7 +388,9 @@ impl Widget for TabHeader {
             builder.add_action(fern_core::accesskit::Action::Click);
         }
         builder.add_action(fern_core::accesskit::Action::Focus);
-        builder.inner_mut().set_selected(self.selected.get() == self.index);
+        builder
+            .inner_mut()
+            .set_selected(self.selected.get() == self.index);
     }
 }
 
@@ -439,9 +443,11 @@ impl Widget for TabBar {
                 .widget_resizable(true),
         );
 
-        let mut row = HStack::new()
-            .spacing(8.0)
-            .child(Expand::horizontal().fills_stack().set_child(headers_scroll_id));
+        let mut row = HStack::new().spacing(8.0).child(
+            Expand::horizontal()
+                .fills_stack()
+                .set_child(headers_scroll_id),
+        );
 
         if let Some(trailing_child_id) = self.trailing_child_id {
             row = row.add_child(trailing_child_id);
@@ -545,7 +551,12 @@ impl std::fmt::Debug for TabWidget {
 impl Widget for TabWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let entries = std::mem::take(&mut self.entries);
-        let enabled_tabs = Rc::new(entries.iter().map(|entry| entry.enabled).collect::<Vec<_>>());
+        let enabled_tabs = Rc::new(
+            entries
+                .iter()
+                .map(|entry| entry.enabled)
+                .collect::<Vec<_>>(),
+        );
         let mut header_ids = Vec::with_capacity(entries.len());
         let shared_header_ids = Rc::new(RefCell::new(Vec::with_capacity(entries.len())));
         let mut switcher = Switcher::new(self.selected.clone());
@@ -565,12 +576,20 @@ impl Widget for TabWidget {
             switcher = switcher.child_boxed(Box::new(TabPane::new(entry.label, entry.content)));
         }
 
-        let trailing_child_id = self.trailing_slot.take().map(|widget| ctx.add_boxed(widget));
+        let trailing_child_id = self
+            .trailing_slot
+            .take()
+            .map(|widget| ctx.add_boxed(widget));
         let tab_bar_id = ctx.add(TabBar::new(header_ids, trailing_child_id));
         let divider_id = ctx.add(Divider::new());
         let switcher_id = ctx.add(switcher);
-        let padded_content_id = ctx.add(Padding::new(CONTENT_TOP_INSET, 0.0, 0.0, 0.0).set_child(switcher_id));
-        let content_id = ctx.add(Expand::vertical().fills_stack().set_child(padded_content_id));
+        let padded_content_id =
+            ctx.add(Padding::new(CONTENT_TOP_INSET, 0.0, 0.0, 0.0).set_child(switcher_id));
+        let content_id = ctx.add(
+            Expand::vertical()
+                .fills_stack()
+                .set_child(padded_content_id),
+        );
 
         let root_id = ctx.add(
             VStack::new()
@@ -790,7 +809,10 @@ mod tests {
 
         let info = tree.accessibility_node(tab.unwrap());
         assert_eq!(info.role(), fern_core::accesskit::Role::Tab);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 
     #[test]
@@ -817,7 +839,11 @@ mod tests {
 
         let info = tree.accessibility_node(disabled_header);
         assert_eq!(info.role(), fern_core::accesskit::Role::Tab);
-        assert!(!info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            !info
+                .actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 
     #[test]

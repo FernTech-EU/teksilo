@@ -72,6 +72,13 @@ impl<'a> BuildContext<'a> {
         self.effect_handles.push(handle);
     }
 
+    /// Register a pre-existing observer handle for lifecycle management.
+    /// The handle will be dropped (and the observer removed) on rebuild
+    /// or widget destruction.
+    pub fn own_handle(&mut self, handle: ObserverHandle) {
+        self.effect_handles.push(handle);
+    }
+
     // --- Compatibility State APIs ---
 
     /// Create a new reactive state value. Prefer `signal()` for new code.

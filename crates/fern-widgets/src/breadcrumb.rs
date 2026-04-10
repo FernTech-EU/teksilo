@@ -5,7 +5,9 @@ use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius};
@@ -238,7 +240,10 @@ impl Widget for BreadcrumbSegment {
         } else {
             FALLBACK_LINE_HEIGHT
         };
-        Size::new(width, (text_height + SEGMENT_PADDING_V * 2.0).max(SEGMENT_MIN_HEIGHT))
+        Size::new(
+            width,
+            (text_height + SEGMENT_PADDING_V * 2.0).max(SEGMENT_MIN_HEIGHT),
+        )
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -388,7 +393,11 @@ impl Widget for Breadcrumb {
         let mut row = HStack::new().spacing(4.0);
 
         for (index, entry) in entries.into_iter().enumerate() {
-            row = row.child(BreadcrumbSegment::new(entry.label, entry.action, entry.current));
+            row = row.child(BreadcrumbSegment::new(
+                entry.label,
+                entry.action,
+                entry.current,
+            ));
             if index + 1 < entry_count {
                 row = row.child(BreadcrumbSeparator);
             }
@@ -489,7 +498,11 @@ mod tests {
         let info = tree.accessibility_node(current_segment);
 
         assert_eq!(info.role(), fern_core::accesskit::Role::Label);
-        assert!(!info.actions().contains(&fern_core::accesskit::Action::Click));
+        assert!(
+            !info
+                .actions()
+                .contains(&fern_core::accesskit::Action::Click)
+        );
     }
 
     #[test]

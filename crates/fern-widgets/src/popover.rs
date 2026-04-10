@@ -123,7 +123,12 @@ impl Widget for PopoverSurface {
                     },
                 )
             })
-            .map(|size| Size::new(size.width + inset, size.height + inset + caret_top + caret_bottom))
+            .map(|size| {
+                Size::new(
+                    size.width + inset,
+                    size.height + inset + caret_top + caret_bottom,
+                )
+            })
             .unwrap_or_else(|| proposal.resolve(200.0, 80.0))
     }
 
@@ -136,7 +141,8 @@ impl Widget for PopoverSurface {
     ) {
         let panel = self.panel_bounds(bounds);
         for child in children.iter_mut() {
-            child.origin = fern_canvas::Point::new(panel.x + SURFACE_PADDING, panel.y + SURFACE_PADDING);
+            child.origin =
+                fern_canvas::Point::new(panel.x + SURFACE_PADDING, panel.y + SURFACE_PADDING);
             child.size = Size::new(
                 (panel.width - SURFACE_PADDING * 2.0).max(0.0),
                 (panel.height - SURFACE_PADDING * 2.0).max(0.0),
@@ -485,7 +491,9 @@ mod tests {
     #[test]
     fn custom_trigger_opens_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Popover::new("Show popover", FixedLeaf(140.0, 60.0)).trigger(FixedLeaf(128.0, 36.0)));
+        tree.add(
+            Popover::new("Show popover", FixedLeaf(140.0, 60.0)).trigger(FixedLeaf(128.0, 36.0)),
+        );
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();

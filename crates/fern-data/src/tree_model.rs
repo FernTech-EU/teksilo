@@ -211,10 +211,7 @@ impl<T: 'static> TreeModel<T> {
             Self::remove_subtree(&mut guard.arena, node);
             parent
         };
-        self.notify(TreeChange::NodeRemoved {
-            parent,
-            node,
-        });
+        self.notify(TreeChange::NodeRemoved { parent, node });
     }
 
     /// Move a node (and its subtree) to a new parent at the given index.
@@ -312,10 +309,7 @@ impl<T: 'static> TreeModel<T> {
             self.inner.clone(),
             id,
             Rc::new(move |observer_id| {
-                inner
-                    .borrow_mut()
-                    .observers
-                    .retain(|e| e.id != observer_id);
+                inner.borrow_mut().observers.retain(|e| e.id != observer_id);
             }),
         )
     }

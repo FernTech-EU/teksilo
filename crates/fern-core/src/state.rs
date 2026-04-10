@@ -15,6 +15,10 @@ pub enum BindingLevel {
     /// Size-affecting change (text content, constraint value). Marks the widget
     /// for relayout and propagates upward through ancestors.
     Relayout,
+    /// Data-model change requiring the widget's `build()` to re-run.
+    /// Used by data-driven widgets (Repeater, ListView, TreeView) to trigger
+    /// a full rebuild of their child subtree when the underlying data changes.
+    Rebuild,
 }
 
 /// A registered binding between a State and a widget property.
@@ -60,8 +64,14 @@ impl BindingRegistry {
         for b in bindings.iter() {
             if (b.is_dirty)() {
                 let entry = dirty_map.entry(b.widget_id).or_insert(b.level);
-                if b.level == BindingLevel::Relayout {
-                    *entry = BindingLevel::Relayout;
+                // Promote to the highest priority level seen for this widget.
+                // Priority: Rebuild > Relayout > RepaintOnly.
+                match b.level {
+                    BindingLevel::Rebuild => *entry = BindingLevel::Rebuild,
+                    BindingLevel::Relayout if *entry == BindingLevel::RepaintOnly => {
+                        *entry = BindingLevel::Relayout;
+                    }
+                    _ => {}
                 }
                 to_clear.push(&b.clear_dirty);
             }

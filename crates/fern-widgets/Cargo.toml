@@ -11,5 +11,6 @@ rich-text = []
 
 [dependencies]
 fern-core = { workspace = true }
+fern-data = { workspace = true }
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }

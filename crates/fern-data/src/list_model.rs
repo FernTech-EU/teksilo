@@ -142,11 +142,7 @@ impl<T: 'static> ListModel<T> {
             let item = guard.items.remove(from);
             guard.items.insert(to, item);
         }
-        self.notify(DataChange::ItemsMoved {
-            from,
-            to,
-            count: 1,
-        });
+        self.notify(DataChange::ItemsMoved { from, to, count: 1 });
     }
 
     /// Replace the entire list contents.

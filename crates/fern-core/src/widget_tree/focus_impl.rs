@@ -80,9 +80,13 @@ impl WidgetTree {
     /// Traverses in document order (depth-first tree traversal).
     pub(super) fn cycle_focus(&mut self, reverse: bool) {
         let mut focusable = Vec::new();
-        let roots = self.arena.roots();
-        for root in roots {
-            self.collect_focusable_tree_order(root, &mut focusable);
+        if let Some(modal_overlay) = self.overlay_manager.topmost_centered() {
+            self.collect_focusable_tree_order(modal_overlay.content_id, &mut focusable);
+        } else {
+            let roots = self.arena.roots();
+            for root in roots {
+                self.collect_focusable_tree_order(root, &mut focusable);
+            }
         }
 
         if focusable.is_empty() {

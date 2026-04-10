@@ -115,12 +115,10 @@ impl WindowManager {
         // Resolve the initial theme from ThemeMode before building the tree
         let initial_theme = match self.theme_mode {
             ThemeMode::Manual => self.theme.clone(),
-            ThemeMode::FollowSystem => {
-                match window.theme() {
-                    Some(winit::window::Theme::Dark) => Theme::dark_default(),
-                    _ => Theme::light_default(),
-                }
-            }
+            ThemeMode::FollowSystem => match window.theme() {
+                Some(winit::window::Theme::Dark) => Theme::dark_default(),
+                _ => Theme::light_default(),
+            },
             ThemeMode::Native => {
                 let os = fern_platform::os_theme::query_os_theme_colors();
                 let base = if os.color_scheme.is_dark() {

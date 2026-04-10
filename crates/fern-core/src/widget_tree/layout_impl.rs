@@ -1,8 +1,8 @@
 use super::*;
 
 impl WidgetTree {
-    /// Process dirty state bindings: mark bound widgets for repaint.
-    /// Called automatically at the start of layout().
+    /// Process dirty state bindings: mark bound widgets for repaint, relayout,
+    /// or rebuild. Called automatically at the start of layout().
     pub(super) fn process_state_changes(&mut self) {
         let dirty_widgets = self.binding_registry.flush_dirty();
         for (id, level) in &dirty_widgets {
@@ -14,7 +14,17 @@ impl WidgetTree {
                     self.arena.mark_needs_layout(*id);
                     self.arena.mark_ancestors_need_layout(*id);
                 }
+                crate::state::BindingLevel::Rebuild => {
+                    self.arena.mark_needs_rebuild(*id);
+                    self.arena.mark_ancestors_need_layout(*id);
+                }
             }
+        }
+
+        // Rebuild data-driven widgets whose data model changed.
+        let to_rebuild = self.arena.collect_needs_rebuild();
+        for widget_id in to_rebuild {
+            self.rebuild_single_widget(widget_id);
         }
 
         let mut to_dormant = Vec::new();
@@ -137,6 +147,7 @@ impl WidgetTree {
         for id in self.arena.active_ids() {
             if let Some(node) = self.arena.get_mut(id) {
                 node.dirty.needs_layout = false;
+                node.dirty.needs_rebuild = false;
             }
         }
     }

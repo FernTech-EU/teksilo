@@ -121,6 +121,8 @@ pub struct WidgetTree {
     /// Widget that has captured the pointer (receives all PointerMove/PointerUp
     /// regardless of hit-test). Set via `EventContext::capture_pointer()`.
     pointer_captured_by: Option<WidgetId>,
+    /// Current cursor selected by hover/interaction routing.
+    current_cursor: crate::widget::CursorIcon,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
     pending_delayed_overlays: Vec<PendingDelayedOverlay>,
     /// OS-level accessibility preferences (high contrast, reduced motion, text scale).
@@ -178,6 +180,7 @@ impl WidgetTree {
             a11y_dirty: true,
             cached_frame: None,
             pointer_captured_by: None,
+            current_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
             prefers_high_contrast: false,
             prefers_reduced_motion: false,
@@ -507,39 +510,47 @@ impl WidgetTree {
             .collect();
 
         for widget_id in ids {
-            if let Some(node) = self.arena.get_mut(widget_id) {
-                node.effect_handles.clear();
+            self.rebuild_single_widget(widget_id);
+        }
+    }
+
+    /// Rebuild a single composite widget: destroy old children, re-run `build()`,
+    /// and wire up new children. Used by both `rebuild_built_widgets()` (environment
+    /// changes) and `process_state_changes()` (data-driven rebuild).
+    pub(crate) fn rebuild_single_widget(&mut self, widget_id: WidgetId) {
+        if let Some(node) = self.arena.get_mut(widget_id) {
+            node.effect_handles.clear();
+            node.dirty.needs_rebuild = false;
+        }
+
+        let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
+        for child_id in old_children {
+            self.arena.destroy(child_id);
+        }
+
+        let mut widget_box = match self.arena.take_widget(widget_id) {
+            Some(widget) => widget,
+            None => return,
+        };
+
+        let mut build_ctx = crate::build_context::BuildContext {
+            tree: self,
+            composite_id: Some(widget_id),
+            effect_handles: Vec::new(),
+        };
+        let new_children = widget_box.build(&mut build_ctx);
+        let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
+
+        self.arena.restore_widget(widget_id, widget_box);
+
+        for &child_id in &new_children {
+            if let Some(child_node) = self.arena.get_mut(child_id) {
+                child_node.parent = Some(widget_id);
             }
-
-            let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
-            for child_id in old_children {
-                self.arena.destroy(child_id);
-            }
-
-            let mut widget_box = match self.arena.take_widget(widget_id) {
-                Some(widget) => widget,
-                None => continue,
-            };
-
-            let mut build_ctx = crate::build_context::BuildContext {
-                tree: self,
-                composite_id: Some(widget_id),
-                effect_handles: Vec::new(),
-            };
-            let new_children = widget_box.build(&mut build_ctx);
-            let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
-
-            self.arena.restore_widget(widget_id, widget_box);
-
-            for &child_id in &new_children {
-                if let Some(child_node) = self.arena.get_mut(child_id) {
-                    child_node.parent = Some(widget_id);
-                }
-            }
-            if let Some(node) = self.arena.get_mut(widget_id) {
-                node.children = new_children;
-                node.effect_handles = effect_handles;
-            }
+        }
+        if let Some(node) = self.arena.get_mut(widget_id) {
+            node.children = new_children;
+            node.effect_handles = effect_handles;
         }
     }
 

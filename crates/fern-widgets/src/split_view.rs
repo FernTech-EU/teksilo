@@ -8,8 +8,7 @@ use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget,
-    WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -59,7 +58,6 @@ impl SplitHandle {
             interaction: Signal::new(SplitHandleState::Idle),
         }
     }
-
 }
 
 impl std::fmt::Debug for SplitHandle {
@@ -113,8 +111,8 @@ impl Widget for SplitHandle {
             let min = (min_first_size / available).clamp(0.0, 1.0);
             let max = 1.0 - (min_second_size / available).clamp(0.0, 1.0);
             let (min, max) = if min <= max { (min, max) } else { (0.5, 0.5) };
-            let fraction = ((coordinate - start - divider_thickness / 2.0) / available)
-                .clamp(min, max);
+            let fraction =
+                ((coordinate - start - divider_thickness / 2.0) / available).clamp(min, max);
             split.set(fraction);
         };
 
@@ -335,7 +333,9 @@ impl Widget for SplitHandle {
 
         let grip_color = if !self.enabled {
             colors.disabled_text
-        } else if interaction == SplitHandleState::Dragging || interaction == SplitHandleState::Focused {
+        } else if interaction == SplitHandleState::Dragging
+            || interaction == SplitHandleState::Focused
+        {
             colors.primary
         } else if interaction == SplitHandleState::Hovered {
             colors.on_surface
@@ -347,13 +347,19 @@ impl Widget for SplitHandle {
         let center_y = bounds.y + bounds.height / 2.0;
         match self.orientation {
             Orientation::Horizontal => {
-                canvas.fill_rect(Rect::new(center_x - 1.0, bounds.y + 2.0, 2.0, bounds.height - 4.0), grip_color.with_alpha(0.35));
+                canvas.fill_rect(
+                    Rect::new(center_x - 1.0, bounds.y + 2.0, 2.0, bounds.height - 4.0),
+                    grip_color.with_alpha(0.35),
+                );
                 for offset in [-8.0_f32, 0.0, 8.0] {
                     canvas.fill_circle(Point::new(center_x, center_y + offset), 1.6, grip_color);
                 }
             }
             Orientation::Vertical => {
-                canvas.fill_rect(Rect::new(bounds.x + 2.0, center_y - 1.0, bounds.width - 4.0, 2.0), grip_color.with_alpha(0.35));
+                canvas.fill_rect(
+                    Rect::new(bounds.x + 2.0, center_y - 1.0, bounds.width - 4.0, 2.0),
+                    grip_color.with_alpha(0.35),
+                );
                 for offset in [-8.0_f32, 0.0, 8.0] {
                     canvas.fill_circle(Point::new(center_x + offset, center_y), 1.6, grip_color);
                 }
@@ -496,7 +502,8 @@ impl Widget for SplitView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
-        self.split.bind_to(self_id, registry, BindingLevel::Relayout);
+        self.split
+            .bind_to(self_id, registry, BindingLevel::Relayout);
 
         if let Some(pending) = self.first_pending.take() {
             self.first_id = Some(match pending {
@@ -575,7 +582,8 @@ impl Widget for SplitView {
                 children[1].origin = Point::new(bounds.x + first_main, bounds.y);
                 children[1].size = Size::new(self.divider_thickness, bounds.height);
 
-                children[2].origin = Point::new(bounds.x + first_main + self.divider_thickness, bounds.y);
+                children[2].origin =
+                    Point::new(bounds.x + first_main + self.divider_thickness, bounds.y);
                 children[2].size = Size::new(second_main, bounds.height);
             }
             Orientation::Vertical => {
@@ -585,7 +593,8 @@ impl Widget for SplitView {
                 children[1].origin = Point::new(bounds.x, bounds.y + first_main);
                 children[1].size = Size::new(bounds.width, self.divider_thickness);
 
-                children[2].origin = Point::new(bounds.x, bounds.y + first_main + self.divider_thickness);
+                children[2].origin =
+                    Point::new(bounds.x, bounds.y + first_main + self.divider_thickness);
                 children[2].size = Size::new(bounds.width, second_main);
             }
         }
@@ -657,7 +666,11 @@ mod tests {
         let end = Point::new(start.x + 80.0, start.y);
         tree.drag(start, end);
 
-        assert!(split.get() > 0.65, "split should move right, got {}", split.get());
+        assert!(
+            split.get() > 0.65,
+            "split should move right, got {}",
+            split.get()
+        );
     }
 
     #[test]
@@ -712,9 +725,14 @@ mod tests {
 
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
-        let handle = tree.find_by_role(fern_core::accesskit::Role::Splitter).unwrap();
+        let handle = tree
+            .find_by_role(fern_core::accesskit::Role::Splitter)
+            .unwrap();
         let info = tree.accessibility_node(handle);
         assert_eq!(info.role(), fern_core::accesskit::Role::Splitter);
-        assert!(info.actions().contains(&fern_core::accesskit::Action::Increment));
+        assert!(
+            info.actions()
+                .contains(&fern_core::accesskit::Action::Increment)
+        );
     }
 }

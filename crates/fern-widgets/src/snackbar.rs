@@ -100,7 +100,10 @@ impl Widget for SnackbarSurface {
         _ctx: &LayoutContext,
     ) {
         for child in children.iter_mut() {
-            child.origin = fern_canvas::Point::new(bounds.x + SNACKBAR_PADDING_X, bounds.y + SNACKBAR_PADDING_Y);
+            child.origin = fern_canvas::Point::new(
+                bounds.x + SNACKBAR_PADDING_X,
+                bounds.y + SNACKBAR_PADDING_Y,
+            );
             child.size = Size::new(
                 (bounds.width - SNACKBAR_PADDING_X * 2.0).max(0.0),
                 (bounds.height - SNACKBAR_PADDING_Y * 2.0).max(0.0),
@@ -109,7 +112,8 @@ impl Widget for SnackbarSurface {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(ctx.theme.shape.radius_full.max(ctx.theme.shape.radius_md));
+        let radius =
+            CornerRadius::uniform(ctx.theme.shape.radius_full.max(ctx.theme.shape.radius_md));
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_surface);
         canvas.stroke_rounded_rect(
             bounds,
@@ -216,7 +220,13 @@ impl Widget for Snackbar {
                 if !enabled {
                     return;
                 }
-                present_snackbar(ctx, self_id, content_id, dismiss.clone(), auto_dismiss_after);
+                present_snackbar(
+                    ctx,
+                    self_id,
+                    content_id,
+                    dismiss.clone(),
+                    auto_dismiss_after,
+                );
             }
         };
 
@@ -381,7 +391,9 @@ mod tests {
     #[test]
     fn custom_trigger_opens_snackbar() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Snackbar::new("Show snackbar", FixedLeaf(180.0, 36.0)).trigger(FixedLeaf(132.0, 36.0)));
+        tree.add(
+            Snackbar::new("Show snackbar", FixedLeaf(180.0, 36.0)).trigger(FixedLeaf(132.0, 36.0)),
+        );
         tree.layout(SizeProposal::exact(640.0, 480.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();

@@ -22,7 +22,9 @@ pub fn query_os_theme_colors() -> OsThemeColors {
 #[cfg(target_os = "linux")]
 mod platform {
     use super::*;
-    use crate::linux_helpers::{Desktop, detect_desktop, read_gsettings, read_portal_rgb, read_portal_u32};
+    use crate::linux_helpers::{
+        Desktop, detect_desktop, read_gsettings, read_portal_rgb, read_portal_u32,
+    };
 
     pub(super) fn query_color_scheme() -> ColorSchemePreference {
         // XDG portal: 0 = no preference, 1 = dark, 2 = light
@@ -263,10 +265,8 @@ mod platform {
             colors.selection_fg = resolve(&["theme_selected_fg_color"]);
         }
         if colors.button_bg.is_none() {
-            colors.button_bg = resolve(&[
-                "theme_button_background_normal",
-                "theme_unfocused_bg_color",
-            ]);
+            colors.button_bg =
+                resolve(&["theme_button_background_normal", "theme_unfocused_bg_color"]);
         }
         if colors.tooltip_bg.is_none() {
             colors.tooltip_bg = resolve(&["tooltip_bg_color"]);
@@ -302,10 +302,7 @@ mod platform {
             format!("/usr/share/themes/{}/gtk-4.0/gtk.css", theme_name),
             format!("/usr/share/themes/{}/gtk-3.0/gtk.css", theme_name),
             // Flatpak/snap locations
-            format!(
-                "/usr/local/share/themes/{}/gtk-4.0/gtk.css",
-                theme_name
-            ),
+            format!("/usr/local/share/themes/{}/gtk-4.0/gtk.css", theme_name),
         ];
 
         for path in &candidates {
@@ -389,10 +386,7 @@ mod platform {
         }
 
         // rgb(r, g, b)
-        if let Some(inner) = value
-            .strip_prefix("rgb(")
-            .and_then(|s| s.strip_suffix(')'))
-        {
+        if let Some(inner) = value.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
             let parts: Vec<&str> = inner.split(',').collect();
             if parts.len() == 3 {
                 let r = parse_css_component(parts[0])?;
@@ -572,5 +566,4 @@ mod tests {
         // Should at least return a valid color scheme preference
         let _ = colors.color_scheme;
     }
-
 }

@@ -31,6 +31,25 @@ use crate::command_context::CommandContext;
 use crate::window_config::WindowConfig;
 use crate::window_manager::WindowManager;
 
+fn apply_cursor_to_window(
+    platform_window: &fern_platform::PlatformWindow,
+    cursor: fern_core::CursorIcon,
+) {
+    let winit_cursor = match cursor {
+        fern_core::CursorIcon::Default => winit::window::CursorIcon::Default,
+        fern_core::CursorIcon::Pointer => winit::window::CursorIcon::Pointer,
+        fern_core::CursorIcon::Text => winit::window::CursorIcon::Text,
+        fern_core::CursorIcon::Crosshair => winit::window::CursorIcon::Crosshair,
+        fern_core::CursorIcon::Move => winit::window::CursorIcon::Move,
+        fern_core::CursorIcon::NotAllowed => winit::window::CursorIcon::NotAllowed,
+        fern_core::CursorIcon::Grab => winit::window::CursorIcon::Grab,
+        fern_core::CursorIcon::Grabbing => winit::window::CursorIcon::Grabbing,
+        fern_core::CursorIcon::ColResize => winit::window::CursorIcon::ColResize,
+        fern_core::CursorIcon::RowResize => winit::window::CursorIcon::RowResize,
+    };
+    platform_window.window().set_cursor(winit_cursor);
+}
+
 #[derive(Debug)]
 struct IdleTrace {
     last_report: Instant,
@@ -402,6 +421,7 @@ impl FernAppHandler {
                     ) {
                         managed.tree.dispatch_event(evt);
                     }
+                    apply_cursor_to_window(&managed.platform_window, managed.tree.current_cursor());
                     if managed.tree.needs_redraw() {
                         if let Some(trace) = &mut self.idle_trace {
                             trace.note_redraw_request("cursor");
@@ -419,6 +439,7 @@ impl FernAppHandler {
                     ) {
                         managed.tree.dispatch_event(evt);
                     }
+                    apply_cursor_to_window(&managed.platform_window, managed.tree.current_cursor());
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("mouse_input");
                     }

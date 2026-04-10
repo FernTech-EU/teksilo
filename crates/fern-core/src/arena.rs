@@ -35,6 +35,9 @@ pub enum ActivationState {
 pub struct DirtyFlags {
     pub needs_layout: bool,
     pub needs_paint: bool,
+    /// When true, the widget's `build()` should be re-run to regenerate children.
+    /// Set by `BindingLevel::Rebuild` bindings (data-driven widgets).
+    pub needs_rebuild: bool,
 }
 
 /// A gesture binding: arena of recognizers + callback for when gestures fire.
@@ -134,6 +137,7 @@ impl WidgetArena {
             dirty: DirtyFlags {
                 needs_layout: true,
                 needs_paint: true,
+                needs_rebuild: false,
             },
             bounds: fern_canvas::Rect::ZERO,
             gesture_binding: None,
@@ -180,6 +184,7 @@ impl WidgetArena {
             dirty: DirtyFlags {
                 needs_layout: true,
                 needs_paint: true,
+                needs_rebuild: false,
             },
             bounds: fern_canvas::Rect::ZERO,
             gesture_binding: None,
@@ -363,6 +368,31 @@ impl WidgetArena {
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
         }
+    }
+
+    /// Mark a widget as needing its `build()` re-run.
+    /// Also marks for layout and paint since rebuilt children need both.
+    pub fn mark_needs_rebuild(&mut self, id: WidgetId) {
+        if let Some(node) = self.nodes.get_mut(id) {
+            node.dirty.needs_rebuild = true;
+            node.dirty.needs_layout = true;
+            node.dirty.needs_paint = true;
+        }
+    }
+
+    /// Collect widgets that need their `build()` re-run (data-driven rebuild).
+    /// Only returns active widgets with `has_built_children == true` and
+    /// `needs_rebuild == true`.
+    pub fn collect_needs_rebuild(&self) -> Vec<WidgetId> {
+        self.nodes
+            .iter()
+            .filter(|(_, n)| {
+                n.activation == ActivationState::Active
+                    && n.has_built_children
+                    && n.dirty.needs_rebuild
+            })
+            .map(|(id, _)| id)
+            .collect()
     }
 
     /// Check all widgets with visible_state bindings and return
