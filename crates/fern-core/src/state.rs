@@ -157,7 +157,8 @@ impl<T: Clone + 'static> std::fmt::Debug for StateHandle<T> {
 
 // --- Reactive<T> ---
 
-/// A property value that is either static or bound to a reactive state.
+/// Compatibility property type for State-based APIs.
+/// Prefer `crate::signal::Prop<T>` in new widget and binding code.
 pub enum Reactive<T: Clone + 'static> {
     /// A fixed value, set at build time.
     Static(T),

@@ -44,8 +44,8 @@ pub use overlay::{
 pub use shortcut::{Shortcut, ShortcutMap, ShortcutScope};
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
 pub use state::{
-    AnimationRequest, BindingLevel, BindingRegistry, DerivedState, ObserverId, Reactive,
-    ReadableState, State, StateHandle,
+    AnimationRequest, BindingLevel, BindingRegistry, DerivedState, ObserverId, ReadableState,
+    State, StateHandle,
 };
 pub use widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
