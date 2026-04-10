@@ -4,6 +4,10 @@
 //! Opens a dropdown overlay with selectable items.
 //! The dropdown panel is pre-created during build() and kept dormant until opened.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Instant;
+
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
@@ -28,6 +32,10 @@ enum ComboBoxState {
     Open,
     Disabled,
 }
+
+// TODO(milestone-7): Add `max_visible_items` option (default ~8) to ComboBox and MenuList.
+// When item count exceeds the limit, show a scrollable list with arrow
+// headers/footers for quick navigation. Blocked on ListView from Milestone 7.
 
 /// A dropdown selection widget.
 ///
@@ -113,22 +121,31 @@ struct DropdownItem {
     label: String,
     index: usize,
     selected_signal: Signal<Option<usize>>,
-    hovered: Signal<bool>,
     root_child_id: Option<WidgetId>,
 }
 
 impl Widget for DropdownItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
-        let hovered = self.hovered.clone();
         let selected_signal = self.selected_signal.clone();
         let index = self.index;
 
-        let bg_color = hovered.map({
-            let on_surface = theme.colors.on_surface;
+        // Track whether this item is highlighted (hovered or keyboard-selected)
+        let highlighted = ctx.signal(false);
+
+        // Observe the selection signal — highlight this item when it's selected
+        {
+            let highlighted = highlighted.clone();
+            ctx.effect(&self.selected_signal, move |sel| {
+                highlighted.set(*sel == Some(index));
+            });
+        }
+
+        let bg_color = highlighted.map({
+            let primary = theme.colors.primary;
             move |h| {
                 if *h {
-                    on_surface.with_alpha(0.08)
+                    primary.with_alpha(0.12)
                 } else {
                     Color::TRANSPARENT
                 }
@@ -150,19 +167,15 @@ impl Widget for DropdownItem {
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 
-        let hovered_enter = hovered.clone();
-        let hovered_leave = hovered.clone();
-
         let handler_set = HandlerSet::new()
             .on_tap(move |ctx: &mut EventContext| {
                 selected_signal.set(Some(index));
                 ctx.dismiss_all_overlays();
             })
-            .on_hover(move |entered: bool, _ctx: &mut EventContext| {
-                if entered {
-                    hovered_enter.set(true);
-                } else {
-                    hovered_leave.set(false);
+            .on_hover({
+                let highlighted = highlighted.clone();
+                move |entered: bool, _ctx: &mut EventContext| {
+                    highlighted.set(entered);
                 }
             })
             .cursor(CursorIcon::Pointer);
@@ -225,7 +238,6 @@ impl Widget for DropdownPanel {
                 label: label.clone(),
                 index: i,
                 selected_signal: self.selected.clone(),
-                hovered: Signal::new(false),
                 root_child_id: None,
             };
             vstack = vstack.child(item);
@@ -379,7 +391,7 @@ impl Widget for ComboBox {
                     ctx.show_overlay(OverlayRequest {
                         content_id: dropdown_id,
                         anchor: self_id,
-                        placement: OverlayPlacement::Below,
+                        placement: OverlayPlacement::BelowPreferred,
                         dismiss: DismissBehavior::ClickOutside,
                         layer: OverlayLayer::InTree,
                         parent_overlay: None,
@@ -404,6 +416,10 @@ impl Widget for ComboBox {
                 let interaction = interaction.clone();
                 let items_len = self.items.len();
                 let selected = self.selected.clone();
+                let items_for_typeahead = self.items.clone();
+                // Type-ahead buffer: (prefix, last_keystroke_time)
+                let typeahead: Rc<RefCell<(String, Instant)>> =
+                    Rc::new(RefCell::new((String::new(), Instant::now())));
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     if !enabled {
                         return EventResponse::Ignored;
@@ -413,22 +429,53 @@ impl Widget for ComboBox {
                             key: Key::Enter | Key::Space,
                             ..
                         } => {
-                            interaction.set(ComboBoxState::Open);
-                            ctx.activate(dropdown_id);
-                            ctx.show_overlay(OverlayRequest {
-                                content_id: dropdown_id,
-                                anchor: self_id,
-                                placement: OverlayPlacement::Below,
-                                dismiss: DismissBehavior::ClickOutside,
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
-                            });
+                            if interaction.get() == ComboBoxState::Open {
+                                // Close the dropdown and confirm selection
+                                interaction.set(ComboBoxState::Focused);
+                                ctx.dismiss_all_overlays();
+                            } else {
+                                // Open the dropdown
+                                interaction.set(ComboBoxState::Open);
+                                ctx.activate(dropdown_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id: dropdown_id,
+                                    anchor: self_id,
+                                    placement: OverlayPlacement::BelowPreferred,
+                                    dismiss: DismissBehavior::ClickOutside,
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                            }
                             EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::Escape, ..
+                        } => {
+                            if interaction.get() == ComboBoxState::Open {
+                                interaction.set(ComboBoxState::Focused);
+                                ctx.dismiss_all_overlays();
+                                EventResponse::Handled
+                            } else {
+                                EventResponse::Ignored
+                            }
                         }
                         WidgetEvent::KeyDown {
                             key: Key::ArrowDown,
                             ..
                         } => {
+                            if interaction.get() != ComboBoxState::Open {
+                                // Open dropdown on ArrowDown when closed
+                                interaction.set(ComboBoxState::Open);
+                                ctx.activate(dropdown_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id: dropdown_id,
+                                    anchor: self_id,
+                                    placement: OverlayPlacement::BelowPreferred,
+                                    dismiss: DismissBehavior::ClickOutside,
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                            }
                             let current = selected.get().unwrap_or(0);
                             let next = if current + 1 >= items_len {
                                 0
@@ -441,6 +488,18 @@ impl Widget for ComboBox {
                         WidgetEvent::KeyDown {
                             key: Key::ArrowUp, ..
                         } => {
+                            if interaction.get() != ComboBoxState::Open {
+                                interaction.set(ComboBoxState::Open);
+                                ctx.activate(dropdown_id);
+                                ctx.show_overlay(OverlayRequest {
+                                    content_id: dropdown_id,
+                                    anchor: self_id,
+                                    placement: OverlayPlacement::BelowPreferred,
+                                    dismiss: DismissBehavior::ClickOutside,
+                                    layer: OverlayLayer::InTree,
+                                    parent_overlay: None,
+                                });
+                            }
                             let current = selected.get().unwrap_or(0);
                             let next = if current == 0 {
                                 items_len.saturating_sub(1)
@@ -448,6 +507,31 @@ impl Widget for ComboBox {
                                 current - 1
                             };
                             selected.set(Some(next));
+                            EventResponse::Handled
+                        }
+                        // Type-ahead: character keys jump to matching item
+                        WidgetEvent::KeyDown {
+                            key: Key::Character(ch),
+                            ..
+                        } => {
+                            let mut ta = typeahead.borrow_mut();
+                            let now = Instant::now();
+                            // Reset buffer if more than 500ms since last keystroke
+                            if now.duration_since(ta.1).as_millis() > 500 {
+                                ta.0.clear();
+                            }
+                            ta.0.push(ch.to_ascii_lowercase());
+                            ta.1 = now;
+                            let prefix = ta.0.clone();
+                            drop(ta);
+
+                            // Find first item matching the prefix (case-insensitive)
+                            if let Some(idx) = items_for_typeahead
+                                .iter()
+                                .position(|item| item.to_lowercase().starts_with(&prefix))
+                            {
+                                selected.set(Some(idx));
+                            }
                             EventResponse::Handled
                         }
                         _ => EventResponse::Ignored,
@@ -593,5 +677,159 @@ mod tests {
 
         // Overlay should be open
         assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn type_ahead_jumps_to_matching_item() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry", "Blueberry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+        tree.focus(cb);
+
+        // Type 'b' → jumps to first item starting with 'b' (Banana, index 1)
+        tree.press_key(Key::Character('b'), fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get(), Some(1), "should jump to 'Banana'");
+
+        // Type 'l' quickly after → buffer becomes "bl" → Blueberry (index 3)
+        tree.press_key(Key::Character('l'), fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get(), Some(3), "should jump to 'Blueberry'");
+    }
+
+    #[test]
+    fn type_ahead_case_insensitive() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+        tree.focus(cb);
+
+        // Uppercase 'C' should still match 'Cherry'
+        tree.press_key(Key::Character('C'), fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get(), Some(2), "should match 'Cherry' case-insensitively");
+    }
+
+    #[test]
+    fn type_ahead_no_match_keeps_selection() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(Some(1_usize));
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+        tree.focus(cb);
+
+        // Type 'z' → no match, selection unchanged
+        tree.press_key(Key::Character('z'), fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get(), Some(1), "no match should keep existing selection");
+    }
+
+    #[test]
+    fn below_preferred_opens_above_when_no_space() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        // Tiny viewport: combo box near the bottom, no space for dropdown below
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+
+        assert_eq!(tree.active_overlays().len(), 1, "overlay should be open");
+
+        // The overlay should be positioned above the combo box (negative y)
+        // because there's no space below in a 60px viewport
+        let content_ids = tree.overlay_manager().active_content_ids();
+        let overlay_bounds = tree.bounds(content_ids[0]);
+        let cb_bounds = tree.bounds(cb);
+
+        // Overlay should be above the combo box (its bottom edge at or above the combo box top)
+        assert!(
+            overlay_bounds.y + overlay_bounds.height <= cb_bounds.y + 5.0,
+            "overlay should be positioned above when no space below (overlay bottom: {}, combo top: {})",
+            overlay_bounds.y + overlay_bounds.height,
+            cb_bounds.y
+        );
+    }
+
+    #[test]
+    fn enter_toggles_dropdown_open_close() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.focus(cb);
+
+        // Enter opens the dropdown
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert_eq!(tree.active_overlays().len(), 1, "Enter should open dropdown");
+
+        // Navigate to an item
+        tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get(), Some(1));
+
+        // Enter again closes the dropdown and confirms selection
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Enter should close dropdown when open"
+        );
+        assert_eq!(selected.get(), Some(1), "selection should be preserved");
+    }
+
+    #[test]
+    fn escape_closes_dropdown() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.focus(cb);
+
+        // Open
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // Escape closes
+        tree.press_key(Key::Escape, fern_core::event::Modifiers::NONE);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Escape should close the dropdown"
+        );
+    }
+
+    #[test]
+    fn arrow_down_opens_dropdown_when_closed() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.focus(cb);
+
+        // ArrowDown when closed should open and navigate
+        tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert_eq!(tree.active_overlays().len(), 1, "ArrowDown should open dropdown");
+        assert_eq!(selected.get(), Some(1));
     }
 }

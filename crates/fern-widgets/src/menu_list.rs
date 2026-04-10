@@ -46,6 +46,9 @@ impl Widget for MenuSeparator {
     }
 }
 
+// TODO(milestone-7): Add `max_visible_items` option to MenuList. When item count exceeds
+// the limit, show a scrollable list with arrow headers/footers. Blocked on ListView.
+
 /// A themed vertical menu container.
 ///
 /// ```ignore

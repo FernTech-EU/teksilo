@@ -184,6 +184,10 @@ pub struct EventContext {
     pub(crate) dismiss_all_overlays: bool,
     /// Request to capture or release the pointer.
     pub(crate) pointer_capture: Option<bool>,
+    /// Delayed overlay requests (content_id, request, delay).
+    pub(crate) delayed_overlay_requests: Vec<(crate::overlay::OverlayRequest, std::time::Duration)>,
+    /// Cancel pending delayed overlays by content widget ID.
+    pub(crate) cancel_delayed_overlays: Vec<crate::widget_id::WidgetId>,
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -205,6 +209,8 @@ impl EventContext {
             overlay_dismissals: Vec::new(),
             dismiss_all_overlays: false,
             pointer_capture: None,
+            delayed_overlay_requests: Vec::new(),
+            cancel_delayed_overlays: Vec::new(),
         }
     }
 
@@ -257,6 +263,26 @@ impl EventContext {
         callback: impl FnOnce(crate::idle::IdleDeadline) + 'static,
     ) {
         self.idle_callbacks.push(Box::new(callback));
+    }
+
+    /// Show an overlay after a delay. The widget tree checks pending delayed
+    /// overlays during `layout()` and shows them once the delay elapses.
+    /// Use this for submenu hover-open delays.
+    ///
+    /// The content widget should already be added to the tree (typically
+    /// dormant). It will be activated automatically when the delay elapses.
+    pub fn show_overlay_after(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        delay: std::time::Duration,
+    ) {
+        self.delayed_overlay_requests.push((request, delay));
+    }
+
+    /// Cancel a pending delayed overlay by its content widget ID.
+    /// Call this when the hover ends before the delay elapses.
+    pub fn cancel_delayed_overlay(&mut self, content_id: crate::widget_id::WidgetId) {
+        self.cancel_delayed_overlays.push(content_id);
     }
 
     /// Capture the pointer: all subsequent `PointerMove` and `PointerUp`

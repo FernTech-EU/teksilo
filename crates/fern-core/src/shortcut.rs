@@ -28,6 +28,9 @@ impl Shortcut {
 }
 
 impl std::fmt::Display for Shortcut {
+    // TODO: Replace with ShortcutFormatter in fern-i18n for locale/platform-aware
+    // display (e.g. "Ctrl+S" → "⌘S" on macOS, "Strg+S" in German).
+    // See architecture Section 11.2.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", self.modifiers, self.key)
     }

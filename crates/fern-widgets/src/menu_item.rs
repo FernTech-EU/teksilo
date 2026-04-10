@@ -3,13 +3,15 @@
 //! Non-generic, closure-based command erasure (same pattern as Button).
 //! Supports icons, shortcut labels, disabled state, and submenu triggers.
 
+use std::time::Duration;
+
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::signal::Signal;
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -29,14 +31,23 @@ enum MenuItemState {
     Disabled,
 }
 
+/// Default delay before a submenu opens on hover (200ms).
+/// This delay also provides diagonal movement tolerance: when the pointer
+/// crosses other menu items while moving toward a submenu, those items
+/// don't open their submenus because the delay hasn't elapsed yet.
+const DEFAULT_SUBMENU_OPEN_DELAY: Duration = Duration::from_millis(200);
+
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
 pub struct MenuItem {
     label: String,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
     action: Option<CommandFactory>,
+    /// Type-erased command for automatic shortcut label lookup via ShortcutMap.
+    command_any: Option<Box<dyn std::any::Any>>,
     enabled: bool,
     submenu_factory: Option<Box<dyn Fn() -> Box<dyn Widget>>>,
+    submenu_open_delay: Duration,
     // Build state
     interaction: Signal<MenuItemState>,
     root_child_id: Option<WidgetId>,
@@ -50,8 +61,10 @@ impl MenuItem {
             icon: None,
             shortcut_label: None,
             action: None,
+            command_any: None,
             enabled: true,
             submenu_factory: None,
+            submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             root_child_id: None,
             submenu_content_id: None,
@@ -59,10 +72,13 @@ impl MenuItem {
     }
 
     /// Set the command to emit on activation. Generic only at this call site.
+    /// Also stores the command for automatic shortcut label lookup from the ShortcutMap.
     pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
+        let cmd_for_lookup = command.clone();
         self.action = Some(Box::new(move |ctx: &mut EventContext| {
             ctx.emit(command.clone());
         }));
+        self.command_any = Some(Box::new(cmd_for_lookup));
         self
     }
 
@@ -83,8 +99,9 @@ impl MenuItem {
         self
     }
 
-    /// Create a submenu trigger item. The factory is invoked on hover to produce
-    /// the submenu content (typically a `MenuList`).
+    /// Create a submenu trigger item. The factory is invoked during `build()` to
+    /// pre-create the submenu content (typically a `MenuList`), which is kept
+    /// dormant until the hover delay elapses.
     pub fn submenu(
         label: impl Into<String>,
         factory: impl Fn() -> Box<dyn Widget> + 'static,
@@ -94,12 +111,20 @@ impl MenuItem {
             icon: None,
             shortcut_label: None,
             action: None,
+            command_any: None,
             enabled: true,
             submenu_factory: Some(Box::new(factory)),
+            submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             root_child_id: None,
             submenu_content_id: None,
         }
+    }
+
+    /// Set a custom submenu open delay (default: 200ms).
+    pub fn submenu_delay(mut self, delay: Duration) -> Self {
+        self.submenu_open_delay = delay;
+        self
     }
 
     /// Whether this is a submenu trigger.
@@ -176,8 +201,13 @@ impl Widget for MenuItem {
         // Spacer between label and trailing content
         row = row.child(Spacer::new());
 
-        // Shortcut label (dimmed)
-        if let Some(ref shortcut_text) = self.shortcut_label {
+        // Shortcut label (dimmed) — manual label takes precedence, then auto-lookup from ShortcutMap
+        let resolved_shortcut = self.shortcut_label.clone().or_else(|| {
+            self.command_any
+                .as_ref()
+                .and_then(|cmd| ctx.shortcut_label_for_any(cmd.as_ref()))
+        });
+        if let Some(ref shortcut_text) = resolved_shortcut {
             let shortcut_color = {
                 let text = theme.colors.on_surface.with_alpha(0.5);
                 let disabled = theme.colors.disabled_text;
@@ -219,37 +249,98 @@ impl Widget for MenuItem {
         // --- Handlers ---
         let action = self.action.take();
         let action_rc: std::rc::Rc<Option<CommandFactory>> = std::rc::Rc::new(action);
-        let action_for_tap = action_rc.clone();
         let action_for_key = action_rc.clone();
 
         let int_hover = interaction.clone();
-        let int_tap = interaction.clone();
         let self_id = ctx.self_id();
+        let is_submenu = submenu_content_id.is_some();
 
-        let mut handler_set = HandlerSet::new()
-            .on_tap({
-                move |ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
-                    int_tap.set(MenuItemState::Pressed);
-                    if let Some(ref action) = *action_for_tap {
-                        action(ctx);
-                        // Dismiss all overlays (context menu, submenus) after activation
-                        ctx.dismiss_all_overlays();
-                    }
-                }
-            })
-            .on_hover({
-                let submenu_id = submenu_content_id;
+        let mut handler_set = HandlerSet::new();
+
+        if is_submenu {
+            // --- Submenu trigger: timer-based delayed open ---
+            // On hover enter: request a delayed overlay via the widget tree's
+            // timer system (like tooltips). On hover leave: cancel the pending
+            // request. The widget tree checks pending overlays during layout()
+            // and opens them once the delay elapses.
+            let sub_id = submenu_content_id.unwrap();
+            let open_delay = self.submenu_open_delay;
+
+            handler_set = handler_set.on_hover({
+                let int_hover = int_hover.clone();
                 move |entered: bool, ctx: &mut EventContext| {
                     if !enabled {
                         return;
                     }
                     if entered {
                         int_hover.set(MenuItemState::Hovered);
-                        // Open submenu on hover
-                        if let Some(sub_id) = submenu_id {
+                        ctx.show_overlay_after(
+                            OverlayRequest {
+                                content_id: sub_id,
+                                anchor: self_id,
+                                placement: OverlayPlacement::TrailingEdge,
+                                dismiss: DismissBehavior::ClickOutside,
+                                layer: OverlayLayer::InTree,
+                                parent_overlay: None,
+                            },
+                            open_delay,
+                        );
+                    } else {
+                        int_hover.set(MenuItemState::Idle);
+                        ctx.cancel_delayed_overlay(sub_id);
+                    }
+                }
+            });
+        } else {
+            // --- Regular menu item: tap to activate ---
+            let action_for_tap = action_rc.clone();
+            let int_tap = interaction.clone();
+
+            handler_set = handler_set
+                .on_tap({
+                    move |ctx: &mut EventContext| {
+                        if !enabled {
+                            return;
+                        }
+                        int_tap.set(MenuItemState::Pressed);
+                        if let Some(ref action) = *action_for_tap {
+                            action(ctx);
+                            ctx.dismiss_all_overlays();
+                        }
+                    }
+                })
+                .on_hover({
+                    move |entered: bool, _ctx: &mut EventContext| {
+                        if !enabled {
+                            return;
+                        }
+                        if entered {
+                            int_hover.set(MenuItemState::Hovered);
+                        } else {
+                            int_hover.set(MenuItemState::Idle);
+                        }
+                    }
+                });
+        }
+
+        // Keyboard handler shared by both submenu and regular items
+        handler_set = handler_set.on_key({
+            let interaction = interaction.clone();
+            let sub_id = submenu_content_id;
+            move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                if !enabled {
+                    return EventResponse::Ignored;
+                }
+                match event {
+                    WidgetEvent::KeyDown {
+                        key: Key::Enter | Key::Space,
+                        ..
+                    } => {
+                        if let Some(ref action) = *action_for_key {
+                            action(ctx);
+                            ctx.dismiss_all_overlays();
+                        } else if let Some(sub_id) = sub_id {
+                            // Enter/Space on submenu trigger opens it immediately
                             ctx.activate(sub_id);
                             ctx.show_overlay(OverlayRequest {
                                 content_id: sub_id,
@@ -260,33 +351,13 @@ impl Widget for MenuItem {
                                 parent_overlay: None,
                             });
                         }
-                    } else {
-                        int_hover.set(MenuItemState::Idle);
+                        interaction.set(MenuItemState::Pressed);
+                        EventResponse::Handled
                     }
+                    _ => EventResponse::Ignored,
                 }
-            })
-            .on_key({
-                let interaction = interaction.clone();
-                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::Enter | Key::Space,
-                            ..
-                        } => {
-                            if let Some(ref action) = *action_for_key {
-                                action(ctx);
-                                ctx.dismiss_all_overlays();
-                            }
-                            interaction.set(MenuItemState::Pressed);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                }
-            });
+            }
+        });
 
         if enabled {
             handler_set = handler_set.cursor(CursorIcon::Pointer);
@@ -420,6 +491,87 @@ mod tests {
     }
 
     #[test]
+    fn auto_shortcut_label_from_shortcut_map() {
+        use fern_core::shortcut::{Shortcut, ShortcutMap};
+
+        let shortcuts =
+            ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
+
+        // Item with auto-resolved shortcut (via ShortcutMap)
+        let mut tree_with = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_shortcuts(shortcuts);
+        let item_with = tree_with.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        tree_with.layout(SizeProposal::unspecified());
+
+        // Item without shortcuts registered
+        let mut tree_without = WidgetTree::new().with_theme(Theme::light_default());
+        let item_without = tree_without.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        tree_without.layout(SizeProposal::unspecified());
+
+        // The item with an auto-resolved shortcut label should be wider
+        let width_with = tree_with.bounds(item_with).width;
+        let width_without = tree_without.bounds(item_without).width;
+        assert!(
+            width_with > width_without,
+            "auto shortcut label should make item wider: {} vs {}",
+            width_with,
+            width_without
+        );
+    }
+
+    #[test]
+    fn manual_shortcut_label_overrides_auto() {
+        use fern_core::shortcut::{Shortcut, ShortcutMap};
+
+        let shortcuts =
+            ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
+
+        // Manual label should take precedence over auto-lookup
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_shortcuts(shortcuts);
+        let item = tree.add(
+            MenuItem::new("Cut")
+                .on_activate(TestCmd::Cut)
+                .shortcut_label("Custom"),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        // Should build without panic — manual label used
+        assert!(tree.bounds(item).width > 0.0);
+    }
+
+    #[test]
+    fn no_shortcut_label_when_command_not_bound() {
+        use fern_core::shortcut::{Shortcut, ShortcutMap};
+
+        // Only Paste is bound, not Cut
+        let shortcuts =
+            ShortcutMap::new().bind(Shortcut::ctrl(Key::V), TestCmd::Paste);
+
+        let mut tree_with_map = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_shortcuts(shortcuts);
+        let item_with_map =
+            tree_with_map.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        tree_with_map.layout(SizeProposal::unspecified());
+
+        let mut tree_no_map = WidgetTree::new().with_theme(Theme::light_default());
+        let item_no_map = tree_no_map.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        tree_no_map.layout(SizeProposal::unspecified());
+
+        // Widths should be the same — no shortcut label resolved for Cut
+        let width_with = tree_with_map.bounds(item_with_map).width;
+        let width_without = tree_no_map.bounds(item_no_map).width;
+        assert!(
+            (width_with - width_without).abs() < 0.01,
+            "unbound command should produce no shortcut label: {} vs {}",
+            width_with,
+            width_without
+        );
+    }
+
+    #[test]
     fn submenu_item_has_chevron() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(MenuItem::submenu("Open Recent", || {
@@ -427,6 +579,129 @@ mod tests {
         }));
         tree.layout(SizeProposal::exact(300.0, 40.0));
         // Verify it builds with the chevron without panic
+        assert!(tree.bounds(item).width > 0.0);
+    }
+
+    #[test]
+    fn submenu_does_not_open_immediately_on_hover() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(MenuItem::submenu("More", || {
+            Box::new(
+                crate::menu_list::MenuList::new()
+                    .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+            )
+        }));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        assert!(tree.active_overlays().is_empty());
+
+        // Hover over the item — submenu should NOT open immediately
+        let center = tree.bounds(item).center();
+        tree.pointer_move(center);
+
+        // Advance just a tiny amount — not enough for the 200ms default delay
+        tree.advance_time(std::time::Duration::from_millis(50));
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "submenu should not open immediately on hover (delay required)"
+        );
+    }
+
+    #[test]
+    fn submenu_opens_after_delay() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(
+            MenuItem::submenu("More", || {
+                Box::new(
+                    crate::menu_list::MenuList::new()
+                        .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                )
+            })
+            .submenu_delay(std::time::Duration::from_millis(100)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        assert!(tree.active_overlays().is_empty());
+
+        // Hover over the submenu trigger
+        let center = tree.bounds(item).center();
+        tree.pointer_move(center);
+
+        // Advance past the delay
+        tree.advance_time(std::time::Duration::from_millis(150));
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "submenu should open after delay elapses"
+        );
+    }
+
+    #[test]
+    fn submenu_delay_provides_diagonal_tolerance() {
+        // With a non-zero delay, quickly moving through a submenu trigger
+        // to another item cancels the pending open — this IS diagonal tolerance.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(MenuItem::submenu("More", || {
+            Box::new(
+                crate::menu_list::MenuList::new()
+                    .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+            )
+        }));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        // Move pointer into the submenu trigger briefly
+        let center = tree.bounds(item).center();
+        tree.pointer_move(center);
+        // Immediately move away (simulating diagonal movement) — cancels the pending open
+        tree.pointer_move(Point::new(center.x, center.y + 50.0));
+
+        // Even after the delay elapses, the submenu should NOT open
+        tree.advance_time(std::time::Duration::from_millis(300));
+
+        assert!(
+            tree.active_overlays().is_empty(),
+            "quick pass-through should not open submenu (diagonal tolerance)"
+        );
+    }
+
+    #[test]
+    fn submenu_opens_on_enter_key() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(MenuItem::submenu("More", || {
+            Box::new(
+                crate::menu_list::MenuList::new()
+                    .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+            )
+        }));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        tree.focus(item);
+
+        assert!(tree.active_overlays().is_empty());
+
+        // Enter key should open submenu immediately (no delay for keyboard)
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "Enter key should open submenu immediately"
+        );
+    }
+
+    #[test]
+    fn custom_submenu_delay() {
+        // Verify the submenu_delay builder method is accepted
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(
+            MenuItem::submenu("More", || {
+                Box::new(TextWidget::new("placeholder"))
+            })
+            .submenu_delay(std::time::Duration::from_millis(500)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 40.0));
         assert!(tree.bounds(item).width > 0.0);
     }
 }

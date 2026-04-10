@@ -35,7 +35,8 @@ pub enum OverlayPlacement {
     /// Near the anchor with a preferred alignment and offset (tooltip).
     NearAnchor { offset: Vec2 },
     /// Below the anchor if space allows, otherwise above (combo box dropdown).
-    BelowPreferred { viewport_height: f32 },
+    /// The viewport height is supplied by `position_overlays()` at layout time.
+    BelowPreferred,
 }
 
 /// When an overlay is dismissed.
@@ -245,7 +246,13 @@ impl OverlayManager {
 
     /// Compute overlay positions based on anchor bounds.
     /// Called after layout to position overlays correctly.
-    pub fn position_overlays(&mut self, anchor_bounds_fn: impl Fn(WidgetId) -> Rect) {
+    /// `viewport` is (width, height) used for clamping overlays to the visible area.
+    pub fn position_overlays(
+        &mut self,
+        anchor_bounds_fn: impl Fn(WidgetId) -> Rect,
+        viewport: (f32, f32),
+    ) {
+        let (vw, vh) = viewport;
         for overlay in &mut self.stack {
             let anchor = anchor_bounds_fn(overlay.anchor);
             let content_size = overlay.bounds.size(); // Will be set from content layout
@@ -263,14 +270,28 @@ impl OverlayManager {
                     content_size.width.max(anchor.width),
                     content_size.height,
                 ),
-                OverlayPlacement::TrailingEdge => Rect::new(
-                    anchor.x + anchor.width + 2.0,
-                    anchor.y,
-                    content_size.width,
-                    content_size.height,
-                ),
+                OverlayPlacement::TrailingEdge => {
+                    let x_right = anchor.x + anchor.width + 2.0;
+                    let fits_right = x_right + content_size.width <= vw;
+                    let x = if fits_right {
+                        x_right
+                    } else {
+                        // Fallback: open to the leading edge
+                        anchor.x - content_size.width - 2.0
+                    };
+                    let y = anchor.y.min(vh - content_size.height).max(0.0);
+                    Rect::new(x, y, content_size.width, content_size.height)
+                }
                 OverlayPlacement::AtPointer(point) => {
-                    Rect::new(point.x, point.y, content_size.width, content_size.height)
+                    // Clamp to viewport so menus don't overflow off-screen
+                    let x = point.x.min(vw - content_size.width).max(0.0);
+                    let y = if point.y + content_size.height <= vh {
+                        point.y
+                    } else {
+                        // Not enough space below pointer — open above
+                        (point.y - content_size.height).max(0.0)
+                    };
+                    Rect::new(x, y, content_size.width, content_size.height)
                 }
                 OverlayPlacement::NearAnchor { offset } => Rect::new(
                     anchor.x + offset.x,
@@ -278,16 +299,18 @@ impl OverlayManager {
                     content_size.width,
                     content_size.height,
                 ),
-                OverlayPlacement::BelowPreferred { viewport_height } => {
+                OverlayPlacement::BelowPreferred => {
                     let below_y = anchor.y + anchor.height + 4.0;
-                    let fits_below = below_y + content_size.height <= *viewport_height;
+                    let fits_below = below_y + content_size.height <= vh;
                     let y = if fits_below {
                         below_y
                     } else {
                         anchor.y - content_size.height - 4.0
                     };
+                    // Clamp horizontally
+                    let x = anchor.x.min(vw - content_size.width).max(0.0);
                     Rect::new(
-                        anchor.x,
+                        x,
                         y,
                         content_size.width.max(anchor.width),
                         content_size.height,

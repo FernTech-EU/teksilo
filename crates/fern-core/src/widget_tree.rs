@@ -25,6 +25,9 @@ type ShortcutLookup = Box<
     ) -> Option<ErasedCommand>,
 >;
 
+/// Type-erased reverse lookup: given a command (as `&dyn Any`), find its shortcut.
+type ShortcutReverseLookup = Box<dyn Fn(&dyn std::any::Any) -> Option<crate::shortcut::Shortcut>>;
+
 #[allow(clippy::type_complexity)]
 pub struct WidgetTree {
     arena: WidgetArena,
@@ -36,6 +39,7 @@ pub struct WidgetTree {
     command_handler: Option<Box<dyn FnMut(&ErasedCommand)>>,
     pending_commands: Vec<ErasedCommand>,
     shortcut_lookup: Option<ShortcutLookup>,
+    shortcut_reverse_lookup: Option<ShortcutReverseLookup>,
     binding_registry: crate::state::BindingRegistry,
     idle_queue: crate::idle::IdleQueue,
     /// Simulated clock for deterministic time-dependent testing.
@@ -66,6 +70,8 @@ pub struct WidgetTree {
     /// Widget that has captured the pointer (receives all PointerMove/PointerUp
     /// regardless of hit-test). Set via `EventContext::capture_pointer()`.
     pointer_captured_by: Option<WidgetId>,
+    /// Delayed overlay requests (e.g., submenu hover-open delay).
+    pending_delayed_overlays: Vec<PendingDelayedOverlay>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -80,6 +86,16 @@ struct TooltipEntry {
     overlay_id: Option<crate::overlay::OverlayId>,
 }
 
+/// A delayed overlay request (e.g., submenu hover-open delay).
+struct PendingDelayedOverlay {
+    request: crate::overlay::OverlayRequest,
+    delay: std::time::Duration,
+    /// When the request was made (real time, for windowed apps).
+    real_requested_at: std::time::Instant,
+    /// When the request was made (simulated time, for tests).
+    sim_requested_at: std::time::Instant,
+}
+
 impl WidgetTree {
     pub fn new() -> Self {
         Self {
@@ -92,6 +108,7 @@ impl WidgetTree {
             command_handler: None,
             pending_commands: Vec::new(),
             shortcut_lookup: None,
+            shortcut_reverse_lookup: None,
             binding_registry: crate::state::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
             sim_clock: std::time::Instant::now(),
@@ -107,6 +124,7 @@ impl WidgetTree {
             a11y_dirty: true,
             cached_frame: None,
             pointer_captured_by: None,
+            pending_delayed_overlays: Vec::new(),
         }
     }
 
@@ -361,10 +379,16 @@ impl WidgetTree {
     /// Register a ShortcutMap for keyboard shortcut interception.
     /// Shortcuts are checked before any widget sees the key event (preview pass).
     pub fn with_shortcuts<C: AppCommand>(mut self, map: crate::shortcut::ShortcutMap<C>) -> Self {
+        let map_for_reverse = map.clone();
         self.shortcut_lookup = Some(Box::new(move |key, modifiers, focused, is_in_scope| {
             let shortcut = crate::shortcut::Shortcut::new(key, modifiers);
             map.find(&shortcut, focused, is_in_scope)
                 .map(|cmd| ErasedCommand::new(cmd.clone()))
+        }));
+        self.shortcut_reverse_lookup = Some(Box::new(move |cmd_any: &dyn std::any::Any| {
+            cmd_any
+                .downcast_ref::<C>()
+                .and_then(|cmd| map_for_reverse.find_shortcut_for(cmd).copied())
         }));
         self
     }
@@ -375,6 +399,15 @@ impl WidgetTree {
         let is_in_scope =
             |focused: WidgetId, scope: WidgetId| -> bool { self.is_descendant_of(focused, scope) };
         lookup(key, modifiers, self.focused, &is_in_scope)
+    }
+
+    /// Reverse-lookup: find the shortcut label for a type-erased command.
+    /// Returns the `Shortcut::to_string()` display (e.g. "Ctrl+S").
+    pub(crate) fn shortcut_label_for_any(&self, command: &dyn std::any::Any) -> Option<String> {
+        self.shortcut_reverse_lookup
+            .as_ref()
+            .and_then(|lookup| lookup(command))
+            .map(|shortcut| shortcut.to_string())
     }
 
     // --- Command handling ---
@@ -679,6 +712,9 @@ impl WidgetTree {
         // Process tooltip timers with real time (for windowed apps).
         self.process_tooltips_real();
 
+        // Process delayed overlay requests (submenu hover-open delays).
+        self.process_delayed_overlays_real();
+
         // Refresh cached root list if the tree structure changed.
         self.arena.refresh_roots();
 
@@ -715,7 +751,12 @@ impl WidgetTree {
 
         // Position and layout overlay content
         let anchor_bounds = |id: WidgetId| -> Rect { self.arena.bounds(id) };
-        self.overlay_manager.position_overlays(anchor_bounds);
+        let viewport = (
+            proposal.width.unwrap_or(800.0),
+            proposal.height.unwrap_or(600.0),
+        );
+        self.overlay_manager
+            .position_overlays(anchor_bounds, viewport);
         for content_id in &overlay_content_ids {
             if !self.arena.is_active(*content_id) {
                 continue;
@@ -745,7 +786,8 @@ impl WidgetTree {
                 self.overlay_manager.set_content_bounds(oid, intrinsic);
                 // Re-position with correct size
                 let anchor_bounds2 = |id: WidgetId| -> Rect { self.arena.bounds(id) };
-                self.overlay_manager.position_overlays(anchor_bounds2);
+                self.overlay_manager
+                    .position_overlays(anchor_bounds2, viewport);
             }
             // Get final overlay position
             let overlay_bounds = overlay_id
@@ -1220,6 +1262,27 @@ impl WidgetTree {
             } else {
                 self.pointer_captured_by = None;
             }
+        }
+        // Handle delayed overlay requests
+        for (request, delay) in ctx.delayed_overlay_requests {
+            // Remove any existing pending request for the same content
+            let content_id = request.content_id;
+            self.pending_delayed_overlays
+                .retain(|p| p.request.content_id != content_id);
+            self.pending_delayed_overlays.push(PendingDelayedOverlay {
+                request,
+                delay,
+                real_requested_at: std::time::Instant::now(),
+                sim_requested_at: self.sim_clock,
+            });
+            // Mark the anchor as needing paint so the event loop keeps
+            // running until the delay elapses.
+            self.arena.mark_needs_paint(source_widget);
+        }
+        // Handle cancellation of delayed overlays
+        for content_id in ctx.cancel_delayed_overlays {
+            self.pending_delayed_overlays
+                .retain(|p| p.request.content_id != content_id);
         }
     }
 
@@ -1790,6 +1853,54 @@ impl WidgetTree {
         }
     }
 
+    // --- Delayed overlay processing (submenu hover-open delays) ---
+
+    /// Process delayed overlay requests using simulated clock (for tests).
+    fn process_delayed_overlays(&mut self) {
+        let sim_now = self.sim_clock;
+        self.process_delayed_overlays_impl(|p| sim_now.saturating_duration_since(p.sim_requested_at));
+    }
+
+    /// Process delayed overlay requests using real clock (for windowed apps).
+    fn process_delayed_overlays_real(&mut self) {
+        let real_now = std::time::Instant::now();
+        self.process_delayed_overlays_impl(|p| {
+            real_now.saturating_duration_since(p.real_requested_at)
+        });
+    }
+
+    fn process_delayed_overlays_impl(
+        &mut self,
+        elapsed_fn: impl Fn(&PendingDelayedOverlay) -> std::time::Duration,
+    ) {
+        // Collect indices of ready overlays
+        let ready: Vec<usize> = self
+            .pending_delayed_overlays
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| elapsed_fn(p) >= p.delay)
+            .map(|(i, _)| i)
+            .collect();
+
+        if ready.is_empty() {
+            return;
+        }
+
+        // Remove ready entries (in reverse order to preserve indices)
+        let mut pending: Vec<PendingDelayedOverlay> = Vec::new();
+        for i in ready.into_iter().rev() {
+            pending.push(self.pending_delayed_overlays.remove(i));
+        }
+
+        // Activate content and show overlays
+        for p in pending {
+            let content_id = p.request.content_id;
+            self.arena.activate(content_id);
+            self.overlay_manager.show(p.request);
+            self.arena.mark_needs_paint(content_id);
+        }
+    }
+
     /// Handle pointer enter/leave for tooltip hover tracking.
     /// Check if widget_id is the anchor or a descendant of the anchor.
     fn is_descendant_of(&self, widget_id: WidgetId, ancestor: WidgetId) -> bool {
@@ -1850,7 +1961,7 @@ impl WidgetTree {
         }
     }
 
-    /// Returns the earliest deadline for a pending tooltip (if any).
+    /// Returns the earliest deadline for a pending tooltip or delayed overlay (if any).
     /// The event loop should use ControlFlow::WaitUntil(deadline) if this returns Some.
     pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
         let tooltip_deadline = self
@@ -1859,14 +1970,17 @@ impl WidgetTree {
             .filter(|e| e.overlay_id.is_none())
             .filter_map(|e| e.real_hover_start.map(|start| start + e.delay))
             .min();
+        let delayed_overlay_deadline = self
+            .pending_delayed_overlays
+            .iter()
+            .map(|p| p.real_requested_at + p.delay)
+            .min();
         let animation_deadline = self.animation_scheduler.next_deadline();
 
-        match (tooltip_deadline, animation_deadline) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            (None, None) => None,
-        }
+        [tooltip_deadline, delayed_overlay_deadline, animation_deadline]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Get the overlay manager (read-only, for querying).
@@ -2011,6 +2125,7 @@ impl WidgetTree {
     pub fn advance_time(&mut self, duration: std::time::Duration) {
         self.sim_clock += duration;
         self.process_tooltips();
+        self.process_delayed_overlays();
     }
 
     /// Get the current simulated clock value.

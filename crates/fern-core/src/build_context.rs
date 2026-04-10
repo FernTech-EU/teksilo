@@ -135,6 +135,13 @@ impl<'a> BuildContext<'a> {
         self.tree.set_dormant(id);
     }
 
+    /// Look up the shortcut label for a command (type-erased).
+    /// Returns the display string (e.g. "Ctrl+S") if a shortcut is bound to this command
+    /// in the tree's `ShortcutMap`. Used by `MenuItem` for automatic shortcut labels.
+    pub fn shortcut_label_for_any(&self, command: &dyn std::any::Any) -> Option<String> {
+        self.tree.shortcut_label_for_any(command)
+    }
+
     /// Apply a `HandlerSet` to the composite widget being built (self).
     /// This transfers attached event handlers, focusable flag, cursor, etc.
     /// to the widget's arena node, replacing `event()` and `is_focusable()` overrides.
