@@ -509,11 +509,12 @@ impl Widget for ComboBox {
                             selected.set(Some(next));
                             EventResponse::Handled
                         }
-                        // Type-ahead: character keys jump to matching item
-                        WidgetEvent::KeyDown {
-                            key: Key::Character(ch),
-                            ..
-                        } => {
+                        // Type-ahead: letter/character keys jump to matching item.
+                        // Key::A..Key::Z and Key::Character are all handled via to_char().
+                        WidgetEvent::KeyDown { key, .. }
+                            if key.to_char().is_some() =>
+                        {
+                            let ch = key.to_char().unwrap();
                             let mut ta = typeahead.borrow_mut();
                             let now = Instant::now();
                             // Reset buffer if more than 500ms since last keystroke
@@ -690,13 +691,29 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 50.0));
         tree.focus(cb);
 
-        // Type 'b' → jumps to first item starting with 'b' (Banana, index 1)
-        tree.press_key(Key::Character('b'), fern_core::event::Modifiers::NONE);
+        // Key::B (as sent by the real app via translate_key) → Banana (index 1)
+        tree.press_key(Key::B, fern_core::event::Modifiers::NONE);
         assert_eq!(selected.get(), Some(1), "should jump to 'Banana'");
 
-        // Type 'l' quickly after → buffer becomes "bl" → Blueberry (index 3)
-        tree.press_key(Key::Character('l'), fern_core::event::Modifiers::NONE);
+        // Key::L quickly after → buffer becomes "bl" → Blueberry (index 3)
+        tree.press_key(Key::L, fern_core::event::Modifiers::NONE);
         assert_eq!(selected.get(), Some(3), "should jump to 'Blueberry'");
+    }
+
+    #[test]
+    fn type_ahead_with_character_key() {
+        // Key::Character is used for non-letter characters (numbers, symbols)
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["100px", "200px", "300px"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+        tree.focus(cb);
+
+        tree.press_key(Key::Character('2'), fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get(), Some(1), "should jump to '200px'");
     }
 
     #[test]
@@ -710,8 +727,8 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 50.0));
         tree.focus(cb);
 
-        // Uppercase 'C' should still match 'Cherry'
-        tree.press_key(Key::Character('C'), fern_core::event::Modifiers::NONE);
+        // Key::C matches 'Cherry' (to_char returns lowercase 'c')
+        tree.press_key(Key::C, fern_core::event::Modifiers::NONE);
         assert_eq!(selected.get(), Some(2), "should match 'Cherry' case-insensitively");
     }
 
@@ -726,8 +743,8 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 50.0));
         tree.focus(cb);
 
-        // Type 'z' → no match, selection unchanged
-        tree.press_key(Key::Character('z'), fern_core::event::Modifiers::NONE);
+        // Key::Z → no match, selection unchanged
+        tree.press_key(Key::Z, fern_core::event::Modifiers::NONE);
         assert_eq!(selected.get(), Some(1), "no match should keep existing selection");
     }
 
@@ -831,5 +848,37 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 200.0));
         assert_eq!(tree.active_overlays().len(), 1, "ArrowDown should open dropdown");
         assert_eq!(selected.get(), Some(1));
+    }
+
+    #[test]
+    fn type_ahead_highlights_in_open_dropdown() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 300.0));
+        tree.focus(cb);
+
+        // Open dropdown
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(300.0, 300.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+        let frame_before = tree.render();
+
+        // Type 'b' (Key::B as sent by the real app) → type-ahead should select Banana
+        tree.press_key(Key::B, fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get(), Some(1), "type-ahead should update selection");
+
+        // Layout + render — triggers process_state_changes which should detect dirty binding
+        tree.layout(SizeProposal::exact(300.0, 300.0));
+        let frame_after = tree.render();
+
+        // The rendered output should differ (highlight on Banana)
+        assert_ne!(
+            frame_before.shapes, frame_after.shapes,
+            "dropdown should repaint with highlight after type-ahead"
+        );
     }
 }
