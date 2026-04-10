@@ -3,7 +3,7 @@ use slotmap::SlotMap;
 use crate::environment::ThemeOverride;
 use crate::event_handlers::EventHandlers;
 use crate::gesture::{GestureArena, GestureEvent};
-use crate::signal::ObserverHandle;
+use crate::signal::{ObserverHandle, Prop};
 use crate::widget::{CursorIcon, Widget};
 use crate::widget_id::WidgetId;
 use fern_canvas::RenderFrame;
@@ -54,8 +54,8 @@ pub struct WidgetNode {
     pub bounds: fern_canvas::Rect,
     pub(crate) gesture_binding: Option<GestureBinding>,
     pub(crate) theme_override: Option<ThemeOverride>,
-    pub(crate) visible_state: Option<crate::state::Reactive<bool>>,
-    pub(crate) enabled_state: Option<crate::state::Reactive<bool>>,
+    pub(crate) visible_state: Option<Prop<bool>>,
+    pub(crate) enabled_state: Option<Prop<bool>>,
     pub(crate) alignment_override: Option<fern_tokens::Alignment>,
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.

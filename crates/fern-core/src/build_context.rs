@@ -97,13 +97,13 @@ impl<'a> BuildContext<'a> {
         self.tree.theme()
     }
 
-    /// Bind a widget's visibility to a boolean state or derived state.
-    pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
+    /// Bind a widget's visibility to a boolean prop or compatibility state binding.
+    pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.visible_when(id, state);
     }
 
-    /// Bind a widget's enabled state to a boolean state or derived state.
-    pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::state::Reactive<bool>>) {
+    /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
+    pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.enabled_when(id, state);
     }
 
