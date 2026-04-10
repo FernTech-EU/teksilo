@@ -2,9 +2,12 @@
 //!
 //! Run with: `cargo run -p tab-widget`
 
-use fern_ui::prelude::*;
 use fern_ui::core::widget::WidgetPlacement;
-use fern_ui::widgets::{Badge, Breadcrumb, BreadcrumbItem, Button, ButtonStyle, Card, HStack, Panel, TabItem, TabWidget, TextWidget, VStack};
+use fern_ui::prelude::*;
+use fern_ui::widgets::{
+    Badge, Breadcrumb, BreadcrumbItem, Button, ButtonStyle, Card, HStack, Panel, TabItem,
+    TabWidget, TextWidget, VStack,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Cmd {
@@ -22,7 +25,9 @@ struct Root {
 
 impl Root {
     fn new() -> Self {
-        Self { root_child_id: None }
+        Self {
+            root_child_id: None,
+        }
     }
 }
 
@@ -38,8 +43,16 @@ impl Widget for Root {
 
         let trailing = HStack::new()
             .spacing(12.0)
-            .child(TextWidget::new("").bind_text(selected_label).style(theme.typography.label.clone()))
-            .child(Button::new("Toggle Theme").style(ButtonStyle::Flat).on_click(Cmd::ToggleTheme));
+            .child(
+                TextWidget::new("")
+                    .bind_text(selected_label)
+                    .style(theme.typography.label.clone()),
+            )
+            .child(
+                Button::new("Toggle Theme")
+                    .style(ButtonStyle::Flat)
+                    .on_click(Cmd::ToggleTheme),
+            );
 
         let tabs = ctx.add(
             TabWidget::new(selected)
@@ -130,26 +143,24 @@ impl Widget for Root {
         );
 
         let root_id = ctx.add(
-            Panel::new()
-                .padding(24.0)
-                .child(
-                    VStack::new()
-                        .spacing(16.0)
-                        .add_child(breadcrumb)
-                        .child(
-                            TextWidget::new("TabWidget")
-                                .style(theme.typography.heading_1.clone())
-                                .color(theme.colors.on_surface),
-                        )
-                        .child(
-                            TextWidget::new(
-                                "A focused Milestone 6 example for the first implementation slice.",
-                            )
-                            .style(theme.typography.body.clone())
+            Panel::new().padding(24.0).child(
+                VStack::new()
+                    .spacing(16.0)
+                    .add_child(breadcrumb)
+                    .child(
+                        TextWidget::new("TabWidget")
+                            .style(theme.typography.heading_1.clone())
                             .color(theme.colors.on_surface),
+                    )
+                    .child(
+                        TextWidget::new(
+                            "A focused Milestone 6 example for the first implementation slice.",
                         )
-                        .add_child(tabs),
-                ),
+                        .style(theme.typography.body.clone())
+                        .color(theme.colors.on_surface),
+                    )
+                    .add_child(tabs),
+            ),
         );
 
         self.root_child_id = Some(root_id);

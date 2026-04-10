@@ -23,7 +23,9 @@ struct OverlayDemo {
 
 impl OverlayDemo {
     fn new() -> Self {
-        Self { root_child_id: None }
+        Self {
+            root_child_id: None,
+        }
     }
 }
 
@@ -214,7 +216,9 @@ struct NativeModalRoot {
 
 impl NativeModalRoot {
     fn new() -> Self {
-        Self { root_child_id: None }
+        Self {
+            root_child_id: None,
+        }
     }
 }
 

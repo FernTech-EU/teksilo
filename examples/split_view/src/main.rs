@@ -1,5 +1,5 @@
-use fern_ui::prelude::*;
 use fern_ui::core::WidgetPlacement;
+use fern_ui::prelude::*;
 use fern_ui::tokens::Orientation;
 use fern_ui::widgets::{Badge, Panel, ScrollArea, SplitView, TextWidget, VStack};
 
@@ -10,7 +10,9 @@ struct SplitViewDemo {
 
 impl SplitViewDemo {
     fn new() -> Self {
-        Self { root_child_id: None }
+        Self {
+            root_child_id: None,
+        }
     }
 }
 
