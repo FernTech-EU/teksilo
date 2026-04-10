@@ -1,7 +1,6 @@
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 
 use crate::accessibility::AccessNodeBuilder;
-use crate::event::{EventResponse, WidgetEvent};
 use crate::widget_id::WidgetId;
 
 /// A child that is either pre-registered (ID) or waiting to be inserted.

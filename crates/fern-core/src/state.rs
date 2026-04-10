@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::widget_id::WidgetId;
 
@@ -262,6 +262,24 @@ struct AnimationState {
     target: Option<f32>,
 }
 
+pub(crate) struct WeakAnimatedState {
+    inner: Weak<RefCell<StateInner<f32>>>,
+    animation: Weak<RefCell<AnimationState>>,
+}
+
+impl WeakAnimatedState {
+    pub(crate) fn upgrade(&self) -> Option<State<f32>> {
+        Some(State {
+            inner: self.inner.upgrade()?,
+            animation: Some(self.animation.upgrade()?),
+        })
+    }
+
+    pub(crate) fn same_state(&self, state: &State<f32>) -> bool {
+        self.inner.as_ptr() == Rc::as_ptr(&state.inner)
+    }
+}
+
 /// A reactive state value. When set, marks itself dirty.
 /// Can be bound to widget properties via a BindingRegistry.
 pub struct State<T> {
@@ -404,10 +422,40 @@ impl State<f32> {
         }
     }
 
-    fn animation_state(&self) -> &Rc<RefCell<AnimationState>> {
-        self.animation
-            .as_ref()
-            .expect("set_animated called on State<f32> without animation support; use State::new_animated()")
+    pub fn supports_animation(&self) -> bool {
+        self.animation.is_some()
+    }
+
+    pub fn try_set_animated(
+        &self,
+        target: f32,
+        duration: std::time::Duration,
+        easing: fern_tokens::Easing,
+    ) -> Result<(), &'static str> {
+        let Some(animation) = &self.animation else {
+            return Err(
+                "set_animated called on State<f32> without animation support; use State::new_animated()",
+            );
+        };
+
+        let mut anim = animation.borrow_mut();
+        anim.pending = Some(AnimationRequest {
+            target,
+            duration,
+            easing,
+            frame_interval: None,
+        });
+        anim.target = Some(target);
+        drop(anim);
+        self.inner.borrow_mut().dirty = true;
+        Ok(())
+    }
+
+    pub(crate) fn weak_handle(&self) -> Option<WeakAnimatedState> {
+        self.animation.as_ref().map(|animation| WeakAnimatedState {
+            inner: Rc::downgrade(&self.inner),
+            animation: Rc::downgrade(animation),
+        })
     }
 
     /// Animate this state smoothly from its current value to `target` over
@@ -426,16 +474,8 @@ impl State<f32> {
         duration: std::time::Duration,
         easing: fern_tokens::Easing,
     ) {
-        let mut anim = self.animation_state().borrow_mut();
-        anim.pending = Some(AnimationRequest {
-            target,
-            duration,
-            easing,
-            frame_interval: None,
-        });
-        anim.target = Some(target);
-        drop(anim);
-        self.inner.borrow_mut().dirty = true; // trigger a frame so the scheduler picks this up
+        self.try_set_animated(target, duration, easing)
+            .expect("set_animated called on State<f32> without animation support; use State::new_animated()");
     }
 
     /// Returns the target value of the current or pending animation, if any.
