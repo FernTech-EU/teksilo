@@ -409,7 +409,8 @@ impl WidgetArena {
         handler_set: crate::widget_builder::HandlerSet,
     ) {
         if let Some(node) = self.get_mut(id) {
-            node.handlers = handler_set.handlers;
+            let existing_handlers = std::mem::take(&mut node.handlers);
+            node.handlers = existing_handlers.merge(handler_set.handlers);
             if let Some(focusable) = handler_set.focusable {
                 node.node_focusable = Some(focusable);
             }

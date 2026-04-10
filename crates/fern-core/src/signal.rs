@@ -24,6 +24,19 @@ pub struct ObserverHandle {
 }
 
 impl ObserverHandle {
+    /// Create a new observer handle.
+    ///
+    /// - `keeper`: an `Rc` that keeps the observed source alive while this handle exists.
+    /// - `observer_id`: the ID identifying this observer.
+    /// - `remover`: called with `observer_id` when the handle is dropped, to unregister the callback.
+    pub fn new(keeper: Rc<dyn std::any::Any>, observer_id: u64, remover: Rc<dyn Fn(u64)>) -> Self {
+        Self {
+            _signal: keeper,
+            observer_id,
+            remover,
+        }
+    }
+
     /// Explicitly detach the observer without dropping the handle.
     pub fn detach(self) {
         // Drop runs automatically, which calls remover
