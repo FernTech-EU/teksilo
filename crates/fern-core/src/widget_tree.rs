@@ -12,6 +12,7 @@ use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPla
 use crate::widget_id::WidgetId;
 
 mod accessibility_impl;
+mod event_dispatch_impl;
 mod overlay_impl;
 mod rendering_impl;
 mod test_api;
@@ -406,16 +407,12 @@ impl WidgetTree {
     /// Pending `set_animated` requests are started at the current sim_clock,
     /// then time advances by `duration`, and the scheduler ticks at the new time.
     pub fn tick_animations(&mut self, duration: std::time::Duration) {
-        // Start pending animations at the CURRENT time (before advancing)
         self.process_pending_animations_at(self.sim_clock);
 
-        // Advance clock
         self.sim_clock += duration;
 
-        // Tick the scheduler at the new time
         self.animation_scheduler.tick(self.sim_clock);
 
-        // Process state changes from animation updates
         self.process_state_changes();
     }
 
@@ -424,7 +421,6 @@ impl WidgetTree {
     /// tokens at build time) and marks all widgets as needing layout and repaint.
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
-        // Clear focus/hover/tooltips before rebuild — old widget IDs become stale.
         self.focused = None;
         self.hovered = None;
         self.focus_origin = None;
@@ -444,20 +440,17 @@ impl WidgetTree {
             .collect();
 
         for widget_id in ids {
-            // Drop effect handles (RAII cleanup of observer subscriptions)
             if let Some(node) = self.arena.get_mut(widget_id) {
                 node.effect_handles.clear();
             }
 
-            // Destroy old child subtree
             let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
             for child_id in old_children {
                 self.arena.destroy(child_id);
             }
 
-            // Take widget out, rebuild, put back
             let mut widget_box = match self.arena.take_widget(widget_id) {
-                Some(w) => w,
+                Some(widget) => widget,
                 None => continue,
             };
 
@@ -471,7 +464,6 @@ impl WidgetTree {
 
             self.arena.restore_widget(widget_id, widget_box);
 
-            // Wire new children
             for &child_id in &new_children {
                 if let Some(child_node) = self.arena.get_mut(child_id) {
                     child_node.parent = Some(widget_id);
@@ -570,7 +562,6 @@ impl WidgetTree {
             }
         }
 
-        // Process visible_when bindings: toggle dormancy based on State<bool>
         let mut to_dormant = Vec::new();
         let mut to_activate = Vec::new();
         for (id, is_active, should_be_visible) in self.arena.visibility_checks() {
@@ -634,9 +625,6 @@ impl WidgetTree {
     }
 
     fn flush_commands(&mut self) {
-        // Only consume commands if a tree-local handler is registered (headless tests).
-        // In windowed apps, commands remain in pending_commands for the app-level
-        // handler to drain via drain_pending_commands().
         if let Some(handler) = &mut self.command_handler {
             let commands: Vec<ErasedCommand> = self.pending_commands.drain(..).collect();
             for cmd in &commands {
@@ -656,10 +644,8 @@ impl WidgetTree {
 
     /// Internal: insert a widget, call build(), wire children, register clips.
     fn insert_widget(&mut self, widget: Box<dyn Widget>) -> WidgetId {
-        // 1. Insert into the arena.
         let id = self.arena.insert(widget);
 
-        // 1b. Extract attached handlers from WidgetWithHandlers wrapper.
         {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
                 if let Some(handler_set) = widget_box.take_handler_set() {
@@ -679,10 +665,9 @@ impl WidgetTree {
             }
         }
 
-        // 2. Call build() — resolve pending children and effects.
         {
             let mut widget_box = match self.arena.take_widget(id) {
-                Some(w) => w,
+                Some(widget) => widget,
                 None => return id,
             };
             let mut build_ctx = crate::build_context::BuildContext {
@@ -709,11 +694,10 @@ impl WidgetTree {
             }
         }
 
-        // 3. Set clips_children from widget trait method.
         let clips = self
             .arena
             .get(id)
-            .is_some_and(|n| n.widget.clips_children());
+            .is_some_and(|node| node.widget.clips_children());
         if clips {
             self.arena.set_clips_children(id, true);
         }
@@ -735,10 +719,8 @@ impl WidgetTree {
     pub fn add_child(&mut self, parent: WidgetId, widget: impl Widget + 'static) -> WidgetId {
         let boxed: Box<dyn Widget> = Box::new(widget);
 
-        // 1. Insert as child.
         let id = self.arena.insert_child(parent, boxed);
 
-        // 1b. Extract attached handlers from WidgetWithHandlers wrapper.
         {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
                 if let Some(handler_set) = widget_box.take_handler_set() {
@@ -758,7 +740,6 @@ impl WidgetTree {
             }
         }
 
-        // 2. Call build() — resolve pending children and effects.
         {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
                 let mut build_ctx = crate::build_context::BuildContext {
@@ -786,11 +767,10 @@ impl WidgetTree {
             }
         }
 
-        // 3. Set clips_children from widget trait method.
         let clips = self
             .arena
             .get(id)
-            .is_some_and(|n| n.widget.clips_children());
+            .is_some_and(|node| node.widget.clips_children());
         if clips {
             self.arena.set_clips_children(id, true);
         }
@@ -1032,632 +1012,6 @@ impl WidgetTree {
                 node.dirty.needs_layout = false;
             }
         }
-    }
-
-    // --- Event dispatch ---
-
-    /// Dispatch a widget event, routing to the appropriate widget.
-    ///
-    /// Routing rules (architecture Section 7.1):
-    /// - Pointer events → hit testing against layout tree
-    /// - Keyboard/IME events → focused widget
-    /// - AccessKit actions → target widget directly
-    /// - Scroll events → hit testing (scroll target under pointer)
-    pub fn dispatch_event(&mut self, event: WidgetEvent) {
-        if let WidgetEvent::KeyDown {
-            key: Key::ArrowLeft,
-            ..
-        } = &event
-            && self.overlay_manager.len() > 1
-        {
-            if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
-                self.dormant_dismissed_content(&content_ids);
-                if let Some(restore_id) = focus_restore {
-                    if self.arena.is_active(restore_id) {
-                        self.focus(restore_id);
-                    }
-                }
-            }
-            return;
-        }
-
-        // Overlay interception: Escape dismisses topmost overlay
-        if let WidgetEvent::KeyDown {
-            key: Key::Escape, ..
-        } = &event
-            && !self.overlay_manager.is_empty()
-        {
-            if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
-                self.dormant_dismissed_content(&content_ids);
-                // Restore focus to the widget that had focus before the overlay opened
-                if let Some(restore_id) = focus_restore {
-                    if self.arena.is_active(restore_id) {
-                        self.focus(restore_id);
-                    }
-                }
-            }
-            return;
-        }
-
-        // Overlay interception: click outside dismisses ClickOutside overlays.
-        // For secondary (right-click), dismiss but don't consume — let context
-        // menu handler run so a new context menu can open at the click location.
-        if let WidgetEvent::PointerDown { position, button } = &event {
-            let dismissed = self.overlay_manager.handle_click_outside(*position);
-            if !dismissed.is_empty() {
-                self.dormant_dismissed_content(&dismissed);
-                if *button != PointerButton::Secondary {
-                    return; // Click consumed by overlay dismissal
-                }
-                // Secondary click: overlays dismissed, but fall through to open new context menu
-            }
-        }
-
-        // Shortcut interception: before any widget sees the key event
-        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event
-            && let Some(cmd) = self.shortcut_map_lookup(*key, *modifiers)
-        {
-            self.pending_commands.push(cmd);
-            self.flush_commands();
-            return;
-        }
-
-        // Feed pointer events to gesture recognizers on the target widget chain
-        if let Some(raw) = to_raw_pointer_event(&event) {
-            let target = if self.pointer_captured_by.is_some() {
-                self.pointer_captured_by
-            } else {
-                match &event {
-                    WidgetEvent::PointerDown { position, .. }
-                    | WidgetEvent::PointerUp { position, .. } => self.hit_test(*position),
-                    WidgetEvent::PointerMove { position } => self.hit_test(*position),
-                    _ => None,
-                }
-            };
-            if let Some(target_id) = target {
-                self.feed_gesture_recognizers(target_id, &raw);
-            }
-        }
-
-        match &event {
-            WidgetEvent::PointerMove { position } => {
-                if let Some(captured) = self.pointer_captured_by {
-                    // Pointer is captured — route directly, skip hover tracking
-                    self.dispatch_to_widget(
-                        captured,
-                        &WidgetEvent::PointerMove {
-                            position: *position,
-                        },
-                    );
-                } else {
-                    self.handle_pointer_move(*position);
-                }
-                self.update_pointer_leave_overlays(*position);
-            }
-            WidgetEvent::PointerDown { position, button } => {
-                if let Some(target) = self.hit_test(*position) {
-                    // Context menu: right-click walks up for a context_menu_factory
-                    if *button == PointerButton::Secondary {
-                        if self.show_context_menu_for(target, *position) {
-                            return; // Context menu shown — consume the event
-                        }
-                    }
-                    // Focus the nearest focusable widget (target or ancestor)
-                    if let Some(focusable) = self.find_focusable_at_or_above(target) {
-                        self.focus_with_origin(focusable, crate::focus::FocusOrigin::Pointer);
-                    }
-                    self.dispatch_to_widget(target, &event);
-                }
-            }
-            WidgetEvent::PointerUp { position, .. } => {
-                if let Some(captured) = self.pointer_captured_by {
-                    // Route to the capturing widget and auto-release capture
-                    self.dispatch_to_widget(captured, &event);
-                    self.pointer_captured_by = None;
-                } else if let Some(target) = self.hit_test(*position) {
-                    self.dispatch_to_widget(target, &event);
-                }
-            }
-            WidgetEvent::Scroll { .. } => {
-                // Scroll goes to the widget under the pointer (or focused)
-                if let Some(target) = self.hovered.or(self.focused) {
-                    self.dispatch_to_widget(target, &event);
-                }
-            }
-            WidgetEvent::KeyDown { key, modifiers, .. } => {
-                if *key == Key::Tab {
-                    self.cycle_focus(modifiers.shift());
-                    // Tab is consumed — don't dispatch to the focused widget
-                } else if let Some(focused) = self.focused {
-                    self.dispatch_to_widget(focused, &event);
-                }
-            }
-            WidgetEvent::KeyUp { .. }
-            | WidgetEvent::ImeComposition { .. }
-            | WidgetEvent::ImeCommit { .. } => {
-                if let Some(focused) = self.focused {
-                    self.dispatch_to_widget(focused, &event);
-                }
-            }
-            WidgetEvent::AccessAction { target, action, .. } => {
-                // Handle Action::Focus at the tree level — widgets can't request
-                // focus from EventContext, so we intercept it here.
-                if *action == accesskit::Action::Focus {
-                    if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
-                        self.focus_with_origin(id, crate::focus::FocusOrigin::Programmatic);
-                    }
-                } else {
-                    // Route other actions to the specific target widget from AccessKit,
-                    // falling back to the focused widget.
-                    let dispatch_target = target
-                        .filter(|id| self.arena.is_active(*id))
-                        .or(self.focused);
-                    if let Some(id) = dispatch_target {
-                        self.dispatch_to_widget(id, &event);
-                    }
-                }
-            }
-            WidgetEvent::Gesture { .. } => {
-                // Gesture events route to the widget under the pointer (or focused).
-                if let Some(target) = self.hovered.or(self.focused) {
-                    self.dispatch_to_widget(target, &event);
-                }
-            }
-            // PointerEnter/Leave and Focus events are synthesized internally,
-            // not dispatched from outside.
-            WidgetEvent::ScrollIntoView { .. } => {
-                // ScrollIntoView is dispatched directly to specific clipping ancestors
-                // by scroll_focused_into_view, not through the general dispatch path.
-            }
-            WidgetEvent::PointerEnter
-            | WidgetEvent::PointerLeave
-            | WidgetEvent::FocusGained { .. }
-            | WidgetEvent::FocusLost => {}
-        }
-        self.flush_commands();
-    }
-
-    /// Walk up from `target` looking for a context_menu_factory.
-    /// If found, invoke it and show the result as an overlay at `position`.
-    fn show_context_menu_for(&mut self, target: WidgetId, position: Point) -> bool {
-        // Walk up from target to root looking for a context menu factory
-        let mut current = Some(target);
-        let factory_owner = loop {
-            match current {
-                None => break None,
-                Some(id) => {
-                    if self
-                        .arena
-                        .get(id)
-                        .is_some_and(|n| n.context_menu_factory.is_some())
-                    {
-                        break Some(id);
-                    }
-                    current = self.arena.get(id).and_then(|n| n.parent);
-                }
-            }
-        };
-
-        let Some(owner_id) = factory_owner else {
-            return false;
-        };
-
-        // Dismiss any existing overlays before opening a new context menu
-        let dismissed = self.overlay_manager.dismiss_all();
-        self.dormant_dismissed_content(&dismissed);
-
-        // Invoke the factory to create the menu content widget
-        let menu_widget = {
-            let node = self.arena.get(owner_id).unwrap();
-            let factory = node.context_menu_factory.as_ref().unwrap();
-            factory()
-        };
-
-        // Add the menu widget to the arena and show as overlay
-        let content_id = self.add_boxed(menu_widget);
-        let prev_focus = self.focused;
-        self.overlay_manager.show(crate::overlay::OverlayRequest {
-            content_id,
-            anchor: owner_id,
-            placement: crate::overlay::OverlayPlacement::AtPointer(position),
-            dismiss: crate::overlay::DismissBehavior::ClickOutside,
-            layer: crate::overlay::OverlayLayer::InTree,
-            parent_overlay: None,
-        });
-        if let Some(focus_id) = prev_focus {
-            self.overlay_manager.set_top_focus_restore(focus_id);
-        }
-        // Focus the menu content so it receives keyboard events
-        self.focus(content_id);
-        true
-    }
-
-    fn handle_pointer_move(&mut self, position: Point) {
-        let target = self.hit_test(position);
-
-        if target != self.hovered {
-            if let Some(old) = self.hovered {
-                self.dispatch_to_widget(old, &WidgetEvent::PointerLeave);
-                self.tooltip_pointer_leave(old);
-            }
-            if let Some(new) = target {
-                self.dispatch_to_widget(new, &WidgetEvent::PointerEnter);
-                self.tooltip_pointer_enter(new);
-            }
-            self.hovered = target;
-        }
-
-        if let Some(target) = target {
-            self.dispatch_to_widget(target, &WidgetEvent::PointerMove { position });
-        }
-    }
-
-    fn dispatch_to_widget(&mut self, target: WidgetId, event: &WidgetEvent) {
-        // Skip events for disabled widgets (enabled_when binding is false)
-        if !self.arena.is_enabled(target) {
-            return;
-        }
-
-        // Preview pass: root → target
-        let mut ancestors = Vec::new();
-        let mut current = self.arena.parent(target);
-        while let Some(id) = current {
-            ancestors.push(id);
-            current = self.arena.parent(id);
-        }
-        ancestors.reverse();
-
-        for &id in &ancestors {
-            let mut ctx = EventContext::new();
-            let response = if let Some(node) = self.arena.get_mut(id) {
-                // Attached handlers are checked first, then widget event() fallback.
-                Self::try_handler_preview(node, event, &mut ctx)
-                    .unwrap_or(EventResponse::Ignored)
-            } else {
-                EventResponse::Ignored
-            };
-            self.collect_from_ctx(ctx, id);
-            if response == EventResponse::Handled {
-                self.arena.mark_needs_paint(id);
-                return;
-            }
-        }
-
-        // Bubble pass: target → root
-        let needs_layout_on_handle = matches!(
-            event,
-            WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. }
-        );
-        let mut current = Some(target);
-        while let Some(id) = current {
-            let mut ctx = EventContext::new();
-            let response = if let Some(node) = self.arena.get_mut(id) {
-                Self::try_handler_bubble(node, event, &mut ctx)
-                    .unwrap_or(EventResponse::Ignored)
-            } else {
-                EventResponse::Ignored
-            };
-            self.collect_from_ctx(ctx, id);
-            if response == EventResponse::Handled {
-                if needs_layout_on_handle {
-                    self.arena.mark_needs_layout(id);
-                } else {
-                    self.arena.mark_needs_paint(id);
-                }
-                break;
-            }
-            current = self.arena.parent(id);
-        }
-    }
-
-    fn dispatch_to_widget_direct(&mut self, target: WidgetId, event: &WidgetEvent) {
-        if !self.arena.is_enabled(target) {
-            return;
-        }
-
-        let mut ctx = EventContext::new();
-        let response = if let Some(node) = self.arena.get_mut(target) {
-            Self::try_handler_bubble(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
-        } else {
-            EventResponse::Ignored
-        };
-        self.collect_from_ctx(ctx, target);
-
-        if response == EventResponse::Handled {
-            self.arena.mark_needs_paint(target);
-        }
-    }
-
-    /// Try to dispatch an event to attached handlers during the preview pass.
-    /// Returns `Some(response)` if a handler was found, `None` otherwise.
-    fn try_handler_preview(
-        node: &mut crate::arena::WidgetNode,
-        event: &WidgetEvent,
-        ctx: &mut EventContext,
-    ) -> Option<EventResponse> {
-        // Preview pass only uses on_key and on_pointer_event (escape hatch)
-        match event {
-            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
-                // on_key in preview is not typical — skip for now
-                None
-            }
-            _ => node
-                .handlers
-                .on_pointer_event
-                .as_mut()
-                .map(|handler| handler(event, ctx)),
-        }
-    }
-
-    /// Try to dispatch an event to attached handlers during the bubble pass.
-    /// Returns `Some(response)` if a handler was found, `None` otherwise.
-    fn try_handler_bubble(
-        node: &mut crate::arena::WidgetNode,
-        event: &WidgetEvent,
-        ctx: &mut EventContext,
-    ) -> Option<EventResponse> {
-        match event {
-            WidgetEvent::PointerEnter => {
-                // Auto-set cursor from node_cursor
-                if let Some(cursor) = node.node_cursor {
-                    ctx.set_cursor(cursor);
-                }
-                node.handlers.on_hover.as_mut().map(|handler| {
-                    handler(true, ctx);
-                    EventResponse::Handled
-                }).or_else(|| {
-                    // If no on_hover but node_cursor is set, still handle to set cursor
-                    node.node_cursor.map(|_| EventResponse::Handled)
-                })
-            }
-            WidgetEvent::PointerLeave => {
-                // Reset cursor on leave if node_cursor was set
-                if node.node_cursor.is_some() {
-                    ctx.set_cursor(crate::widget::CursorIcon::Default);
-                }
-                node.handlers.on_hover.as_mut().map(|handler| {
-                    handler(false, ctx);
-                    EventResponse::Handled
-                }).or_else(|| {
-                    node.node_cursor.map(|_| EventResponse::Handled)
-                })
-            }
-            WidgetEvent::FocusGained { .. } => node.handlers.on_focus.as_mut().map(|handler| {
-                handler(true, ctx);
-                EventResponse::Handled
-            }),
-            WidgetEvent::FocusLost => node.handlers.on_focus.as_mut().map(|handler| {
-                handler(false, ctx);
-                EventResponse::Handled
-            }),
-            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => node
-                .handlers
-                .on_key
-                .as_mut()
-                .map(|handler| handler(event, ctx)),
-            WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. } => node
-                .handlers
-                .on_scroll
-                .as_mut()
-                .map(|handler| handler(event, ctx)),
-            WidgetEvent::AccessAction { action, .. } => node
-                .handlers
-                .on_access_action
-                .as_mut()
-                .map(|handler| handler(*action, ctx)),
-            WidgetEvent::PointerDown { position, button } => {
-                // Auto-wire TapRecognizer for on_tap handlers
-                if node.handlers.on_tap.is_some() {
-                    let arena = node.handlers.gesture_arena.get_or_insert_with(|| {
-                        let mut a = GestureArena::new();
-                        a.add(crate::gesture::TapRecognizer::new());
-                        a
-                    });
-                    arena.process(&RawPointerEvent::Down {
-                        position: *position,
-                        button: *button,
-                    });
-                    return Some(EventResponse::Handled);
-                }
-                // Low-level pointer escape hatch
-                node.handlers
-                    .on_pointer_event
-                    .as_mut()
-                    .map(|handler| handler(event, ctx))
-            }
-            WidgetEvent::PointerUp { position, button } => {
-                if let Some(ref mut arena) = node.handlers.gesture_arena {
-                    let result = arena.process(&RawPointerEvent::Up {
-                        position: *position,
-                        button: *button,
-                    });
-                    if matches!(result, Some(GestureEvent::Tap { .. })) {
-                        if let Some(ref mut handler) = node.handlers.on_tap {
-                            handler(ctx);
-                        }
-                    }
-                    return Some(EventResponse::Handled);
-                }
-                node.handlers
-                    .on_pointer_event
-                    .as_mut()
-                    .map(|handler| handler(event, ctx))
-            }
-            WidgetEvent::PointerMove { position } => {
-                if let Some(ref mut arena) = node.handlers.gesture_arena {
-                    arena.process(&RawPointerEvent::Move {
-                        position: *position,
-                    });
-                    return Some(EventResponse::Ignored);
-                }
-                node.handlers
-                    .on_pointer_event
-                    .as_mut()
-                    .map(|handler| handler(event, ctx))
-            }
-            _ => None,
-        }
-    }
-
-    /// Collect commands, tree mutations, and idle callbacks from an EventContext.
-    fn collect_from_ctx(&mut self, ctx: EventContext, source_widget: WidgetId) {
-        self.pending_commands.extend(ctx.commands);
-        for cb in ctx.idle_callbacks {
-            self.idle_queue.push_boxed(cb);
-        }
-        // Process dismissals BEFORE tree mutations and new overlay requests,
-        // so that dismiss_all + activate + show_overlay in the same EventContext
-        // works correctly (e.g., MenuBar switching from one dropdown to another).
-        if ctx.dismiss_all_overlays {
-            let dismissed = self.overlay_manager.dismiss_all();
-            self.dormant_dismissed_content(&dismissed);
-        } else if ctx.dismiss_top {
-            if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
-                self.dormant_dismissed_content(&content_ids);
-                if let Some(restore_id) = focus_restore {
-                    if self.arena.is_active(restore_id) {
-                        self.focus(restore_id);
-                    }
-                }
-            }
-        } else {
-            for id in ctx.overlay_dismissals {
-                let dismissed = self.overlay_manager.dismiss(id);
-                self.dormant_dismissed_content(&dismissed);
-            }
-        }
-        for preserve_content in ctx.dismiss_descendant_overlays {
-            self.dismiss_child_overlays_for_source(source_widget, preserve_content);
-        }
-        self.apply_tree_mutations(&ctx.tree_mutations);
-        for mut req in ctx.overlay_requests {
-            if req.parent_overlay.is_none() {
-                req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
-            }
-            if self.overlay_manager.find_by_content(req.content_id).is_some() {
-                continue;
-            }
-            // Record current focus before showing, so it can be restored on dismiss
-            let current_focus = self.focused;
-            self.overlay_manager.show(req);
-            if let Some(focus_id) = current_focus {
-                self.overlay_manager.set_top_focus_restore(focus_id);
-            }
-        }
-        // Handle pointer capture requests
-        if let Some(capture) = ctx.pointer_capture {
-            if capture {
-                self.pointer_captured_by = Some(source_widget);
-            } else {
-                self.pointer_captured_by = None;
-            }
-        }
-        // Handle delayed overlay requests
-        for (mut request, delay, focus_target) in ctx.delayed_overlay_requests {
-            if request.parent_overlay.is_none() {
-                request.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
-            }
-            if self.overlay_manager.find_by_content(request.content_id).is_some() {
-                continue;
-            }
-            // Remove any existing pending request for the same content
-            let content_id = request.content_id;
-            self.pending_delayed_overlays
-                .retain(|p| p.request.content_id != content_id);
-            self.pending_delayed_overlays.push(PendingDelayedOverlay {
-                request,
-                delay,
-                focus_target,
-                real_requested_at: std::time::Instant::now(),
-                sim_requested_at: self.sim_clock,
-            });
-            // Mark the anchor as needing paint so the event loop keeps
-            // running until the delay elapses.
-            self.arena.mark_needs_paint(source_widget);
-        }
-        // Handle cancellation of delayed overlays
-        for content_id in ctx.cancel_delayed_overlays {
-            self.pending_delayed_overlays
-                .retain(|p| p.request.content_id != content_id);
-        }
-        // Handle cross-widget repaint requests
-        for id in ctx.repaint_requests {
-            self.arena.mark_needs_paint(id);
-        }
-        // Handle synthetic clicks (keyboard activation of child widgets)
-        for id in ctx.synthetic_clicks {
-            self.click(id);
-        }
-        // Handle focus requests (e.g., focusing overlay content on open)
-        if let Some(&id) = ctx.focus_requests.last() {
-            self.focus(id);
-        }
-    }
-
-    /// Feed a raw pointer event to gesture recognizers on the target widget
-    /// and its ancestors (bubbling up). If a gesture is recognized, dispatch
-    /// it as a `WidgetEvent::Gesture` through the normal preview/bubble path.
-    fn feed_gesture_recognizers(&mut self, target: WidgetId, raw: &RawPointerEvent) {
-        // Collect the chain: target + ancestors
-        let mut chain = vec![target];
-        let mut current = self.arena.parent(target);
-        while let Some(id) = current {
-            chain.push(id);
-            current = self.arena.parent(id);
-        }
-
-        for id in chain {
-            if let Some(node) = self.arena.get_mut(id)
-                && let Some(binding) = &mut node.gesture_binding
-                && let Some(gesture) = binding.arena.process(raw)
-            {
-                let mut ctx = EventContext::new();
-                (binding.handler)(gesture.clone(), &mut ctx);
-                self.collect_from_ctx(ctx, id);
-
-                // Also dispatch as WidgetEvent::Gesture for the widget's event()
-                self.dispatch_to_widget(id, &WidgetEvent::Gesture { gesture });
-                return; // First recognized gesture wins
-            }
-        }
-    }
-
-    fn apply_tree_mutations(&mut self, mutations: &[crate::widget::TreeMutation]) {
-        use crate::widget::TreeMutation;
-        for mutation in mutations {
-            match mutation {
-                TreeMutation::SetDormant(id) => self.arena.set_dormant(*id),
-                TreeMutation::Activate(id) => self.arena.activate(*id),
-                TreeMutation::Destroy(id) => self.arena.destroy(*id),
-            }
-        }
-    }
-
-    pub fn hit_test(&self, point: Point) -> Option<WidgetId> {
-        let roots = self.arena.roots();
-        for &root in roots.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(root, point) {
-                return Some(hit);
-            }
-        }
-        None
-    }
-
-    fn hit_test_recursive(&self, id: WidgetId, point: Point) -> Option<WidgetId> {
-        if !self.arena.is_active(id) {
-            return None;
-        }
-        let bounds = self.arena.bounds(id);
-        if !bounds.contains(point) {
-            return None;
-        }
-        let children = self.arena.children(id).to_vec();
-        for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(child, point) {
-                return Some(hit);
-            }
-        }
-        Some(id)
     }
 
     // --- Focus ---

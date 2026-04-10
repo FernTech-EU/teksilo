@@ -4,6 +4,7 @@ pub mod app_command;
 pub mod app_event;
 pub mod arena;
 pub mod build_context;
+mod compat;
 pub mod environment;
 pub mod event;
 pub(crate) mod event_handlers;

@@ -622,43 +622,6 @@ impl<T: Clone + 'static> From<Signal<T>> for Prop<T> {
     }
 }
 
-// Bridge: State<T> → Prop<T> for compatibility with State-based APIs.
-impl<T: Clone + 'static> From<crate::state::State<T>> for Prop<T> {
-    fn from(state: crate::state::State<T>) -> Self {
-        Prop::Bound(Signal::from(state))
-    }
-}
-
-// Bridge: DerivedState<T> → Prop<T>
-impl<T: Clone + 'static> From<crate::state::DerivedState<T>> for Prop<T> {
-    fn from(derived: crate::state::DerivedState<T>) -> Self {
-        Prop::Bound(Signal::from(derived))
-    }
-}
-
-// Bridge: Prop<T> → Reactive<T> for compatibility with State-based bindings.
-impl<T: Clone + 'static> From<Prop<T>> for crate::state::Reactive<T> {
-    fn from(prop: Prop<T>) -> Self {
-        match prop {
-            Prop::Static(v) => crate::state::Reactive::Static(v),
-            Prop::Bound(signal) => {
-                // Convert Signal to StateHandle via ReadableState
-                let signal_clone = signal.clone();
-                let handle = crate::state::StateHandle::from_signal(signal_clone);
-                crate::state::Reactive::Bound(handle)
-            }
-        }
-    }
-}
-
-// Bridge: Signal<T> → Reactive<T>
-impl<T: Clone + 'static> From<Signal<T>> for crate::state::Reactive<T> {
-    fn from(signal: Signal<T>) -> Self {
-        let handle = crate::state::StateHandle::from_signal(signal);
-        crate::state::Reactive::Bound(handle)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

@@ -106,22 +106,21 @@ impl<T: Clone + 'static> StateHandle<T> {
         self.inner.read()
     }
 
+    pub(crate) fn new_with_tracking(
+        inner: Rc<dyn ReadableState<T>>,
+        is_dirty: Option<Rc<dyn Fn() -> bool>>,
+        clear_dirty: Option<Rc<dyn Fn()>>,
+    ) -> Self {
+        Self {
+            inner,
+            is_dirty,
+            clear_dirty,
+        }
+    }
+
     /// Create a StateHandle from a Signal for compatibility interop.
     pub fn from_signal(signal: crate::signal::Signal<T>) -> Self {
-        struct SignalReader<T: Clone + 'static>(crate::signal::Signal<T>);
-        impl<T: Clone + 'static> ReadableState<T> for SignalReader<T> {
-            fn read(&self) -> T {
-                self.0.get()
-            }
-        }
-
-        let dirty_signal = signal.clone();
-        let clear_signal = signal.clone();
-        StateHandle {
-            inner: Rc::new(SignalReader(signal)),
-            is_dirty: Some(Rc::new(move || dirty_signal.is_dirty())),
-            clear_dirty: Some(Rc::new(move || clear_signal.clear_dirty())),
-        }
+        crate::compat::state_handle_from_signal(signal)
     }
 
     /// Register this handle's dirty tracking for a widget at the given level.
