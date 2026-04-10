@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use fern_core::WidgetTree;
+use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
 use fern_platform::event_translation::TranslationState;
 use fern_tokens::Theme;
@@ -44,10 +45,13 @@ pub struct WindowManager {
     pending_creates: Vec<WindowConfig>,
     /// Windows pending closure.
     pending_closes: Vec<FernWindowId>,
+    /// OS-level accessibility preferences, queried once at startup.
+    a11y_prefs: AccessibilityPreferences,
 }
 
 impl WindowManager {
     pub fn new(theme: Theme) -> Self {
+        let a11y_prefs = AccessibilityPreferences::query();
         Self {
             windows: HashMap::new(),
             fern_to_winit: HashMap::new(),
@@ -58,6 +62,7 @@ impl WindowManager {
             modal_blocked: HashMap::new(),
             pending_creates: Vec::new(),
             pending_closes: Vec::new(),
+            a11y_prefs,
         }
     }
 
@@ -96,6 +101,11 @@ impl WindowManager {
         let pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
+        tree.set_accessibility_preferences(
+            self.a11y_prefs.high_contrast,
+            self.a11y_prefs.reduced_motion,
+            self.a11y_prefs.text_scale_factor,
+        );
 
         #[cfg(feature = "text")]
         {
@@ -208,6 +218,11 @@ impl WindowManager {
     /// Get the current shared theme.
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// Get the OS-level accessibility preferences (queried at startup).
+    pub fn accessibility_preferences(&self) -> &AccessibilityPreferences {
+        &self.a11y_prefs
     }
 
     /// Number of active windows.

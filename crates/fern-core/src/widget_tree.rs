@@ -72,6 +72,10 @@ pub struct WidgetTree {
     pointer_captured_by: Option<WidgetId>,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
     pending_delayed_overlays: Vec<PendingDelayedOverlay>,
+    /// OS-level accessibility preferences (high contrast, reduced motion, text scale).
+    prefers_high_contrast: bool,
+    prefers_reduced_motion: bool,
+    text_scale_factor: f64,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -125,6 +129,9 @@ impl WidgetTree {
             cached_frame: None,
             pointer_captured_by: None,
             pending_delayed_overlays: Vec::new(),
+            prefers_high_contrast: false,
+            prefers_reduced_motion: false,
+            text_scale_factor: 1.0,
         }
     }
 
@@ -301,6 +308,44 @@ impl WidgetTree {
     pub fn set_layout_direction(&mut self, direction: crate::environment::LayoutDirection) {
         self.layout_direction = direction;
         self.arena.mark_all_dirty();
+    }
+
+    /// Set OS-level accessibility preferences.
+    ///
+    /// Called by `fern-app` after querying the platform layer. Updates the
+    /// values fed into `PaintContext` and `Environment` on subsequent frames.
+    /// Marks all widgets dirty so the new preferences take effect immediately.
+    pub fn set_accessibility_preferences(
+        &mut self,
+        high_contrast: bool,
+        reduced_motion: bool,
+        text_scale_factor: f64,
+    ) {
+        let changed = self.prefers_high_contrast != high_contrast
+            || self.prefers_reduced_motion != reduced_motion
+            || (self.text_scale_factor - text_scale_factor).abs() > f64::EPSILON;
+
+        if changed {
+            self.prefers_high_contrast = high_contrast;
+            self.prefers_reduced_motion = reduced_motion;
+            self.text_scale_factor = text_scale_factor;
+            self.arena.mark_all_dirty();
+        }
+    }
+
+    /// Whether the OS has requested high-contrast mode.
+    pub fn prefers_high_contrast(&self) -> bool {
+        self.prefers_high_contrast
+    }
+
+    /// Whether the OS has requested reduced motion.
+    pub fn prefers_reduced_motion(&self) -> bool {
+        self.prefers_reduced_motion
+    }
+
+    /// OS text scaling factor (1.0 = normal).
+    pub fn text_scale_factor(&self) -> f64 {
+        self.text_scale_factor
     }
 
     /// Mark a widget as clipping its children to its bounds (scroll areas).
@@ -1568,6 +1613,11 @@ impl WidgetTree {
         let mut frame = RenderFrame::new();
         let base_theme = self.theme.clone();
         let text_backend = self.text_backend.clone();
+        let a11y_prefs = A11yPaintPrefs {
+            high_contrast: self.prefers_high_contrast,
+            reduced_motion: self.prefers_reduced_motion,
+            large_text: self.text_scale_factor > 1.0,
+        };
 
         // Paint main content first
         let roots: Vec<WidgetId> = self.arena.roots();
@@ -1579,6 +1629,7 @@ impl WidgetTree {
                 &base_theme,
                 &text_backend,
                 None,
+                &a11y_prefs,
             );
         }
 
@@ -1592,6 +1643,7 @@ impl WidgetTree {
                 &base_theme,
                 &text_backend,
                 None,
+                &a11y_prefs,
             );
         }
 
@@ -2193,6 +2245,13 @@ fn to_raw_pointer_event(event: &WidgetEvent) -> Option<RawPointerEvent> {
     }
 }
 
+/// Accessibility preferences passed through the paint recursion.
+struct A11yPaintPrefs {
+    high_contrast: bool,
+    reduced_motion: bool,
+    large_text: bool,
+}
+
 /// Recursive paint pass with per-widget caching.
 /// Only re-runs `paint()` for widgets with `needs_paint` set; clean widgets
 /// reuse their `cached_paint` output. The tree walk still runs for clip/child
@@ -2204,6 +2263,7 @@ fn paint_widget_cached(
     base_theme: &fern_tokens::Theme,
     text_backend: &Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
     clip_bounds: Option<Rect>,
+    a11y_prefs: &A11yPaintPrefs,
 ) {
     if !arena.is_active(id) {
         return;
@@ -2230,9 +2290,9 @@ fn paint_widget_cached(
         let ctx = PaintContext {
             theme: &resolved_theme,
             scale_factor: 1.0,
-            prefers_high_contrast: false,
-            prefers_reduced_motion: false,
-            prefers_large_text: false,
+            prefers_high_contrast: a11y_prefs.high_contrast,
+            prefers_reduced_motion: a11y_prefs.reduced_motion,
+            prefers_large_text: a11y_prefs.large_text,
         };
 
         let bounds = arena.bounds(id);
@@ -2285,7 +2345,7 @@ fn paint_widget_cached(
     }
 
     for child_id in children {
-        paint_widget_cached(arena, child_id, frame, base_theme, text_backend, next_clip);
+        paint_widget_cached(arena, child_id, frame, base_theme, text_backend, next_clip, a11y_prefs);
     }
 
     if clips {
