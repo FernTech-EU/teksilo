@@ -165,7 +165,11 @@ impl OverlayManager {
     pub fn next_auto_dismiss_deadline(&self) -> Option<std::time::Instant> {
         self.stack
             .iter()
-            .filter_map(|overlay| overlay.auto_dismiss_after.map(|delay| overlay.shown_at_real + delay))
+            .filter_map(|overlay| {
+                overlay
+                    .auto_dismiss_after
+                    .map(|delay| overlay.shown_at_real + delay)
+            })
             .min()
     }
 
@@ -194,6 +198,17 @@ impl OverlayManager {
         }
 
         false
+    }
+
+    pub(crate) fn overlay(&self, id: OverlayId) -> Option<&ActiveOverlay> {
+        self.stack.iter().find(|overlay| overlay.id == id)
+    }
+
+    pub(crate) fn topmost_centered(&self) -> Option<&ActiveOverlay> {
+        self.stack
+            .iter()
+            .rev()
+            .find(|overlay| matches!(overlay.placement, OverlayPlacement::Centered))
     }
 
     /// Dismiss an overlay and all its children (cascade), returning the
@@ -698,7 +713,12 @@ mod tests {
         mgr.set_content_bounds(id, Size::new(240.0, 120.0));
         mgr.position_overlays(|_| Rect::new(0.0, 0.0, 10.0, 10.0), (800.0, 600.0));
 
-        let bounds = mgr.stack.iter().find(|overlay| overlay.id == id).unwrap().bounds;
+        let bounds = mgr
+            .stack
+            .iter()
+            .find(|overlay| overlay.id == id)
+            .unwrap()
+            .bounds;
         assert!((bounds.x - 280.0).abs() < 0.01);
         assert!((bounds.y - 240.0).abs() < 0.01);
     }
@@ -718,7 +738,12 @@ mod tests {
         mgr.set_content_bounds(id, Size::new(240.0, 64.0));
         mgr.position_overlays(|_| Rect::new(0.0, 0.0, 10.0, 10.0), (800.0, 600.0));
 
-        let bounds = mgr.stack.iter().find(|overlay| overlay.id == id).unwrap().bounds;
+        let bounds = mgr
+            .stack
+            .iter()
+            .find(|overlay| overlay.id == id)
+            .unwrap()
+            .bounds;
         assert!((bounds.x - 280.0).abs() < 0.01);
         assert!((bounds.y - 512.0).abs() < 0.01);
     }

@@ -419,6 +419,9 @@ impl WidgetTree {
     }
 
     fn collect_from_ctx(&mut self, ctx: EventContext, source_widget: WidgetId) {
+        if let Some(cursor) = ctx.cursor_request {
+            self.current_cursor = cursor;
+        }
         self.pending_commands.extend(ctx.commands);
         for callback in ctx.idle_callbacks {
             self.idle_queue.push_boxed(callback);
@@ -475,7 +478,8 @@ impl WidgetTree {
             }
             let current_focus = self.focused;
             let overlay_id = self.overlay_manager.show_for(req, duration);
-            self.overlay_manager.set_shown_at_sim(overlay_id, self.sim_clock);
+            self.overlay_manager
+                .set_shown_at_sim(overlay_id, self.sim_clock);
             if let Some(focus_id) = current_focus {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
@@ -560,6 +564,16 @@ impl WidgetTree {
     }
 
     pub fn hit_test(&self, point: Point) -> Option<WidgetId> {
+        if let Some(overlay_id) = self.overlay_manager.hit_test(point)
+            && let Some(overlay) = self.overlay_manager.overlay(overlay_id)
+        {
+            return self.hit_test_recursive(overlay.content_id, point);
+        }
+
+        if self.overlay_manager.topmost_centered().is_some() {
+            return None;
+        }
+
         let roots = self.arena.roots();
         for &root in roots.iter().rev() {
             if let Some(hit) = self.hit_test_recursive(root, point) {
@@ -591,6 +605,8 @@ impl WidgetTree {
 mod tests {
     use super::*;
     use crate::test_widgets::FillWidget;
+    use crate::widget::CursorIcon;
+    use crate::widget_builder::WidgetBuilder;
 
     #[derive(Debug, Clone, PartialEq)]
     enum TestCmd {
@@ -608,6 +624,19 @@ mod tests {
         assert_eq!(tree.hovered, Some(widget));
         tree.pointer_move(Point::new(200.0, 200.0));
         assert_eq!(tree.hovered, None);
+    }
+
+    #[test]
+    fn pointer_hover_updates_current_cursor() {
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().cursor(CursorIcon::ColResize));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert_eq!(tree.current_cursor(), CursorIcon::ColResize);
+
+        tree.pointer_move(Point::new(200.0, 200.0));
+        assert_eq!(tree.current_cursor(), CursorIcon::Default);
     }
 
     #[test]

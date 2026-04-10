@@ -58,7 +58,10 @@ impl Widget for DialogSurface {
             })
             .unwrap_or_else(|| proposal.resolve(240.0, 120.0));
 
-        Size::new((content.width + inset).max(DIALOG_MIN_WIDTH), content.height + inset)
+        Size::new(
+            (content.width + inset).max(DIALOG_MIN_WIDTH),
+            content.height + inset,
+        )
     }
 
     fn place_children(
@@ -69,7 +72,8 @@ impl Widget for DialogSurface {
         _ctx: &LayoutContext,
     ) {
         for child in children.iter_mut() {
-            child.origin = fern_canvas::Point::new(bounds.x + DIALOG_PADDING, bounds.y + DIALOG_PADDING);
+            child.origin =
+                fern_canvas::Point::new(bounds.x + DIALOG_PADDING, bounds.y + DIALOG_PADDING);
             child.size = Size::new(
                 (bounds.width - DIALOG_PADDING * 2.0).max(0.0),
                 (bounds.height - DIALOG_PADDING * 2.0).max(0.0),
@@ -473,6 +477,28 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FullSizeFocusable {
+        label: &'static str,
+    }
+
+    impl Widget for FullSizeFocusable {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            ctx.apply_self_handlers(fern_core::widget_builder::HandlerSet::new().focusable(true));
+            Vec::new()
+        }
+
+        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+            proposal.resolve(0.0, 0.0)
+        }
+
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            builder.set_role(fern_core::accesskit::Role::Button);
+            builder.set_name(self.label);
+            builder.add_action(fern_core::accesskit::Action::Focus);
+        }
+    }
+
     #[test]
     fn access_click_opens_centered_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
@@ -508,7 +534,9 @@ mod tests {
         });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        let dialog = tree.find_by_role(fern_core::accesskit::Role::Dialog).unwrap();
+        let dialog = tree
+            .find_by_role(fern_core::accesskit::Role::Dialog)
+            .unwrap();
         let info = tree.accessibility_node(dialog);
         assert_eq!(info.role(), fern_core::accesskit::Role::Dialog);
     }
@@ -516,7 +544,9 @@ mod tests {
     #[test]
     fn custom_trigger_opens_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)));
+        tree.add(
+            Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)),
+        );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -550,5 +580,59 @@ mod tests {
 
         assert!(tree.find_by_label("Review Changes").is_some());
         assert!(tree.find_by_label("Close").is_some());
+    }
+
+    #[test]
+    fn centered_dialog_blocks_background_hit_testing() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(FullSizeFocusable {
+            label: "Background",
+        });
+        tree.add(Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Open dialog").unwrap();
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let content_id = tree.overlay_manager().active_content_ids()[0];
+        let dialog_bounds = tree.bounds(content_id);
+        let blocked_point =
+            fern_canvas::Point::new(dialog_bounds.right() + 40.0, dialog_bounds.y + 10.0);
+
+        assert_eq!(tree.hit_test(blocked_point), None);
+    }
+
+    #[test]
+    fn centered_dialog_traps_tab_focus() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(FullSizeFocusable {
+            label: "Background",
+        });
+        tree.add(Dialog::new(
+            "Open dialog",
+            DialogContent::new()
+                .title("Review Changes")
+                .body(FixedLeaf(220.0, 120.0))
+                .footer(Button::new("Close")),
+        ));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Open dialog").unwrap();
+        tree.focus(trigger);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+        });
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.press_key(Key::Tab, fern_core::event::Modifiers::NONE);
+
+        let close = tree.find_by_label("Close").unwrap();
+        assert_eq!(tree.focused(), Some(close));
+        assert_ne!(tree.find_by_label("Background"), tree.focused());
     }
 }
