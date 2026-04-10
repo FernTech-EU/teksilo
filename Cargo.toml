@@ -25,6 +25,7 @@ serde = { version = "1", features = ["derive"] }
 fern-tokens = { path = "crates/fern-tokens", version = "0.1.0" }
 fern-canvas = { path = "crates/fern-canvas", version = "0.1.0" }
 fern-core = { path = "crates/fern-core", version = "0.1.0" }
+fern-data = { path = "crates/fern-data", version = "0.1.0" }
 fern-widgets = { path = "crates/fern-widgets", version = "0.1.0" }
 fern-i18n = { path = "crates/fern-i18n", version = "0.1.0" }
 fern-text = { path = "crates/fern-text", version = "0.1.0" }
