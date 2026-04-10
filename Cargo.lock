@@ -721,6 +721,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dialogs-and-popovers"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -951,6 +958,14 @@ dependencies = [
  "accesskit",
  "fern-canvas",
  "fern-tokens",
+ "slotmap",
+]
+
+[[package]]
+name = "fern-data"
+version = "0.1.0"
+dependencies = [
+ "fern-core",
  "slotmap",
 ]
 
@@ -2934,6 +2949,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "split-view"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2995,6 +3017,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tab-widget"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
 ]
 
 [[package]]
