@@ -191,6 +191,9 @@ pub struct EventContext {
         std::time::Duration,
         Option<crate::widget_id::WidgetId>,
     )>,
+    /// Timed overlay requests (request, auto-dismiss delay).
+    pub(crate) timed_overlay_requests:
+        Vec<(crate::overlay::OverlayRequest, std::time::Duration)>,
     /// Dismiss descendant overlays of the source widget's containing overlay.
     /// Optionally preserve the subtree rooted at a specific content widget ID.
     pub(crate) dismiss_descendant_overlays: Vec<Option<crate::widget_id::WidgetId>>,
@@ -225,6 +228,7 @@ impl EventContext {
             dismiss_top: false,
             pointer_capture: None,
             delayed_overlay_requests: Vec::new(),
+            timed_overlay_requests: Vec::new(),
             dismiss_descendant_overlays: Vec::new(),
             cancel_delayed_overlays: Vec::new(),
             repaint_requests: Vec::new(),
@@ -262,6 +266,15 @@ impl EventContext {
     /// Show an overlay (tooltip, menu, popover).
     pub fn show_overlay(&mut self, request: crate::overlay::OverlayRequest) {
         self.overlay_requests.push(request);
+    }
+
+    /// Show an overlay that dismisses automatically after `duration`.
+    pub fn show_overlay_for(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        duration: std::time::Duration,
+    ) {
+        self.timed_overlay_requests.push((request, duration));
     }
 
     /// Dismiss an overlay by ID.

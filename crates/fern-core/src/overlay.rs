@@ -36,6 +36,8 @@ pub enum OverlayPlacement {
     NearAnchor { offset: Vec2 },
     /// Centered within the viewport (dialog).
     Centered,
+    /// Bottom-centered within the viewport (snackbar/toast).
+    BottomCenter,
     /// Below the anchor if space allows, otherwise above (combo box dropdown).
     /// The viewport height is supplied by `position_overlays()` at layout time.
     BelowPreferred,
@@ -99,6 +101,12 @@ pub(crate) struct ActiveOverlay {
     pub pointer_leave_started_real: Option<std::time::Instant>,
     /// When pointer-leave dismissal started (simulated time).
     pub pointer_leave_started_sim: Option<std::time::Instant>,
+    /// Dismiss automatically after this duration, if set.
+    pub auto_dismiss_after: Option<Duration>,
+    /// When the overlay was shown (real time).
+    pub shown_at_real: std::time::Instant,
+    /// When the overlay was shown (simulated time).
+    pub shown_at_sim: std::time::Instant,
 }
 
 /// Manages the overlay stack — creation, positioning, dismissal, cascading.
@@ -117,8 +125,22 @@ impl OverlayManager {
 
     /// Show a new overlay. Returns the OverlayId.
     pub fn show(&mut self, request: OverlayRequest) -> OverlayId {
+        self.show_with_auto_dismiss(request, None)
+    }
+
+    /// Show a new overlay that dismisses automatically after `duration`.
+    pub fn show_for(&mut self, request: OverlayRequest, duration: Duration) -> OverlayId {
+        self.show_with_auto_dismiss(request, Some(duration))
+    }
+
+    fn show_with_auto_dismiss(
+        &mut self,
+        request: OverlayRequest,
+        auto_dismiss_after: Option<Duration>,
+    ) -> OverlayId {
         let id = OverlayId::new(self.next_id);
         self.next_id += 1;
+        let now = std::time::Instant::now();
 
         let overlay = ActiveOverlay {
             id,
@@ -132,9 +154,25 @@ impl OverlayManager {
             focus_restore: None,
             pointer_leave_started_real: None,
             pointer_leave_started_sim: None,
+            auto_dismiss_after,
+            shown_at_real: now,
+            shown_at_sim: now,
         };
         self.stack.push(overlay);
         id
+    }
+
+    pub fn next_auto_dismiss_deadline(&self) -> Option<std::time::Instant> {
+        self.stack
+            .iter()
+            .filter_map(|overlay| overlay.auto_dismiss_after.map(|delay| overlay.shown_at_real + delay))
+            .min()
+    }
+
+    pub(crate) fn set_shown_at_sim(&mut self, id: OverlayId, shown_at_sim: std::time::Instant) {
+        if let Some(overlay) = self.stack.iter_mut().find(|overlay| overlay.id == id) {
+            overlay.shown_at_sim = shown_at_sim;
+        }
     }
 
     pub(crate) fn is_descendant_of(&self, child: OverlayId, ancestor: OverlayId) -> bool {
@@ -410,6 +448,12 @@ impl OverlayManager {
                     content_size.width.min(vw),
                     content_size.height.min(vh),
                 ),
+                OverlayPlacement::BottomCenter => Rect::new(
+                    ((vw - content_size.width) / 2.0).max(0.0),
+                    (vh - content_size.height - 24.0).max(0.0),
+                    content_size.width.min(vw),
+                    content_size.height.min(vh),
+                ),
                 OverlayPlacement::BelowPreferred => {
                     let below_y = anchor.y + anchor.height + 4.0;
                     let fits_below = below_y + content_size.height <= vh;
@@ -657,5 +701,25 @@ mod tests {
         let bounds = mgr.stack.iter().find(|overlay| overlay.id == id).unwrap().bounds;
         assert!((bounds.x - 280.0).abs() < 0.01);
         assert!((bounds.y - 240.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn bottom_center_placement_uses_viewport_bottom_margin() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::BottomCenter,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        mgr.set_content_bounds(id, Size::new(240.0, 64.0));
+        mgr.position_overlays(|_| Rect::new(0.0, 0.0, 10.0, 10.0), (800.0, 600.0));
+
+        let bounds = mgr.stack.iter().find(|overlay| overlay.id == id).unwrap().bounds;
+        assert!((bounds.x - 280.0).abs() < 0.01);
+        assert!((bounds.y - 512.0).abs() < 0.01);
     }
 }

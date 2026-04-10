@@ -277,11 +277,13 @@ impl WidgetTree {
             .iter()
             .map(|pending| pending.real_requested_at + pending.delay)
             .min();
+        let auto_dismiss_deadline = self.overlay_manager.next_auto_dismiss_deadline();
         let animation_deadline = self.animation_scheduler.next_deadline();
 
         [
             tooltip_deadline,
             delayed_overlay_deadline,
+            auto_dismiss_deadline,
             animation_deadline,
         ]
         .into_iter()
@@ -302,6 +304,16 @@ impl WidgetTree {
         request: crate::overlay::OverlayRequest,
     ) -> crate::overlay::OverlayId {
         self.overlay_manager.show(request)
+    }
+
+    pub fn show_overlay_for(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        duration: std::time::Duration,
+    ) -> crate::overlay::OverlayId {
+        let id = self.overlay_manager.show_for(request, duration);
+        self.overlay_manager.set_shown_at_sim(id, self.sim_clock);
+        id
     }
 
     pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
@@ -557,5 +569,34 @@ mod tests {
 
         tree.advance_time(std::time::Duration::from_millis(500));
         assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn timed_overlay_auto_dismisses_after_duration() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Toast"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.show_overlay_for(
+            crate::overlay::OverlayRequest {
+                content_id: content,
+                anchor,
+                placement: crate::overlay::OverlayPlacement::Below,
+                dismiss: crate::overlay::DismissBehavior::Manual,
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+            },
+            std::time::Duration::from_millis(300),
+        );
+
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.advance_time(std::time::Duration::from_millis(200));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content));
     }
 }

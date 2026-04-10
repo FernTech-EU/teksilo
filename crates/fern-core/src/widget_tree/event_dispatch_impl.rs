@@ -462,6 +462,24 @@ impl WidgetTree {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
         }
+        for (mut req, duration) in ctx.timed_overlay_requests {
+            if req.parent_overlay.is_none() {
+                req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
+            }
+            if self
+                .overlay_manager
+                .find_by_content(req.content_id)
+                .is_some()
+            {
+                continue;
+            }
+            let current_focus = self.focused;
+            let overlay_id = self.overlay_manager.show_for(req, duration);
+            self.overlay_manager.set_shown_at_sim(overlay_id, self.sim_clock);
+            if let Some(focus_id) = current_focus {
+                self.overlay_manager.set_top_focus_restore(focus_id);
+            }
+        }
         if let Some(capture) = ctx.pointer_capture {
             if capture {
                 self.pointer_captured_by = Some(source_widget);

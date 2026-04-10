@@ -82,6 +82,7 @@ impl WidgetTree {
         self.process_tooltips();
         self.process_delayed_overlays();
         self.process_pointer_leave_overlays();
+        self.process_auto_dismiss_overlays();
     }
 
     /// Get the current simulated clock value.

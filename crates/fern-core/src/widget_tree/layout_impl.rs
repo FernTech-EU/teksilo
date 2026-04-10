@@ -45,6 +45,7 @@ impl WidgetTree {
         self.process_tooltips_real();
         self.process_delayed_overlays_real();
         self.process_pointer_leave_overlays_real();
+        self.process_auto_dismiss_overlays_real();
 
         self.arena.refresh_roots();
 
