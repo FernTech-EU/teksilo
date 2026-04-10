@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn card_renders_shadow_and_background() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let content = tree.add(FixedLeaf(100.0, 50.0));
+        let _content = tree.add(FixedLeaf(100.0, 50.0));
         tree.add(Card::new().content(FixedLeaf(100.0, 50.0)));
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let frame = tree.render();

@@ -269,7 +269,6 @@ impl Widget for MenuItem {
 
             handler_set = handler_set
                 .on_tap({
-                    let int_hover = int_hover.clone();
                     move |ctx: &mut EventContext| {
                         if !enabled {
                             return;

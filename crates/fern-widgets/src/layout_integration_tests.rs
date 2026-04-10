@@ -1,7 +1,7 @@
 use fern_canvas::{Size, SizeProposal};
 use fern_core::widget::{LayoutContext, Widget};
 use fern_core::widget_tree::WidgetTree;
-use fern_tokens::{Alignment, HAlignment, VAlignment};
+use fern_tokens::{Alignment, HAlignment};
 
 use crate::primitives::{
     Center, Expand, FixedSize, HStack, MinSize, Padding, Spacer, TextWidget, VStack, ZStack,
@@ -166,7 +166,7 @@ fn expand_horizontal_in_hstack() {
 fn center_widget() {
     let mut tree = WidgetTree::new();
     let child = tree.add(FixedLeaf(40.0, 20.0));
-    let center = tree.add(Center::new().set_child(child));
+    let _center = tree.add(Center::new().set_child(child));
     tree.layout(SizeProposal::exact(200.0, 100.0));
 
     let cb = tree.bounds(child);
@@ -273,7 +273,7 @@ fn demo_layout_no_overlap_between_sections() {
             .add_child(typography)
             .add_child(showcase),
     );
-    let root = tree.add(Padding::uniform(24.0).set_child(outer));
+    let _root = tree.add(Padding::uniform(24.0).set_child(outer));
     tree.layout(SizeProposal::exact(600.0, 500.0));
 
     // === Check that each section starts BELOW the previous section ===

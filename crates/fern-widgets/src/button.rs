@@ -246,7 +246,6 @@ impl fern_core::widget::Widget for Button {
         let int_hover_leave = interaction.clone();
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
-        let action_key = action.as_ref().map(|_| ());
         // Re-wrap action into Rc so it can be shared between tap, key, and access handlers
         let action_rc: std::rc::Rc<Option<CommandFactory>> = std::rc::Rc::new(action);
         let action_for_tap = action_rc.clone();
@@ -537,7 +536,7 @@ mod tests {
 
     #[test]
     fn keyboard_focus_shows_focus_ring() {
-        let (mut tree, btn) = setup();
+        let (mut tree, _btn) = setup();
 
         let frame_idle = tree.render();
         let idle_shapes = frame_idle.shapes.clone();

@@ -627,7 +627,7 @@ mod tests {
     fn scrollbar_thumb_drag_updates_position() {
         let (bar, position, _max, _ratio) = make_scrollbar();
         let mut tree = WidgetTree::new();
-        let id = tree.add(bar);
+        let _id = tree.add(bar);
         tree.layout(SizeProposal::exact(12.0, 400.0));
 
         // Render once to cache bounds
@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn scrollbar_accessibility() {
-        let (bar, position, max_scroll, _ratio) = make_scrollbar();
+        let (bar, position, _max_scroll, _ratio) = make_scrollbar();
         position.set(100.0);
 
         let mut tree = WidgetTree::new();
@@ -729,7 +729,7 @@ mod tests {
     fn track_click_pages_forward() {
         let (bar, position, ..) = make_scrollbar();
         let mut tree = WidgetTree::new();
-        let id = tree.add(bar);
+        let _id = tree.add(bar);
         tree.layout(SizeProposal::exact(12.0, 400.0));
         tree.render();
 
@@ -756,7 +756,7 @@ mod tests {
         // the pointer is outside its bounds.
         let (bar, position, ..) = make_scrollbar();
         let mut tree = WidgetTree::new();
-        let id = tree.add(bar);
+        let _id = tree.add(bar);
         tree.layout(SizeProposal::exact(12.0, 400.0));
         tree.render();
 

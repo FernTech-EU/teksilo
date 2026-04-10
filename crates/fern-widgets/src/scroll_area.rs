@@ -731,7 +731,7 @@ mod tests {
         let b = tree.add(TallLeaf::new(200.0, 100.0));
         let content = tree.add(VStack::new().add_child(a).add_child(b));
 
-        let scroll = tree.add(ScrollArea::from_id(content));
+        let _scroll = tree.add(ScrollArea::from_id(content));
 
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -769,7 +769,7 @@ mod tests {
     fn scroll_offset_is_clamped() {
         let mut tree = WidgetTree::new();
         let content = tree.add(TallLeaf::new(200.0, 200.0));
-        let scroll = tree.add(ScrollArea::from_id(content));
+        let _scroll = tree.add(ScrollArea::from_id(content));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 

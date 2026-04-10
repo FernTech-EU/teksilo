@@ -206,7 +206,7 @@ mod tests {
     fn content_alignment_top_trailing() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let expand = tree.add(
+        let _expand = tree.add(
             Expand::new()
                 .content_alignment(Alignment::TOP_TRAILING)
                 .set_child(child),
