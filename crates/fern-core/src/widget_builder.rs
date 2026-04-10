@@ -279,6 +279,13 @@ impl<W: Widget> std::fmt::Debug for WidgetWithHandlers<W> {
 }
 
 impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
+    fn build(
+        &mut self,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Vec<crate::widget_id::WidgetId> {
+        self.widget.build(ctx)
+    }
+
     fn size_that_fits(
         &self,
         proposal: fern_canvas::SizeProposal,
@@ -326,6 +333,67 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
 
     fn take_handler_set(&mut self) -> Option<HandlerSet> {
         Some(self.take_handler_set())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widget::WidgetPlacement;
+    use crate::widget_id::WidgetId;
+    use crate::widget_tree::WidgetTree;
+
+    #[derive(Debug)]
+    struct CompositeLeaf {
+        child_id: Option<WidgetId>,
+    }
+
+    impl CompositeLeaf {
+        fn new() -> Self {
+            Self { child_id: None }
+        }
+    }
+
+    impl Widget for CompositeLeaf {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let child = ctx.add(crate::test_widgets::FillWidget::new());
+            self.child_id = Some(child);
+            vec![child]
+        }
+
+        fn size_that_fits(
+            &self,
+            proposal: fern_canvas::SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> fern_canvas::Size {
+            proposal.resolve(120.0, 40.0)
+        }
+
+        fn place_children(
+            &self,
+            bounds: fern_canvas::Rect,
+            _proposal: fern_canvas::SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &crate::widget::LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.child_id.into_iter().collect()
+        }
+    }
+
+    #[test]
+    fn wrapped_composite_widget_still_builds_children() {
+        let mut tree = WidgetTree::new();
+        let root = tree.add(CompositeLeaf::new().on_tap(|_ctx| {}));
+        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
+
+        assert_eq!(tree.children(root).len(), 1);
     }
 }
 
