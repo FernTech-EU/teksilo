@@ -166,6 +166,10 @@ impl WidgetArena {
 
     /// Insert a widget as a child of the given parent.
     pub fn insert_child(&mut self, parent: WidgetId, widget: Box<dyn Widget>) -> WidgetId {
+        assert!(
+            self.nodes.contains_key(parent),
+            "insert_child() called with invalid parent WidgetId {parent:?}"
+        );
         self.roots_dirty = true;
         let children = widget.children();
         let id = self.nodes.insert(WidgetNode {

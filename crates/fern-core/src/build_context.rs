@@ -86,19 +86,6 @@ impl<'a> BuildContext<'a> {
         state
     }
 
-    /// Observe a state value. (V1 API — prefer `effect()`)
-    pub fn observe<T: 'static>(&mut self, state: &State<T>, callback: impl Fn(&T) + 'static) {
-        let observer_id = state.observe(callback);
-        // Register cleanup so the observer is removed on rebuild
-        if let Some(composite_id) = self.composite_id {
-            let state_clone = state.clone();
-            self.tree.register_observer_cleanup(
-                composite_id,
-                Box::new(move || state_clone.remove_observer(observer_id)),
-            );
-        }
-    }
-
     /// Get the binding registry.
     pub fn binding_registry(&self) -> &BindingRegistry {
         self.tree.binding_registry()

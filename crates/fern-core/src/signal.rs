@@ -4,8 +4,8 @@
 //! `Prop<T>` replaces `Reactive<T>` as the widget property type.
 //! `ObserverHandle` is an RAII guard — dropping it removes the observer callback.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::{Ref, RefCell};
+use std::rc::{Rc, Weak};
 
 use crate::state::{Binding, BindingLevel, BindingRegistry};
 use crate::widget_id::WidgetId;
@@ -67,6 +67,35 @@ struct AnimationState {
     target: Option<f32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalAccessError {
+    ReadOnly,
+    AnimationUnsupported,
+}
+
+pub(crate) struct WeakAnimatedSignal {
+    inner: Weak<RefCell<MutableInner<f32>>>,
+    animation: Weak<RefCell<AnimationState>>,
+}
+
+impl WeakAnimatedSignal {
+    pub(crate) fn upgrade(&self) -> Option<Signal<f32>> {
+        Some(Signal {
+            kind: SignalKind::Mutable {
+                inner: self.inner.upgrade()?,
+                animation: Some(self.animation.upgrade()?),
+            },
+        })
+    }
+
+    pub(crate) fn same_signal(&self, signal: &Signal<f32>) -> bool {
+        match &signal.kind {
+            SignalKind::Mutable { inner, .. } => self.inner.as_ptr() == Rc::as_ptr(inner),
+            SignalKind::Derived { .. } => false,
+        }
+    }
+}
+
 enum SignalKind<T> {
     Mutable {
         inner: Rc<RefCell<MutableInner<T>>>,
@@ -108,6 +137,11 @@ impl<T: 'static> Signal<T> {
     /// Set a new value. Marks the signal as dirty and notifies observers.
     /// Panics if called on a derived (read-only) signal.
     pub fn set(&self, value: T) {
+        self.try_set(value)
+            .expect("cannot set() on a derived Signal — it is read-only");
+    }
+
+    pub fn try_set(&self, value: T) -> Result<(), SignalAccessError> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
                 let mut guard = inner.borrow_mut();
@@ -120,16 +154,23 @@ impl<T: 'static> Signal<T> {
                 for cb in &callbacks {
                     cb(&guard.value);
                 }
+                Ok(())
             }
-            SignalKind::Derived { .. } => {
-                panic!("cannot set() on a derived Signal — it is read-only");
-            }
+            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
         }
     }
 
     /// Register an observer callback. Returns an `ObserverHandle` — dropping
     /// the handle removes the callback.
     pub fn observe(&self, f: impl Fn(&T) + 'static) -> ObserverHandle {
+        self.try_observe(f)
+            .expect("observe() is only supported on mutable signals")
+    }
+
+    pub fn try_observe(
+        &self,
+        f: impl Fn(&T) + 'static,
+    ) -> Result<ObserverHandle, SignalAccessError> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
                 let mut guard = inner.borrow_mut();
@@ -139,7 +180,7 @@ impl<T: 'static> Signal<T> {
                     id,
                     callback: Rc::new(f),
                 });
-                ObserverHandle {
+                Ok(ObserverHandle {
                     _signal: inner.clone(),
                     observer_id: id,
                     remover: {
@@ -148,11 +189,9 @@ impl<T: 'static> Signal<T> {
                             inner.borrow_mut().observers.retain(|e| e.id != observer_id);
                         })
                     },
-                }
+                })
             }
-            SignalKind::Derived { .. } => {
-                panic!("observe() is only supported on mutable signals");
-            }
+            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
         }
     }
 
@@ -178,14 +217,17 @@ impl<T: Clone + 'static> Signal<T> {
 
     /// Read the current value by reference (only for mutable signals).
     /// Panics on derived signals.
-    pub fn get_ref(&self) -> std::cell::Ref<'_, T> {
+    pub fn get_ref(&self) -> Ref<'_, T> {
+        self.try_get_ref()
+            .expect("get_ref() is only supported on mutable signals")
+    }
+
+    pub fn try_get_ref(&self) -> Result<Ref<'_, T>, SignalAccessError> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
-                std::cell::Ref::map(inner.borrow(), |guard| &guard.value)
+                Ok(Ref::map(inner.borrow(), |guard| &guard.value))
             }
-            SignalKind::Derived { .. } => {
-                panic!("get_ref() is only supported on mutable signals");
-            }
+            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
         }
     }
 
@@ -264,6 +306,10 @@ impl<T: Clone + 'static> Signal<T> {
 }
 
 impl<T: 'static> Signal<T> {
+    pub fn is_mutable(&self) -> bool {
+        matches!(self.kind, SignalKind::Mutable { .. })
+    }
+
     pub fn is_dirty(&self) -> bool {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => inner.borrow().dirty,
@@ -302,14 +348,26 @@ impl Signal<f32> {
         }
     }
 
-    fn animation_state(&self) -> &Rc<RefCell<AnimationState>> {
-        match &self.kind {
-            SignalKind::Mutable { animation, .. } => animation
-                .as_ref()
-                .expect("animate_to called on Signal<f32> without animation support; use Signal::new_animated()"),
-            SignalKind::Derived { .. } => {
-                panic!("animate_to is not supported on derived signals");
+    pub fn supports_animation(&self) -> bool {
+        matches!(
+            &self.kind,
+            SignalKind::Mutable {
+                animation: Some(_),
+                ..
             }
+        )
+    }
+
+    pub(crate) fn weak_handle(&self) -> Option<WeakAnimatedSignal> {
+        match &self.kind {
+            SignalKind::Mutable {
+                inner,
+                animation: Some(animation),
+            } => Some(WeakAnimatedSignal {
+                inner: Rc::downgrade(inner),
+                animation: Rc::downgrade(animation),
+            }),
+            _ => None,
         }
     }
 
@@ -330,18 +388,56 @@ impl Signal<f32> {
         easing: fern_tokens::Easing,
         frame_interval: Option<std::time::Duration>,
     ) {
-        let mut anim = self.animation_state().borrow_mut();
-        anim.pending = Some(crate::state::AnimationRequest {
-            target,
-            duration,
-            easing,
-            frame_interval,
-        });
-        anim.target = Some(target);
-        drop(anim);
-        // Mark dirty to trigger a frame
-        if let SignalKind::Mutable { inner, .. } = &self.kind {
-            inner.borrow_mut().dirty = true;
+        self.try_animate_to_with_frame_interval(target, duration, easing, frame_interval)
+            .unwrap_or_else(|err| match err {
+                SignalAccessError::ReadOnly => {
+                    panic!("animate_to is not supported on derived signals")
+                }
+                SignalAccessError::AnimationUnsupported => {
+                    panic!(
+                        "animate_to called on Signal<f32> without animation support; use Signal::new_animated()"
+                    )
+                }
+            });
+    }
+
+    pub fn try_animate_to(
+        &self,
+        target: f32,
+        duration: std::time::Duration,
+        easing: fern_tokens::Easing,
+    ) -> Result<(), SignalAccessError> {
+        self.try_animate_to_with_frame_interval(target, duration, easing, None)
+    }
+
+    pub fn try_animate_to_with_frame_interval(
+        &self,
+        target: f32,
+        duration: std::time::Duration,
+        easing: fern_tokens::Easing,
+        frame_interval: Option<std::time::Duration>,
+    ) -> Result<(), SignalAccessError> {
+        match &self.kind {
+            SignalKind::Mutable {
+                inner,
+                animation: Some(animation),
+            } => {
+                let mut anim = animation.borrow_mut();
+                anim.pending = Some(crate::state::AnimationRequest {
+                    target,
+                    duration,
+                    easing,
+                    frame_interval,
+                });
+                anim.target = Some(target);
+                drop(anim);
+                inner.borrow_mut().dirty = true;
+                Ok(())
+            }
+            SignalKind::Mutable {
+                animation: None, ..
+            } => Err(SignalAccessError::AnimationUnsupported),
+            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
         }
     }
 

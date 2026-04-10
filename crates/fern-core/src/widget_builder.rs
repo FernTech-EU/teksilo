@@ -11,7 +11,6 @@ use fern_canvas::Point;
 use crate::event::{EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
 use crate::gesture::GestureEvent;
-use crate::signal::Prop;
 use crate::widget::{CursorIcon, EventContext, Widget};
 
 // ---------------------------------------------------------------------------
@@ -28,9 +27,6 @@ pub struct HandlerSet {
     pub(crate) focusable: Option<bool>,
     pub(crate) tab_index: Option<i32>,
     pub(crate) cursor: Option<CursorIcon>,
-    pub(crate) visible_when: Option<Prop<bool>>,
-    pub(crate) enabled_when: Option<Prop<bool>>,
-    pub(crate) tooltip_text: Option<String>,
     pub(crate) clips_children: Option<bool>,
     pub(crate) context_menu_factory: Option<ContextMenuFactory>,
 }
@@ -43,9 +39,6 @@ impl HandlerSet {
             focusable: None,
             tab_index: None,
             cursor: None,
-            visible_when: None,
-            enabled_when: None,
-            tooltip_text: None,
             clips_children: None,
             context_menu_factory: None,
         }
@@ -267,21 +260,6 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     // -- Framework-level properties --
 
-    pub fn visible_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
-        self.handler_set.visible_when = Some(signal.into());
-        self
-    }
-
-    pub fn enabled_when(mut self, signal: impl Into<Prop<bool>>) -> Self {
-        self.handler_set.enabled_when = Some(signal.into());
-        self
-    }
-
-    pub fn tooltip(mut self, text: impl Into<String>) -> Self {
-        self.handler_set.tooltip_text = Some(text.into());
-        self
-    }
-
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.handler_set.clips_children = Some(clips);
         self
@@ -438,18 +416,6 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     fn cursor(self, cursor: CursorIcon) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).cursor(cursor)
-    }
-
-    fn visible_when(self, signal: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).visible_when(signal)
-    }
-
-    fn enabled_when(self, signal: impl Into<Prop<bool>>) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).enabled_when(signal)
-    }
-
-    fn tooltip(self, text: impl Into<String>) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).tooltip(text)
     }
 
     fn clips_children_on(self, clips: bool) -> WidgetWithHandlers<Self> {
