@@ -34,6 +34,8 @@ pub enum OverlayPlacement {
     AtPointer(Point),
     /// Near the anchor with a preferred alignment and offset (tooltip).
     NearAnchor { offset: Vec2 },
+    /// Centered within the viewport (dialog).
+    Centered,
     /// Below the anchor if space allows, otherwise above (combo box dropdown).
     /// The viewport height is supplied by `position_overlays()` at layout time.
     BelowPreferred,
@@ -402,6 +404,12 @@ impl OverlayManager {
                     content_size.width,
                     content_size.height,
                 ),
+                OverlayPlacement::Centered => Rect::new(
+                    ((vw - content_size.width) / 2.0).max(0.0),
+                    ((vh - content_size.height) / 2.0).max(0.0),
+                    content_size.width.min(vw),
+                    content_size.height.min(vh),
+                ),
                 OverlayPlacement::BelowPreferred => {
                     let below_y = anchor.y + anchor.height + 4.0;
                     let fits_below = below_y + content_size.height <= vh;
@@ -629,5 +637,25 @@ mod tests {
 
         // Hit test should find topmost (b)
         assert_eq!(mgr.hit_test(Point::new(50.0, 25.0)), Some(b));
+    }
+
+    #[test]
+    fn centered_placement_uses_viewport_center() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        mgr.set_content_bounds(id, Size::new(240.0, 120.0));
+        mgr.position_overlays(|_| Rect::new(0.0, 0.0, 10.0, 10.0), (800.0, 600.0));
+
+        let bounds = mgr.stack.iter().find(|overlay| overlay.id == id).unwrap().bounds;
+        assert!((bounds.x - 280.0).abs() < 0.01);
+        assert!((bounds.y - 240.0).abs() < 0.01);
     }
 }

@@ -1,9 +1,11 @@
 pub mod accordion;
 pub mod badge;
+pub mod breadcrumb;
 pub mod button;
 pub mod card;
 pub mod checkbox;
 pub mod combo_box;
+pub mod dialog;
 pub mod link;
 pub mod menu_bar;
 pub(crate) mod menu_context;
@@ -12,6 +14,7 @@ pub mod menu_list;
 pub mod panel;
 pub mod primitives;
 pub mod progress_bar;
+pub mod popover;
 pub mod radio_button;
 pub mod scroll_area;
 pub mod scroll_bar;
@@ -28,10 +31,12 @@ pub use tooltip::TooltipWidget;
 
 pub use accordion::Accordion;
 pub use badge::Badge;
+pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonStyle};
 pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
 pub use combo_box::ComboBox;
+pub use dialog::Dialog;
 pub use link::Link;
 pub use menu_bar::MenuBar;
 pub use menu_item::MenuItem;
@@ -42,12 +47,15 @@ pub use primitives::{
     Padding, RectWidget, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
 pub use progress_bar::ProgressBar;
+pub use popover::Popover;
 pub use radio_button::RadioButton;
 pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarStyle};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
 pub use segmented_control::SegmentedControl;
 pub use slider::Slider;
 pub use status_bar::StatusBar;
+pub use split_view::SplitView;
+pub use tab_widget::{TabItem, TabWidget};
 pub use toggle::Toggle;
 pub use toolbar::Toolbar;
 
