@@ -41,7 +41,7 @@ pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
 pub use shortcut::{Shortcut, ShortcutMap, ShortcutScope};
-pub use signal::{ObserverHandle, Prop, Signal};
+pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
 pub use state::{
     AnimationRequest, BindingLevel, BindingRegistry, DerivedState, ObserverId, Reactive,
     ReadableState, State, StateHandle,
