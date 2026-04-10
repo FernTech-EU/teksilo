@@ -106,7 +106,7 @@ impl<T: Clone + 'static> StateHandle<T> {
         self.inner.read()
     }
 
-    /// Create a StateHandle from a Signal (bridge for V1/V2 interop).
+    /// Create a StateHandle from a Signal for compatibility interop.
     pub fn from_signal(signal: crate::signal::Signal<T>) -> Self {
         struct SignalReader<T: Clone + 'static>(crate::signal::Signal<T>);
         impl<T: Clone + 'static> ReadableState<T> for SignalReader<T> {

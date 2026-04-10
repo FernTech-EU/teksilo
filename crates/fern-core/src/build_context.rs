@@ -42,7 +42,7 @@ impl<'a> BuildContext<'a> {
         self.tree.add_child(parent, widget)
     }
 
-    // --- V2: Signal-based APIs ---
+    // --- Signal APIs ---
 
     /// Create a new mutable signal.
     pub fn signal<T: 'static>(&mut self, value: T) -> Signal<T> {
@@ -72,14 +72,15 @@ impl<'a> BuildContext<'a> {
         self.effect_handles.push(handle);
     }
 
-    // --- V1: Legacy State-based APIs ---
+    // --- Compatibility State APIs ---
 
-    /// Create a new reactive state value. (V1 API — prefer `signal()`)
+    /// Create a new reactive state value. Prefer `signal()` for new code.
     pub fn state<T: 'static>(&mut self, value: T) -> State<T> {
         State::new(value)
     }
 
-    /// Create a new `State<f32>` that supports `set_animated()`. (V1 API — prefer `animated_signal()`)
+    /// Create a new `State<f32>` that supports `set_animated()`.
+    /// Prefer `animated_signal()` for new code.
     pub fn animated_state(&mut self, value: f32) -> State<f32> {
         let state = State::new_animated(value);
         self.tree.register_animated_state(&state);

@@ -23,7 +23,7 @@ use crate::state::State;
 
 /// A single active animation driving a `State<f32>` from `start` to `end`.
 struct ActiveAnimation {
-    /// The state being animated (V1).
+    /// The state being animated.
     state: State<f32>,
     /// Value at animation start.
     start_value: f32,

@@ -1,4 +1,4 @@
-//! Unified reactivity primitives for FernUI V2.
+//! Unified reactivity primitives for FernUI.
 //!
 //! `Signal<T>` replaces `State<T>` + `DerivedState<T>` with a single type.
 //! `Prop<T>` replaces `Reactive<T>` as the widget property type.
@@ -622,7 +622,7 @@ impl<T: Clone + 'static> From<Signal<T>> for Prop<T> {
     }
 }
 
-// Bridge: State<T> → Prop<T> (for backward compatibility with V1 APIs)
+// Bridge: State<T> → Prop<T> for compatibility with State-based APIs.
 impl<T: Clone + 'static> From<crate::state::State<T>> for Prop<T> {
     fn from(state: crate::state::State<T>) -> Self {
         Prop::Bound(Signal::from(state))
@@ -636,7 +636,7 @@ impl<T: Clone + 'static> From<crate::state::DerivedState<T>> for Prop<T> {
     }
 }
 
-// Bridge: Prop<T> → Reactive<T> (for V1 compatibility during migration)
+// Bridge: Prop<T> → Reactive<T> for compatibility with State-based bindings.
 impl<T: Clone + 'static> From<Prop<T>> for crate::state::Reactive<T> {
     fn from(prop: Prop<T>) -> Self {
         match prop {
