@@ -137,7 +137,9 @@ impl Widget for SegmentedControl {
         let focus_origin = self.focus_origin.clone();
         let cached_bounds = self.cached_bounds.clone();
 
-        let mut handlers = HandlerSet::new().focusable(enabled).cursor(CursorIcon::Pointer);
+        let mut handlers = HandlerSet::new()
+            .focusable(enabled)
+            .cursor(CursorIcon::Pointer);
 
         // Pointer event handler (click to select segment)
         {

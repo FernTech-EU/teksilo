@@ -343,83 +343,81 @@ impl Widget for ScrollArea {
             let max_scroll_x = max_scroll_x.clone();
             let viewport_size = viewport_size.clone();
             let clamp_and_set = clamp_and_set.clone();
-            handlers = handlers.on_scroll(move |event, _ctx| {
-                match event {
-                    WidgetEvent::Scroll { delta, .. } => {
-                        let max_y = max_scroll_y.get();
-                        let max_x = max_scroll_x.get();
-                        let cur_y = scroll_y.get();
-                        let cur_x = scroll_x.get();
+            handlers = handlers.on_scroll(move |event, _ctx| match event {
+                WidgetEvent::Scroll { delta, .. } => {
+                    let max_y = max_scroll_y.get();
+                    let max_x = max_scroll_x.get();
+                    let cur_y = scroll_y.get();
+                    let cur_x = scroll_x.get();
 
-                        match delta {
-                            ScrollDelta::Lines { x, y } => {
-                                let base_y = scroll_y.animation_target().unwrap_or(cur_y);
-                                let base_x = scroll_x.animation_target().unwrap_or(cur_x);
-                                let target_y = (base_y + y * line_height).clamp(0.0, max_y);
-                                let target_x = (base_x + x * line_height).clamp(0.0, max_x);
-                                if smooth_scrolling {
-                                    scroll_y.animate_to(
-                                        target_y,
-                                        smooth_scroll_duration,
-                                        Easing::EaseOut,
-                                    );
-                                    scroll_x.animate_to(
-                                        target_x,
-                                        smooth_scroll_duration,
-                                        Easing::EaseOut,
-                                    );
-                                } else {
-                                    scroll_y.set(target_y);
-                                    scroll_x.set(target_x);
-                                }
-                            }
-                            ScrollDelta::Pixels { x, y } => {
-                                scroll_y.set(cur_y + y);
-                                scroll_x.set(cur_x + x);
-                                clamp_and_set();
+                    match delta {
+                        ScrollDelta::Lines { x, y } => {
+                            let base_y = scroll_y.animation_target().unwrap_or(cur_y);
+                            let base_x = scroll_x.animation_target().unwrap_or(cur_x);
+                            let target_y = (base_y + y * line_height).clamp(0.0, max_y);
+                            let target_x = (base_x + x * line_height).clamp(0.0, max_x);
+                            if smooth_scrolling {
+                                scroll_y.animate_to(
+                                    target_y,
+                                    smooth_scroll_duration,
+                                    Easing::EaseOut,
+                                );
+                                scroll_x.animate_to(
+                                    target_x,
+                                    smooth_scroll_duration,
+                                    Easing::EaseOut,
+                                );
+                            } else {
+                                scroll_y.set(target_y);
+                                scroll_x.set(target_x);
                             }
                         }
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::ScrollIntoView {
-                        target_bounds,
-                        margin,
-                    } => {
-                        let vp = viewport_size.get();
-                        let sy = scroll_y.get();
-                        let sx = scroll_x.get();
-
-                        let viewport_top = sy;
-                        let viewport_bottom = viewport_top + vp.height;
-                        let target_top = target_bounds.y + sy - margin;
-                        let target_bottom = target_top + target_bounds.height + margin * 2.0;
-
-                        let mut new_y = sy;
-                        if target_top < viewport_top {
-                            new_y = target_top;
-                        } else if target_bottom > viewport_bottom {
-                            new_y = target_bottom - vp.height;
+                        ScrollDelta::Pixels { x, y } => {
+                            scroll_y.set(cur_y + y);
+                            scroll_x.set(cur_x + x);
+                            clamp_and_set();
                         }
-
-                        let viewport_left = sx;
-                        let viewport_right = viewport_left + vp.width;
-                        let target_left = target_bounds.x + sx - margin;
-                        let target_right = target_left + target_bounds.width + margin * 2.0;
-
-                        let mut new_x = sx;
-                        if target_left < viewport_left {
-                            new_x = target_left;
-                        } else if target_right > viewport_right {
-                            new_x = target_right - vp.width;
-                        }
-
-                        scroll_y.set(new_y);
-                        scroll_x.set(new_x);
-                        clamp_and_set();
-                        EventResponse::Handled
                     }
-                    _ => EventResponse::Ignored,
+                    EventResponse::Handled
                 }
+                WidgetEvent::ScrollIntoView {
+                    target_bounds,
+                    margin,
+                } => {
+                    let vp = viewport_size.get();
+                    let sy = scroll_y.get();
+                    let sx = scroll_x.get();
+
+                    let viewport_top = sy;
+                    let viewport_bottom = viewport_top + vp.height;
+                    let target_top = target_bounds.y + sy - margin;
+                    let target_bottom = target_top + target_bounds.height + margin * 2.0;
+
+                    let mut new_y = sy;
+                    if target_top < viewport_top {
+                        new_y = target_top;
+                    } else if target_bottom > viewport_bottom {
+                        new_y = target_bottom - vp.height;
+                    }
+
+                    let viewport_left = sx;
+                    let viewport_right = viewport_left + vp.width;
+                    let target_left = target_bounds.x + sx - margin;
+                    let target_right = target_left + target_bounds.width + margin * 2.0;
+
+                    let mut new_x = sx;
+                    if target_left < viewport_left {
+                        new_x = target_left;
+                    } else if target_right > viewport_right {
+                        new_x = target_right - vp.width;
+                    }
+
+                    scroll_y.set(new_y);
+                    scroll_x.set(new_x);
+                    clamp_and_set();
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
             });
         }
 
@@ -811,8 +809,7 @@ mod tests {
         let mut tree = WidgetTree::new();
 
         let leaf = TallLeaf::new(180.0, 500.0);
-        let scroll =
-            tree.add(ScrollArea::new(leaf).scroll_bar_style(ScrollBarStyle::Permanent));
+        let scroll = tree.add(ScrollArea::new(leaf).scroll_bar_style(ScrollBarStyle::Permanent));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1127,8 +1124,7 @@ mod tests {
     fn widget_resizable_stretches_small_content() {
         let mut tree = WidgetTree::new();
         // Content is 100x50, viewport is 200x100
-        let scroll =
-            tree.add(ScrollArea::new(TallLeaf::new(100.0, 50.0)).widget_resizable(true));
+        let scroll = tree.add(ScrollArea::new(TallLeaf::new(100.0, 50.0)).widget_resizable(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1151,8 +1147,7 @@ mod tests {
     fn widget_resizable_does_not_shrink_large_content() {
         let mut tree = WidgetTree::new();
         // Content is larger than viewport
-        let scroll =
-            tree.add(ScrollArea::new(WideLeaf::new(400.0, 500.0)).widget_resizable(true));
+        let scroll = tree.add(ScrollArea::new(WideLeaf::new(400.0, 500.0)).widget_resizable(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1175,8 +1170,7 @@ mod tests {
     #[test]
     fn smooth_scrolling_line_events_use_animation() {
         let mut tree = WidgetTree::new();
-        let scroll =
-            tree.add(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(true));
+        let scroll = tree.add(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(true));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1241,8 +1235,8 @@ mod tests {
     #[test]
     fn preferred_size_overrides_default() {
         let mut tree = WidgetTree::new();
-        let scroll = tree
-            .add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
+        let scroll =
+            tree.add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
         // With unconstrained proposal, should use preferred size
         tree.layout(SizeProposal {
             width: None,
@@ -1264,8 +1258,8 @@ mod tests {
     #[test]
     fn constrained_proposal_overrides_preferred_size() {
         let mut tree = WidgetTree::new();
-        let scroll = tree
-            .add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
+        let scroll =
+            tree.add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
         // With constrained proposal, the proposal wins
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let bounds = tree.bounds(scroll);

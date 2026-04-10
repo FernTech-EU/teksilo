@@ -265,7 +265,9 @@ impl Widget for RadioButton {
                 }
             })
             .on_access_action({
-                move |action: fern_core::accesskit::Action, _ctx: &mut EventContext| -> EventResponse {
+                move |action: fern_core::accesskit::Action,
+                      _ctx: &mut EventContext|
+                      -> EventResponse {
                     if action == fern_core::accesskit::Action::Click && enabled {
                         sel_access.set(value);
                         EventResponse::Handled

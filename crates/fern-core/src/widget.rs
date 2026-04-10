@@ -186,12 +186,11 @@ pub struct EventContext {
     /// Request to capture or release the pointer.
     pub(crate) pointer_capture: Option<bool>,
     /// Delayed overlay requests (request, delay, optional focus target).
-    pub(crate) delayed_overlay_requests:
-        Vec<(
-            crate::overlay::OverlayRequest,
-            std::time::Duration,
-            Option<crate::widget_id::WidgetId>,
-        )>,
+    pub(crate) delayed_overlay_requests: Vec<(
+        crate::overlay::OverlayRequest,
+        std::time::Duration,
+        Option<crate::widget_id::WidgetId>,
+    )>,
     /// Dismiss descendant overlays of the source widget's containing overlay.
     /// Optionally preserve the subtree rooted at a specific content widget ID.
     pub(crate) dismiss_descendant_overlays: Vec<Option<crate::widget_id::WidgetId>>,

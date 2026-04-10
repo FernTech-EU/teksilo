@@ -192,7 +192,6 @@ impl ScrollBar {
             }
         }
     }
-
 }
 
 impl Widget for ScrollBar {
@@ -475,36 +474,24 @@ impl Widget for ScrollBar {
             // --- Resting state: thin indicator aligned to trailing edge ---
             let thin = self.resting_thickness;
             let thin_bounds = match self.orientation {
-                ScrollBarOrientation::Vertical => Rect::new(
-                    bounds.right() - thin,
-                    bounds.y,
-                    thin,
-                    bounds.height,
-                ),
-                ScrollBarOrientation::Horizontal => Rect::new(
-                    bounds.x,
-                    bounds.bottom() - thin,
-                    bounds.width,
-                    thin,
-                ),
+                ScrollBarOrientation::Vertical => {
+                    Rect::new(bounds.right() - thin, bounds.y, thin, bounds.height)
+                }
+                ScrollBarOrientation::Horizontal => {
+                    Rect::new(bounds.x, bounds.bottom() - thin, bounds.width, thin)
+                }
             };
             let radius = CornerRadius::uniform(thin / 2.0);
             // Thin thumb
             let offset = self.thumb_offset();
             let thumb_len = self.thumb_length();
             let thumb_rect = match self.orientation {
-                ScrollBarOrientation::Vertical => Rect::new(
-                    thin_bounds.x,
-                    thin_bounds.y + offset,
-                    thin,
-                    thumb_len,
-                ),
-                ScrollBarOrientation::Horizontal => Rect::new(
-                    thin_bounds.x + offset,
-                    thin_bounds.y,
-                    thumb_len,
-                    thin,
-                ),
+                ScrollBarOrientation::Vertical => {
+                    Rect::new(thin_bounds.x, thin_bounds.y + offset, thin, thumb_len)
+                }
+                ScrollBarOrientation::Horizontal => {
+                    Rect::new(thin_bounds.x + offset, thin_bounds.y, thumb_len, thin)
+                }
             };
             let thumb_color = ctx.theme.colors.on_surface.with_alpha(0.2);
             canvas.fill_rounded_rect(thumb_rect, radius, thumb_color);
@@ -514,11 +501,11 @@ impl Widget for ScrollBar {
 
             // Track background
             if self.show_track || (self.overlay_mode && active) {
-                let track_color = ctx
-                    .theme
-                    .colors
-                    .on_surface
-                    .with_alpha(if active { 0.08 } else { 0.04 });
+                let track_color =
+                    ctx.theme
+                        .colors
+                        .on_surface
+                        .with_alpha(if active { 0.08 } else { 0.04 });
                 canvas.fill_rounded_rect(bounds, radius, track_color);
             }
 

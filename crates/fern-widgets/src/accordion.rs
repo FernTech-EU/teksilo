@@ -165,7 +165,11 @@ impl Widget for Accordion {
                     let new_expanded = !expanded_tap.get();
                     expanded_tap.set(new_expanded);
                     if let Some(ref height) = height_tap {
-                        let target = if new_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
+                        let target = if new_expanded {
+                            EXPANDED_MAX_HEIGHT
+                        } else {
+                            0.0
+                        };
                         height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
                     }
                 }
@@ -184,8 +188,16 @@ impl Widget for Accordion {
                             let new_expanded = !expanded_key.get();
                             expanded_key.set(new_expanded);
                             if let Some(ref height) = height_key {
-                                let target = if new_expanded { EXPANDED_MAX_HEIGHT } else { 0.0 };
-                                height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
+                                let target = if new_expanded {
+                                    EXPANDED_MAX_HEIGHT
+                                } else {
+                                    0.0
+                                };
+                                height.animate_to(
+                                    target,
+                                    Duration::from_millis(200),
+                                    Easing::EaseInOut,
+                                );
                             }
                             EventResponse::Handled
                         }

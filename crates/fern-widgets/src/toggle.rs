@@ -11,9 +11,7 @@ use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
-use fern_core::widget::{
-    CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement,
-};
+use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing};
@@ -103,7 +101,9 @@ impl Widget for Toggle {
             }
         };
 
-        let mut handlers = HandlerSet::new().focusable(enabled).cursor(CursorIcon::Pointer);
+        let mut handlers = HandlerSet::new()
+            .focusable(enabled)
+            .cursor(CursorIcon::Pointer);
 
         // Tap handler
         {
@@ -131,8 +131,12 @@ impl Widget for Toggle {
                     return EventResponse::Ignored;
                 }
                 match event {
-                    WidgetEvent::KeyDown { key: Key::Space, .. } => EventResponse::Handled,
-                    WidgetEvent::KeyUp { key: Key::Space, .. } => {
+                    WidgetEvent::KeyDown {
+                        key: Key::Space, ..
+                    } => EventResponse::Handled,
+                    WidgetEvent::KeyUp {
+                        key: Key::Space, ..
+                    } => {
                         toggle();
                         EventResponse::Handled
                     }

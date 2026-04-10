@@ -156,7 +156,10 @@ mod tests {
         tree.advance_time(std::time::Duration::from_millis(500));
         let end = tree.simulated_now();
 
-        assert_eq!(end.duration_since(start), std::time::Duration::from_millis(500));
+        assert_eq!(
+            end.duration_since(start),
+            std::time::Duration::from_millis(500)
+        );
     }
 
     #[test]
@@ -172,10 +175,18 @@ mod tests {
         );
 
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((*state.get() - 50.0).abs() < 2.0, "at 50%: {}", *state.get());
+        assert!(
+            (*state.get() - 50.0).abs() < 2.0,
+            "at 50%: {}",
+            *state.get()
+        );
 
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((*state.get() - 100.0).abs() < 0.1, "at 100%: {}", *state.get());
+        assert!(
+            (*state.get() - 100.0).abs() < 0.1,
+            "at 100%: {}",
+            *state.get()
+        );
 
         assert!(!tree.has_active_animations());
     }
@@ -193,7 +204,11 @@ mod tests {
         );
 
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((*state.get() - 25.0).abs() < 2.0, "ease-in at 50%: {}", *state.get());
+        assert!(
+            (*state.get() - 25.0).abs() < 2.0,
+            "ease-in at 50%: {}",
+            *state.get()
+        );
     }
 
     #[test]
@@ -216,10 +231,18 @@ mod tests {
             fern_tokens::Easing::Linear,
         );
         tree.tick_animations(std::time::Duration::from_millis(50));
-        assert!((*state.get() - 25.0).abs() < 3.0, "mid-replace: {}", *state.get());
+        assert!(
+            (*state.get() - 25.0).abs() < 3.0,
+            "mid-replace: {}",
+            *state.get()
+        );
 
         tree.tick_animations(std::time::Duration::from_millis(50));
-        assert!((*state.get() - 0.0).abs() < 0.5, "end-replace: {}", *state.get());
+        assert!(
+            (*state.get() - 0.0).abs() < 0.5,
+            "end-replace: {}",
+            *state.get()
+        );
     }
 
     #[test]

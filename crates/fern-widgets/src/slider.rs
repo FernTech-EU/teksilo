@@ -93,7 +93,6 @@ impl Slider {
         let usable = self.primary_length(bounds) - THUMB_RADIUS * 2.0;
         self.primary_start(bounds) + THUMB_RADIUS + usable * self.normalized()
     }
-
 }
 
 impl std::fmt::Debug for Slider {
@@ -171,7 +170,9 @@ impl Widget for Slider {
             }
         };
 
-        let mut handlers = HandlerSet::new().focusable(enabled).cursor(CursorIcon::Pointer);
+        let mut handlers = HandlerSet::new()
+            .focusable(enabled)
+            .cursor(CursorIcon::Pointer);
 
         // Pointer event handler (drag to change value)
         {

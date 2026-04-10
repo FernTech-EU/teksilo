@@ -207,7 +207,9 @@ impl WidgetTree {
 
         self.overlay_manager.stack.iter().any(|candidate| {
             (candidate.id == overlay_id
-                || self.overlay_manager.is_descendant_of(candidate.id, overlay_id))
+                || self
+                    .overlay_manager
+                    .is_descendant_of(candidate.id, overlay_id))
                 && candidate.bounds.contains(position)
         })
     }
@@ -336,7 +338,8 @@ impl WidgetTree {
     /// registered values each frame for pending `set_animated` requests.
     /// Called automatically by `BuildContext::animated_state()`.
     pub fn register_animated_state(&mut self, state: &crate::state::State<f32>) {
-        self.animated_values.retain(|registration| registration.is_alive());
+        self.animated_values
+            .retain(|registration| registration.is_alive());
         if !self
             .animated_values
             .iter()
@@ -350,7 +353,8 @@ impl WidgetTree {
 
     /// Register a `Signal<f32>` for animation support.
     pub fn register_animated_signal(&mut self, signal: &crate::signal::Signal<f32>) {
-        self.animated_values.retain(|registration| registration.is_alive());
+        self.animated_values
+            .retain(|registration| registration.is_alive());
         if !self
             .animated_values
             .iter()
@@ -389,8 +393,13 @@ impl WidgetTree {
         for animation in pending {
             match animation {
                 PendingAnimationRegistration::State(state, req) => {
-                    self.animation_scheduler
-                        .animate(&state, req.target, req.duration, req.easing, now);
+                    self.animation_scheduler.animate(
+                        &state,
+                        req.target,
+                        req.duration,
+                        req.easing,
+                        now,
+                    );
                 }
                 PendingAnimationRegistration::Signal(signal, req) => {
                     self.animation_scheduler.animate_signal_with_frame_interval(
@@ -856,7 +865,6 @@ impl WidgetTree {
             }
         }
     }
-
 }
 
 impl Default for WidgetTree {
@@ -882,5 +890,3 @@ fn to_raw_pointer_event(event: &WidgetEvent) -> Option<RawPointerEvent> {
         _ => None,
     }
 }
-
-

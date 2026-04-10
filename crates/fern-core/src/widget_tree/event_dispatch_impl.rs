@@ -79,7 +79,12 @@ impl WidgetTree {
         match &event {
             WidgetEvent::PointerMove { position } => {
                 if let Some(captured) = self.pointer_captured_by {
-                    self.dispatch_to_widget(captured, &WidgetEvent::PointerMove { position: *position });
+                    self.dispatch_to_widget(
+                        captured,
+                        &WidgetEvent::PointerMove {
+                            position: *position,
+                        },
+                    );
                 } else {
                     self.handle_pointer_move(*position);
                 }
@@ -346,9 +351,11 @@ impl WidgetTree {
                 handler(false, ctx);
                 EventResponse::Handled
             }),
-            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
-                node.handlers.on_key.as_mut().map(|handler| handler(event, ctx))
-            }
+            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => node
+                .handlers
+                .on_key
+                .as_mut()
+                .map(|handler| handler(event, ctx)),
             WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. } => node
                 .handlers
                 .on_scroll
@@ -442,7 +449,11 @@ impl WidgetTree {
             if req.parent_overlay.is_none() {
                 req.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
             }
-            if self.overlay_manager.find_by_content(req.content_id).is_some() {
+            if self
+                .overlay_manager
+                .find_by_content(req.content_id)
+                .is_some()
+            {
                 continue;
             }
             let current_focus = self.focused;
@@ -462,7 +473,11 @@ impl WidgetTree {
             if request.parent_overlay.is_none() {
                 request.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
             }
-            if self.overlay_manager.find_by_content(request.content_id).is_some() {
+            if self
+                .overlay_manager
+                .find_by_content(request.content_id)
+                .is_some()
+            {
                 continue;
             }
             let content_id = request.content_id;

@@ -32,7 +32,7 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
-    Grid, HStack, IconWidget, Link, MaxSize, MenuList, MenuItem, Padding, Panel, ProgressBar,
+    Grid, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel, ProgressBar,
     RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle,
     Toolbar, TrackSize, VStack, Wrap,
 };

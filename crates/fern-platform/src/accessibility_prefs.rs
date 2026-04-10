@@ -199,7 +199,7 @@ mod platform {
         use std::mem;
         use windows::Win32::UI::Accessibility::HIGHCONTRASTW;
         use windows::Win32::UI::WindowsAndMessaging::{
-            SPI_GETHIGHCONTRAST, SystemParametersInfoW, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
         };
 
         unsafe {

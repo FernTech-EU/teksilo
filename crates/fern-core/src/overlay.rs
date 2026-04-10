@@ -184,7 +184,9 @@ impl OverlayManager {
             if !self.is_descendant_of(overlay.id, parent) {
                 continue;
             }
-            if preserve.is_some_and(|keep| overlay.id == keep || self.is_descendant_of(overlay.id, keep)) {
+            if preserve
+                .is_some_and(|keep| overlay.id == keep || self.is_descendant_of(overlay.id, keep))
+            {
                 continue;
             }
             to_dismiss.push(overlay.id);
@@ -207,7 +209,8 @@ impl OverlayManager {
             .filter(|overlay| to_dismiss.contains(&overlay.id))
             .map(|overlay| overlay.content_id)
             .collect();
-        self.stack.retain(|overlay| !to_dismiss.contains(&overlay.id));
+        self.stack
+            .retain(|overlay| !to_dismiss.contains(&overlay.id));
 
         (dismissed_content, focus_restore)
     }
@@ -324,7 +327,12 @@ impl OverlayManager {
         let to_dismiss: Vec<OverlayId> = self
             .stack
             .iter()
-            .filter(|o| matches!(o.dismiss, DismissBehavior::ClickOutside | DismissBehavior::PointerLeave { .. }))
+            .filter(|o| {
+                matches!(
+                    o.dismiss,
+                    DismissBehavior::ClickOutside | DismissBehavior::PointerLeave { .. }
+                )
+            })
             .map(|o| o.id)
             .collect();
 
@@ -543,7 +551,10 @@ mod tests {
         assert_eq!(mgr.len(), 1);
 
         // Click outside — dismissed
-        assert!(!mgr.handle_click_outside(Point::new(500.0, 500.0)).is_empty());
+        assert!(
+            !mgr.handle_click_outside(Point::new(500.0, 500.0))
+                .is_empty()
+        );
         assert!(mgr.is_empty());
     }
 
@@ -559,7 +570,10 @@ mod tests {
             parent_overlay: None,
         });
 
-        assert!(mgr.handle_click_outside(Point::new(500.0, 500.0)).is_empty());
+        assert!(
+            mgr.handle_click_outside(Point::new(500.0, 500.0))
+                .is_empty()
+        );
         assert_eq!(mgr.len(), 1);
     }
 

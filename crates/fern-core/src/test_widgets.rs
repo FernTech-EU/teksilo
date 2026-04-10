@@ -71,9 +71,7 @@ impl Widget for FillWidget {
         ctx: &mut crate::build_context::BuildContext,
     ) -> Vec<crate::widget_id::WidgetId> {
         if self.focusable {
-            ctx.apply_self_handlers(
-                crate::widget_builder::HandlerSet::new().focusable(true),
-            );
+            ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().focusable(true));
         }
         Vec::new()
     }

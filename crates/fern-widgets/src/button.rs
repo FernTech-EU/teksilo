@@ -320,7 +320,9 @@ impl fern_core::widget::Widget for Button {
                 }
             })
             .on_access_action({
-                move |action: fern_core::accesskit::Action, ctx: &mut EventContext| -> EventResponse {
+                move |action: fern_core::accesskit::Action,
+                      ctx: &mut EventContext|
+                      -> EventResponse {
                     if action == fern_core::accesskit::Action::Click && enabled {
                         if let Some(ref act) = *action_for_access {
                             act(ctx);
@@ -531,7 +533,10 @@ mod tests {
     fn focus_origin_keyboard() {
         let (mut tree, _btn) = setup();
         tree.press_key(Key::Tab, Modifiers::NONE);
-        assert_eq!(tree.focus_origin(), Some(fern_core::focus::FocusOrigin::Keyboard));
+        assert_eq!(
+            tree.focus_origin(),
+            Some(fern_core::focus::FocusOrigin::Keyboard)
+        );
     }
 
     #[test]
@@ -592,7 +597,10 @@ mod tests {
             position: center,
             button: PointerButton::Primary,
         });
-        assert_eq!(tree.focus_origin(), Some(fern_core::focus::FocusOrigin::Pointer));
+        assert_eq!(
+            tree.focus_origin(),
+            Some(fern_core::focus::FocusOrigin::Pointer)
+        );
     }
 
     #[test]

@@ -10,9 +10,9 @@ impl WidgetTree {
             let old_overlay = self.overlay_ancestor_for_widget(old);
             let new_overlay = self.overlay_ancestor_for_widget(id);
             let moving_into_descendant_overlay = match (old_overlay, new_overlay) {
-                (Some(old_overlay), Some(new_overlay)) => {
-                    self.overlay_manager.is_descendant_of(new_overlay, old_overlay)
-                }
+                (Some(old_overlay), Some(new_overlay)) => self
+                    .overlay_manager
+                    .is_descendant_of(new_overlay, old_overlay),
                 _ => false,
             };
 
@@ -247,7 +247,10 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.press_key(Key::Tab, Modifiers::NONE);
-        assert_eq!(tree.focus_origin(), Some(crate::focus::FocusOrigin::Keyboard));
+        assert_eq!(
+            tree.focus_origin(),
+            Some(crate::focus::FocusOrigin::Keyboard)
+        );
     }
 
     #[test]

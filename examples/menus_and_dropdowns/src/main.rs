@@ -13,8 +13,8 @@ use std::rc::Rc;
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonStyle, ComboBox, Divider, Expand, HStack, IconWidget, MenuBar, MenuList,
-    MenuItem, Padding, Panel, ScrollArea, Spacer, StatusBar, TextWidget, Toolbar, VStack,
+    Button, ButtonStyle, ComboBox, Divider, Expand, HStack, IconWidget, MenuBar, MenuItem,
+    MenuList, Padding, Panel, ScrollArea, Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 
 // ---------------------------------------------------------------------------
@@ -225,10 +225,22 @@ impl Widget for Root {
                                             .item(MenuItem::submenu("Alignment", || {
                                                 Box::new(
                                                     MenuList::new()
-                                                        .item(MenuItem::new("Left").on_activate(Cmd::AlignLeft))
-                                                        .item(MenuItem::new("Center").on_activate(Cmd::AlignCenter))
-                                                        .item(MenuItem::new("Right").on_activate(Cmd::AlignRight))
-                                                        .item(MenuItem::new("Justify").on_activate(Cmd::AlignJustify)),
+                                                        .item(
+                                                            MenuItem::new("Left")
+                                                                .on_activate(Cmd::AlignLeft),
+                                                        )
+                                                        .item(
+                                                            MenuItem::new("Center")
+                                                                .on_activate(Cmd::AlignCenter),
+                                                        )
+                                                        .item(
+                                                            MenuItem::new("Right")
+                                                                .on_activate(Cmd::AlignRight),
+                                                        )
+                                                        .item(
+                                                            MenuItem::new("Justify")
+                                                                .on_activate(Cmd::AlignJustify),
+                                                        ),
                                                 )
                                             })),
                                     )
@@ -353,14 +365,13 @@ impl Widget for Root {
                 .add_child(menu_showcase_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content));
-        let scroll = ctx.add(ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarStyle::Overlay));
+        let scroll = ctx.add(
+            ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarStyle::Overlay),
+        );
 
         let menu_bar = ctx.add(
             MenuBar::new()
-                .leading_slot(
-                    IconWidget::chevron_right(16.0)
-                        .color(c.primary),
-                )
+                .leading_slot(IconWidget::chevron_right(16.0).color(c.primary))
                 .menu("File", || {
                     Box::new(
                         MenuList::new()
@@ -427,21 +438,17 @@ impl Widget for Root {
                                 Box::new(
                                     MenuList::new()
                                         .item(MenuItem::new("Left").on_activate(Cmd::AlignLeft))
+                                        .item(MenuItem::new("Center").on_activate(Cmd::AlignCenter))
+                                        .item(MenuItem::new("Right").on_activate(Cmd::AlignRight))
                                         .item(
-                                            MenuItem::new("Center")
-                                                .on_activate(Cmd::AlignCenter),
-                                        )
-                                        .item(
-                                            MenuItem::new("Right").on_activate(Cmd::AlignRight),
-                                        )
-                                        .item(
-                                            MenuItem::new("Justify")
-                                                .on_activate(Cmd::AlignJustify),
+                                            MenuItem::new("Justify").on_activate(Cmd::AlignJustify),
                                         ),
                                 )
                             }))
                             .separator()
-                            .item(MenuItem::new("Toggle Dark Mode").on_activate(Cmd::ToggleDarkMode)),
+                            .item(
+                                MenuItem::new("Toggle Dark Mode").on_activate(Cmd::ToggleDarkMode),
+                            ),
                     )
                 })
                 .trailing_slot(
@@ -514,10 +521,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use fern_ui::core::signal::Signal;
     use fern_ui::core::WidgetTree;
+    use fern_ui::core::signal::Signal;
     use fern_ui::prelude::*;
-    use fern_ui::widgets::{ComboBox, MenuList, MenuItem, MenuSeparator};
+    use fern_ui::widgets::{ComboBox, MenuItem, MenuList, MenuSeparator};
 
     #[derive(Debug, Clone, PartialEq)]
     enum TestCmd {
@@ -602,7 +609,11 @@ mod tests {
     #[test]
     fn menu_item_disabled_ignores_tap() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::new("Nope").on_activate(TestCmd::Action).enabled(false));
+        let item = tree.add(
+            MenuItem::new("Nope")
+                .on_activate(TestCmd::Action)
+                .enabled(false),
+        );
         tree.layout(SizeProposal::exact(200.0, 40.0));
 
         let called = std::rc::Rc::new(std::cell::Cell::new(false));
@@ -625,8 +636,7 @@ mod tests {
                 .child(fern_ui::widgets::TextWidget::new("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -657,8 +667,7 @@ mod tests {
                 .child(fern_ui::widgets::TextWidget::new("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -798,8 +807,7 @@ mod tests {
                 .child(fern_ui::widgets::TextWidget::new("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -834,8 +842,7 @@ mod tests {
                 .child(fern_ui::widgets::TextWidget::new("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -868,8 +875,7 @@ mod tests {
                 .child(fern_ui::widgets::TextWidget::new("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );

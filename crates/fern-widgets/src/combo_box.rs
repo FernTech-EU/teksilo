@@ -511,9 +511,7 @@ impl Widget for ComboBox {
                         }
                         // Type-ahead: letter/character keys jump to matching item.
                         // Key::A..Key::Z and Key::Character are all handled via to_char().
-                        WidgetEvent::KeyDown { key, .. }
-                            if key.to_char().is_some() =>
-                        {
+                        WidgetEvent::KeyDown { key, .. } if key.to_char().is_some() => {
                             let ch = key.to_char().unwrap();
                             let mut ta = typeahead.borrow_mut();
                             let now = Instant::now();
@@ -729,7 +727,11 @@ mod tests {
 
         // Key::C matches 'Cherry' (to_char returns lowercase 'c')
         tree.press_key(Key::C, fern_core::event::Modifiers::NONE);
-        assert_eq!(selected.get(), Some(2), "should match 'Cherry' case-insensitively");
+        assert_eq!(
+            selected.get(),
+            Some(2),
+            "should match 'Cherry' case-insensitively"
+        );
     }
 
     #[test]
@@ -745,7 +747,11 @@ mod tests {
 
         // Key::Z → no match, selection unchanged
         tree.press_key(Key::Z, fern_core::event::Modifiers::NONE);
-        assert_eq!(selected.get(), Some(1), "no match should keep existing selection");
+        assert_eq!(
+            selected.get(),
+            Some(1),
+            "no match should keep existing selection"
+        );
     }
 
     #[test]
@@ -793,7 +799,11 @@ mod tests {
         // Enter opens the dropdown
         tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(300.0, 200.0));
-        assert_eq!(tree.active_overlays().len(), 1, "Enter should open dropdown");
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "Enter should open dropdown"
+        );
 
         // Navigate to an item
         tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
@@ -846,7 +856,11 @@ mod tests {
         // ArrowDown when closed should open and navigate
         tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(300.0, 200.0));
-        assert_eq!(tree.active_overlays().len(), 1, "ArrowDown should open dropdown");
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "ArrowDown should open dropdown"
+        );
         assert_eq!(selected.get(), Some(1));
     }
 
@@ -869,7 +883,11 @@ mod tests {
 
         // Type 'b' (Key::B as sent by the real app) → type-ahead should select Banana
         tree.press_key(Key::B, fern_core::event::Modifiers::NONE);
-        assert_eq!(selected.get(), Some(1), "type-ahead should update selection");
+        assert_eq!(
+            selected.get(),
+            Some(1),
+            "type-ahead should update selection"
+        );
 
         // Layout + render — triggers process_state_changes which should detect dirty binding
         tree.layout(SizeProposal::exact(300.0, 300.0));

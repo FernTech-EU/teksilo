@@ -22,7 +22,9 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement};
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
+};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Color;
@@ -315,8 +317,7 @@ impl Widget for MenuOverlayHost {
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
-                            key: Key::Escape,
-                            ..
+                            key: Key::Escape, ..
                         } => {
                             menu_ctx.close(ctx);
                             EventResponse::Handled
@@ -324,8 +325,7 @@ impl Widget for MenuOverlayHost {
                         _ => EventResponse::Ignored,
                     }
                 }
-            })
-            ;
+            });
         // NOT focusable — the inner MenuList receives focus directly.
         // ArrowLeft/Right and FocusLost bubble from MenuList through here.
         ctx.apply_self_handlers(handler_set);
@@ -989,7 +989,11 @@ mod tests {
         for _ in 0..10 {
             tree.press_key(Key::ArrowRight, fern_core::event::Modifiers::NONE);
             tree.layout(SizeProposal::exact(600.0, 400.0));
-            assert_eq!(tree.active_overlays().len(), 1, "Navigation should continue working");
+            assert_eq!(
+                tree.active_overlays().len(),
+                1,
+                "Navigation should continue working"
+            );
             assert!(
                 overlay_contains_label(&tree, "New")
                     || overlay_contains_label(&tree, "Cut")
@@ -1001,7 +1005,11 @@ mod tests {
         for _ in 0..10 {
             tree.press_key(Key::ArrowLeft, fern_core::event::Modifiers::NONE);
             tree.layout(SizeProposal::exact(600.0, 400.0));
-            assert_eq!(tree.active_overlays().len(), 1, "Navigation should continue working");
+            assert_eq!(
+                tree.active_overlays().len(),
+                1,
+                "Navigation should continue working"
+            );
             assert!(
                 overlay_contains_label(&tree, "New")
                     || overlay_contains_label(&tree, "Cut")
@@ -1031,17 +1039,14 @@ mod tests {
                     )
                 })
                 .menu("View", || {
-                    Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new("Zoom").on_activate(TestCmd::New)),
-                    )
+                    Box::new(MenuList::new().item(MenuItem::new("Zoom").on_activate(TestCmd::New)))
                 }),
         );
-        
+
         let toolbar = tree.add(TextWidget::new("Toolbar"));
         let content = tree.add(TextWidget::new("Content Area"));
         let status_bar = tree.add(TextWidget::new("Status Bar"));
-        
+
         let root = tree.add(
             VStack::new()
                 .add_child(menu_bar)
@@ -1049,11 +1054,11 @@ mod tests {
                 .child(Expand::new().fills_stack().set_child(content))
                 .add_child(status_bar),
         );
-        
+
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         // Click first menu (File)
-                let first_trigger_center = trigger_center(&tree, root, "File");
+        let first_trigger_center = trigger_center(&tree, root, "File");
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: first_trigger_center,
             button: fern_core::event::PointerButton::Primary,
@@ -1063,63 +1068,71 @@ mod tests {
             button: fern_core::event::PointerButton::Primary,
         });
         tree.layout(SizeProposal::exact(800.0, 600.0));
-        
+
         assert_eq!(tree.active_overlays().len(), 1, "File menu should be open");
-                assert!(overlay_contains_label(&tree, "New"));
-        
+        assert!(overlay_contains_label(&tree, "New"));
+
         // Navigate to Edit menu
         tree.press_key(Key::ArrowRight, fern_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(800.0, 600.0));
         assert_eq!(tree.active_overlays().len(), 1, "Edit menu should be open");
-                assert!(overlay_contains_label(&tree, "Cut"));
-        
+        assert!(overlay_contains_label(&tree, "Cut"));
+
         // Navigate to View menu
         tree.press_key(Key::ArrowRight, fern_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(800.0, 600.0));
         assert_eq!(tree.active_overlays().len(), 1, "View menu should be open");
-                assert!(overlay_contains_label(&tree, "Zoom"));
-        
+        assert!(overlay_contains_label(&tree, "Zoom"));
+
         // Navigate back to File menu (wrap around)
         tree.press_key(Key::ArrowRight, fern_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(800.0, 600.0));
-        assert_eq!(tree.active_overlays().len(), 1, "File menu should be open again");
-                assert!(overlay_contains_label(&tree, "New"));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "File menu should be open again"
+        );
+        assert!(overlay_contains_label(&tree, "New"));
 
-                tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
-                tree.layout(SizeProposal::exact(800.0, 600.0));
-                assert_eq!(tree.active_overlays().len(), 1, "File menu should remain open in the complex layout");
-                assert!(overlay_contains_label(&tree, "New"));
-            }
+        tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "File menu should remain open in the complex layout"
+        );
+        assert!(overlay_contains_label(&tree, "New"));
+    }
 
-            #[test]
-            fn click_outside_clears_menu_state() {
-                let (mut tree, bar) = setup_menu_bar();
-                let file_center = trigger_center(&tree, bar, "File");
-                let edit_center = trigger_center(&tree, bar, "Edit");
+    #[test]
+    fn click_outside_clears_menu_state() {
+        let (mut tree, bar) = setup_menu_bar();
+        let file_center = trigger_center(&tree, bar, "File");
+        let edit_center = trigger_center(&tree, bar, "Edit");
 
-                tree.dispatch_event(WidgetEvent::PointerDown {
-                    position: file_center,
-                    button: fern_core::event::PointerButton::Primary,
-                });
-                tree.dispatch_event(WidgetEvent::PointerUp {
-                    position: file_center,
-                    button: fern_core::event::PointerButton::Primary,
-                });
-                tree.layout(SizeProposal::exact(600.0, 400.0));
-                assert_eq!(tree.active_overlays().len(), 1);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: file_center,
+            button: fern_core::event::PointerButton::Primary,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: file_center,
+            button: fern_core::event::PointerButton::Primary,
+        });
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        assert_eq!(tree.active_overlays().len(), 1);
 
-                tree.dispatch_event(WidgetEvent::PointerDown {
-                    position: fern_canvas::Point::new(1000.0, 1000.0),
-                    button: fern_core::event::PointerButton::Primary,
-                });
-                tree.layout(SizeProposal::exact(600.0, 400.0));
-                assert!(tree.active_overlays().is_empty());
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(1000.0, 1000.0),
+            button: fern_core::event::PointerButton::Primary,
+        });
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        assert!(tree.active_overlays().is_empty());
 
-                tree.pointer_move(edit_center);
-                tree.layout(SizeProposal::exact(600.0, 400.0));
-                assert!(
-                    tree.active_overlays().is_empty(),
-                    "hovering a trigger after dismissal should not reopen a menu"
-                );
+        tree.pointer_move(edit_center);
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "hovering a trigger after dismissal should not reopen a menu"
+        );
     }
 }

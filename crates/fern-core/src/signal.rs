@@ -224,9 +224,7 @@ impl<T: Clone + 'static> Signal<T> {
 
     pub fn try_get_ref(&self) -> Result<Ref<'_, T>, SignalAccessError> {
         match &self.kind {
-            SignalKind::Mutable { inner, .. } => {
-                Ok(Ref::map(inner.borrow(), |guard| &guard.value))
-            }
+            SignalKind::Mutable { inner, .. } => Ok(Ref::map(inner.borrow(), |guard| &guard.value)),
             SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
         }
     }

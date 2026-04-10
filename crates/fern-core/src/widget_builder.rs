@@ -120,10 +120,7 @@ impl HandlerSet {
 
     /// Set a context menu factory. The factory is invoked on right-click
     /// to produce the overlay content widget (typically a `MenuList`).
-    pub fn context_menu(
-        mut self,
-        factory: impl Fn() -> Box<dyn Widget> + 'static,
-    ) -> Self {
+    pub fn context_menu(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
         self.context_menu_factory = Some(Box::new(factory));
         self
     }
@@ -265,10 +262,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    pub fn context_menu(
-        mut self,
-        factory: impl Fn() -> Box<dyn Widget> + 'static,
-    ) -> Self {
+    pub fn context_menu(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
         self.handler_set.context_menu_factory = Some(Box::new(factory));
         self
     }

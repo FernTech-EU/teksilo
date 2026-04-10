@@ -421,7 +421,9 @@ impl Widget for Checkbox {
                 }
             })
             .on_access_action({
-                move |action: fern_core::accesskit::Action, _ctx: &mut EventContext| -> EventResponse {
+                move |action: fern_core::accesskit::Action,
+                      _ctx: &mut EventContext|
+                      -> EventResponse {
                     if action == fern_core::accesskit::Action::Click && enabled {
                         kind_access.toggle();
                         EventResponse::Handled

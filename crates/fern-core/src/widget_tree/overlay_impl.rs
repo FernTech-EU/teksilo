@@ -74,7 +74,11 @@ impl WidgetTree {
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
             });
-            if let Some(entry) = self.tooltips.iter_mut().find(|e| e.content_id == content_id) {
+            if let Some(entry) = self
+                .tooltips
+                .iter_mut()
+                .find(|e| e.content_id == content_id)
+            {
                 entry.overlay_id = Some(oid);
             }
         }
@@ -82,7 +86,9 @@ impl WidgetTree {
 
     pub(super) fn process_delayed_overlays(&mut self) {
         let sim_now = self.sim_clock;
-        self.process_delayed_overlays_impl(|p| sim_now.saturating_duration_since(p.sim_requested_at));
+        self.process_delayed_overlays_impl(|p| {
+            sim_now.saturating_duration_since(p.sim_requested_at)
+        });
     }
 
     pub(super) fn process_delayed_overlays_real(&mut self) {
@@ -186,14 +192,16 @@ impl WidgetTree {
                 overlay.parent_overlay.is_none()
                     && self.is_descendant_of(overlay.anchor, menu_root)
                     && !preserve_overlay.is_some_and(|keep| {
-                        overlay.id == keep || self.overlay_manager.is_descendant_of(overlay.id, keep)
+                        overlay.id == keep
+                            || self.overlay_manager.is_descendant_of(overlay.id, keep)
                     })
             })
             .map(|overlay| overlay.id)
             .collect();
 
         for overlay_id in overlay_ids {
-            let (dismissed, focus_restore) = self.overlay_manager.dismiss_with_focus_restore(overlay_id);
+            let (dismissed, focus_restore) =
+                self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed);
             if let Some(restore_id) = focus_restore {
                 if self.arena.is_active(restore_id) {
@@ -271,10 +279,14 @@ impl WidgetTree {
             .min();
         let animation_deadline = self.animation_scheduler.next_deadline();
 
-        [tooltip_deadline, delayed_overlay_deadline, animation_deadline]
-            .into_iter()
-            .flatten()
-            .min()
+        [
+            tooltip_deadline,
+            delayed_overlay_deadline,
+            animation_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     pub fn overlay_manager(&self) -> &crate::overlay::OverlayManager {
@@ -299,12 +311,19 @@ impl WidgetTree {
 
     pub(super) fn dormant_dismissed_content(&mut self, content_ids: &[WidgetId]) {
         for &id in content_ids {
-            let focused_in_subtree = self.focused.filter(|focused| self.is_descendant_of(*focused, id));
-            let hovered_in_subtree = self.hovered.filter(|hovered| self.is_descendant_of(*hovered, id));
+            let focused_in_subtree = self
+                .focused
+                .filter(|focused| self.is_descendant_of(*focused, id));
+            let hovered_in_subtree = self
+                .hovered
+                .filter(|hovered| self.is_descendant_of(*hovered, id));
 
             if let Some(focused) = focused_in_subtree {
                 self.dispatch_to_widget(focused, &WidgetEvent::FocusLost);
-                if self.focused.is_some_and(|current| self.is_descendant_of(current, id)) {
+                if self
+                    .focused
+                    .is_some_and(|current| self.is_descendant_of(current, id))
+                {
                     self.focused = None;
                     self.focus_origin = None;
                 }

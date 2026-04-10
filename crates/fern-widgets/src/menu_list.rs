@@ -84,9 +84,7 @@ impl Widget for KeyboardHighlightWrapper {
         let bg = RectWidget::new().bind_background(bg_color);
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new()
-            .add_child(bg_id)
-            .add_child(self.item_id);
+        let zstack = ZStack::new().add_child(bg_id).add_child(self.item_id);
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 
@@ -238,77 +236,79 @@ impl Widget for MenuList {
         let item_ids = self.item_widget_ids.clone();
         let sub_flags = self.submenu_flags.clone();
         let handler_set = HandlerSet::new()
-            .on_key(move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                match event {
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowDown,
-                        ..
-                    } => {
-                        if item_count == 0 {
-                            return EventResponse::Ignored;
-                        }
-                        let current = focused_index.get().unwrap_or(usize::MAX);
-                        let next = if current >= item_count - 1 {
-                            0
-                        } else {
-                            current + 1
-                        };
-                        focused_index.set(Some(next));
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowUp, ..
-                    } => {
-                        if item_count == 0 {
-                            return EventResponse::Ignored;
-                        }
-                        let current = focused_index.get().unwrap_or(0);
-                        let next = if current == 0 {
-                            item_count - 1
-                        } else {
-                            current - 1
-                        };
-                        focused_index.set(Some(next));
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::KeyDown {
-                        key: Key::Enter | Key::Space,
-                        ..
-                    } => {
-                        // Activate the focused item via synthetic click.
-                        if let Some(idx) = focused_index.get() {
-                            if idx < item_ids.len() {
-                                ctx.synthetic_click(item_ids[idx]);
-                                return EventResponse::Handled;
+            .on_key(
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    match event {
+                        WidgetEvent::KeyDown {
+                            key: Key::ArrowDown,
+                            ..
+                        } => {
+                            if item_count == 0 {
+                                return EventResponse::Ignored;
                             }
+                            let current = focused_index.get().unwrap_or(usize::MAX);
+                            let next = if current >= item_count - 1 {
+                                0
+                            } else {
+                                current + 1
+                            };
+                            focused_index.set(Some(next));
+                            EventResponse::Handled
                         }
-                        EventResponse::Ignored
-                    }
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowRight,
-                        ..
-                    } => {
-                        // Only open submenus; for non-submenu items, let it bubble
-                        // to MenuOverlayHost which navigates to the next bar menu.
-                        if let Some(idx) = focused_index.get() {
-                            if idx < sub_flags.len() && sub_flags[idx] {
-                                ctx.synthetic_click(item_ids[idx]);
-                                return EventResponse::Handled;
+                        WidgetEvent::KeyDown {
+                            key: Key::ArrowUp, ..
+                        } => {
+                            if item_count == 0 {
+                                return EventResponse::Ignored;
                             }
+                            let current = focused_index.get().unwrap_or(0);
+                            let next = if current == 0 {
+                                item_count - 1
+                            } else {
+                                current - 1
+                            };
+                            focused_index.set(Some(next));
+                            EventResponse::Handled
                         }
-                        EventResponse::Ignored
+                        WidgetEvent::KeyDown {
+                            key: Key::Enter | Key::Space,
+                            ..
+                        } => {
+                            // Activate the focused item via synthetic click.
+                            if let Some(idx) = focused_index.get() {
+                                if idx < item_ids.len() {
+                                    ctx.synthetic_click(item_ids[idx]);
+                                    return EventResponse::Handled;
+                                }
+                            }
+                            EventResponse::Ignored
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::ArrowRight,
+                            ..
+                        } => {
+                            // Only open submenus; for non-submenu items, let it bubble
+                            // to MenuOverlayHost which navigates to the next bar menu.
+                            if let Some(idx) = focused_index.get() {
+                                if idx < sub_flags.len() && sub_flags[idx] {
+                                    ctx.synthetic_click(item_ids[idx]);
+                                    return EventResponse::Handled;
+                                }
+                            }
+                            EventResponse::Ignored
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::ArrowLeft | Key::Escape,
+                            ..
+                        } => {
+                            // Let it bubble to MenuOverlayHost (for bar navigation)
+                            // or the tree-level Escape handler (for overlay dismissal).
+                            EventResponse::Ignored
+                        }
+                        _ => EventResponse::Ignored,
                     }
-                    WidgetEvent::KeyDown {
-                        key: Key::ArrowLeft | Key::Escape,
-                        ..
-                    } => {
-                        // Let it bubble to MenuOverlayHost (for bar navigation)
-                        // or the tree-level Escape handler (for overlay dismissal).
-                        EventResponse::Ignored
-                    }
-                    _ => EventResponse::Ignored,
-                }
-            })
+                },
+            )
             .focusable(true);
 
         ctx.apply_self_handlers(handler_set);

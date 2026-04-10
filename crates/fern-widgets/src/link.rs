@@ -219,7 +219,9 @@ impl Widget for Link {
                 }
             })
             .on_access_action({
-                move |action: fern_core::accesskit::Action, ctx: &mut EventContext| -> EventResponse {
+                move |action: fern_core::accesskit::Action,
+                      ctx: &mut EventContext|
+                      -> EventResponse {
                     if action == fern_core::accesskit::Action::Click {
                         if let Some(ref act) = *action_for_access {
                             act(ctx);

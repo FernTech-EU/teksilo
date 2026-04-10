@@ -524,12 +524,15 @@ mod tests {
     }
 
     fn overlay_contains_label(tree: &WidgetTree, label: &str) -> bool {
-        tree.overlay_manager().active_content_ids().into_iter().any(|root| {
-            descendants(tree, root).into_iter().any(|id| {
-                let info = tree.accessibility_node(id);
-                info.name() == Some(label)
+        tree.overlay_manager()
+            .active_content_ids()
+            .into_iter()
+            .any(|root| {
+                descendants(tree, root).into_iter().any(|id| {
+                    let info = tree.accessibility_node(id);
+                    info.name() == Some(label)
+                })
             })
-        })
     }
 
     #[test]
@@ -549,7 +552,11 @@ mod tests {
     #[test]
     fn disabled_ignores_tap() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::new("Cut").on_activate(TestCmd::Cut).enabled(false));
+        let item = tree.add(
+            MenuItem::new("Cut")
+                .on_activate(TestCmd::Cut)
+                .enabled(false),
+        );
         tree.layout(SizeProposal::exact(200.0, 40.0));
         let called = Rc::new(Cell::new(false));
         let c = called.clone();
@@ -590,8 +597,7 @@ mod tests {
     fn auto_shortcut_label_from_shortcut_map() {
         use fern_core::shortcut::{Shortcut, ShortcutMap};
 
-        let shortcuts =
-            ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
+        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
 
         // Item with auto-resolved shortcut (via ShortcutMap)
         let mut tree_with = WidgetTree::new()
@@ -620,8 +626,7 @@ mod tests {
     fn manual_shortcut_label_overrides_auto() {
         use fern_core::shortcut::{Shortcut, ShortcutMap};
 
-        let shortcuts =
-            ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
+        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
 
         // Manual label should take precedence over auto-lookup
         let mut tree = WidgetTree::new()
@@ -642,14 +647,12 @@ mod tests {
         use fern_core::shortcut::{Shortcut, ShortcutMap};
 
         // Only Paste is bound, not Cut
-        let shortcuts =
-            ShortcutMap::new().bind(Shortcut::ctrl(Key::V), TestCmd::Paste);
+        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::V), TestCmd::Paste);
 
         let mut tree_with_map = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_shortcuts(shortcuts);
-        let item_with_map =
-            tree_with_map.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        let item_with_map = tree_with_map.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
         tree_with_map.layout(SizeProposal::unspecified());
 
         let mut tree_no_map = WidgetTree::new().with_theme(Theme::light_default());
@@ -869,14 +872,15 @@ mod tests {
     #[test]
     fn moving_pointer_outside_closes_open_submenu_after_delay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let menu = tree.add(
-            crate::menu_list::MenuList::new().item(MenuItem::submenu("More", || {
+        let menu = tree.add(crate::menu_list::MenuList::new().item(MenuItem::submenu(
+            "More",
+            || {
                 Box::new(
                     crate::menu_list::MenuList::new()
                         .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
                 )
-            })),
-        );
+            },
+        )));
         tree.layout(SizeProposal::exact(240.0, 80.0));
 
         let submenu_item = find_menu_item(&tree, menu, "More");
@@ -897,10 +901,8 @@ mod tests {
         // Verify the submenu_delay builder method is accepted
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::submenu("More", || {
-                Box::new(TextWidget::new("placeholder"))
-            })
-            .submenu_delay(std::time::Duration::from_millis(500)),
+            MenuItem::submenu("More", || Box::new(TextWidget::new("placeholder")))
+                .submenu_delay(std::time::Duration::from_millis(500)),
         );
         tree.layout(SizeProposal::exact(200.0, 40.0));
         assert!(tree.bounds(item).width > 0.0);
