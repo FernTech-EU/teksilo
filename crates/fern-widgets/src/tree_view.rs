@@ -60,6 +60,9 @@ pub struct TreeView<T: 'static> {
     /// Enable intra-widget drag reordering.
     reorderable: bool,
 
+    /// Active drop feedback (set by on_drag_hover, read by paint).
+    drop_feedback: Rc<Cell<Option<(f32, f32)>>>, // (y, width) for insertion line
+
     // Persistent scroll state
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
@@ -92,6 +95,7 @@ impl<T: 'static> TreeView<T> {
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
+            drop_feedback: Rc::new(Cell::new(None)),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -221,11 +225,15 @@ impl<T: 'static> Widget for TreeView<T> {
             }
         });
 
-        // --- Observe scroll position changes ---
+        // --- Observe scroll position changes (rebuild only when visible range changes) ---
         let item_height = self.item_height;
         let viewport_h = self.viewport_height.clone();
-        let prev_start = Rc::new(Cell::new(usize::MAX));
-        let prev_end = Rc::new(Cell::new(usize::MAX));
+        // Initialize to current visible range so the first scroll doesn't
+        // spuriously trigger a rebuild (which would destroy the scrollbar
+        // and break pointer capture during drag).
+        let (init_start, init_end) = self.visible_range();
+        let prev_start = Rc::new(Cell::new(init_start));
+        let prev_end = Rc::new(Cell::new(init_end));
         let version_for_scroll = version.clone();
         let scroll_ver = Rc::new(Cell::new(0_u64));
         let scroll_handle = self.scroll_y.observe({
@@ -384,13 +392,32 @@ impl<T: 'static> Widget for TreeView<T> {
         if self.reorderable {
             let my_tree_id = self.tree_id;
 
-            handlers = handlers.on_drag_hover(move |payload, _position, _ctx| {
+            let ih_for_hover = self.item_height;
+            let scroll_for_hover = self.scroll_y.clone();
+            let tsh_for_hover = self.tree_slice.handle();
+            let feedback_for_hover = self.drop_feedback.clone();
+
+            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 if payload.has_typed::<TreeViewDragData>() {
+                    let scroll = scroll_for_hover.get().max(0.0);
+                    let content_y = position.y + scroll;
+                    let count = tsh_for_hover.visible_count();
+                    let flat_idx = if ih_for_hover > 0.0 {
+                        ((content_y + ih_for_hover * 0.5) / ih_for_hover)
+                            .floor()
+                            .max(0.0)
+                            .min(count as f32) as usize
+                    } else {
+                        0
+                    };
+                    let insertion_y = flat_idx as f32 * ih_for_hover - scroll;
+                    feedback_for_hover.set(Some((insertion_y, 400.0)));
                     DropFeedback::InsertionLine {
-                        y: 0.0,
+                        y: insertion_y,
                         width: 400.0,
                     }
                 } else {
+                    feedback_for_hover.set(None);
                     DropFeedback::NoFeedback
                 }
             });
@@ -398,13 +425,11 @@ impl<T: 'static> Widget for TreeView<T> {
             // For the drop handler, we need access to the tree model and the
             // flattened entries. Access them via the TreeSlice's public methods.
             let tree_model_for_drop = self.tree_slice.tree().clone();
-            let flattened_for_drop = self.tree_slice.version_signal(); // trigger re-reads
             let ih_for_drop = self.item_height;
             let scroll_for_drop = self.scroll_y.clone();
 
             let tsh_for_drop = self.tree_slice.handle();
             handlers = handlers.on_drop(move |mut payload, position, _ctx| {
-                let _ = &flattened_for_drop; // keep version signal alive
                 if let Some(drag_data) = payload.take_typed::<TreeViewDragData>() {
                     if drag_data.source_tree_id == my_tree_id {
                         let source_node = drag_data.source_node;
@@ -433,10 +458,21 @@ impl<T: 'static> Widget for TreeView<T> {
                             if y_in_row < third {
                                 // Drop BEFORE target: move as sibling above
                                 let target = entry.node_id;
+                                let source_parent = tree_model_for_drop.parent(source_node);
                                 if let Some(parent) = tree_model_for_drop.parent(target) {
                                     let siblings = tree_model_for_drop.children(parent);
-                                    let idx =
+                                    let mut idx =
                                         siblings.iter().position(|&n| n == target).unwrap_or(0);
+                                    // Adjust: if source is an earlier sibling under the same
+                                    // parent, move_node removes it first, shifting indices down.
+                                    if source_parent == Some(parent) {
+                                        let src_idx = siblings.iter().position(|&n| n == source_node);
+                                        if let Some(si) = src_idx {
+                                            if si < idx {
+                                                idx -= 1;
+                                            }
+                                        }
+                                    }
                                     tree_model_for_drop.move_node(source_node, parent, idx);
                                 } else {
                                     // Target is a root — move to root before it
@@ -448,18 +484,39 @@ impl<T: 'static> Widget for TreeView<T> {
                                             break;
                                         }
                                     }
+                                    // Adjust if source is also a root before target
+                                    if source_parent.is_none() {
+                                        for i in 0..root_count {
+                                            if tree_model_for_drop.root(i) == source_node {
+                                                if i < idx {
+                                                    idx -= 1;
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
                                     tree_model_for_drop.move_to_root(source_node, idx);
                                 }
                             } else if y_in_row > 2.0 * third {
                                 // Drop AFTER target: move as sibling below
                                 let target = entry.node_id;
+                                let source_parent = tree_model_for_drop.parent(source_node);
                                 if let Some(parent) = tree_model_for_drop.parent(target) {
                                     let siblings = tree_model_for_drop.children(parent);
-                                    let idx = siblings
+                                    let mut idx = siblings
                                         .iter()
                                         .position(|&n| n == target)
                                         .map(|i| i + 1)
                                         .unwrap_or(0);
+                                    // Adjust for same-parent removal shifting indices
+                                    if source_parent == Some(parent) {
+                                        let src_idx = siblings.iter().position(|&n| n == source_node);
+                                        if let Some(si) = src_idx {
+                                            if si < idx {
+                                                idx -= 1;
+                                            }
+                                        }
+                                    }
                                     tree_model_for_drop.move_node(source_node, parent, idx);
                                 } else {
                                     let root_count = tree_model_for_drop.root_count();
@@ -470,15 +527,23 @@ impl<T: 'static> Widget for TreeView<T> {
                                             break;
                                         }
                                     }
+                                    // Adjust if source is also a root before target
+                                    if source_parent.is_none() {
+                                        for i in 0..root_count {
+                                            if tree_model_for_drop.root(i) == source_node {
+                                                if i < idx {
+                                                    idx -= 1;
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
                                     tree_model_for_drop
                                         .move_to_root(source_node, idx.min(root_count));
                                 }
                             } else {
-                                // Drop INTO target (middle third)
-                                if entry.has_children || true {
-                                    // Allow dropping into any node as first child
-                                    tree_model_for_drop.move_node(source_node, entry.node_id, 0);
-                                }
+                                // Drop INTO target (middle third): reparent as first child
+                                tree_model_for_drop.move_node(source_node, entry.node_id, 0);
                             }
                         }
                         return true;
@@ -663,6 +728,23 @@ impl<T: 'static> Widget for TreeView<T> {
                 sb_child.origin = bounds.origin();
                 sb_child.size = Size::ZERO;
             }
+        }
+    }
+
+    fn paint(
+        &self,
+        bounds: Rect,
+        canvas: &mut fern_canvas::Canvas,
+        _ctx: &fern_core::widget::PaintContext,
+    ) {
+        // Draw insertion line during drag hover
+        if let Some((y, width)) = self.drop_feedback.get() {
+            let line_y = bounds.y + y;
+            let line_x = bounds.x;
+            canvas.fill_rect(
+                Rect::new(line_x, line_y - 1.0, width, 2.0),
+                fern_tokens::Color::from_rgba(0.2, 0.4, 0.9, 0.8),
+            );
         }
     }
 

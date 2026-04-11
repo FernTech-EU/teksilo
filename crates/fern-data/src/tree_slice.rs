@@ -172,15 +172,6 @@ impl<T: 'static> TreeSlice<T> {
     pub fn expand_all(&self) {
         {
             let mut exp = self.expanded.borrow_mut();
-            // Collect all nodes that have children
-            let flat = self.flattened.borrow();
-            for entry in flat.iter() {
-                if entry.has_children {
-                    exp.insert(entry.node_id);
-                }
-            }
-            // Also need to expand nodes that aren't visible yet
-            drop(flat);
             self.expand_all_recursive(&mut exp);
         }
         self.reflatten_and_notify();
