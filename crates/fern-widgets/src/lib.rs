@@ -32,6 +32,7 @@ pub mod toggle;
 pub mod toolbar;
 pub mod tooltip;
 pub mod tree_view;
+pub mod wizard;
 
 pub use tooltip::TooltipWidget;
 
@@ -68,6 +69,7 @@ pub use tab_widget::{TabItem, TabWidget};
 pub use toggle::Toggle;
 pub use toolbar::Toolbar;
 pub use tree_view::TreeView;
+pub use wizard::{Wizard, WizardStep};
 
 #[cfg(test)]
 mod layout_integration_tests;
