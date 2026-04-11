@@ -440,7 +440,8 @@ impl Widget for TabBar {
                 .scroll_bar_style(ScrollBarStyle::Overlay)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AsNeeded)
-                .widget_resizable(true),
+                .widget_resizable(true)
+                .preferred_size(0.0, HEADER_MIN_HEIGHT),
         );
 
         let mut row = HStack::new().spacing(8.0).child(

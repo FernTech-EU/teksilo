@@ -86,7 +86,12 @@ impl Widget for HStack {
         let mut max_height: f32 = 0.0;
         for &child_id in &self.child_ids {
             if ctx.child_is_spacer(child_id) {
-                continue; // spacers don't contribute intrinsic width
+                // Spacers don't contribute intrinsic width (primary axis),
+                // but they still contribute to cross-axis height.
+                if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
+                    max_height = max_height.max(child_size.height);
+                }
+                continue;
             }
             if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
                 total_width += child_size.width;

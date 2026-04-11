@@ -87,7 +87,12 @@ impl Widget for VStack {
 
         for &child_id in &self.child_ids {
             if ctx.child_is_spacer(child_id) {
-                continue; // spacers don't contribute intrinsic height
+                // Spacers don't contribute intrinsic height (primary axis),
+                // but they still contribute to cross-axis width.
+                if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
+                    max_width = max_width.max(child_size.width);
+                }
+                continue;
             }
             if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
                 total_height += child_size.height;
