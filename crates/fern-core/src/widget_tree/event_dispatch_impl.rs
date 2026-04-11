@@ -1166,9 +1166,17 @@ mod tests {
 
     #[test]
     fn escape_cancels_drag() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
         let mut tree = WidgetTree::new();
         let source = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Register a command handler that panics if called
+        let cmd_fired = Rc::new(Cell::new(false));
+        let cf = cmd_fired.clone();
+        tree.on_command(move |_cmd: &TestCmd| cf.set(true));
 
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(99_i32));
@@ -1176,7 +1184,8 @@ mod tests {
         assert!(tree.active_drag.is_some());
 
         tree.press_key(Key::Escape, Modifiers::NONE);
-        assert!(tree.active_drag.is_none());
+        assert!(tree.active_drag.is_none(), "drag should be cancelled");
+        assert!(!cmd_fired.get(), "Escape should not emit any command");
     }
 
     #[test]
@@ -1274,6 +1283,123 @@ mod tests {
         assert!(
             hover_count.get() > 0,
             "on_drag_hover should have been called"
+        );
+    }
+
+    #[test]
+    fn drop_outside_window_cancels() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
+        tree.collect_from_ctx(ctx, source);
+        assert!(tree.active_drag.is_some());
+
+        // PointerUp far outside any widget
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(-100.0, -100.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(tree.active_drag.is_none(), "drag should be cleared");
+    }
+
+    #[test]
+    fn drop_target_rejects_wrong_type() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let accepted = Rc::new(Cell::new(false));
+        let a = accepted.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        // Target only accepts String payloads
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|payload, _pos, _ctx| {
+                    if payload.has_typed::<String>() {
+                        crate::drag_state::DropFeedback::InsertionLine {
+                            y: 0.0,
+                            width: 100.0,
+                        }
+                    } else {
+                        crate::drag_state::DropFeedback::NoFeedback
+                    }
+                })
+                .on_drop(move |payload, _pos, _ctx| {
+                    if payload.has_typed::<String>() {
+                        a.set(true);
+                        true
+                    } else {
+                        false
+                    }
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Drag a u32 (not String)
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(150.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(!accepted.get(), "on_drop should reject wrong payload type");
+    }
+
+    #[test]
+    fn inter_widget_drop_transfers_payload() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let received_value = Rc::new(Cell::new(0_u32));
+        let rv = received_value.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_payload, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 100.0,
+                    }
+                })
+                .on_drop(move |mut payload, _pos, _ctx| {
+                    if let Some(val) = payload.take_typed::<u32>() {
+                        rv.set(val);
+                        true
+                    } else {
+                        false
+                    }
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Start drag from source with typed payload
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(777_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Drop on target
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(150.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert_eq!(
+            received_value.get(),
+            777,
+            "Target should receive the typed payload from source"
         );
     }
 }

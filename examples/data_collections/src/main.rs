@@ -1,11 +1,13 @@
 //! Data Collections example — Milestone 6 showcase.
 //!
-//! Demonstrates `Repeater`, `ListView` (with virtualization and selection),
-//! and `TreeView` (with expand/collapse).
+//! Demonstrates all Milestone 6 features:
+//! - **Repeater** — non-virtualized dynamic collection
+//! - **ListView** — virtualized list with selection and drag reordering
+//! - **TreeView** — hierarchical tree with expand/collapse and drag reparenting
 //!
 //! Shows both activation patterns:
 //! - `on_activate(Cmd::RemoveTag)` — typed command routed to central handler
-//! - `on_activate_fn(move |_| { model.push(...) })` — closure escape hatch
+//! - `on_activate_fn(move |_| { ... })` — closure escape hatch (Section 9.2.6)
 //!
 //! Run with: `cargo run -p data-collections`
 
@@ -16,12 +18,12 @@ use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonStyle, Card, HStack, ListView, Padding, Panel, Repeater, Spacer, TabWidget,
-    TextWidget, TreeView, VStack,
+    Button, ButtonStyle, Card, HStack, ListView, Padding, Panel, RectWidget, Repeater, Spacer,
+    TabWidget, TextWidget, TreeView, VStack, ZStack,
 };
 
 // ---------------------------------------------------------------------------
-// Commands — used by buttons that go through the central handler
+// Commands — used by the "Remove Tag" button (typed command path)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +43,7 @@ struct Root {
     tags: ListModel<String>,
     list_items: ListModel<String>,
     tree_model: TreeModel<String>,
-    selection: SelectionModel,
+    list_selection: SelectionModel,
     tag_counter: Rc<Cell<usize>>,
     list_counter: Rc<Cell<usize>>,
     tree_counter: Rc<Cell<usize>>,
@@ -52,19 +54,20 @@ impl Root {
         tags: ListModel<String>,
         list_items: ListModel<String>,
         tree_model: TreeModel<String>,
-        selection: SelectionModel,
     ) -> Self {
         Self {
             root_child_id: None,
             tags,
             list_items,
             tree_model,
-            selection,
+            list_selection: SelectionModel::new(SelectionMode::Multi),
             tag_counter: Rc::new(Cell::new(5)),
             list_counter: Rc::new(Cell::new(201)),
             tree_counter: Rc::new(Cell::new(1)),
         }
     }
+
+    // ---- Tab 1: Repeater ----
 
     fn build_repeater_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let tags = self.tags.clone();
@@ -82,8 +85,8 @@ impl Root {
                     )
                     .child(
                         TextWidget::new(
-                            "Add uses on_activate_fn (closure). \
-                             Remove uses on_activate (typed command).",
+                            "Non-virtualized: one widget per item. \
+                             Add uses on_activate_fn, Remove uses on_activate.",
                         )
                         .style(theme.typography.body.clone())
                         .color(theme.colors.on_surface),
@@ -91,7 +94,6 @@ impl Root {
                     .child(
                         HStack::new()
                             .spacing(8.0)
-                            // Closure escape hatch — mutates model directly
                             .child(
                                 Button::new("+ Add Tag")
                                     .style(ButtonStyle::Filled)
@@ -101,7 +103,6 @@ impl Root {
                                         tags_add.push(format!("Tag {}", n));
                                     }),
                             )
-                            // Typed command — handled by on_command in main()
                             .child(
                                 Button::new("- Remove Last")
                                     .style(ButtonStyle::Outlined)
@@ -109,23 +110,41 @@ impl Root {
                             ),
                     )
                     .child(
-                        Repeater::new(tags, move |_i, tag| {
-                            Box::new(Padding::uniform(4.0).child(Card::new().content(
-                                Padding::uniform(8.0).child(TextWidget::new(tag.as_str())),
-                            )))
+                        Repeater::new(tags, move |i, tag| {
+                            Box::new(
+                                Padding::uniform(2.0).child(
+                                    Card::new().content(
+                                        Padding::symmetric(8.0, 12.0).child(
+                                            HStack::new()
+                                                .spacing(8.0)
+                                                .child(
+                                                    TextWidget::new(
+                                                        format!("{}.", i + 1).leak() as &str
+                                                    )
+                                                    .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0)),
+                                                )
+                                                .child(TextWidget::new(tag.as_str())),
+                                        ),
+                                    ),
+                                ),
+                            )
                         })
-                        .spacing(4.0),
+                        .spacing(2.0),
                     ),
             ),
         )
     }
 
+    // ---- Tab 2: ListView ----
+
     fn build_listview_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let items = self.list_items.clone();
         let items_add = self.list_items.clone();
         let items_remove = self.list_items.clone();
-        let selection = self.selection.clone();
+        let selection = self.list_selection.clone();
         let counter = self.list_counter.clone();
+        let on_surface = theme.colors.on_surface;
+        let body_style = theme.typography.body.clone();
 
         VStack::new()
             .spacing(0.0)
@@ -140,8 +159,9 @@ impl Root {
                         )
                         .child(
                             TextWidget::new(
-                                "200 items, but only the visible ones have widgets. \
-                                 Click buttons to add/remove items.",
+                                "200 items, only visible ones have widgets. \
+                                 Multi-select: click, Ctrl+click, Shift+click. \
+                                 Drag to reorder. Alt+Arrow to reorder via keyboard.",
                             )
                             .style(theme.typography.body.clone())
                             .color(theme.colors.on_surface),
@@ -171,26 +191,52 @@ impl Root {
                 ),
             )
             .child(
-                ListView::new(items, move |_index, item, _selected| {
+                ListView::new(items, move |index, item, selected| {
+                    // Alternating row background + selection highlight
+                    let bg = if selected {
+                        Color::from_rgba(0.25, 0.47, 0.85, 0.25)
+                    } else if index % 2 == 0 {
+                        Color::from_rgba(0.0, 0.0, 0.0, 0.03)
+                    } else {
+                        Color::TRANSPARENT
+                    };
+
                     Box::new(
-                        Padding::symmetric(4.0, 16.0).child(
-                            HStack::new()
-                                .spacing(12.0)
-                                .child(TextWidget::new(item.as_str()))
-                                .child(Spacer::new()),
+                        ZStack::new().child(RectWidget::new().background(bg)).child(
+                            Padding::symmetric(6.0, 16.0).child(
+                                HStack::new()
+                                    .spacing(12.0)
+                                    .child(
+                                        TextWidget::new(format!("{:>4}", index + 1).leak() as &str)
+                                            .color(Color::from_rgba(0.5, 0.5, 0.5, 1.0))
+                                            .style(body_style.clone()),
+                                    )
+                                    .child(
+                                        TextWidget::new(item.as_str())
+                                            .color(on_surface)
+                                            .style(body_style.clone()),
+                                    )
+                                    .child(Spacer::new()),
+                            ),
                         ),
                     )
                 })
                 .item_height(32.0)
-                .selection(selection),
+                .selection(selection)
+                .reorderable(true),
             )
     }
+
+    // ---- Tab 3: TreeView ----
 
     fn build_treeview_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let tree = self.tree_model.clone();
         let tree_add = self.tree_model.clone();
         let tree_remove = self.tree_model.clone();
         let counter = self.tree_counter.clone();
+        let on_surface = theme.colors.on_surface;
+        let body_style = theme.typography.body.clone();
+        let label_style = theme.typography.label.clone();
 
         VStack::new()
             .spacing(0.0)
@@ -205,8 +251,9 @@ impl Root {
                         )
                         .child(
                             TextWidget::new(
-                                "Hierarchical data with expand/collapse. \
-                                 Click buttons to add/remove root nodes.",
+                                "Hierarchical tree with expand/collapse. \
+                                 Drag to reparent (top=before, middle=into, bottom=after). \
+                                 Keyboard: Arrows navigate, Right/Left expand/collapse.",
                             )
                             .style(theme.typography.body.clone())
                             .color(theme.colors.on_surface),
@@ -215,7 +262,7 @@ impl Root {
                             HStack::new()
                                 .spacing(8.0)
                                 .child(
-                                    Button::new("+ Add Root Node")
+                                    Button::new("+ Add Root")
                                         .style(ButtonStyle::Filled)
                                         .on_activate_fn(move |_ctx| {
                                             let n = counter.get();
@@ -241,19 +288,36 @@ impl Root {
             )
             .child(
                 TreeView::new(tree, move |item, entry, _selected| {
-                    let indent = entry.depth as f32 * 24.0;
-                    let prefix = if entry.has_children {
+                    let indent = entry.depth as f32 * 20.0;
+                    let arrow = if entry.has_children {
                         if entry.is_expanded { "v " } else { "> " }
                     } else {
                         "  "
                     };
-                    let label = format!("{}{}", prefix, item);
+                    let is_folder = entry.has_children;
+
                     Box::new(
-                        Padding::new(0.0, 8.0, 0.0, indent + 8.0)
-                            .child(TextWidget::new(label.leak() as &str)),
+                        Padding::new(2.0, 8.0, 2.0, indent + 8.0).child(
+                            HStack::new()
+                                .spacing(4.0)
+                                .child(
+                                    TextWidget::new(arrow.to_string().leak() as &str)
+                                        .color(Color::from_rgba(0.4, 0.4, 0.4, 1.0))
+                                        .style(label_style.clone()),
+                                )
+                                .child(TextWidget::new(item.as_str()).color(on_surface).style(
+                                    if is_folder {
+                                        body_style.clone()
+                                    } else {
+                                        label_style.clone()
+                                    },
+                                ))
+                                .child(Spacer::new()),
+                        ),
                     )
                 })
-                .item_height(28.0),
+                .item_height(28.0)
+                .reorderable(true),
             )
     }
 }
@@ -309,12 +373,15 @@ impl Widget for Root {
 // ---------------------------------------------------------------------------
 
 fn main() {
+    // --- Data models (shared between Root and command handler) ---
+
     let tags = ListModel::from_vec(vec![
         "Rust".into(),
         "GUI".into(),
         "FernUI".into(),
         "Desktop".into(),
     ]);
+
     let list_items = ListModel::from_vec((1..=200).map(|i| format!("Item {}", i)).collect());
 
     let tree_model = TreeModel::new();
@@ -330,9 +397,7 @@ fn main() {
     tree_model.insert_child(pics, 1, "Screenshots".into());
     tree_model.insert_root(2, "Downloads".into());
 
-    let selection = SelectionModel::new(SelectionMode::Multi);
-
-    // Clone for the command handler (only needed for the typed-command button).
+    // Clone for the typed-command handler (Repeater "Remove" button)
     let tags_cmd = tags.clone();
 
     FernAppBuilder::new()
@@ -351,7 +416,6 @@ fn main() {
                 tags.clone(),
                 list_items.clone(),
                 tree_model.clone(),
-                selection.clone(),
             ))
         })
         .run();

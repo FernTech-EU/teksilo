@@ -819,10 +819,10 @@ mod tests {
     #[test]
     fn accessibility_role_is_tree() {
         let tree = sample_tree();
-        let (mut wtree, _tv_id) = make_tree_view(tree);
+        let (mut wtree, tv_id) = make_tree_view(tree);
         wtree.layout(SizeProposal::exact(400.0, 300.0));
-        // This test mainly verifies the widget builds without error
-        // and that the role is set (verified by the accessibility method).
+        let info = wtree.accessibility_node(tv_id);
+        assert_eq!(info.role(), fern_core::accesskit::Role::Tree);
     }
 
     #[test]
@@ -833,5 +833,76 @@ mod tests {
 
         // Only scrollbar
         assert_eq!(wtree.children(tv_id).len(), 1);
+    }
+
+    #[test]
+    fn tree_item_has_a11y_role_and_expanded() {
+        let tree = sample_tree(); // A (has children), B (has children), C (leaf)
+        let (mut wtree, tv_id) = make_tree_view(tree);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let children = wtree.children(tv_id);
+        // First child (A) should be a TreeItemWrapper with TreeItem role
+        let info_a = wtree.accessibility_node(children[0]);
+        assert_eq!(info_a.role(), fern_core::accesskit::Role::TreeItem);
+        // A has children and is collapsed → is_expanded returns false
+        assert!(
+            !info_a.is_expanded(),
+            "Root A should report not expanded (collapsed)"
+        );
+
+        // Third child (C) is a leaf → also not expanded
+        let info_c = wtree.accessibility_node(children[2]);
+        assert_eq!(info_c.role(), fern_core::accesskit::Role::TreeItem);
+        assert!(!info_c.is_expanded(), "Leaf C should not be expanded");
+    }
+
+    #[test]
+    fn keyboard_arrow_down_navigates() {
+        use fern_core::event::{Key, Modifiers};
+        use fern_data::{SelectionMode, SelectionModel};
+
+        let tree = sample_tree(); // A, B, C (3 roots)
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(tree, |_item, entry, _selected| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .selection(sel_clone),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Focus the TreeView
+        wtree.focus(tv_id);
+
+        // ArrowDown should select item 0 first (from no focus), then 1
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowDown,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+
+        // focused_index starts at None → unwrap_or(0) → ArrowDown moves to 1
+        assert_eq!(
+            selection.selected_indices(),
+            vec![1],
+            "ArrowDown from initial state should select index 1 (second root)"
+        );
+
+        // Another ArrowDown should move to index 2
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowDown,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        assert_eq!(
+            selection.selected_indices(),
+            vec![2],
+            "Second ArrowDown should select index 2 (third root)"
+        );
     }
 }

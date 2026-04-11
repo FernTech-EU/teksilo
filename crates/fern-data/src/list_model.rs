@@ -271,6 +271,7 @@ mod tests {
         assert_eq!(model.len(), 4);
         assert_eq!(model.with_item(1, |v| *v), Some(99));
         let log = changes.borrow();
+        assert_eq!(log.len(), 1, "insert should emit exactly one change");
         assert_eq!(log[0], DataChange::ItemsInserted { range: 1..2 });
     }
 
@@ -287,6 +288,7 @@ mod tests {
         assert_eq!(removed, "b");
         assert_eq!(model.len(), 2);
         let log = changes.borrow();
+        assert_eq!(log.len(), 1, "remove should emit exactly one change");
         assert_eq!(log[0], DataChange::ItemsRemoved { range: 1..2 });
     }
 
@@ -302,6 +304,7 @@ mod tests {
         model.set(2, 99);
         assert_eq!(model.with_item(2, |v| *v), Some(99));
         let log = changes.borrow();
+        assert_eq!(log.len(), 1, "set should emit exactly one change");
         assert_eq!(log[0], DataChange::ItemUpdated { index: 2 });
     }
 
@@ -319,6 +322,7 @@ mod tests {
         assert_eq!(model.with_item(0, |v| *v), Some("b"));
         assert_eq!(model.with_item(2, |v| *v), Some("a"));
         let log = changes.borrow();
+        assert_eq!(log.len(), 1, "move_item should emit exactly one change");
         assert_eq!(
             log[0],
             DataChange::ItemsMoved {

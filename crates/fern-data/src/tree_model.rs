@@ -485,6 +485,7 @@ mod tests {
 
         let a1 = tree.insert_child(a, 0, "A1");
         let log = changes.borrow();
+        assert_eq!(log.len(), 1, "insert_child should emit exactly one change");
         assert_eq!(
             log[0],
             TreeChange::NodeInserted {
@@ -507,6 +508,7 @@ mod tests {
         tree.remove(a1);
         assert_eq!(tree.child_count(a), 1);
         let log = changes.borrow();
+        assert_eq!(log.len(), 1, "remove should emit exactly one change");
         assert_eq!(
             log[0],
             TreeChange::NodeRemoved {
@@ -521,12 +523,17 @@ mod tests {
         let tree = TreeModel::new();
         let a = tree.insert_root(0, "A");
         let a1 = tree.insert_child(a, 0, "A1");
-        let _a1a = tree.insert_child(a1, 0, "A1a");
+        let a1a = tree.insert_child(a1, 0, "A1a");
 
         tree.remove(a1);
         assert_eq!(tree.child_count(a), 0);
-        // a1 and a1a should both be gone
-        assert_eq!(tree.with_item(a1, |_| ()), None);
+        // Both a1 and its descendant a1a should be gone from the arena
+        assert_eq!(tree.with_item(a1, |_| ()), None, "a1 should be removed");
+        assert_eq!(
+            tree.with_item(a1a, |_| ()),
+            None,
+            "a1a (grandchild) should also be removed"
+        );
     }
 
     #[test]
