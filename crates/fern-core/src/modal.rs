@@ -125,7 +125,10 @@ mod tests {
         let content_id = tree.add(FillWidget::new());
         let request = ModalRequest::in_tree(content_id);
         assert_eq!(request.presentation, ModalPresentation::Auto);
-        assert_eq!(request.close_behavior, ModalCloseBehavior::EscapeOrClickOutside);
+        assert_eq!(
+            request.close_behavior,
+            ModalCloseBehavior::EscapeOrClickOutside
+        );
         match request.content {
             ModalContent::ExistingWidget(id) => assert_eq!(id, content_id),
             ModalContent::Deferred(_) => panic!("expected ExistingWidget content"),
@@ -134,11 +137,12 @@ mod tests {
 
     #[test]
     fn deferred_request_can_override_metadata() {
-        let request = ModalRequest::deferred(|tree| tree.add(crate::test_widgets::FillWidget::new()))
-            .presentation(ModalPresentation::NativeWindow)
-            .close_behavior(ModalCloseBehavior::Manual)
-            .title("Preferences")
-            .size(640, 480);
+        let request =
+            ModalRequest::deferred(|tree| tree.add(crate::test_widgets::FillWidget::new()))
+                .presentation(ModalPresentation::NativeWindow)
+                .close_behavior(ModalCloseBehavior::Manual)
+                .title("Preferences")
+                .size(640, 480);
 
         assert_eq!(request.presentation, ModalPresentation::NativeWindow);
         assert_eq!(request.close_behavior, ModalCloseBehavior::Manual);

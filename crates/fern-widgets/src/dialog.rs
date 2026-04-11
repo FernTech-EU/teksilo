@@ -356,12 +356,7 @@ impl Widget for Dialog {
                                     key: Key::Enter | Key::Space,
                                     ..
                                 } if enabled => {
-                                    show_centered_modal_overlay(
-                                        ctx,
-                                        content_id,
-                                        self_id,
-                                        &dismiss,
-                                    );
+                                    show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
                                     EventResponse::Handled
                                 }
                                 _ => EventResponse::Ignored,
@@ -370,12 +365,7 @@ impl Widget for Dialog {
                         .on_access_action({
                             move |action, ctx| {
                                 if action == fern_core::accesskit::Action::Click && enabled {
-                                    show_centered_modal_overlay(
-                                        ctx,
-                                        content_id,
-                                        self_id,
-                                        &dismiss,
-                                    );
+                                    show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
                                     EventResponse::Handled
                                 } else {
                                     EventResponse::Ignored

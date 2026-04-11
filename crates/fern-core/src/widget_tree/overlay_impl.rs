@@ -306,6 +306,28 @@ impl WidgetTree {
         self.overlay_manager.show(request)
     }
 
+    /// Show an overlay relative to a source widget, inheriting the source
+    /// overlay ancestry and focus-restore behavior used during event dispatch.
+    pub fn show_overlay_from_source(
+        &mut self,
+        source_widget: WidgetId,
+        mut request: crate::overlay::OverlayRequest,
+    ) -> crate::overlay::OverlayId {
+        if request.parent_overlay.is_none() {
+            request.parent_overlay = self.overlay_ancestor_for_widget(source_widget);
+        }
+        if let Some(existing) = self.overlay_manager.find_by_content(request.content_id) {
+            return existing;
+        }
+
+        let current_focus = self.focused;
+        let id = self.overlay_manager.show(request);
+        if let Some(focus_id) = current_focus {
+            self.overlay_manager.set_top_focus_restore(focus_id);
+        }
+        id
+    }
+
     pub fn show_overlay_for(
         &mut self,
         request: crate::overlay::OverlayRequest,

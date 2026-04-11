@@ -2,6 +2,8 @@ use fern_canvas::SizeProposal;
 use fern_core::app_command::{AppCommand, ErasedCommand};
 use fern_core::app_event::AppEvent;
 use fern_core::event::WidgetEvent;
+use fern_core::modal::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
+use fern_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use fern_core::{WidgetId, WidgetTree};
 use fern_platform::event_translation;
 use fern_tokens::{ColorTokens, Theme};
@@ -30,6 +32,76 @@ use fern_text::SharedTypesetter;
 use crate::command_context::CommandContext;
 use crate::window_config::WindowConfig;
 use crate::window_manager::WindowManager;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolvedModalPresentation {
+    InTree,
+    NativeWindow,
+}
+
+fn resolve_modal_presentation(
+    requested: ModalPresentation,
+    content: &ModalContent,
+    native_supported: bool,
+) -> ResolvedModalPresentation {
+    let can_use_native = native_supported && matches!(content, ModalContent::Deferred(_));
+
+    match requested {
+        ModalPresentation::InTree => ResolvedModalPresentation::InTree,
+        ModalPresentation::NativeWindow => {
+            if can_use_native {
+                ResolvedModalPresentation::NativeWindow
+            } else {
+                ResolvedModalPresentation::InTree
+            }
+        }
+        ModalPresentation::Auto => {
+            if can_use_native {
+                ResolvedModalPresentation::NativeWindow
+            } else {
+                ResolvedModalPresentation::InTree
+            }
+        }
+    }
+}
+
+fn modal_close_behavior_to_overlay_dismiss(behavior: ModalCloseBehavior) -> DismissBehavior {
+    match behavior {
+        ModalCloseBehavior::ClickOutside | ModalCloseBehavior::EscapeOrClickOutside => {
+            DismissBehavior::ClickOutside
+        }
+        ModalCloseBehavior::EscapeKey | ModalCloseBehavior::Manual => DismissBehavior::Manual,
+    }
+}
+
+fn present_in_tree_modal_request(
+    tree: &mut WidgetTree,
+    source_widget: WidgetId,
+    request: ModalRequest,
+) {
+    let dismiss = modal_close_behavior_to_overlay_dismiss(request.close_behavior);
+    let content_id = match request.content {
+        ModalContent::ExistingWidget(id) => id,
+        ModalContent::Deferred(builder) => {
+            let id = builder(tree);
+            tree.set_dormant(id);
+            id
+        }
+    };
+
+    tree.activate(content_id);
+    tree.show_overlay_from_source(
+        source_widget,
+        OverlayRequest {
+            content_id,
+            anchor: source_widget,
+            placement: OverlayPlacement::Centered,
+            dismiss,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        },
+    );
+}
 
 fn apply_cursor_to_window(
     platform_window: &fern_platform::PlatformWindow,
@@ -242,6 +314,57 @@ impl FernAppHandler {
         self.wm.flush_commands_through(&mut self.command_handler)
     }
 
+    fn process_modal_requests(&mut self) -> bool {
+        let native_supported = fern_platform::supports_native_modal_windows();
+        let requests = self.wm.drain_pending_modal_requests();
+        let had_requests = !requests.is_empty();
+
+        for (source_window, requests) in requests {
+            for queued in requests {
+                let resolved = resolve_modal_presentation(
+                    queued.request.presentation,
+                    &queued.request.content,
+                    native_supported,
+                );
+
+                match resolved {
+                    ResolvedModalPresentation::InTree => {
+                        if let Some(managed) = self.wm.get_by_fern_mut(source_window) {
+                            present_in_tree_modal_request(
+                                &mut managed.tree,
+                                queued.source_widget,
+                                queued.request,
+                            );
+                        }
+                    }
+                    ResolvedModalPresentation::NativeWindow => {
+                        let ModalRequest {
+                            content,
+                            title,
+                            size,
+                            ..
+                        } = queued.request;
+
+                        let ModalContent::Deferred(builder) = content else {
+                            continue;
+                        };
+
+                        let mut config = WindowConfig::new().modal(true).parent(source_window);
+                        if let Some(title) = title {
+                            config = config.title(title);
+                        }
+                        if let Some((width, height)) = size {
+                            config = config.size(width, height);
+                        }
+                        self.wm.queue_create(config.root(builder));
+                    }
+                }
+            }
+        }
+
+        had_requests
+    }
+
     fn maybe_exit(&self, event_loop: &ActiveEventLoop) {
         if self.wm.is_empty() {
             event_loop.exit();
@@ -287,8 +410,9 @@ impl FernAppHandler {
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
         let had_commands = self.flush_commands();
+        let had_modal_requests = self.process_modal_requests();
         self.process_pending(event_loop);
-        if had_commands {
+        if had_commands || had_modal_requests {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
             }
@@ -815,6 +939,7 @@ impl HeadlessApp {
 mod tests {
     use super::*;
     use fern_tokens::Color;
+    use fern_widgets::Button;
 
     #[test]
     fn builder_accepts_theme() {
@@ -834,5 +959,64 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
         assert!(!frame.is_empty());
+    }
+
+    #[test]
+    fn auto_prefers_native_for_deferred_content_when_supported() {
+        let request = ModalRequest::deferred(|tree| tree.add(Button::new("Deferred")));
+
+        assert_eq!(
+            resolve_modal_presentation(request.presentation, &request.content, true),
+            ResolvedModalPresentation::NativeWindow
+        );
+    }
+
+    #[test]
+    fn existing_widget_forces_in_tree_even_if_native_requested() {
+        let mut tree = WidgetTree::new();
+        let content = tree.add(Button::new("Existing"));
+        let request = ModalRequest::in_tree(content).presentation(ModalPresentation::NativeWindow);
+
+        assert_eq!(
+            resolve_modal_presentation(request.presentation, &request.content, true),
+            ResolvedModalPresentation::InTree
+        );
+    }
+
+    #[test]
+    fn present_in_tree_modal_request_shows_centered_overlay() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let source = tree.add(Button::new("Trigger"));
+        let content = tree.add(Button::new("Modal content"));
+        tree.set_dormant(content);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::in_tree(content).presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(tree.find_by_label("Modal content").is_some());
+    }
+
+    #[test]
+    fn present_in_tree_modal_request_builds_deferred_content() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let source = tree.add(Button::new("Trigger"));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| tree.add(Button::new("Deferred modal")))
+                .presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(tree.find_by_label("Deferred modal").is_some());
     }
 }

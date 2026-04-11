@@ -61,8 +61,8 @@ impl WidgetTree {
 mod tests {
     use super::*;
     use crate::test_widgets::FillWidget;
-    use crate::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
     use crate::widget_builder::WidgetBuilder;
+    use crate::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -132,7 +132,10 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].source_widget, trigger);
         assert_eq!(requests[0].request.presentation, ModalPresentation::InTree);
-        assert_eq!(requests[0].request.close_behavior, ModalCloseBehavior::Manual);
+        assert_eq!(
+            requests[0].request.close_behavior,
+            ModalCloseBehavior::Manual
+        );
         match requests[0].request.content {
             ModalContent::ExistingWidget(id) => assert_eq!(id, content),
             ModalContent::Deferred(_) => panic!("expected ExistingWidget content"),

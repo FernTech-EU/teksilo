@@ -252,6 +252,11 @@ impl WindowManager {
         self.windows.get_mut(&id)
     }
 
+    pub(crate) fn get_by_fern_mut(&mut self, id: FernWindowId) -> Option<&mut ManagedWindow> {
+        let winit_id = self.fern_to_winit.get(&id).copied()?;
+        self.windows.get_mut(&winit_id)
+    }
+
     /// Get the FernWindowId for a winit WindowId.
     pub fn fern_id_for_winit(&self, id: winit::window::WindowId) -> Option<FernWindowId> {
         self.windows.get(&id).map(|w| w.fern_id)
@@ -340,6 +345,20 @@ impl WindowManager {
         for managed in self.windows.values() {
             managed.platform_window.request_redraw();
         }
+    }
+
+    /// Drain pending modal requests from all windows.
+    pub fn drain_pending_modal_requests(
+        &mut self,
+    ) -> Vec<(FernWindowId, Vec<fern_core::QueuedModalRequest>)> {
+        let mut all_requests = Vec::new();
+        for managed in self.windows.values_mut() {
+            let requests = managed.tree.drain_pending_modal_requests();
+            if !requests.is_empty() {
+                all_requests.push((managed.fern_id, requests));
+            }
+        }
+        all_requests
     }
 
     /// Drain pending commands from all windows and route through the handler
