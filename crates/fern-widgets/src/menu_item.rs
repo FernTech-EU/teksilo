@@ -83,6 +83,15 @@ impl MenuItem {
         self
     }
 
+    /// Escape hatch: arbitrary closure invoked on activation.
+    /// See architecture Section 9.2.6.
+    /// Note: shortcut label auto-lookup is not available with this variant
+    /// since there is no typed command to look up.
+    pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.action = Some(Box::new(f));
+        self
+    }
+
     /// Set a leading icon.
     pub fn icon(mut self, icon: IconWidget) -> Self {
         self.icon = Some(icon);
@@ -906,5 +915,35 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(200.0, 40.0));
         assert!(tree.bounds(item).width > 0.0);
+    }
+
+    #[test]
+    fn on_activate_fn_fires_closure() {
+        let called = Rc::new(Cell::new(false));
+        let c = called.clone();
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(MenuItem::new("Action").on_activate_fn(move |_ctx| {
+            c.set(true);
+        }));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        tree.click(item);
+        assert!(called.get());
+    }
+
+    #[test]
+    fn on_activate_fn_disabled_ignores() {
+        let called = Rc::new(Cell::new(false));
+        let c = called.clone();
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(
+            MenuItem::new("Nope")
+                .on_activate_fn(move |_ctx| c.set(true))
+                .enabled(false),
+        );
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        tree.click(item);
+        assert!(!called.get());
     }
 }

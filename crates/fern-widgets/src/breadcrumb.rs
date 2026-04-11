@@ -76,6 +76,13 @@ impl BreadcrumbItem {
         }));
         self
     }
+
+    /// Escape hatch: arbitrary closure invoked on activation.
+    /// See architecture Section 9.2.6.
+    pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.action = Some(Box::new(f));
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -517,5 +524,27 @@ mod tests {
 
         let info = tree.accessibility_node(breadcrumb);
         assert_eq!(info.role(), fern_core::accesskit::Role::Navigation);
+    }
+
+    #[test]
+    fn on_activate_fn_fires_closure() {
+        let called = Rc::new(Cell::new(false));
+        let c = called.clone();
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let breadcrumb = tree.add(
+            Breadcrumb::new()
+                .item(BreadcrumbItem::new("Home").on_activate_fn(move |_ctx| {
+                    c.set(true);
+                }))
+                .item(BreadcrumbItem::current("Current")),
+        );
+        tree.layout(SizeProposal::exact(400.0, 48.0));
+
+        // Click the first segment (Home)
+        let root = tree.child_widget(breadcrumb, 0);
+        let home_segment = tree.child_widget(root, 0);
+        tree.click(home_segment);
+
+        assert!(called.get());
     }
 }

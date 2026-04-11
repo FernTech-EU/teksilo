@@ -3,8 +3,9 @@
 //! Demonstrates `Repeater`, `ListView` (with virtualization and selection),
 //! and `TreeView` (with expand/collapse).
 //!
-//! Buttons use `on_activate_fn` to mutate shared models directly via closures,
-//! which is the natural pattern for data-driven UIs (architecture Section 9.2.6).
+//! Shows both activation patterns:
+//! - `on_activate(Cmd::RemoveTag)` — typed command routed to central handler
+//! - `on_activate_fn(move |_| { model.push(...) })` — closure escape hatch
 //!
 //! Run with: `cargo run -p data-collections`
 
@@ -18,6 +19,17 @@ use fern_ui::widgets::{
     Button, ButtonStyle, Card, HStack, ListView, Padding, Panel, Repeater, Spacer, TabWidget,
     TextWidget, TreeView, VStack,
 };
+
+// ---------------------------------------------------------------------------
+// Commands — used by buttons that go through the central handler
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq)]
+enum Cmd {
+    RemoveTag,
+}
+
+impl AppCommand for Cmd {}
 
 // ---------------------------------------------------------------------------
 // Root widget
@@ -57,7 +69,6 @@ impl Root {
     fn build_repeater_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let tags = self.tags.clone();
         let tags_add = self.tags.clone();
-        let tags_remove = self.tags.clone();
         let counter = self.tag_counter.clone();
 
         VStack::new().spacing(16.0).child(
@@ -71,8 +82,8 @@ impl Root {
                     )
                     .child(
                         TextWidget::new(
-                            "The Repeater creates one widget per item. \
-                             Click the buttons to add/remove tags.",
+                            "Add uses on_activate_fn (closure). \
+                             Remove uses on_activate (typed command).",
                         )
                         .style(theme.typography.body.clone())
                         .color(theme.colors.on_surface),
@@ -80,6 +91,7 @@ impl Root {
                     .child(
                         HStack::new()
                             .spacing(8.0)
+                            // Closure escape hatch — mutates model directly
                             .child(
                                 Button::new("+ Add Tag")
                                     .style(ButtonStyle::Filled)
@@ -89,14 +101,11 @@ impl Root {
                                         tags_add.push(format!("Tag {}", n));
                                     }),
                             )
+                            // Typed command — handled by on_command in main()
                             .child(
                                 Button::new("- Remove Last")
                                     .style(ButtonStyle::Outlined)
-                                    .on_activate_fn(move |_ctx| {
-                                        if !tags_remove.is_empty() {
-                                            tags_remove.remove(tags_remove.len() - 1);
-                                        }
-                                    }),
+                                    .on_activate(Cmd::RemoveTag),
                             ),
                     )
                     .child(
@@ -323,10 +332,20 @@ fn main() {
 
     let selection = SelectionModel::new(SelectionMode::Multi);
 
+    // Clone for the command handler (only needed for the typed-command button).
+    let tags_cmd = tags.clone();
+
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .window_title("Data Collections — Milestone 6")
         .window_size(960, 680)
+        .on_command(move |cmd: &Cmd, _ctx| match cmd {
+            Cmd::RemoveTag => {
+                if !tags_cmd.is_empty() {
+                    tags_cmd.remove(tags_cmd.len() - 1);
+                }
+            }
+        })
         .root(move |tree| {
             tree.add(Root::new(
                 tags.clone(),

@@ -48,6 +48,13 @@ impl Link {
         self
     }
 
+    /// Escape hatch: arbitrary closure invoked on activation.
+    /// See architecture Section 9.2.6.
+    pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.action = Some(Box::new(f));
+        self
+    }
+
     /// Set a URL for the link (informational — not automatically opened).
     pub fn url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
@@ -326,5 +333,18 @@ mod tests {
             info.actions()
                 .contains(&fern_core::accesskit::Action::Click)
         );
+    }
+
+    #[test]
+    fn on_activate_fn_click() {
+        let called = Rc::new(Cell::new(false));
+        let c = called.clone();
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let link = tree.add(Link::new("Action").on_activate_fn(move |_ctx| {
+            c.set(true);
+        }));
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        tree.click(link);
+        assert!(called.get());
     }
 }

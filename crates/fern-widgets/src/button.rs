@@ -91,6 +91,16 @@ impl Button {
         self
     }
 
+    /// Escape hatch: arbitrary closure invoked on activation. Use only when
+    /// the action cannot be expressed as a typed command — plugin systems,
+    /// scripting consoles, or direct model mutation from data-driven widgets.
+    /// Loses recordability, command palette integration, and assertion-based
+    /// testing. See architecture Section 9.2.6.
+    pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.action = Some(Box::new(f));
+        self
+    }
+
     /// Attach a tooltip that appears after a hover delay.
     pub fn tooltip(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
@@ -657,5 +667,73 @@ mod tests {
         tree.pointer_move(tree.bounds(btn).center());
         tree.advance_time(std::time::Duration::from_millis(1000));
         assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn on_activate_fn_click() {
+        let counter = Rc::new(Cell::new(0_u32));
+        let c = counter.clone();
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let btn = tree.add(Button::new("Inc").on_activate_fn(move |_ctx| {
+            c.set(c.get() + 1);
+        }));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.click(btn);
+        assert_eq!(counter.get(), 1);
+        tree.click(btn);
+        assert_eq!(counter.get(), 2);
+    }
+
+    #[test]
+    fn on_activate_fn_keyboard() {
+        let called = Rc::new(Cell::new(false));
+        let c = called.clone();
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let btn = tree.add(Button::new("Do").on_activate_fn(move |_ctx| {
+            c.set(true);
+        }));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.focus(btn);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        assert!(called.get());
+    }
+
+    #[test]
+    fn on_activate_fn_disabled_ignores() {
+        let called = Rc::new(Cell::new(false));
+        let c = called.clone();
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let btn = tree.add(
+            Button::new("Nope")
+                .on_activate_fn(move |_ctx| c.set(true))
+                .enabled(false),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.click(btn);
+        assert!(!called.get());
+    }
+
+    #[test]
+    fn on_activate_fn_overwrites_on_activate() {
+        let cmd_called = Rc::new(Cell::new(false));
+        let fn_called = Rc::new(Cell::new(false));
+        let cc = cmd_called.clone();
+        let fc = fn_called.clone();
+
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.on_command(move |_cmd: &TestCmd| cc.set(true));
+        let btn = tree.add(
+            Button::new("Test")
+                .on_activate(TestCmd::Save)
+                .on_activate_fn(move |_ctx| fc.set(true)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.click(btn);
+        assert!(fn_called.get(), "on_activate_fn should fire (last wins)");
+        assert!(!cmd_called.get(), "on_activate should be overwritten");
     }
 }
