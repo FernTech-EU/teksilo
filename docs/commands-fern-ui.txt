@@ -1,0 +1,2 @@
+RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p menus-and-dropdowns
+FERN_IDLE_TRACE=1 ./target/profiling/menus-and-dropdowns
