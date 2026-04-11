@@ -823,6 +823,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: fern_ui::prelude::Point::new(399.0, 299.0),
             button: PointerButton::Primary,
+            modifiers: fern_ui::core::event::Modifiers::NONE,
         });
         assert!(
             tree.active_overlays().is_empty(),

@@ -18,4 +18,4 @@ pub use list_model::ListModel;
 pub use selection_model::{SelectionMode, SelectionModel};
 pub use tree_change::{NodeId, TreeChange};
 pub use tree_model::TreeModel;
-pub use tree_slice::{FlatEntry, TreeSlice};
+pub use tree_slice::{FlatEntry, TreeSlice, TreeSliceHandle};

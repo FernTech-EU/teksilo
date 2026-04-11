@@ -6,6 +6,7 @@
 
 use std::cell::Cell;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 use fern_core::signal::Signal;
 
@@ -28,7 +29,8 @@ pub struct SelectionModel {
     mode: SelectionMode,
     selection: Signal<BTreeSet<usize>>,
     /// Anchor index for Shift+click range extension.
-    anchor: Cell<Option<usize>>,
+    /// Shared via Rc so clones see the same anchor state.
+    anchor: Rc<Cell<Option<usize>>>,
 }
 
 impl SelectionModel {
@@ -37,7 +39,7 @@ impl SelectionModel {
         Self {
             mode,
             selection: Signal::new(BTreeSet::new()),
-            anchor: Cell::new(None),
+            anchor: Rc::new(Cell::new(None)),
         }
     }
 

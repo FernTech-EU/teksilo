@@ -186,7 +186,9 @@ impl Widget for Slider {
                 }
                 let bounds = cached_bounds.get();
                 match event {
-                    WidgetEvent::PointerDown { position, button } => {
+                    WidgetEvent::PointerDown {
+                        position, button, ..
+                    } => {
                         if *button == PointerButton::Primary {
                             // Check if click is on the thumb
                             let pos = match orientation {

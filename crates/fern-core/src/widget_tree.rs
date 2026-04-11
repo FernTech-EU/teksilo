@@ -945,14 +945,18 @@ impl Default for WidgetTree {
 /// Convert a `WidgetEvent` to a `RawPointerEvent` if applicable.
 fn to_raw_pointer_event(event: &WidgetEvent) -> Option<RawPointerEvent> {
     match event {
-        WidgetEvent::PointerDown { position, button } => Some(RawPointerEvent::Down {
+        WidgetEvent::PointerDown {
+            position, button, ..
+        } => Some(RawPointerEvent::Down {
             position: *position,
             button: *button,
         }),
         WidgetEvent::PointerMove { position } => Some(RawPointerEvent::Move {
             position: *position,
         }),
-        WidgetEvent::PointerUp { position, button } => Some(RawPointerEvent::Up {
+        WidgetEvent::PointerUp {
+            position, button, ..
+        } => Some(RawPointerEvent::Up {
             position: *position,
             button: *button,
         }),

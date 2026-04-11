@@ -42,7 +42,10 @@ impl WidgetTree {
             return;
         }
 
-        if let WidgetEvent::PointerDown { position, button } = &event {
+        if let WidgetEvent::PointerDown {
+            position, button, ..
+        } = &event
+        {
             let dismissed = self.overlay_manager.handle_click_outside(*position);
             if !dismissed.is_empty() {
                 self.dormant_dismissed_content(&dismissed);
@@ -112,7 +115,9 @@ impl WidgetTree {
                 }
                 self.update_pointer_leave_overlays(*position);
             }
-            WidgetEvent::PointerDown { position, button } => {
+            WidgetEvent::PointerDown {
+                position, button, ..
+            } => {
                 if let Some(target) = self.hit_test(*position) {
                     if *button == PointerButton::Secondary
                         && self.show_context_menu_for(target, *position)
@@ -388,7 +393,9 @@ impl WidgetTree {
                 .on_access_action
                 .as_mut()
                 .map(|handler| handler(*action, ctx)),
-            WidgetEvent::PointerDown { position, button } => {
+            WidgetEvent::PointerDown {
+                position, button, ..
+            } => {
                 if node.handlers.on_tap.is_some() {
                     let arena = node.handlers.gesture_arena.get_or_insert_with(|| {
                         let mut arena = GestureArena::new();
@@ -406,7 +413,9 @@ impl WidgetTree {
                     .as_mut()
                     .map(|handler| handler(event, ctx))
             }
-            WidgetEvent::PointerUp { position, button } => {
+            WidgetEvent::PointerUp {
+                position, button, ..
+            } => {
                 if let Some(ref mut arena) = node.handlers.gesture_arena {
                     let result = arena.process(&RawPointerEvent::Up {
                         position: *position,
@@ -1156,6 +1165,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: Point::new(150.0, 50.0),
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
@@ -1177,6 +1187,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: Point::new(999.0, 999.0),
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");

@@ -222,6 +222,18 @@ impl<T: 'static> TreeSlice<T> {
         &self.tree
     }
 
+    /// Create a lightweight handle for use in closures.
+    /// Shares all Rc-based internals but does not keep the observer alive.
+    pub fn handle(&self) -> TreeSliceHandle<T> {
+        TreeSliceHandle {
+            tree: self.tree.clone(),
+            expanded: self.expanded.clone(),
+            flattened: self.flattened.clone(),
+            version: self.version.clone(),
+            version_counter: self.version_counter.clone(),
+        }
+    }
+
     // --- Internal ---
 
     fn reflatten_and_notify(&self) {
@@ -299,6 +311,75 @@ impl<T: 'static> std::fmt::Debug for TreeSlice<T> {
             .field("visible_count", &self.visible_count())
             .field("expanded_count", &self.expanded.borrow().len())
             .finish()
+    }
+}
+
+/// Lightweight handle to a `TreeSlice`'s shared state, usable in closures.
+/// Created via `TreeSlice::handle()`. Shares all Rc-based internals.
+pub struct TreeSliceHandle<T: 'static> {
+    tree: TreeModel<T>,
+    expanded: Rc<RefCell<HashSet<NodeId>>>,
+    flattened: Rc<RefCell<Vec<FlatEntry>>>,
+    version: Signal<u64>,
+    version_counter: Rc<std::cell::Cell<u64>>,
+}
+
+impl<T: 'static> TreeSliceHandle<T> {
+    pub fn visible_count(&self) -> usize {
+        self.flattened.borrow().len()
+    }
+
+    pub fn entry_at(&self, flat_index: usize) -> Option<FlatEntry> {
+        self.flattened.borrow().get(flat_index).cloned()
+    }
+
+    pub fn visible_node_id(&self, flat_index: usize) -> Option<NodeId> {
+        self.flattened.borrow().get(flat_index).map(|e| e.node_id)
+    }
+
+    pub fn expand(&self, node: NodeId) {
+        let inserted = self.expanded.borrow_mut().insert(node);
+        if inserted {
+            self.reflatten_and_notify();
+        }
+    }
+
+    pub fn collapse(&self, node: NodeId) {
+        let removed = self.expanded.borrow_mut().remove(&node);
+        if removed {
+            self.reflatten_and_notify();
+        }
+    }
+
+    pub fn is_expanded(&self, node: NodeId) -> bool {
+        self.expanded.borrow().contains(&node)
+    }
+
+    pub fn tree(&self) -> &TreeModel<T> {
+        &self.tree
+    }
+
+    fn reflatten_and_notify(&self) {
+        TreeSlice::<T>::rebuild_flat_list(
+            &self.tree,
+            &self.expanded.borrow(),
+            &mut self.flattened.borrow_mut(),
+        );
+        let next = self.version_counter.get() + 1;
+        self.version_counter.set(next);
+        self.version.set(next);
+    }
+}
+
+impl<T: 'static> Clone for TreeSliceHandle<T> {
+    fn clone(&self) -> Self {
+        Self {
+            tree: self.tree.clone(),
+            expanded: self.expanded.clone(),
+            flattened: self.flattened.clone(),
+            version: self.version.clone(),
+            version_counter: self.version_counter.clone(),
+        }
     }
 }
 

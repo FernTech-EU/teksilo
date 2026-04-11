@@ -245,10 +245,12 @@ pub enum WidgetEvent {
     PointerDown {
         position: Point,
         button: PointerButton,
+        modifiers: Modifiers,
     },
     PointerUp {
         position: Point,
         button: PointerButton,
+        modifiers: Modifiers,
     },
     PointerMove {
         position: Point,

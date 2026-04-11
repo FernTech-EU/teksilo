@@ -318,6 +318,7 @@ impl Widget for ScrollBar {
                     WidgetEvent::PointerDown {
                         position,
                         button: PointerButton::Primary,
+                        ..
                     } => {
                         let tr = thumb_rect();
                         if tr.contains(*position) {
@@ -628,6 +629,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: Point::new(6.0, 10.0),
             button: PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
 
         // Drag 100px down: track is 400px, thumb is 200px (50% ratio),
@@ -657,11 +659,13 @@ mod tests {
             tree.dispatch_event(WidgetEvent::PointerDown {
                 position: Point::new(6.0, 390.0),
                 button: PointerButton::Primary,
+                modifiers: fern_core::event::Modifiers::NONE,
             });
             // Release so next click isn't a drag
             tree.dispatch_event(WidgetEvent::PointerUp {
                 position: Point::new(6.0, 390.0),
                 button: PointerButton::Primary,
+                modifiers: fern_core::event::Modifiers::NONE,
             });
         }
 
@@ -725,6 +729,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: Point::new(6.0, 350.0),
             button: PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
 
         let pos = position.get();
@@ -752,6 +757,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: Point::new(6.0, 10.0),
             button: PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
 
         // Move far outside the scrollbar bounds
@@ -763,6 +769,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: Point::new(200.0, 300.0),
             button: PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
 
         // Now hover the scrollbar again — should NOT continue dragging

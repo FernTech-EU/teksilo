@@ -125,7 +125,9 @@ impl Widget for SplitHandle {
                     }
 
                     match event {
-                        WidgetEvent::PointerDown { position, button } => {
+                        WidgetEvent::PointerDown {
+                            position, button, ..
+                        } => {
                             if *button != PointerButton::Primary {
                                 return EventResponse::Ignored;
                             }

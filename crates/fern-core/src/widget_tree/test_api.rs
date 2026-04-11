@@ -7,10 +7,12 @@ impl WidgetTree {
         self.dispatch_event(WidgetEvent::PointerDown {
             position: center,
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
         self.dispatch_event(WidgetEvent::PointerUp {
             position: center,
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
     }
 
@@ -42,12 +44,20 @@ impl WidgetTree {
 
     /// Simulate a pointer down at a specific position with a specific button.
     pub fn pointer_down_button(&mut self, position: Point, button: PointerButton) {
-        self.dispatch_event(WidgetEvent::PointerDown { position, button });
+        self.dispatch_event(WidgetEvent::PointerDown {
+            position,
+            button,
+            modifiers: Modifiers::NONE,
+        });
     }
 
     /// Simulate a pointer up at a specific position with a specific button.
     pub fn pointer_up_button(&mut self, position: Point, button: PointerButton) {
-        self.dispatch_event(WidgetEvent::PointerUp { position, button });
+        self.dispatch_event(WidgetEvent::PointerUp {
+            position,
+            button,
+            modifiers: Modifiers::NONE,
+        });
     }
 
     /// Simulate a drag from one position to another.
@@ -55,11 +65,13 @@ impl WidgetTree {
         self.dispatch_event(WidgetEvent::PointerDown {
             position: from,
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
         self.dispatch_event(WidgetEvent::PointerMove { position: to });
         self.dispatch_event(WidgetEvent::PointerUp {
             position: to,
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
     }
 

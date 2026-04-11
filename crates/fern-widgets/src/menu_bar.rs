@@ -627,10 +627,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
 
@@ -649,10 +651,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -661,10 +665,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
 
         assert!(
@@ -684,10 +690,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -747,10 +755,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -774,10 +784,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: edit_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: edit_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -801,10 +813,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -831,10 +845,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -843,6 +859,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: fern_canvas::Point::new(1000.0, 1000.0),
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
 
@@ -865,10 +882,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
 
@@ -890,10 +909,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -946,10 +967,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
 
@@ -978,10 +1001,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
 
@@ -1062,10 +1087,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: first_trigger_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: first_trigger_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -1113,10 +1140,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: file_center,
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert_eq!(tree.active_overlays().len(), 1);
@@ -1124,6 +1153,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: fern_canvas::Point::new(1000.0, 1000.0),
             button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert!(tree.active_overlays().is_empty());

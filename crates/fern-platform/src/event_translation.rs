@@ -6,6 +6,7 @@ use fern_core::gesture::GestureEvent;
 pub struct TranslationState {
     scale_factor: f64,
     cursor_position: Option<Point>,
+    current_modifiers: Modifiers,
 }
 
 impl TranslationState {
@@ -13,6 +14,7 @@ impl TranslationState {
         Self {
             scale_factor: 1.0,
             cursor_position: None,
+            current_modifiers: Modifiers::NONE,
         }
     }
 
@@ -26,6 +28,10 @@ impl TranslationState {
 
     pub fn cursor_position(&self) -> Option<Point> {
         self.cursor_position
+    }
+
+    pub fn set_modifiers(&mut self, modifiers: Modifiers) {
+        self.current_modifiers = modifiers;
     }
 }
 
@@ -70,10 +76,12 @@ pub fn translate_mouse_input(
         winit::event::ElementState::Pressed => Some(WidgetEvent::PointerDown {
             position,
             button: pointer_button,
+            modifiers: state.current_modifiers,
         }),
         winit::event::ElementState::Released => Some(WidgetEvent::PointerUp {
             position,
             button: pointer_button,
+            modifiers: state.current_modifiers,
         }),
     }
 }

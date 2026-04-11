@@ -587,10 +587,12 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: center,
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
         tree.dispatch_event(WidgetEvent::PointerUp {
             position: center,
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame_after_click = tree.render();
@@ -610,6 +612,7 @@ mod tests {
         tree.dispatch_event(WidgetEvent::PointerDown {
             position: center,
             button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
         });
         assert_eq!(
             tree.focus_origin(),

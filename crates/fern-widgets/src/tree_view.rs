@@ -54,6 +54,9 @@ pub struct TreeView<T: 'static> {
     item_height: f32,
     selection: Option<SelectionModel>,
 
+    /// Keyboard-focused flat index.
+    focused_index: Rc<Cell<Option<usize>>>,
+
     /// Enable intra-widget drag reordering.
     reorderable: bool,
 
@@ -87,6 +90,7 @@ impl<T: 'static> TreeView<T> {
             delegate: Rc::new(delegate),
             item_height: DEFAULT_ITEM_HEIGHT,
             selection: None,
+            focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
@@ -271,7 +275,110 @@ impl<T: 'static> Widget for TreeView<T> {
                 }
                 _ => fern_core::event::EventResponse::Ignored,
             })
-            .clips_children(true);
+            .clips_children(true)
+            .focusable(true);
+
+        // --- Keyboard navigation + expand/collapse + Alt+Arrow reorder ---
+        {
+            let tsh = self.tree_slice.handle();
+            let sel_for_key = self.selection.clone();
+            let fi = self.focused_index.clone();
+            let reorderable = self.reorderable;
+            let scroll_for_nav = self.scroll_y.clone();
+            let ih_for_nav = self.item_height;
+            let vh_for_nav = self.viewport_height.clone();
+
+            handlers = handlers.on_key(move |event, _ctx| {
+                if let fern_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
+                    let visible_count = tsh.visible_count();
+                    if visible_count == 0 {
+                        return fern_core::event::EventResponse::Ignored;
+                    }
+
+                    let current = fi.get().unwrap_or(0).min(visible_count - 1);
+
+                    // Alt+Arrow: reorder (when reorderable)
+                    if modifiers.alt() && reorderable {
+                        // TODO: implement tree node sibling reorder
+                    }
+
+                    // ArrowRight: expand / ArrowLeft: collapse or move to parent
+                    match key {
+                        fern_core::event::Key::ArrowRight => {
+                            if let Some(entry) = tsh.entry_at(current) {
+                                if entry.has_children && !entry.is_expanded {
+                                    tsh.expand(entry.node_id);
+                                    return fern_core::event::EventResponse::Handled;
+                                }
+                            }
+                        }
+                        fern_core::event::Key::ArrowLeft => {
+                            if let Some(entry) = tsh.entry_at(current) {
+                                if entry.is_expanded {
+                                    tsh.collapse(entry.node_id);
+                                    return fern_core::event::EventResponse::Handled;
+                                }
+                                // If leaf or collapsed, move to parent
+                                let parent = tsh.tree().parent(entry.node_id);
+                                if let Some(parent_id) = parent {
+                                    // Find parent's flat index
+                                    for i in 0..visible_count {
+                                        if tsh.visible_node_id(i) == Some(parent_id) {
+                                            fi.set(Some(i));
+                                            if let Some(ref sel) = sel_for_key {
+                                                sel.select(i);
+                                            }
+                                            return fern_core::event::EventResponse::Handled;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    // Navigation keys
+                    let new_idx = match key {
+                        fern_core::event::Key::ArrowDown => {
+                            Some(current.saturating_add(1).min(visible_count - 1))
+                        }
+                        fern_core::event::Key::ArrowUp => Some(current.saturating_sub(1)),
+                        fern_core::event::Key::Home => Some(0),
+                        fern_core::event::Key::End => Some(visible_count - 1),
+                        fern_core::event::Key::Enter | fern_core::event::Key::Space => {
+                            if let Some(ref sel) = sel_for_key {
+                                sel.select(current);
+                            }
+                            return fern_core::event::EventResponse::Handled;
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(idx) = new_idx {
+                        fi.set(Some(idx));
+                        if let Some(ref sel) = sel_for_key {
+                            if modifiers.shift() {
+                                sel.extend_to(idx);
+                            } else {
+                                sel.select(idx);
+                            }
+                        }
+                        // Scroll into view
+                        let item_top = idx as f32 * ih_for_nav;
+                        let item_bottom = item_top + ih_for_nav;
+                        let vp = vh_for_nav.get();
+                        let scroll = scroll_for_nav.get();
+                        if item_top < scroll {
+                            scroll_for_nav.set(item_top);
+                        } else if item_bottom > scroll + vp {
+                            scroll_for_nav.set(item_bottom - vp);
+                        }
+                        return fern_core::event::EventResponse::Handled;
+                    }
+                }
+                fern_core::event::EventResponse::Ignored
+            });
+        }
 
         // --- DnD: register as drop target when reorderable ---
         if self.reorderable {
@@ -344,6 +451,32 @@ impl<T: 'static> Widget for TreeView<T> {
                 .with_entry(i, |item, entry| (self.delegate)(item, entry, selected))
             {
                 let child_id = ctx.add_boxed(widget);
+
+                // Selection click handling
+                if let Some(ref sel) = self.selection {
+                    let sel_click = sel.clone();
+                    let click_index = i;
+                    ctx.apply_handlers(
+                        child_id,
+                        HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
+                            fern_core::event::WidgetEvent::PointerDown {
+                                modifiers,
+                                button: fern_core::event::PointerButton::Primary,
+                                ..
+                            } => {
+                                if modifiers.ctrl() {
+                                    sel_click.toggle(click_index);
+                                } else if modifiers.shift() {
+                                    sel_click.extend_to(click_index);
+                                } else {
+                                    sel_click.select(click_index);
+                                }
+                                fern_core::event::EventResponse::Handled
+                            }
+                            _ => fern_core::event::EventResponse::Ignored,
+                        }),
+                    );
+                }
 
                 // Attach drag handler for reorderable items
                 if reorderable {

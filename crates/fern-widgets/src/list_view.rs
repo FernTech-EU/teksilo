@@ -60,6 +60,9 @@ pub struct ListView<T: 'static> {
     spacing: f32,
     selection: Option<SelectionModel>,
 
+    /// Keyboard-focused item index within the list.
+    focused_index: Rc<Cell<Option<usize>>>,
+
     /// Enable intra-widget drag reordering + keyboard Alt+Arrow.
     reorderable: bool,
 
@@ -100,6 +103,7 @@ impl<T: 'static> ListView<T> {
             item_height: DEFAULT_ITEM_HEIGHT,
             spacing: 0.0,
             selection: None,
+            focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
             on_item_drop: None,
             scroll_y: Signal::new_animated(0.0),
@@ -276,7 +280,100 @@ impl<T: 'static> Widget for ListView<T> {
                 }
                 _ => fern_core::event::EventResponse::Ignored,
             })
-            .clips_children(true);
+            .clips_children(true)
+            .focusable(true);
+
+        // --- Keyboard navigation + Alt+Arrow reorder ---
+        {
+            let model_for_key = self.model.clone();
+            let sel_for_key = self.selection.clone();
+            let fi = self.focused_index.clone();
+            let reorderable = self.reorderable;
+            let scroll_for_nav = self.scroll_y.clone();
+            let ih_for_nav = self.item_height;
+            let sp_for_nav = self.spacing;
+            let vh_for_nav = self.viewport_height.clone();
+
+            handlers = handlers.on_key(move |event, _ctx| {
+                if let fern_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
+                    let count = model_for_key.len();
+                    if count == 0 {
+                        return fern_core::event::EventResponse::Ignored;
+                    }
+
+                    // Alt+Arrow: reorder (when reorderable)
+                    if modifiers.alt() && reorderable {
+                        let selected_idx = sel_for_key
+                            .as_ref()
+                            .and_then(|s| s.selected_indices().first().copied());
+                        if let Some(idx) = selected_idx {
+                            match key {
+                                fern_core::event::Key::ArrowUp if idx > 0 => {
+                                    model_for_key.move_item(idx, idx - 1);
+                                    if let Some(ref sel) = sel_for_key {
+                                        sel.select(idx - 1);
+                                    }
+                                    fi.set(Some(idx - 1));
+                                    return fern_core::event::EventResponse::Handled;
+                                }
+                                fern_core::event::Key::ArrowDown if idx + 1 < count => {
+                                    model_for_key.move_item(idx, idx + 1);
+                                    if let Some(ref sel) = sel_for_key {
+                                        sel.select(idx + 1);
+                                    }
+                                    fi.set(Some(idx + 1));
+                                    return fern_core::event::EventResponse::Handled;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    // Navigation keys (no modifiers or with Shift for extend)
+                    let current = fi.get().unwrap_or(0);
+                    let new_idx = match key {
+                        fern_core::event::Key::ArrowDown => {
+                            Some(current.saturating_add(1).min(count - 1))
+                        }
+                        fern_core::event::Key::ArrowUp => Some(current.saturating_sub(1)),
+                        fern_core::event::Key::Home => Some(0),
+                        fern_core::event::Key::End => Some(count - 1),
+                        fern_core::event::Key::Enter | fern_core::event::Key::Space => {
+                            if let Some(ref sel) = sel_for_key {
+                                sel.select(current);
+                            }
+                            return fern_core::event::EventResponse::Handled;
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(idx) = new_idx {
+                        fi.set(Some(idx));
+                        // Select the focused item (standard list keyboard behavior)
+                        if let Some(ref sel) = sel_for_key {
+                            if modifiers.shift() {
+                                sel.extend_to(idx);
+                            } else {
+                                sel.select(idx);
+                            }
+                        }
+                        // Scroll into view
+                        let row_step = ih_for_nav + sp_for_nav;
+                        let item_top = idx as f32 * row_step;
+                        let item_bottom = item_top + ih_for_nav;
+                        let vp = vh_for_nav.get();
+                        let scroll = scroll_for_nav.get();
+                        if item_top < scroll {
+                            scroll_for_nav.set(item_top);
+                        } else if item_bottom > scroll + vp {
+                            scroll_for_nav.set(item_bottom - vp);
+                        }
+                        return fern_core::event::EventResponse::Handled;
+                    }
+                }
+                fern_core::event::EventResponse::Ignored
+            });
+        }
 
         // --- DnD: register self as drop target when reorderable or on_item_drop ---
         if self.reorderable || self.on_item_drop.is_some() {
@@ -355,42 +452,6 @@ impl<T: 'static> Widget for ListView<T> {
             });
         }
 
-        // --- Alt+Arrow keyboard reorder (accessibility contract) ---
-        if self.reorderable {
-            let model_for_key = self.model.clone();
-            let sel_for_key = self.selection.clone();
-            handlers = handlers.on_key(move |event, _ctx| {
-                if let fern_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
-                    if modifiers.alt() {
-                        let selected_idx = sel_for_key
-                            .as_ref()
-                            .and_then(|s| s.selected_indices().first().copied());
-                        if let Some(idx) = selected_idx {
-                            let count = model_for_key.len();
-                            match key {
-                                fern_core::event::Key::ArrowUp if idx > 0 => {
-                                    model_for_key.move_item(idx, idx - 1);
-                                    if let Some(ref sel) = sel_for_key {
-                                        sel.select(idx - 1);
-                                    }
-                                    return fern_core::event::EventResponse::Handled;
-                                }
-                                fern_core::event::Key::ArrowDown if idx + 1 < count => {
-                                    model_for_key.move_item(idx, idx + 1);
-                                    if let Some(ref sel) = sel_for_key {
-                                        sel.select(idx + 1);
-                                    }
-                                    return fern_core::event::EventResponse::Handled;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                fern_core::event::EventResponse::Ignored
-            });
-        }
-
         ctx.apply_self_handlers(handlers);
 
         // --- Create visible item widgets ---
@@ -410,6 +471,33 @@ impl<T: 'static> Widget for ListView<T> {
                 .with_item(i, |item| (self.delegate)(i, item, selected))
             {
                 let child_id = ctx.add_boxed(widget);
+
+                // Selection click handling: plain click selects,
+                // Ctrl+click toggles, Shift+click extends range.
+                if let Some(ref sel) = self.selection {
+                    let sel_click = sel.clone();
+                    let click_index = i;
+                    ctx.apply_handlers(
+                        child_id,
+                        HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
+                            fern_core::event::WidgetEvent::PointerDown {
+                                modifiers,
+                                button: fern_core::event::PointerButton::Primary,
+                                ..
+                            } => {
+                                if modifiers.ctrl() {
+                                    sel_click.toggle(click_index);
+                                } else if modifiers.shift() {
+                                    sel_click.extend_to(click_index);
+                                } else {
+                                    sel_click.select(click_index);
+                                }
+                                fern_core::event::EventResponse::Handled
+                            }
+                            _ => fern_core::event::EventResponse::Ignored,
+                        }),
+                    );
+                }
 
                 // When reorderable, attach an on_drag handler to start drag
                 if reorderable {
@@ -691,6 +779,114 @@ mod tests {
             "Item width {} should be {}",
             item_width,
             400.0 - SCROLLBAR_THICKNESS
+        );
+    }
+
+    // --- Selection tests ---
+
+    fn make_selectable_list(
+        count: usize,
+    ) -> (
+        WidgetTree,
+        WidgetId,
+        ListModel<usize>,
+        fern_data::SelectionModel,
+    ) {
+        use fern_data::{SelectionMode, SelectionModel};
+        let model = ListModel::from_vec((0..count).collect());
+        let selection = SelectionModel::new(SelectionMode::Multi);
+        let sel_clone = selection.clone();
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model.clone(), move |_i, _item, _selected| {
+                Box::new(FixedLeaf(100.0, 30.0))
+            })
+            .item_height(30.0)
+            .selection(sel_clone),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        (tree, lv_id, model, selection)
+    }
+
+    #[test]
+    fn click_selects_item() {
+        let (mut tree, lv_id, _, selection) = make_selectable_list(5);
+        // Click the second item (y = 30..60, center at 45)
+        let children = tree.children(lv_id);
+        tree.click(children[1]);
+        assert!(selection.is_selected(1), "item 1 should be selected");
+        assert!(!selection.is_selected(0), "item 0 should not be selected");
+    }
+
+    #[test]
+    fn click_replaces_selection() {
+        let (mut tree, lv_id, _, selection) = make_selectable_list(5);
+        let children = tree.children(lv_id);
+        tree.click(children[0]);
+        assert!(selection.is_selected(0));
+
+        tree.click(children[2]);
+        assert!(selection.is_selected(2));
+        assert!(
+            !selection.is_selected(0),
+            "previous selection should be cleared"
+        );
+    }
+
+    #[test]
+    fn ctrl_click_toggles() {
+        use fern_core::event::Modifiers;
+        let (mut tree, lv_id, _, selection) = make_selectable_list(5);
+        let children = tree.children(lv_id);
+
+        // Select item 0
+        tree.click(children[0]);
+        assert!(selection.is_selected(0));
+
+        // Ctrl+click item 2 to add it
+        let center = tree.bounds(children[2]).center();
+        tree.dispatch_event(fern_core::event::WidgetEvent::PointerDown {
+            position: center,
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: Modifiers::CTRL,
+        });
+        tree.dispatch_event(fern_core::event::WidgetEvent::PointerUp {
+            position: center,
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: Modifiers::CTRL,
+        });
+
+        assert!(selection.is_selected(0), "item 0 should still be selected");
+        assert!(selection.is_selected(2), "item 2 should be toggled on");
+    }
+
+    #[test]
+    fn shift_click_extends_range() {
+        use fern_core::event::Modifiers;
+        let (mut tree, lv_id, _, selection) = make_selectable_list(5);
+        let children = tree.children(lv_id);
+
+        // Select item 1 as anchor
+        tree.click(children[1]);
+        assert!(
+            selection.is_selected(1),
+            "item 1 should be selected after plain click"
+        );
+
+        // Shift+click item 3 — should extend from anchor (1) to 3
+        let center = tree.bounds(children[3]).center();
+        tree.dispatch_event(fern_core::event::WidgetEvent::PointerDown {
+            position: center,
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: Modifiers::SHIFT,
+        });
+
+        let selected = selection.selected_indices();
+        assert_eq!(
+            selected,
+            vec![1, 2, 3],
+            "Shift+click should select range 1..=3, got {:?}",
+            selected
         );
     }
 }
