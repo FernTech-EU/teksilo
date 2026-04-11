@@ -500,42 +500,75 @@ impl Widget for ScrollArea {
         // Scrollbar thickness — same for both modes (overlay paints thin at rest)
         let sb_thickness = self.scroll_bar_thickness;
 
-        // --- Step 1: Compute viewport size ---
-        // In Permanent mode a non-hidden vertical scrollbar reserves space.
-        let v_reserved = match self.scroll_bar_style {
+        // --- Step 1: Compute viewport size (two-pass for cross-axis dependencies) ---
+
+        // Helper: determine scrollbar visibility from policy + overflow.
+        let resolve_show = |policy: ScrollBarPolicy, has_bar: bool, overflows: bool| -> bool {
+            has_bar
+                && match policy {
+                    ScrollBarPolicy::AlwaysOn => true,
+                    ScrollBarPolicy::AlwaysOff => false,
+                    ScrollBarPolicy::AsNeeded => overflows,
+                }
+        };
+
+        // Pass 1: measure with optimistic vertical reservation.
+        let v_reserved_1 = match self.scroll_bar_style {
             ScrollBarStyle::Permanent if has_v && !v_off => sb_thickness,
             _ => 0.0,
         };
-        let viewport_width = (bounds.width - v_reserved).max(0.0);
+        let vp_w1 = (bounds.width - v_reserved_1).max(0.0);
+        let content_size_1 = ctx
+            .child_size(
+                children[0].id,
+                SizeProposal {
+                    width: Some(vp_w1),
+                    height: None,
+                },
+            )
+            .unwrap_or(Size::new(vp_w1, bounds.height));
 
-        // Measure content at viewport width, unbounded height
-        let content_proposal = SizeProposal {
-            width: Some(viewport_width),
-            height: None,
+        let show_v_1 = resolve_show(self.vertical_policy, has_v, content_size_1.height > bounds.height + 0.5);
+        let show_h_1 = resolve_show(self.horizontal_policy, has_h, content_size_1.width > vp_w1 + 0.5);
+
+        // Compute actual reservations from pass-1 results.
+        let v_res = match self.scroll_bar_style {
+            ScrollBarStyle::Permanent if show_v_1 => sb_thickness,
+            _ => 0.0,
         };
-        let content_size = ctx
-            .child_size(children[0].id, content_proposal)
-            .unwrap_or(Size::new(viewport_width, bounds.height));
+        let h_res = match self.scroll_bar_style {
+            ScrollBarStyle::Permanent if show_h_1 => sb_thickness,
+            _ => 0.0,
+        };
 
-        // Check whether horizontal scroll is needed
-        let needs_h_scroll = content_size.width > viewport_width + 0.5;
-        let needs_v_scroll = content_size.height > bounds.height + 0.5;
+        // Pass 2: re-measure if reservations changed, and re-evaluate cross-axis.
+        let vp_h_after_h = (bounds.height - h_res).max(0.0);
+        let new_needs_v = content_size_1.height > vp_h_after_h + 0.5;
+        let show_v = resolve_show(self.vertical_policy, has_v, new_needs_v);
+        let new_v_res = match self.scroll_bar_style {
+            ScrollBarStyle::Permanent if show_v => sb_thickness,
+            _ => 0.0,
+        };
 
-        // Determine effective scrollbar visibility
-        let show_v = has_v
-            && match self.vertical_policy {
-                ScrollBarPolicy::AlwaysOn => true,
-                ScrollBarPolicy::AlwaysOff => false,
-                ScrollBarPolicy::AsNeeded => needs_v_scroll,
-            };
-        let show_h = has_h
-            && match self.horizontal_policy {
-                ScrollBarPolicy::AlwaysOn => true,
-                ScrollBarPolicy::AlwaysOff => false,
-                ScrollBarPolicy::AsNeeded => needs_h_scroll,
-            };
+        let (viewport_width, content_size, show_h) = if (new_v_res - v_res).abs() > 0.01 {
+            // Vertical reservation changed — re-measure content.
+            let vp_w2 = (bounds.width - new_v_res).max(0.0);
+            let cs2 = ctx
+                .child_size(
+                    children[0].id,
+                    SizeProposal {
+                        width: Some(vp_w2),
+                        height: None,
+                    },
+                )
+                .unwrap_or(Size::new(vp_w2, bounds.height));
+            let sh2 = resolve_show(self.horizontal_policy, has_h, cs2.width > vp_w2 + 0.5);
+            (vp_w2, cs2, sh2)
+        } else {
+            ((bounds.width - new_v_res).max(0.0), content_size_1, show_h_1)
+        };
 
-        // In Permanent mode, reserve space for horizontal scrollbar if shown
+        let v_reserved = new_v_res;
         let h_reserved = match self.scroll_bar_style {
             ScrollBarStyle::Permanent if show_h => sb_thickness,
             _ => 0.0,

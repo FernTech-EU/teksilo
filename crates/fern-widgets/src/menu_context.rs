@@ -99,7 +99,7 @@ impl MenuContext {
             content_id,
             anchor: trigger_id,
             placement: OverlayPlacement::BelowPreferred,
-            dismiss: DismissBehavior::ClickOutside,
+            dismiss: DismissBehavior::EscapeOrClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
         });

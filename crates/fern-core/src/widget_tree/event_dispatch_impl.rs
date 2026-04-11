@@ -31,15 +31,17 @@ impl WidgetTree {
         } = &event
             && !self.overlay_manager.is_empty()
         {
-            if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
+            if let Some((_id, content_ids, focus_restore)) =
+                self.overlay_manager.try_dismiss_top_on_escape()
+            {
                 self.dormant_dismissed_content(&content_ids);
                 if let Some(restore_id) = focus_restore {
                     if self.arena.is_active(restore_id) {
                         self.focus(restore_id);
                     }
                 }
+                return;
             }
-            return;
         }
 
         if let WidgetEvent::PointerDown {
@@ -223,7 +225,7 @@ impl WidgetTree {
             content_id,
             anchor: owner_id,
             placement: crate::overlay::OverlayPlacement::AtPointer(position),
-            dismiss: crate::overlay::DismissBehavior::ClickOutside,
+            dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
         });

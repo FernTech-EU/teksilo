@@ -392,7 +392,7 @@ impl Widget for ComboBox {
                         content_id: dropdown_id,
                         anchor: self_id,
                         placement: OverlayPlacement::BelowPreferred,
-                        dismiss: DismissBehavior::ClickOutside,
+                        dismiss: DismissBehavior::EscapeOrClickOutside,
                         layer: OverlayLayer::InTree,
                         parent_overlay: None,
                     });
@@ -441,7 +441,7 @@ impl Widget for ComboBox {
                                     content_id: dropdown_id,
                                     anchor: self_id,
                                     placement: OverlayPlacement::BelowPreferred,
-                                    dismiss: DismissBehavior::ClickOutside,
+                                    dismiss: DismissBehavior::EscapeOrClickOutside,
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
                                 });
@@ -471,7 +471,7 @@ impl Widget for ComboBox {
                                     content_id: dropdown_id,
                                     anchor: self_id,
                                     placement: OverlayPlacement::BelowPreferred,
-                                    dismiss: DismissBehavior::ClickOutside,
+                                    dismiss: DismissBehavior::EscapeOrClickOutside,
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
                                 });
@@ -495,7 +495,7 @@ impl Widget for ComboBox {
                                     content_id: dropdown_id,
                                     anchor: self_id,
                                     placement: OverlayPlacement::BelowPreferred,
-                                    dismiss: DismissBehavior::ClickOutside,
+                                    dismiss: DismissBehavior::EscapeOrClickOutside,
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
                                 });

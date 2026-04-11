@@ -7,6 +7,16 @@ use winit::window::Window;
 use accesskit::ActionRequest;
 use fern_render::Renderer;
 
+/// Error returned when surface texture acquisition fails during rendering.
+#[derive(Debug)]
+pub struct SurfaceRenderError(pub String);
+
+impl std::fmt::Display for SurfaceRenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Surface error: {}", self.0)
+    }
+}
+
 /// A platform window wrapping a winit window, wgpu surface, renderer,
 /// and AccessKit adapter for screen reader support.
 pub struct PlatformWindow {
@@ -198,17 +208,24 @@ impl PlatformWindow {
         (self.surface_config.width, self.surface_config.height)
     }
 
+    /// Reconfigure the surface with the current config.
+    /// Use after a Lost or Outdated surface error.
+    pub fn reconfigure_surface(&mut self) {
+        self.surface
+            .configure(self.renderer.device(), &self.surface_config);
+    }
+
     /// Render a frame to the surface.
     pub fn render_frame(
         &mut self,
         frame: &fern_canvas::RenderFrame,
         clear_color: [f32; 4],
-    ) -> Result<(), String> {
+    ) -> Result<(), SurfaceRenderError> {
         let current = self.surface.get_current_texture();
         let output = match current {
             wgpu::CurrentSurfaceTexture::Success(tex)
             | wgpu::CurrentSurfaceTexture::Suboptimal(tex) => tex,
-            other => return Err(format!("Surface error: {:?}", other)),
+            other => return Err(SurfaceRenderError(format!("{other:?}"))),
         };
 
         let view = output

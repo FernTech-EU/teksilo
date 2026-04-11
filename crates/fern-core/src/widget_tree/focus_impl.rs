@@ -31,7 +31,7 @@ impl WidgetTree {
     }
 
     /// After setting focus, ensure the focused widget is visible inside
-    /// any ancestor scroll area (clips_children container).
+    /// all ancestor scroll areas (clips_children containers).
     fn scroll_focused_into_view(&mut self, focused_id: WidgetId) {
         let focused_bounds = self.arena.bounds(focused_id);
 
@@ -55,7 +55,6 @@ impl WidgetTree {
                         },
                     );
                 }
-                break;
             }
             current = self.arena.parent(ancestor_id);
         }

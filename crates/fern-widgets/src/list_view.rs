@@ -122,6 +122,8 @@ pub struct ListView<T: 'static> {
 
     /// Active drop feedback (set by on_drag_hover, read by paint).
     drop_feedback: Rc<Cell<Option<(f32, f32)>>>, // (y, width) for insertion line
+    /// Content width (updated during place_children, used by drag feedback).
+    placed_content_width: Rc<Cell<f32>>,
 
     // Set during build
     item_entries: Vec<(usize, WidgetId)>, // (model_index, widget_id)
@@ -173,6 +175,7 @@ impl<T: 'static> ListView<T> {
             reorderable: false,
             on_item_drop: None,
             drop_feedback: Rc::new(Cell::new(None)),
+            placed_content_width: Rc::new(Cell::new(0.0)),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -482,6 +485,7 @@ impl<T: 'static> Widget for ListView<T> {
             let my_model_id = self.model_id;
 
             let feedback_for_hover = self.drop_feedback.clone();
+            let width_for_hover = self.placed_content_width.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 let scroll = scroll_for_hover.get().max(0.0);
                 let content_y = position.y + scroll;
@@ -495,11 +499,12 @@ impl<T: 'static> Widget for ListView<T> {
                 };
 
                 if payload.has_typed::<ListViewDragData>() {
+                    let line_width = width_for_hover.get();
                     let insertion_y = index as f32 * row_step_for_hover - scroll;
-                    feedback_for_hover.set(Some((insertion_y, 400.0)));
+                    feedback_for_hover.set(Some((insertion_y, line_width)));
                     DropFeedback::InsertionLine {
                         y: insertion_y,
-                        width: 400.0,
+                        width: line_width,
                     }
                 } else {
                     feedback_for_hover.set(None);
@@ -687,7 +692,13 @@ impl<T: 'static> Widget for ListView<T> {
 
         let scroll_y = self.scroll_y.get();
         let row_step = self.item_height + self.spacing;
-        let content_width = (bounds.width - SCROLLBAR_THICKNESS).max(0.0);
+        let needs_scrollbar = total_height > viewport_height + 0.5;
+        let content_width = if needs_scrollbar {
+            (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
+        } else {
+            bounds.width
+        };
+        self.placed_content_width.set(content_width);
 
         // Place item widgets
         let item_count = self.item_entries.len();
@@ -702,7 +713,6 @@ impl<T: 'static> Widget for ListView<T> {
 
         // Place scrollbar (last child)
         if let Some(sb_child) = children.last_mut() {
-            let needs_scrollbar = total_height > viewport_height + 0.5;
             if needs_scrollbar {
                 sb_child.origin =
                     Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
@@ -903,6 +913,21 @@ mod tests {
             "Item width {} should be {}",
             item_width,
             400.0 - SCROLLBAR_THICKNESS
+        );
+    }
+
+    #[test]
+    fn small_list_items_use_full_width() {
+        let (mut tree, lv_id, _model) = make_list_view(3, 30.0);
+        // 3 items * 30px = 90px < 300px viewport — no scrollbar needed
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let children = tree.children(lv_id);
+        let item_width = tree.bounds(children[0]).width;
+        assert!(
+            (item_width - 400.0).abs() < 0.01,
+            "Small list item width {} should be full 400.0 (no scrollbar)",
+            item_width,
         );
     }
 

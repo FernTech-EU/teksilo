@@ -195,7 +195,7 @@ impl Popover {
             style: ButtonStyle::Outlined,
             enabled: true,
             placement: OverlayPlacement::BelowPreferred,
-            dismiss: DismissBehavior::ClickOutside,
+            dismiss: DismissBehavior::EscapeOrClickOutside,
             pending_content: Some(Box::new(content)),
             pending_trigger: None,
             show_caret: true,

@@ -467,7 +467,7 @@ mod tests {
             content_id: content,
             anchor,
             placement: crate::overlay::OverlayPlacement::Below,
-            dismiss: crate::overlay::DismissBehavior::Manual,
+            dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
         });
@@ -477,6 +477,30 @@ mod tests {
         tree.press_key(Key::Escape, Modifiers::NONE);
         assert!(tree.active_overlays().is_empty());
         assert!(!tree.is_visible(content));
+    }
+
+    #[test]
+    fn escape_does_not_dismiss_manual_overlay() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new().focusable());
+        let content = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(anchor);
+
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        // Manual overlays should NOT be dismissed by Escape
+        assert_eq!(tree.active_overlays().len(), 1);
     }
 
     #[test]

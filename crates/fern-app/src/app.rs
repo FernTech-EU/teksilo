@@ -67,10 +67,10 @@ fn resolve_modal_presentation(
 
 fn modal_close_behavior_to_overlay_dismiss(behavior: ModalCloseBehavior) -> DismissBehavior {
     match behavior {
-        ModalCloseBehavior::ClickOutside | ModalCloseBehavior::EscapeOrClickOutside => {
-            DismissBehavior::ClickOutside
-        }
-        ModalCloseBehavior::EscapeKey | ModalCloseBehavior::Manual => DismissBehavior::Manual,
+        ModalCloseBehavior::ClickOutside => DismissBehavior::ClickOutside,
+        ModalCloseBehavior::EscapeKey => DismissBehavior::EscapeKey,
+        ModalCloseBehavior::EscapeOrClickOutside => DismissBehavior::EscapeOrClickOutside,
+        ModalCloseBehavior::Manual => DismissBehavior::Manual,
     }
 }
 
@@ -503,7 +503,12 @@ impl FernAppHandler {
             }
 
             let clear = managed.tree.theme().colors.surface.to_array();
-            let _ = managed.platform_window.render_frame(&frame, clear);
+            if let Err(e) = managed.platform_window.render_frame(&frame, clear) {
+                eprintln!("fern-app: {e}, reconfiguring surface");
+                managed.platform_window.reconfigure_surface();
+                managed.platform_window.request_redraw();
+                return;
+            }
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_rendered_frame();
             }
@@ -707,6 +712,26 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
         if let Some(handler) = &mut self.app_event_handler {
             handler(&event);
         }
+        // Route AppEvent::Command through the normal command pipeline so
+        // background-thread commands reach the on_command handler.
+        if let AppEvent::Command(erased) = event {
+            if let Some(h) = self.command_handler.as_mut() {
+                let mut ctx = crate::command_context::CommandContext::new(
+                    self.wm.primary_window_id(),
+                    self.wm.theme().clone(),
+                );
+                h(&erased, &mut ctx);
+                if let Some(new_theme) = ctx.take_theme() {
+                    self.wm.set_theme(new_theme);
+                }
+                for config in ctx.take_creates() {
+                    self.wm.queue_create(config);
+                }
+                for close_id in ctx.take_closes() {
+                    self.wm.queue_close(close_id);
+                }
+            }
+        }
         if let Some(trace) = &mut self.idle_trace {
             trace.note_request_redraw_all();
         }
@@ -780,6 +805,7 @@ pub struct FernAppBuilder {
     typesetter: Option<SharedTypesetter>,
     command_handler: Option<WindowCommandHandler>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
+    on_ready: Option<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
     window_title: String,
     window_width: u32,
@@ -796,6 +822,7 @@ impl FernAppBuilder {
             typesetter: None,
             command_handler: None,
             app_event_handler: None,
+            on_ready: None,
             initial_window: None,
             window_title: "FernUI".to_string(),
             window_width: 800,
@@ -845,6 +872,13 @@ impl FernAppBuilder {
     /// Register a handler for `AppEvent`s received from background threads.
     pub fn on_app_event(mut self, handler: impl FnMut(&AppEvent) + 'static) -> Self {
         self.app_event_handler = Some(Box::new(handler));
+        self
+    }
+
+    /// Register a callback that receives an `AppEventProxy` once the event loop is ready.
+    /// Use this to hand the proxy to background threads that need to post commands.
+    pub fn on_ready(mut self, handler: impl FnOnce(AppEventProxy) + 'static) -> Self {
+        self.on_ready = Some(Box::new(handler));
         self
     }
 
@@ -900,6 +934,13 @@ impl FernAppBuilder {
             .build()
             .unwrap();
         event_loop.set_control_flow(ControlFlow::Wait);
+
+        if let Some(on_ready) = self.on_ready {
+            let proxy = AppEventProxy {
+                inner: event_loop.create_proxy(),
+            };
+            on_ready(proxy);
+        }
 
         #[cfg(feature = "text")]
         let typesetter = self

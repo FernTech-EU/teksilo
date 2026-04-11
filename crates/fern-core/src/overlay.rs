@@ -48,6 +48,10 @@ pub enum OverlayPlacement {
 pub enum DismissBehavior {
     /// Dismiss when the user clicks outside the overlay.
     ClickOutside,
+    /// Dismiss when the user presses Escape.
+    EscapeKey,
+    /// Dismiss on either Escape or an outside click.
+    EscapeOrClickOutside,
     /// Dismiss when the pointer leaves both anchor and overlay.
     PointerLeave { delay: Duration },
     /// Dismiss only via explicit API call.
@@ -302,7 +306,7 @@ impl OverlayManager {
         dismissed_content
     }
 
-    /// Dismiss the topmost overlay (e.g., on Escape).
+    /// Dismiss the topmost overlay unconditionally (e.g., ArrowLeft for submenu cascading).
     /// Returns the overlay ID, content widget IDs, and focus_restore target.
     pub fn dismiss_top(&mut self) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
         if let Some(overlay) = self.stack.last() {
@@ -310,6 +314,26 @@ impl OverlayManager {
             let focus_restore = overlay.focus_restore;
             let content_ids = self.dismiss(id);
             Some((id, content_ids, focus_restore))
+        } else {
+            None
+        }
+    }
+
+    /// Try to dismiss the topmost overlay on Escape, respecting `DismissBehavior`.
+    /// Only dismisses if the overlay's behavior includes Escape dismissal.
+    /// Returns the overlay ID, content widget IDs, and focus_restore target, or `None`
+    /// if the topmost overlay does not allow Escape dismissal.
+    pub fn try_dismiss_top_on_escape(
+        &mut self,
+    ) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
+        let dominated_by_escape = self.stack.last().is_some_and(|o| {
+            matches!(
+                o.dismiss,
+                DismissBehavior::EscapeKey | DismissBehavior::EscapeOrClickOutside
+            )
+        });
+        if dominated_by_escape {
+            self.dismiss_top()
         } else {
             None
         }
@@ -392,7 +416,9 @@ impl OverlayManager {
             .filter(|o| {
                 matches!(
                     o.dismiss,
-                    DismissBehavior::ClickOutside | DismissBehavior::PointerLeave { .. }
+                    DismissBehavior::ClickOutside
+                        | DismissBehavior::EscapeOrClickOutside
+                        | DismissBehavior::PointerLeave { .. }
                 )
             })
             .map(|o| o.id)
@@ -640,6 +666,114 @@ mod tests {
             anchor: fake_id(1),
             placement: OverlayPlacement::Below,
             dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        assert!(
+            mgr.handle_click_outside(Point::new(500.0, 500.0))
+                .is_empty()
+        );
+        assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn escape_dismisses_escape_or_click_outside() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::EscapeOrClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        let dismissed = mgr.try_dismiss_top_on_escape();
+        assert_eq!(dismissed.map(|(oid, _, _)| oid), Some(id));
+        assert!(mgr.is_empty());
+    }
+
+    #[test]
+    fn escape_dismisses_escape_key_only() {
+        let mut mgr = OverlayManager::new();
+        let id = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::EscapeKey,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        // Escape should dismiss
+        let dismissed = mgr.try_dismiss_top_on_escape();
+        assert_eq!(dismissed.map(|(oid, _, _)| oid), Some(id));
+        assert!(mgr.is_empty());
+    }
+
+    #[test]
+    fn escape_does_not_dismiss_click_outside_only() {
+        let mut mgr = OverlayManager::new();
+        mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        assert!(mgr.try_dismiss_top_on_escape().is_none());
+        assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn escape_does_not_dismiss_manual() {
+        let mut mgr = OverlayManager::new();
+        mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        assert!(mgr.try_dismiss_top_on_escape().is_none());
+        assert_eq!(mgr.len(), 1);
+    }
+
+    #[test]
+    fn click_outside_dismisses_escape_or_click_outside() {
+        let mut mgr = OverlayManager::new();
+        mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::EscapeOrClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+
+        let id = mgr.active_ids()[0];
+        mgr.set_content_bounds(id, Size::new(100.0, 50.0));
+
+        assert!(
+            !mgr.handle_click_outside(Point::new(500.0, 500.0))
+                .is_empty()
+        );
+        assert!(mgr.is_empty());
+    }
+
+    #[test]
+    fn click_outside_does_not_dismiss_escape_key_only() {
+        let mut mgr = OverlayManager::new();
+        mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::EscapeKey,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
         });

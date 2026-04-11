@@ -325,6 +325,16 @@ impl WindowManager {
         &self.a11y_prefs
     }
 
+    /// Get the FernWindowId of the first (primary) window.
+    /// Falls back to a synthetic ID when no windows are open yet.
+    pub fn primary_window_id(&self) -> FernWindowId {
+        self.fern_to_winit
+            .keys()
+            .copied()
+            .min_by_key(|id| id.raw())
+            .unwrap_or(FernWindowId::new(0))
+    }
+
     /// Number of active windows.
     pub fn window_count(&self) -> usize {
         self.windows.len()
