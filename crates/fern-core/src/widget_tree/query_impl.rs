@@ -39,6 +39,10 @@ impl WidgetTree {
         !self.idle_queue.is_empty()
     }
 
+    pub fn has_pending_modal_requests(&self) -> bool {
+        !self.pending_modal_requests.is_empty()
+    }
+
     pub fn current_cursor(&self) -> crate::widget::CursorIcon {
         self.current_cursor
     }
@@ -57,6 +61,7 @@ impl WidgetTree {
 mod tests {
     use super::*;
     use crate::test_widgets::FillWidget;
+    use crate::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
     use crate::widget_builder::WidgetBuilder;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -103,5 +108,49 @@ mod tests {
         let deadline = crate::idle::IdleDeadline::new(std::time::Duration::from_millis(100));
         assert!(!deadline.did_timeout());
         assert!(deadline.time_remaining() > std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn modal_request_requested_from_event_handler() {
+        let mut tree = WidgetTree::new();
+        let content = tree.add(FillWidget::new().label("Modal content"));
+        let trigger = tree.add(FillWidget::new().on_tap(move |ctx| {
+            ctx.present_modal(
+                ModalRequest::in_tree(content)
+                    .presentation(ModalPresentation::InTree)
+                    .close_behavior(ModalCloseBehavior::Manual),
+            );
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert!(!tree.has_pending_modal_requests());
+
+        tree.click(trigger);
+
+        assert!(tree.has_pending_modal_requests());
+        let requests = tree.drain_pending_modal_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].source_widget, trigger);
+        assert_eq!(requests[0].request.presentation, ModalPresentation::InTree);
+        assert_eq!(requests[0].request.close_behavior, ModalCloseBehavior::Manual);
+        match requests[0].request.content {
+            ModalContent::ExistingWidget(id) => assert_eq!(id, content),
+            ModalContent::Deferred(_) => panic!("expected ExistingWidget content"),
+        }
+        assert!(!tree.has_pending_modal_requests());
+    }
+
+    #[test]
+    fn draining_modal_requests_clears_queue() {
+        let mut tree = WidgetTree::new();
+        let content = tree.add(FillWidget::new());
+        let trigger = tree.add(FillWidget::new().on_tap(move |ctx| {
+            ctx.present_modal(ModalRequest::in_tree(content));
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.click(trigger);
+        assert_eq!(tree.drain_pending_modal_requests().len(), 1);
+        assert!(tree.drain_pending_modal_requests().is_empty());
     }
 }

@@ -177,6 +177,7 @@ pub struct EventContext {
     pub(crate) cursor_request: Option<CursorIcon>,
     pub(crate) tree_mutations: Vec<TreeMutation>,
     pub(crate) idle_callbacks: Vec<crate::idle::IdleCallback>,
+    pub(crate) modal_requests: Vec<crate::modal::ModalRequest>,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
     /// Whether to dismiss all overlays (e.g., after menu item activation).
@@ -229,6 +230,7 @@ impl EventContext {
             cursor_request: None,
             tree_mutations: Vec::new(),
             idle_callbacks: Vec::new(),
+            modal_requests: Vec::new(),
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
             dismiss_all_overlays: false,
@@ -323,6 +325,15 @@ impl EventContext {
         callback: impl FnOnce(crate::idle::IdleDeadline) + 'static,
     ) {
         self.idle_callbacks.push(Box::new(callback));
+    }
+
+    /// Request framework-owned modal presentation.
+    ///
+    /// The widget tree records the request together with the originating
+    /// widget, and the application layer can later resolve `Auto` into a
+    /// concrete presentation backend.
+    pub fn present_modal(&mut self, request: crate::modal::ModalRequest) {
+        self.modal_requests.push(request);
     }
 
     /// Show an overlay after a delay. The widget tree checks pending delayed

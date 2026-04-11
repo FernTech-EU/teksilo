@@ -42,7 +42,7 @@ pub use button::{Button, ButtonStyle};
 pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
 pub use combo_box::ComboBox;
-pub use dialog::{Dialog, DialogContent};
+pub use dialog::{Dialog, DialogContent, ModalContainer};
 pub use link::Link;
 pub use list_view::ListView;
 pub use menu_bar::MenuBar;

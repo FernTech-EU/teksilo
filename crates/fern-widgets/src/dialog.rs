@@ -3,7 +3,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
@@ -12,30 +12,51 @@ use crate::button::{Button, ButtonStyle};
 use crate::overlay_trigger::OverlayTrigger;
 use crate::primitives::{Divider, TextWidget, VStack};
 
-const DIALOG_PADDING: f32 = 24.0;
-const DIALOG_MIN_WIDTH: f32 = 320.0;
+const DEFAULT_MODAL_PADDING: f32 = 24.0;
+const DEFAULT_MODAL_MIN_WIDTH: f32 = 320.0;
 
-struct DialogSurface {
+pub struct ModalContainer {
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
+    padding: f32,
+    min_width: f32,
 }
 
-impl DialogSurface {
-    fn new(content: Box<dyn Widget>) -> Self {
+impl ModalContainer {
+    pub fn new(content: impl Widget + 'static) -> Self {
+        Self::boxed(Box::new(content))
+    }
+
+    pub(crate) fn boxed(content: Box<dyn Widget>) -> Self {
         Self {
             content_id: None,
             pending_content: Some(content),
+            padding: DEFAULT_MODAL_PADDING,
+            min_width: DEFAULT_MODAL_MIN_WIDTH,
         }
     }
-}
 
-impl std::fmt::Debug for DialogSurface {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DialogSurface").finish()
+    pub fn padding(mut self, padding: f32) -> Self {
+        self.padding = padding.max(0.0);
+        self
+    }
+
+    pub fn min_width(mut self, min_width: f32) -> Self {
+        self.min_width = min_width.max(0.0);
+        self
     }
 }
 
-impl Widget for DialogSurface {
+impl std::fmt::Debug for ModalContainer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModalContainer")
+            .field("padding", &self.padding)
+            .field("min_width", &self.min_width)
+            .finish()
+    }
+}
+
+impl Widget for ModalContainer {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         if let Some(content) = self.pending_content.take() {
             self.content_id = Some(ctx.add_boxed(content));
@@ -44,7 +65,7 @@ impl Widget for DialogSurface {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        let inset = DIALOG_PADDING * 2.0;
+        let inset = self.padding * 2.0;
         let content = self
             .content_id
             .and_then(|id| {
@@ -59,7 +80,7 @@ impl Widget for DialogSurface {
             .unwrap_or_else(|| proposal.resolve(240.0, 120.0));
 
         Size::new(
-            (content.width + inset).max(DIALOG_MIN_WIDTH),
+            (content.width + inset).max(self.min_width),
             content.height + inset,
         )
     }
@@ -73,10 +94,10 @@ impl Widget for DialogSurface {
     ) {
         for child in children.iter_mut() {
             child.origin =
-                fern_canvas::Point::new(bounds.x + DIALOG_PADDING, bounds.y + DIALOG_PADDING);
+                fern_canvas::Point::new(bounds.x + self.padding, bounds.y + self.padding);
             child.size = Size::new(
-                (bounds.width - DIALOG_PADDING * 2.0).max(0.0),
-                (bounds.height - DIALOG_PADDING * 2.0).max(0.0),
+                (bounds.width - self.padding * 2.0).max(0.0),
+                (bounds.height - self.padding * 2.0).max(0.0),
             );
         }
     }
@@ -100,6 +121,24 @@ impl Widget for DialogSurface {
     fn children(&self) -> Vec<WidgetId> {
         self.content_id.into_iter().collect()
     }
+}
+
+fn show_centered_modal_overlay(
+    ctx: &mut EventContext,
+    content_id: WidgetId,
+    anchor: WidgetId,
+    dismiss: &DismissBehavior,
+) {
+    ctx.dismiss_all_overlays();
+    ctx.activate(content_id);
+    ctx.show_overlay(OverlayRequest {
+        content_id,
+        anchor,
+        placement: OverlayPlacement::Centered,
+        dismiss: dismiss.clone(),
+        layer: OverlayLayer::InTree,
+        parent_overlay: None,
+    });
 }
 
 pub struct DialogContent {
@@ -287,7 +326,7 @@ impl Widget for Dialog {
         let enabled = self.enabled;
         let dismiss = self.dismiss.clone();
         let style = self.style;
-        let content_id = ctx.add(DialogSurface::new(
+        let content_id = ctx.add(ModalContainer::boxed(
             self.pending_content
                 .take()
                 .expect("Dialog built without content"),
@@ -307,16 +346,7 @@ impl Widget for Dialog {
                                 if !enabled {
                                     return;
                                 }
-                                ctx.dismiss_all_overlays();
-                                ctx.activate(content_id);
-                                ctx.show_overlay(OverlayRequest {
-                                    content_id,
-                                    anchor: self_id,
-                                    placement: OverlayPlacement::Centered,
-                                    dismiss: dismiss.clone(),
-                                    layer: OverlayLayer::InTree,
-                                    parent_overlay: None,
-                                });
+                                show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
                             }
                         })
                         .on_key({
@@ -326,16 +356,12 @@ impl Widget for Dialog {
                                     key: Key::Enter | Key::Space,
                                     ..
                                 } if enabled => {
-                                    ctx.dismiss_all_overlays();
-                                    ctx.activate(content_id);
-                                    ctx.show_overlay(OverlayRequest {
+                                    show_centered_modal_overlay(
+                                        ctx,
                                         content_id,
-                                        anchor: self_id,
-                                        placement: OverlayPlacement::Centered,
-                                        dismiss: dismiss.clone(),
-                                        layer: OverlayLayer::InTree,
-                                        parent_overlay: None,
-                                    });
+                                        self_id,
+                                        &dismiss,
+                                    );
                                     EventResponse::Handled
                                 }
                                 _ => EventResponse::Ignored,
@@ -344,16 +370,12 @@ impl Widget for Dialog {
                         .on_access_action({
                             move |action, ctx| {
                                 if action == fern_core::accesskit::Action::Click && enabled {
-                                    ctx.dismiss_all_overlays();
-                                    ctx.activate(content_id);
-                                    ctx.show_overlay(OverlayRequest {
+                                    show_centered_modal_overlay(
+                                        ctx,
                                         content_id,
-                                        anchor: self_id,
-                                        placement: OverlayPlacement::Centered,
-                                        dismiss: dismiss.clone(),
-                                        layer: OverlayLayer::InTree,
-                                        parent_overlay: None,
-                                    });
+                                        self_id,
+                                        &dismiss,
+                                    );
                                     EventResponse::Handled
                                 } else {
                                     EventResponse::Ignored
@@ -374,16 +396,7 @@ impl Widget for Dialog {
                             if !enabled {
                                 return;
                             }
-                            ctx.dismiss_all_overlays();
-                            ctx.activate(content_id);
-                            ctx.show_overlay(OverlayRequest {
-                                content_id,
-                                anchor: self_id,
-                                placement: OverlayPlacement::Centered,
-                                dismiss: dismiss.clone(),
-                                layer: OverlayLayer::InTree,
-                                parent_overlay: None,
-                            });
+                            show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
                         }
                     })
                     .on_key({
@@ -393,16 +406,7 @@ impl Widget for Dialog {
                                 key: Key::Enter | Key::Space,
                                 ..
                             } if enabled => {
-                                ctx.dismiss_all_overlays();
-                                ctx.activate(content_id);
-                                ctx.show_overlay(OverlayRequest {
-                                    content_id,
-                                    anchor: self_id,
-                                    placement: OverlayPlacement::Centered,
-                                    dismiss: dismiss.clone(),
-                                    layer: OverlayLayer::InTree,
-                                    parent_overlay: None,
-                                });
+                                show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
                                 EventResponse::Handled
                             }
                             _ => EventResponse::Ignored,
@@ -411,16 +415,7 @@ impl Widget for Dialog {
                     .on_access_action({
                         move |action, ctx| {
                             if action == fern_core::accesskit::Action::Click && enabled {
-                                ctx.dismiss_all_overlays();
-                                ctx.activate(content_id);
-                                ctx.show_overlay(OverlayRequest {
-                                    content_id,
-                                    anchor: self_id,
-                                    placement: OverlayPlacement::Centered,
-                                    dismiss: dismiss.clone(),
-                                    layer: OverlayLayer::InTree,
-                                    parent_overlay: None,
-                                });
+                                show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
                                 EventResponse::Handled
                             } else {
                                 EventResponse::Ignored
@@ -539,6 +534,38 @@ mod tests {
             .unwrap();
         let info = tree.accessibility_node(dialog);
         assert_eq!(info.role(), fern_core::accesskit::Role::Dialog);
+    }
+
+    #[test]
+    fn modal_container_preserves_shell_sizing_defaults() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let container = tree.add(ModalContainer::new(FixedLeaf(220.0, 120.0)));
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+
+        let bounds = tree.bounds(container);
+        assert!((bounds.width - 320.0).abs() < 0.01);
+        assert!((bounds.height - 168.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn modal_container_custom_padding_changes_layout() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let container = tree.add(
+            ModalContainer::new(FixedLeaf(220.0, 120.0))
+                .padding(12.0)
+                .min_width(200.0),
+        );
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+
+        let bounds = tree.bounds(container);
+        assert!((bounds.width - 244.0).abs() < 0.01);
+        assert!((bounds.height - 144.0).abs() < 0.01);
     }
 
     #[test]

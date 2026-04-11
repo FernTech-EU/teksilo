@@ -13,6 +13,7 @@ pub(crate) mod event_handlers;
 pub mod focus;
 pub mod gesture;
 pub mod idle;
+pub mod modal;
 pub mod overlay;
 pub mod shortcut;
 pub mod signal;
@@ -42,6 +43,10 @@ pub use gesture::{
     TapRecognizer,
 };
 pub use idle::IdleDeadline;
+pub use modal::{
+    ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,
+    QueuedModalRequest,
+};
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };

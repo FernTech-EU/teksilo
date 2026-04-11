@@ -455,6 +455,14 @@ impl WidgetTree {
             self.current_cursor = cursor;
         }
         self.pending_commands.extend(ctx.commands);
+        self.pending_modal_requests.extend(
+            ctx.modal_requests
+                .into_iter()
+                .map(|request| crate::modal::QueuedModalRequest {
+                    source_widget,
+                    request,
+                }),
+        );
         for callback in ctx.idle_callbacks {
             self.idle_queue.push_boxed(callback);
         }

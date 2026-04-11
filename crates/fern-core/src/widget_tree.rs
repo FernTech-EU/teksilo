@@ -94,6 +94,7 @@ pub struct WidgetTree {
     last_proposal: SizeProposal,
     command_handler: Option<Box<dyn FnMut(&ErasedCommand)>>,
     pending_commands: Vec<ErasedCommand>,
+    pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
     shortcut_lookup: Option<ShortcutLookup>,
     shortcut_reverse_lookup: Option<ShortcutReverseLookup>,
     binding_registry: crate::state::BindingRegistry,
@@ -167,6 +168,7 @@ impl WidgetTree {
             last_proposal: SizeProposal::exact(800.0, 600.0),
             command_handler: None,
             pending_commands: Vec::new(),
+            pending_modal_requests: Vec::new(),
             shortcut_lookup: None,
             shortcut_reverse_lookup: None,
             binding_registry: crate::state::BindingRegistry::new(),
@@ -686,6 +688,14 @@ impl WidgetTree {
     /// window-aware `CommandContext`.
     pub fn drain_pending_commands(&mut self) -> Vec<ErasedCommand> {
         std::mem::take(&mut self.pending_commands)
+    }
+
+    /// Drain all pending modal requests recorded during event handling.
+    ///
+    /// Each request includes the originating widget so higher layers can
+    /// resolve routing and focus behavior relative to the source tree.
+    pub fn drain_pending_modal_requests(&mut self) -> Vec<crate::modal::QueuedModalRequest> {
+        std::mem::take(&mut self.pending_modal_requests)
     }
 
     // --- Widget insertion ---
