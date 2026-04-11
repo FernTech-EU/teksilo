@@ -1,0 +1,2553 @@
+# FernUI Architecture Document
+
+**Version:** 0.1 — Initial Architecture  
+**Date:** March 31, 2026  
+**Author:** Cyril Jacquet, with architectural design by Claude (Anthropic)  
+**Status:** Pre-implementation reference document
+
+---
+
+## 1. Vision and Positioning
+
+FernUI is a pure-Rust GUI framework designed for serious desktop application development. It is not a general-purpose widget toolkit competing with egui or iced for weekend prototypes. It is the UI infrastructure layer for Skribisto, a cross-platform writing application, and for any Qleany-structured application that needs a native, accessible, high-performance interface.
+
+FernUI's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a solved problem — the text-document and text-typeset crates provide a complete document model and typesetting engine that no other Rust GUI framework can match. Third, the framework is designed to be consumed by applications with structured architecture (Qleany's Clean Architecture with vertical slices), providing typed command flow and MVVM data binding rather than leaving application structure as an exercise for the developer.
+
+### 1.1 Relationship to Qleany
+
+FernUI is infrastructure. Qleany applications consume it as their outermost layer — the "Frameworks & UI" ring in Clean Architecture's concentric circles. FernUI has no dependency on Qleany. Qleany has no dependency on FernUI. The integration surface is the typed command system (FernUI widgets emit application-defined commands that Qleany controllers handle) and the data source traits (application-written ViewModels bridge Qleany DTOs to FernUI's display layer).
+
+The decision not to structure FernUI's internals using Qleany's architecture was deliberate. The Qleany experiment with text-document (entities, use cases, repositories, Unit-of-Work for an in-memory document model) was a productive stress test that revealed and solved performance problems in Qleany itself. Repeating that experiment inside a GUI framework, where the performance characteristics are fundamentally different (layout and rendering are hot paths, not transactional operations), would provide diminishing returns.
+
+### 1.2 Reuse Strategy
+
+FernUI builds on established crates rather than reinventing solved problems.
+
+**Windowing:** winit provides cross-platform window creation, input handling, and HiDPI support. It is battle-tested and has an AccessKit adapter.
+
+**GPU rendering:** wgpu provides the GPU abstraction layer. FernUI's rendering contract (textured quads, colored rectangles, SDF shapes) is simple enough that wgpu's API is more than sufficient.
+
+**Text:** text-document provides the rich text document model (blocks, fragments, tables, lists, cursors, undo/redo). text-typeset provides the typesetting engine (OpenType shaping via rustybuzz, rasterization via swash, atlas packing via etagere, unicode-linebreak, unicode-bidi). These crates produce GPU-ready glyph quads — the same rendering contract FernUI uses for all visual output.
+
+**Accessibility:** AccessKit provides cross-platform accessibility infrastructure. FernUI pushes an AccessKit tree that platform adapters translate into native accessibility APIs (NSAccessibility on macOS, UI Automation on Windows, AT-SPI on Linux).
+
+**Internationalization:** fluent-rs (Mozilla's Project Fluent) provides locale-aware string resolution with support for plurals, gender, and complex grammar. FernUI wraps it in a `tr!` macro.
+
+**CPU rasterization:** tiny-skia handles Tier 3 path rasterization for arbitrary shapes that cannot be rendered with SDF shaders.
+
+---
+
+## 2. Layout Model
+
+FernUI uses a SwiftUI-style layout negotiation protocol. Layout is a two-phase conversation between parent and child: the parent proposes a size, the child responds with the size it actually wants, and the parent places the child at a specific position.
+
+The `Widget` trait expresses this as two methods:
+
+```rust
+trait Widget {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
+    fn place_children(&self, bounds: Rect, proposal: SizeProposal,
+                      children: &mut [WidgetPlacement], ctx: &LayoutContext);
+}
+```
+
+Each layout container (VStack, HStack, ZStack, Grid) implements these two methods differently. No global constraint solver, no flexbox algorithm — just recursive negotiation. This composes naturally: a custom widget is a layout container. Leading/Trailing semantics (rather than Left/Right) ensure automatic RTL mirroring when the locale's `LayoutDirection` is right-to-left.
+
+Layout operates entirely in logical pixels. The scale factor is applied at the rendering boundary, not during layout.
+
+### 2.1 Alignment
+
+The layout negotiation protocol determines how big each widget is, but not where it sits within the allocated space when it is smaller than the space offered. Alignment is the mechanism that controls this positioning.
+
+Alignment is a two-axis value composed from `HAlignment` (horizontal: `Leading`, `Center`, `Trailing`) and `VAlignment` (vertical: `Top`, `Center`, `Bottom`). `Leading` and `Trailing` resolve to left or right depending on the environment's `LayoutDirection`, consistent with all directional properties in FernUI. The combined `Alignment` struct provides convenience constants for the nine common combinations (`center`, `top_leading`, `center_trailing`, etc.).
+
+The `Alignment`, `HAlignment`, and `VAlignment` types are pure data, defined in `fern-tokens`.
+
+### 2.2 Container-Level Alignment
+
+Each layout container accepts an alignment parameter that controls how children are positioned on the cross axis — the axis perpendicular to the container's primary layout direction.
+
+`HStack` lays out children horizontally. Its alignment parameter controls the vertical position of each child within the row. The default is `VAlignment::Center` (vertically centered), which matches the most common expectation. `VStack` lays out children vertically. Its alignment parameter controls the horizontal position of each child. The default is `HAlignment::Leading`. `ZStack` overlays children on top of each other. Its alignment parameter is a full `Alignment` (both axes), defaulting to `Alignment::center`.
+
+The container's `place_children` implementation uses the alignment value to compute each child's position within the allocated bounds. For example, in a VStack with `HAlignment::Center`, each child's x position is `bounds.x + (bounds.width - child.width) / 2.0`. With `HAlignment::Trailing`, it is `bounds.x + bounds.width - child.width`.
+
+### 2.3 Per-Child Alignment Override
+
+Container-level alignment applies to all children uniformly. When one child needs a different alignment than the rest, a per-child alignment override is specified via an `.align()` modifier on the individual widget. The parent container checks each child for an alignment override before falling back to the container's default. The override is stored as an optional property on the widget's arena node, read by the parent during `place_children`.
+
+### 2.4 Spacer
+
+A `Spacer` is a layout utility widget whose `size_that_fits` claims all available space on the container's primary axis. Placing a Spacer before a widget in an HStack pushes the widget to the trailing edge. Placing Spacers on both sides centers the widget. Placing a Spacer after pushes the widget to the leading edge. This is the standard SwiftUI idiom for controlling position without explicit alignment parameters.
+
+### 2.5 Expand, FixedSize, and Size Constraints
+
+Alignment only matters when a widget is smaller than the space available. Several layout modifier widgets control how much space a widget claims.
+
+`Expand` tells the layout system that a widget should claim all available space on one or both axes. An expanded widget's content is positioned within the expanded bounds according to a `content_alignment` parameter. `expand_horizontal()` and `expand_vertical()` expand on a single axis.
+
+`FixedSize` prevents a widget from expanding beyond its natural size, even when the parent offers more space. This is useful for widgets that should not stretch (an icon inside an HStack where other children expand).
+
+`MinSize` enforces a minimum dimension. The widget's `size_that_fits` response is clamped to be at least the specified minimum. This is how buttons enforce the minimum touch target size — the button's composed subtree includes a `MinSize::new(48.0, 48.0)` wrapper rather than overriding sizing on the composite.
+
+`MaxSize` enforces a maximum dimension. The widget's `size_that_fits` response is clamped to be at most the specified maximum. Useful for constraining content width (a text editor that should not exceed 600 pixels wide).
+
+`Center` is a convenience wrapper equivalent to a ZStack with `Alignment::center` — it centers its single child within the available space.
+
+All of these are layout utility widgets in `fern-widgets`. They implement the `Widget` trait's `size_that_fits` and `place_children` methods, wrapping a single child. They require no special framework support — they are ordinary widgets that compose naturally with the layout negotiation protocol.
+
+### 2.6 Dynamic Sizing and Binding Levels
+
+Some property changes affect only a widget's visual appearance (a color change). Others affect the widget's size (a text change, a constraint change). The binding system must distinguish these two cases because they trigger different dirty-tracking responses.
+
+**Repaint-level bindings** (`bind_color`, `bind_background`, `bind_border_color`) mark the widget for repaint only when the bound state changes. The layout pass is skipped — the widget's position and size are unchanged. This is the fast path, used for interaction-driven visual state changes (hover color, pressed color, enabled/disabled appearance).
+
+**Relayout-level bindings** (`bind_text`, `bind_width`, `bind_height`, `bind_min_width`, `bind_max_height`) mark the widget for relayout when the bound state changes. The layout pass reruns on the affected subtree, and the dirty flag propagates upward to ancestors because a child's size change may affect its parent's size, which may affect the grandparent's size, and so on. Propagation stops at an ancestor whose own size is not affected by its children (for example, a `FixedSize` wrapper with a static width).
+
+The classification is determined by the primitive widget's binding method implementation, not by the consumer. A `TextWidget` implementor knows that `bind_text` is relayout-level because changing the text changes the widget's `size_that_fits` result. A composite widget author or application developer does not need to think about this distinction — they call `bind_text(state)` and the framework handles the rest.
+
+**Layout utility widgets with dynamic constraints.** The size constraint widgets (`MinSize`, `MaxSize`, `FixedSize`) accept state bindings for their constraint values, enabling dynamic resizing from application state changes, user-driven splitter interactions, or animation ticks. `FixedSize::bind_width(state)` registers a relayout-level binding — when the state changes, the widget's constraint changes, triggering relayout of the affected subtree.
+
+**Relayout propagation.** When a widget is marked for relayout, the framework marks the widget and all its ancestors up to the root as needing relayout. During the layout pass, it starts from the highest dirty ancestor and works downward, re-running `size_that_fits` and `place_children` for each dirty node. Clean subtrees are skipped. This is the same incremental layout approach used by web browsers and by Qt's layout system. A relayout always implies a repaint for the affected widgets.
+
+**Use cases for dynamic sizing.** A collapsible panel animates between zero height and its natural height by driving a `Signal<f32>` bound to a `FixedSize::bind_height`. A splitter pane resizes two adjacent panels by driving their width constraints from the splitter's drag position. A sidebar width set from user preferences reads from a persistent `Signal<f32>`. An expand/collapse animation drives a height constraint over multiple frames via the animation system.
+
+---
+
+## 3. Scrolling and Viewports
+
+A scroll area is a container whose content may be larger than the visible space. The scroll area acts as a viewport — a window into a potentially large content region. Only the visible portion of the content is rendered, clipped to the viewport boundary.
+
+Scrolling is designed to require minimal changes to the framework. The scroll offset is encoded through the existing layout placement mechanism, not as a separate coordinate transformation layer. Hit testing, event dispatch, and the state system require no modifications. The changes are confined to the arena (one new flag), the paint pass (clip rect support), the renderer (scissor rects), focus management (scroll-into-view), and the scroll area widget itself.
+
+### 3.1 Layout: Unbounded Proposals and Offset Placement
+
+A scroll area participates in layout like any other container widget. In `size_that_fits`, it claims the space its parent offers — this becomes the viewport size. In `place_children`, it proposes an unbounded size on the scroll axis to its content child. For a vertical scroll area, the content receives `SizeProposal { width: Some(viewport_width), height: None }` — "use the viewport width, but be as tall as you need." The content child responds with its natural height (potentially thousands of logical pixels).
+
+The scroll area then positions its content child at `(viewport.x, viewport.y - scroll_offset.y)`. This encodes the scroll offset as a position offset within the normal placement system. No special coordinate transformation infrastructure is needed — the existing `place_children` / `WidgetPlacement` mechanism handles it. The recursive layout function processes the content child and its descendants with the offset origin, and all bounds stored in the arena end up in correct screen-space positions.
+
+`SizeProposal` already supports `None` values for unbounded dimensions. No changes to the `SizeProposal` type or to `layout_widget_recursive` are required.
+
+### 3.2 Hit Testing: No Changes Required
+
+The existing `hit_test_recursive` provides viewport clipping implicitly. It checks `bounds.contains(point)` on the parent before recursing into children. A point outside the scroll area's viewport bounds is rejected at the scroll area's bounds check, and no child is tested. Children scrolled above the viewport have negative screen-space y coordinates that no in-viewport point would match. Children within the viewport have correct screen-space bounds (computed from the offset placement) that match pointer positions directly.
+
+No changes to the hit testing code are needed. The scroll offset encoded in placement positions and the existing parent-bounds containment check together provide correct viewport-clipped hit testing.
+
+### 3.3 Clipping in the Paint Pass
+
+The paint pass requires one new capability: clipping child rendering output to the scroll area's viewport bounds. Without clipping, children positioned near the edge of the viewport would render partially outside it.
+
+The arena's `WidgetNode` gains a `clips_children: bool` flag (default `false`). The scroll area widget sets this flag to `true` on its own arena node. When `paint_widget` enters a node with `clips_children: true`, it pushes a clip rect (the node's own bounds, which represent the viewport) onto the Canvas before recursing into children, and clears the clip after all children are painted.
+
+The Canvas already provides `set_clip(Rect)` and `clear_clip()` methods that produce `DrawCommand::SetClip` and `DrawCommand::ClearClip` entries in the RenderFrame. The change to `paint_widget` is approximately five lines: check the flag, push clip, recurse, pop clip.
+
+### 3.4 Renderer: Scissor Rect Implementation
+
+The `SetClip` and `ClearClip` draw commands exist in the RenderFrame but are currently no-ops in the renderer. The implementation maps directly to wgpu's scissor rect API: `render_pass.set_scissor_rect(x, y, width, height)` for `SetClip` (coordinates in physical pixels, multiplied by scale factor), and resetting the scissor to the full surface dimensions for `ClearClip`. This is approximately ten lines of code in the renderer.
+
+Nested scroll areas (rare but valid — a scrollable sidebar inside a scrollable page) require a clip rect stack. Each `SetClip` pushes a rect, and the effective clip is the intersection of all rects in the stack. `ClearClip` pops the top rect and restores the previous intersection.
+
+### 3.5 Focus and Scroll-Into-View
+
+When Tab navigation moves focus to a widget that is inside a scroll area but outside the current viewport, the scroll area must scroll to make the focused widget visible. Without this, keyboard users cannot see what they have focused.
+
+After `focus_with_origin` sets focus to a widget, the framework walks up the ancestor chain. If any ancestor has `clips_children: true`, the framework checks whether the focused widget's bounds are fully within that ancestor's viewport bounds. If not, the framework dispatches a `WidgetEvent::ScrollIntoView { target_bounds: Rect }` to the clipping ancestor. The scroll area handles this event by adjusting its scroll offset to bring the target bounds into view, using the minimum scroll change needed to make the widget fully visible (or centering it if the widget is larger than the viewport).
+
+### 3.6 The ScrollBar Widget
+
+The scroll bar is a standalone Level 2 widget in `fern-widgets`, not a rendering detail inside ScrollArea. A standalone widget participates in the framework's hit testing, event dispatch, focus, and accessibility systems. Its thumb is a region within its bounds that the framework's existing pointer routing handles. Its accessibility node declares `Role::ScrollBar` with `set_numeric_value`, `set_min_numeric_value`, `set_max_numeric_value`, and `Action::SetValue`.
+
+The ScrollBar stores the current scroll position and the content-to-viewport ratio (both provided by the ScrollArea via shared `Signal<f32>`). It computes thumb position and size from these values. It handles `PointerDown` on the thumb (start drag), `PointerMove` during drag (update position), `PointerUp` (end drag), and `PointerDown` on the track (page-scroll toward click position). It supports both vertical and horizontal orientations.
+
+### 3.7 ScrollArea and ScrollBar Interaction
+
+The ScrollArea owns the scroll state (`Signal<f32>` for each axis). The ScrollBar reads from and writes to this shared state. The ScrollArea and ScrollBar communicate through the reactive binding system, not through events or callbacks.
+
+The ScrollArea supports two scroll bar display modes via `ScrollBarStyle`.
+
+**Overlay mode** (default, matching macOS and modern Linux). The ScrollArea's viewport occupies the full available width — the scroll bar does not reduce the content area. A thin passive scroll indicator (a few semi-transparent pixels at the trailing edge) is painted directly by the ScrollArea during scrolling as a visual hint. When the pointer enters the scroll bar activation zone (a region at the trailing edge wider than the thin indicator), the ScrollArea shows the full interactive ScrollBar widget as an overlay using the existing overlay system (`OverlayPlacement::NearAnchor`, `DismissBehavior::PointerLeave`). The overlay ScrollBar appears on top of the content, receives pointer events for thumb drag and track click, and dismisses when the pointer leaves. The viewport width never changes. The transition from thin indicator to full scroll bar can be animated using the animation scheduler.
+
+**Permanent mode** (matching traditional Windows/GTK style, or when the user's accessibility preferences request always-visible scroll bars). The ScrollBar is a layout sibling of the content viewport. The ScrollArea's internal structure becomes an HStack of `[clipping viewport]` + `[ScrollBar]`. The viewport is narrower by the scroll bar's width. The scroll bar is always visible and always interactive. The viewport width is constant (reduced by the scroll bar width but never changing dynamically).
+
+The mode is selected via `ScrollArea::new(content).scroll_bar_style(ScrollBarStyle::Overlay)` or `ScrollBarStyle::Permanent`. The application or the theme can set a default. An accessibility preference for "always show scroll bars" overrides to Permanent mode.
+
+### 3.8 The Scroll Area Widget
+
+The ScrollArea is a Level 2 (`Widget` trait) widget in `fern-widgets`. It is the viewport container — it owns the clipping behavior, the layout negotiation with unbounded proposals, and the content offset placement described in Sections 3.1–3.5.
+
+The scroll offset for each axis is stored as a `Signal<f32>` (not a raw `Vec2`), because the ScrollBar widget needs to read and write the position through the reactive binding system. When the ScrollBar's thumb is dragged, it sets the shared `Signal<f32>`. The ScrollArea's binding on that state triggers a relayout, which re-runs `place_children` with the updated offset. When the user scrolls via mouse wheel or trackpad (`WidgetEvent::Scroll`), the ScrollArea updates the `Signal<f32>` directly, and the ScrollBar's thumb position updates via the same binding path.
+
+The ScrollArea creates and manages a ScrollBar widget according to the active `ScrollBarStyle` (Section 3.7). In overlay mode, the ScrollArea paints a thin passive indicator during its own `paint()` pass and shows the interactive ScrollBar as an overlay on pointer proximity. In permanent mode, the ScrollBar is a layout child positioned as a sibling of the content viewport. The ScrollArea sets `clips_children: true` on its arena node so the paint pass clips content to the viewport bounds.
+
+The ScrollArea handles `WidgetEvent::ScrollIntoView` to support focus-driven scrolling (Section 3.5) — it adjusts the `Signal<f32>` offset to bring the target bounds into view.
+
+For accessibility, the ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges) and page-level scroll actions (`Action::ScrollDown`, `Action::ScrollUp`, `Action::ScrollLeft`, `Action::ScrollRight`). The ScrollBar declares its own `Role::ScrollBar` with `set_numeric_value`, `set_orientation`, and `Action::SetValue` for direct position control. These are two separate AccessKit nodes with complementary roles.
+
+### 3.9 Interaction with Virtualized Lists
+
+The `ListView` widget (backed by `ListModel<T>` or `ListDataSource`) depends on scrolling. The scroll offset determines which items are visible. The `ListView` only instantiates widget subtrees in the arena for visible items plus a small buffer above and below the viewport. As the user scrolls, items leaving the viewport have their subtrees destroyed and items entering the viewport have new subtrees created.
+
+The `ListView` does not need a general-purpose "scroll area wrapper" — it implements the scrolling behavior internally, because it needs tight control over which items have widget subtrees. It uses the same mechanisms as the scroll area (offset placement, `clips_children: true`, `WidgetEvent::Scroll` handling) but also manages the item lifecycle in the arena.
+
+### 3.10 Accessibility for Scroll Areas and Lists
+
+The scroll system produces two AccessKit nodes with complementary roles. The ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges), `set_clips_children(true)`, and page-level scroll actions (`Action::ScrollUp`, `Action::ScrollDown`, `Action::ScrollLeft`, `Action::ScrollRight`). The ScrollBar declares `Role::ScrollBar` with `set_numeric_value` (the current scroll position), `set_min_numeric_value`, `set_max_numeric_value`, `set_orientation`, and `Action::SetValue` for direct position control by assistive technologies. Screen readers use the ScrollView node to announce the scrollable region and the ScrollBar node to present the scroll position as an adjustable value.
+
+For lists, AccessKit provides `Role::List` with `Role::ListItem` for static lists, and `Role::ListBox` with `Role::ListBoxOption` for interactive selectable lists. The critical properties for virtualized lists are `set_position_in_set(index)` on each visible item and `set_size_of_set(total_count)` on the list container. These tell screen readers the logical position of each item ("item 5 of 200") even when the AccessKit tree only contains the items currently visible in the viewport. Items outside the viewport do not exist in the arena and therefore do not appear in the AccessKit tree — no special mechanism is needed to exclude them.
+
+---
+
+## 4. Widget State Ownership
+
+FernUI uses a retained widget tree with arena-backed flat storage, following the approach proven by Masonry's TreeArena.
+
+All widgets live in a flat `SlotMap`-like arena. Parent-child relationships are stored as ID references within the arena. The tree structure is explicit (unlike a pure ECS where relationships are implicit), but the flat storage avoids Rust's borrow-checker challenges with recursive mutable tree traversal.
+
+The framework processes the tree through well-defined passes (event, layout, accessibility, paint), each of which traverses the arena without holding multiple mutable references simultaneously. This is the key insight from Masonry: separate the passes so that no pass needs to mutate a widget while reading another widget's state.
+
+---
+
+## 5. Widget Extensibility
+
+FernUI provides two tiers of widget creation, both first-class citizens.
+
+### 5.1 Level 1: CompositeWidget (Composition)
+
+A composite widget describes what it is made of by implementing a `build()` method that combines existing widgets. The `build()` method constructs the initial subtree and wires reactive property bindings between state handles and child widget properties (see Section 7.1.1). Ongoing behavior (event handling, focus management, accessibility) is declared through additional trait methods.
+
+```rust
+pub trait CompositeWidget {
+    fn build(&self, ctx: &mut BuildContext) -> WidgetId;
+    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
+        EventResponse::Ignored
+    }
+    fn focus_policy(&self) -> FocusPolicy { FocusPolicy::Default }
+    fn is_focusable(&self) -> bool { false }
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {}
+}
+```
+
+The `CompositeWidget` trait deliberately does not include `size_that_fits` or any sizing override. A composite's size is determined entirely by its composed subtree's layout negotiation. The framework's composite adapter delegates `size_that_fits` to the root child ID returned by `build()`, which queries its own children recursively through the normal SwiftUI-style propose/respond/place protocol. The composite author never writes sizing logic — that is the subtree's responsibility.
+
+If a composite needs to enforce constraints on its overall size (such as a minimum touch target for a button), it achieves this by including a `MinSize` wrapper widget or equivalent constraint widget in its composed subtree, not by overriding sizing on the composite itself. This ensures that all sizing logic lives within the layout system and is visible in the widget tree.
+
+### 5.2 Level 2: Widget (Custom Rendering)
+
+A custom widget implements the full `Widget` trait, including `paint()` for direct rendering via the Canvas API. This is for widgets with no pre-existing visual equivalent — color pickers, node graphs, timeline rulers, or the RichTextEditor that wraps text-typeset.
+
+```rust
+pub trait Widget {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
+    fn place_children(&self, bounds: Rect, proposal: SizeProposal,
+                      children: &mut [WidgetPlacement], ctx: &LayoutContext);
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext);
+    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse;
+    fn accessibility(&self, builder: &mut AccessNodeBuilder);
+}
+```
+
+From the outside, a `CompositeWidget` and a `Widget` are indistinguishable — both are `WidgetId` entries in the arena, both are testable the same way, both participate in layout, events, and accessibility identically.
+
+### 5.3 The Slot System
+
+Standard widgets ship with named extension points — slots — at structural boundaries where extension is anticipated. A slot is an optional placeholder that takes zero space when empty and accommodates arbitrary widget content when filled.
+
+```rust
+TabWidget::new()
+    .tab("Chapter 1", || chapter_editor(1))
+    .trailing_slot(|ctx| {
+        HStack::new()
+            .child(Button::icon_only(Icon::Plus).on_activate(AppCmd::AddChapter))
+            .child(Button::icon_only(Icon::ChevronDown).on_activate(AppCmd::OpenChapterMenu))
+    })
+```
+
+Slots are part of a widget's public API contract. Every standard composite widget in fern-widgets ships with sensible slots at positions where extension is commonly needed, following a consistent naming convention: `leading_slot`, `trailing_slot`, `header_slot`, `footer_slot`.
+
+---
+
+## 6. UI Construction Patterns
+
+A composite widget's `build()` method constructs a widget subtree by adding widgets to the arena and assembling them into parent-child relationships. The raw API (`ctx.add()` returning a `WidgetId`, then `container.add_child(id)`) is correct and always available, but it produces verbose code for common cases. This section defines a convenience layer that reduces boilerplate while preserving full access to the underlying mechanisms.
+
+### 6.1 Inline Children
+
+Most children in a `build()` method are created, added to the arena, and immediately passed as a child to a container — the `WidgetId` is never referenced again. The inline `child()` method eliminates the intermediate variable by accepting a widget value directly rather than a pre-registered ID.
+
+Containers provide three child-addition methods. `add_child(id: WidgetId)` takes a pre-registered ID — used when the composite needs the child's ID for bindings, tooltips, or later reference. `child(widget: impl IntoWidgetTree)` takes a widget value for deferred insertion — the widget is stored temporarily inside the container and resolved into the arena when the container itself is added via `ctx.add()`. Both methods coexist on the same container and can be mixed freely in a single builder chain.
+
+When `BuildContext::add()` inserts a container that has deferred children, it resolves them recursively: each deferred child is inserted into the arena (which may itself have deferred children), and the resulting IDs are wired as children of the container. The resolution is depth-first, matching the visual nesting order.
+
+### 6.2 Iterator-Based Children
+
+The `children()` method accepts an iterator of widgets, adding each element as a deferred child. This replaces the `for` loop + `add_child` pattern for homogeneous child lists known at build time.
+
+For cases where per-item logic is complex (conditional sub-elements, derived values, separators between items), breaking the builder chain and using a `let mut` variable with a regular `for` loop is always available. The builder is an ordinary owned Rust value — standard control flow works naturally.
+
+### 6.3 Conditional Children
+
+The `child_opt()` method accepts an `Option<impl IntoWidgetTree>`. If `Some`, the child is added. If `None`, the method is a no-op and the chain continues. This prevents chain-breaking for simple single-widget conditionals.
+
+For `match` expressions where all arms return the same widget type, the result can be passed directly to `child()` since `match` is an expression in Rust. For arms returning different widget types, `child_boxed(Box<dyn IntoWidgetTree>)` accepts a type-erased widget.
+
+These are static conditionals — evaluated once during `build()`. Dynamic visibility (toggling a panel during interaction) uses `visible_when(Signal<bool>)`, which sets the widget dormant or active without tree reconstruction.
+
+### 6.4 The Repeater — Dynamic Non-Virtualized Collections
+
+The architecture provides two extremes for rendering collections: static children built once in `build()` (loops and iterators), and fully virtualized `ListView` backed by `ListModel<T>` or `ListDataSource` with scroll-position-dependent instantiation. The Repeater fills the middle ground — a dynamic, non-virtualized collection where every item has a widget subtree, and the set of items can change at runtime without a full composite rebuild.
+
+A Repeater takes a `ListModel<T>` and a builder closure (the delegate). It creates one delegate instance per data source item. When the `ListModel` signals that items were inserted, removed, or moved (via `DataChange` notifications), the Repeater creates or destroys delegate subtrees accordingly. The Repeater itself is a Level 2 widget in `fern-widgets` — it is not a framework-level concept.
+
+The builder closure receives each item from the data source and returns a widget tree for that item. The Repeater inserts the resulting subtree as a child at the corresponding position. When the data source notifies `ItemsInserted { range }`, the Repeater calls the builder for each new item and inserts the subtrees at the correct positions. When `ItemsRemoved { range }` is signaled, the Repeater destroys the corresponding subtrees. When `ItemsMoved { from, to }` is signaled, the Repeater reorders its children without destroying or recreating them.
+
+For `ItemUpdated { index }`, the first implementation destroys and recreates the item's subtree. A future optimization path allows in-place updates via reactive bindings — the item's properties are bound to state handles that the data source updates, and the subtree repaints without reconstruction.
+
+The delegate closure comes in two forms. The simple form returns a widget value directly and is sufficient for delegates that do not need reactive state. The context form receives a `BuildContext` and returns a `WidgetId`, matching the `Widget::build()` signature — this is necessary when the delegate needs `ctx.signal()`, `ctx.effect()`, or explicit binding registration.
+
+### 6.5 Repeater vs. ListView
+
+The Repeater creates a widget subtree for every item in the data source. For small, bounded collections (toolbar buttons, tab headers, form fields, chapter lists — typically under 100 items), this is appropriate. The Repeater does not imply scrolling — it produces siblings inside a container, and the container handles overflow.
+
+The `ListView` creates widget subtrees only for visible items plus a small buffer. For large or unbounded collections (log viewers, file browsers, search results — hundreds to millions of items), the `ListView` is required. The `ListView` always implies scrolling and manages item lifecycle based on scroll position.
+
+The boundary is the same as in QML: use a Repeater when the item count is small enough that all subtrees can exist in the arena simultaneously, and a ListView when the item count makes that impractical.
+
+### 6.6 Static vs. Dynamic: When to Use Which
+
+The builder methods (`child()`, `children()`, `child_opt()`, loops, conditionals) are evaluated once during `build()`. The result is baked into the widget tree. When the underlying data changes, the composite must be fully rebuilt to reflect the change.
+
+Dynamic behavior uses different mechanisms. `visible_when(Signal<bool>)` toggles a widget between active and dormant without tree modification — correct for showing/hiding UI sections during interaction. `enabled_when(Signal<bool>)` toggles interactivity without visibility change. The `Repeater` manages a dynamic set of siblings driven by `ListModel<T>` change notifications — correct for collections that grow, shrink, or reorder during interaction. The `ListView` virtualizes large collections with scroll-position-dependent instantiation.
+
+The boundary is clear: if the content structure is fixed for the lifetime of the composite, use builder methods in `build()`. If individual widgets need to appear or disappear, use `visible_when`. If a collection changes, use a `Repeater` (small) or `ListView` (large).
+
+---
+
+## 7. Reactivity Model
+
+FernUI uses a hybrid reactivity model that draws a clean line between simple property binding and structural mutation.
+
+### 7.1 Property Bindings (Declarative)
+
+`State<T>` is a lightweight reactive handle stored in a state arena (separate from the widget arena). Property bindings connect a state value to a widget property:
+
+```rust
+Button::new(tr!("btn-save"))
+    .visible_when(has_unsaved_changes)      // Signal<bool> → visibility
+    .enabled_when(document_is_valid)         // Signal<bool> → enabled
+
+TextWidget::new()
+    .bind_text(status_message)              // Signal<String> → text content
+```
+
+`State<T>::map()` creates derived, read-only state for computed properties:
+
+```rust
+let show_clear = text.map(|t| !t.is_empty());
+Button::icon_only(Icon::Clear).visible_when(show_clear)
+```
+
+When the underlying state changes, the framework updates the bound property and marks the widget for repaint. No general-purpose observer callbacks, no closure-based side effects — the binding is a direct property-to-state link managed by the framework.
+
+### 7.1.1 State-to-Property Propagation
+
+Property bindings are the mechanism that connects a state change on a composite widget to a visual change on its child primitive widgets. This is not automatic — the composite widget author must explicitly create the binding during `build()` using methods like `bind_background()`, `bind_color()`, and `bind_border_color()` on primitive widgets, passing a `State<T>` or `DerivedState<T>` handle.
+
+When a composite's event handler calls `interaction_state.set(Hovered)`, the framework detects that the state value has changed, finds all widgets with properties bound to that state (or to derived states computed from it), and marks those widgets for repaint. During the next paint pass, the bound widgets read the current value from the state handle and render accordingly.
+
+This means the composite's `build()` method must wire the bindings explicitly:
+
+```rust
+// In build(): create state and wire bindings to child widgets
+let interaction = ctx.state(InteractionState::Idle);
+
+let bg_color = interaction.map(move |s| resolve_bg(style, *s, &colors));
+let rect = RectWidget::new().bind_background(bg_color);  // binding, not static value
+
+// In event(): just set state — the bindings propagate automatically
+self.interaction.set(InteractionState::Hovered);
+// → framework detects change → marks rect for repaint → rect reads new bg_color
+```
+
+Static property methods (`.background(color)`) set a fixed value that never changes. Binding methods (`.bind_background(state)`) create a reactive link that updates when the state changes. Both are available on primitive widgets; the composite author chooses which to use based on whether the property needs to react to state changes.
+
+### 7.1.2 Build-Time Capture and Environment Changes
+
+Derived state closures created via `State::map()` capture their computation context at build time. This means they capture a snapshot of any external values they reference — including Theme tokens. State changes within the captured context (e.g., interaction state changing from Idle to Hovered) propagate automatically through the binding system. Environment changes outside the captured context (theme switching, locale switching) produce stale results because the closure still references the old values.
+
+The framework resolves this by triggering a composite rebuild when the environment changes. When `set_theme()` is called, the framework marks all composites as needing reconstruction, re-runs `build()` with the new environment, and creates fresh derived state closures that capture the updated theme. This is not view diffing — it is a full reconstruction triggered by a rare, application-level event. The cost is acceptable because environment changes (theme switches, locale switches) happen at most a few times per session, never on the keystroke path.
+
+This is a deliberate design tradeoff: property bindings within a composite are fast (no reconstruction, no diffing, just state propagation), while environment changes are handled by the heavier mechanism of composite rebuild. The common case (user interaction) is optimized; the rare case (theme switch) is correct but not optimized.
+
+### 7.2 Structural Mutations (Imperative)
+
+Structural changes to the widget tree — activating/dormanting subtrees for tab switching, adding/removing children dynamically — are performed explicitly in the composite widget's event handler.
+
+```rust
+fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
+    if let Some(new_index) = self.extract_tab_switch(event) {
+        ctx.set_dormant(self.content_ids[self.active]);
+        ctx.activate(self.content_ids[new_index]);
+        self.active = new_index;
+        EventResponse::Handled
+    } else {
+        EventResponse::Ignored
+    }
+}
+```
+
+This hybrid avoids the complexity of full view diffing (Xilem/React) while providing the convenience of declarative bindings for common cases. The boundary is clear: property bindings for simple reactivity, event handlers for structural changes.
+
+---
+
+## 8. Conditional Rendering and Dormancy
+
+The widget arena supports three activation states for widget subtrees.
+
+**Active** — fully operational. Participates in layout, receives events, paints, has AccessKit nodes, holds rendering resources.
+
+**Dormant** — state preserved, rendering resources released. Does not participate in layout, receives no events, has no AccessKit nodes. The widget data and state values remain in the arenas. Reactivation triggers relayout and repaint, but no reconstruction.
+
+**Destroyed** — removed from the arena entirely. State is gone. Must be rebuilt from scratch.
+
+Three construction strategies control the memory/responsiveness tradeoff for multi-pane widgets:
+
+**Eager** — all subtrees built at construction time, inactive ones set to Dormant. Switching is instant. Suitable for tab widgets with a small number of tabs.
+
+**Lazy** — subtrees built on first activation, then preserved as Dormant. Suitable when building a subtree is expensive and the user may never visit all tabs.
+
+**Transient** — subtrees built on activation, destroyed on deactivation. Lowest memory, highest switch cost. Suitable for browser-like scenarios where each tab is independent.
+
+Atlas entries for dormant widgets are evicted via LRU. When a dormant widget reactivates, glyphs and shapes re-rasterize on demand. Rendering resource consumption is proportional to visible content, not total content.
+
+---
+
+## 9. Event System
+
+### 9.1 Input Event Routing
+
+Platform input from winit is translated into high-level `WidgetEvent` variants and routed through the widget tree using a two-pass system.
+
+**Preview pass (tunneling):** root → target. Allows parents to intercept events before children see them. Used for application-level keyboard shortcuts that must override widget behavior.
+
+**Bubble pass:** target → root. The standard dispatch path. The widget returns `EventResponse::Handled` to stop propagation or `EventResponse::Ignored` to let the event bubble upward.
+
+Pointer events are routed via hit testing against the layout tree. Keyboard events are routed to the focused widget. AccessKit actions (from screen readers) are routed to the target widget as `WidgetEvent::AccessAction`, flowing through the same event system as pointer and keyboard input.
+
+### 9.2 Typed Application Commands
+
+Widgets communicate with the application layer through typed command enums. The command type is defined by the application, not by FernUI. FernUI imposes only a trait bound:
+
+```rust
+pub trait AppCommand: 'static + Send + Clone + std::fmt::Debug {}
+```
+
+Commands are emitted through closures that capture the concrete type and erase it at the widget level (Approach B — non-generic Widget trait). The application root receives commands via a handler with exhaustive `match`, providing compile-time verification that all command variants are handled:
+
+```rust
+let app = FernApp::new()
+    .on_command(|cmd: AppCmd, ctx| match cmd {
+        AppCmd::DocumentSave => { /* call controller */ }
+        AppCmd::FormatBold => { /* call controller */ }
+        // compiler error if a variant is missing
+    });
+```
+
+#### 9.2.1 Two Documented Approaches to Widget Actions
+
+There are two well-established ways to wire user actions to application logic in retained-mode GUI frameworks. Both are common, both have strong proponents, and both have decades of production use behind them.
+
+**Closure-based actions.** The widget accepts a closure (callback function) that runs when the user activates the widget. This is what SwiftUI does (`Button(action: { ... })`), what Jetpack Compose does (`Button(onClick = { ... })`), what Flutter does (`onPressed: () { ... }`), what GTK does (signal handlers), what Qt does (signal/slot connections), and what every web framework does (`onClick`). This is the more common approach by user count, and it is the default in most mainstream retained-mode frameworks.
+
+**Typed message/command actions.** The widget emits a typed value of an application-defined enum, and a single root handler matches on the enum to dispatch behavior. This is what Elm does (`Msg`), what Iced in Rust does (`Message`), what The Composable Architecture for SwiftUI does (`Action`), what Redux on top of React does (action objects), and what Bubble Tea in Go does (`tea.Msg`). This is the minority approach by user count, but it is the dominant approach in frameworks that prioritize testability, undo systems, and large-application correctness.
+
+**FernUI uses typed commands.** This is a deliberate bet, not a claim that closures are wrong. The bet is that FernUI's target — a Qt replacement for commercial desktop applications, which by definition are long-lived and grow large — benefits more from the typed-command discipline than it suffers from the friction. Applications with hundreds of operations, complex undoable state, accessibility automation requirements, and multi-year lifespans benefit from having every operation enumerated in one place. Applications with a dozen buttons and a six-month lifespan would find the discipline excessive.
+
+#### 9.2.2 What FernUI Gains from Typed Commands
+
+**Central command routing.** The application has one place that lists every operation it can perform — the exhaustive `match` in `on_command`. Adding a cross-cutting concern (logging every action, recording for replay, implementing undo, gating actions behind permission checks) requires changing one function, not editing every widget construction site. Reading the handler tells you what the application does.
+
+**Undo and replay.** A typed command is a value: serializable, inspectable, recordable. Recording a sequence of commands gives you an undo log, a replay file for crash reproduction, a macro recorder, or a script export. These are not theoretical features for a writing application or a creative tool — they are core requirements. A closure cannot be recorded, replayed, serialized, or inspected.
+
+**Testing.** Tests can simulate user interactions and assert that specific commands were emitted: `assert_eq!(captured_commands, vec![AppCmd::Save, AppCmd::Close])`. This decouples tests from implementation details. The test does not need to know which widget triggered the command, what intermediate state was touched, or how the closure was wired up. It only needs to know what the user did and what command should result.
+
+**External automation.** Scripting interfaces, accessibility automation, remote control protocols, and command palettes all need a vocabulary of operations they can invoke programmatically. Typed commands are that vocabulary. A "command palette" feature (the Ctrl+Shift+P pattern from VS Code) requires only iterating over the command enum's variants. Closures cannot be invoked from outside the program that constructed them.
+
+**Compile-time exhaustiveness.** Adding a command variant produces compile errors at every handler that does not handle it. This is the same correctness guarantee that Rust's `match` provides for any sum type, applied to the application's operation set.
+
+#### 9.2.3 What Typed Commands Cost
+
+Closures are not free of these benefits — they trade them for a different set of advantages. The honest accounting:
+
+**Friction during prototyping.** With a closure, you write the click behavior inline next to the button and iterate. With a typed command, you must define the variant in the enum, add a handler arm, and only then write the behavior. The first hour of trying out a UI idea is slower. Mature applications do not feel this cost (the command set stabilizes), but exploratory work does.
+
+**Difficulty for third-party widget libraries.** A library widget cannot anticipate the host application's command type. Iced solves this by making every widget generic over the message type, which works but spreads generic parameters through every type signature. FernUI's choice of non-generic widgets (Approach B from Section 5) makes this harder — there is no message-type parameter to thread through. A library widget that needs to emit application-specific actions has three options: take a closure (escape hatch, see 9.2.6), take an `Any`-typed payload that the host downcasts, or define its own internal event type and ask the host to translate. None of these are as clean as Iced's approach.
+
+**Highly dynamic UIs.** A plugin system where plugins contribute their own buttons with their own actions cannot have those actions in a central enum at compile time, because the enum cannot list every plugin's variants. A scripting console where the user types arbitrary code that runs on click cannot have a typed command for "run this string." See 9.2.6 for how FernUI handles these cases.
+
+**Cognitive overhead for new contributors.** A developer coming from SwiftUI or Compose expects to write `Button(onClick: { doSomething() })`. The typed-command pattern requires understanding why that is not how this framework works, what to do instead, and where to put the actual logic. The architecture documentation has to teach this pattern, and code review has to enforce it. There is a learning cost.
+
+For an application with the scope of a professional writing tool, an IDE, a digital audio workstation, or an accounting suite, these costs are absorbed quickly and the benefits compound over years. For a small utility or a one-off tool, the costs may exceed the benefits. The framework targets the former.
+
+#### 9.2.4 Local View State Belongs to Signals, Not Commands
+
+The typed-command pattern applies to *application-level* state changes — operations that affect persistent data, mutate the domain model, or coordinate cross-widget behavior. It does not apply to local view state.
+
+A disclosure widget that toggles its open/closed visual state does not emit a command. It owns a `Signal<bool>` and the click handler calls `signal.set(!signal.get())` directly. A character counter that updates as the user types does not emit a command. It binds to the text input's signal and recomputes its display via `signal.map()`. A tooltip delay timer does not emit a command. It manages its own state internally.
+
+The distinction is the same one React draws between `useState` (local component state) and `dispatch` (Redux action that affects the global store). Local view state is owned by Signals on the widget, mutated directly, and never crosses the application command boundary. Application state changes go through commands.
+
+When in doubt, ask: would the application care if this widget were removed and replaced with a different one that has different visual structure but the same purpose? If yes, the relevant interaction emits a command (the application cares about "save was requested," not about whether a button or a menu item triggered it). If no, the interaction is local view state (a disclosure triangle is part of the widget, not part of the application).
+
+This distinction is not always sharp. A checkbox could be local view state (a "show advanced options" toggle) or an application command (a setting that gets persisted). The framework cannot decide for the developer. The rule of thumb is: if mutating a Signal is sufficient and no other part of the application needs to know, it is local. If anything outside the immediate widget needs to react, it is a command.
+
+#### 9.2.5 Parameterizing Commands to Avoid Variant Explosion
+
+A common concern is that typed commands lead to a proliferation of variants — separate `AddTag`, `AddListItem`, `AddTreeNode` commands for what is conceptually one "add" operation. The solution is to parameterize commands with data, not to multiply variants:
+
+```rust
+// Multiplies as collections grow:
+enum AppCmd {
+    AddTag(TagPayload),
+    RemoveTag(TagId),
+    AddListItem(ItemPayload),
+    RemoveListItem(usize),
+    AddTreeNode(NodePayload),
+    RemoveTreeNode(NodeId),
+    // ... 40 more variants for 20 collections
+}
+
+// One pair per operation, parameterized by collection identity:
+enum AppCmd {
+    AddItem { collection: CollectionId, item: ItemPayload },
+    RemoveItem { collection: CollectionId, key: ItemKey },
+    // ... rest of the application's operations
+}
+```
+
+The handler matches on the operation, then dispatches by `collection` to the appropriate controller. This keeps the central command-routing pattern while collapsing pairs of variants into single ones. The collection identity is data, not a separate command type. Dynamic command construction in loops is natural:
+
+```rust
+for tag in tags.iter() {
+    Button::new(&tag.name).on_activate(AppCmd::AddItem {
+        collection: CollectionId::Tags,
+        item: ItemPayload::Tag(tag.id),
+    })
+}
+```
+
+This pattern scales to applications with hundreds of operations across dozens of collections without the variant count growing past the number of distinct operations.
+
+#### 9.2.6 Escape Hatch: `on_activate_fn`
+
+Some applications cannot enumerate their command set at compile time. A plugin system where plugins contribute buttons with their own actions cannot list every plugin's actions in the host's command enum. A scripting console where users type arbitrary code that runs on click has no compile-time vocabulary for "this specific code." A third-party widget library cannot anticipate the host application's command type.
+
+For these cases, every action-firing widget provides `on_activate_fn` alongside `on_activate`:
+
+```rust
+impl Button {
+    /// Standard typed command. Recordable, replayable, testable, scriptable.
+    /// The application's command handler dispatches based on the variant.
+    pub fn on_activate<C: AppCommand>(self, command: C) -> Self;
+
+    /// Escape hatch: arbitrary closure invoked on activation. Use only when
+    /// the action cannot be expressed as a typed command — plugin systems,
+    /// scripting consoles, third-party library widgets that cannot know the
+    /// host's command type. Loses recordability, command palette integration,
+    /// undo recording, and assertion-based testing. Document the reason in
+    /// a comment at the call site.
+    pub fn on_activate_fn(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
+}
+```
+
+The same pair exists on `Link`, `BreadcrumbItem`, and `MenuItem`. Internally both methods store a `Box<dyn FnMut(&mut EventContext)>` — the typed-command path produces a closure that emits the command, the escape-hatch path stores the closure directly. The dispatch code is identical; only the construction differs.
+
+```rust
+// Standard usage — typed command:
+Button::new("Save").on_activate(AppCmd::Save)
+
+// Plugin button — closure escape hatch:
+Button::new(&plugin.label)
+    .on_activate_fn({
+        // Plugin actions are loaded at runtime and cannot appear in AppCmd.
+        // The plugin runtime handles its own logging and undo.
+        let plugin = plugin.clone();
+        move |ctx| plugin.invoke(ctx)
+    })
+
+// Scripting console — closure escape hatch:
+Button::new("Run")
+    .on_activate_fn({
+        // The script content is user-typed at runtime.
+        let script = script_text.clone();
+        move |ctx| {
+            let result = scripting_engine.run(&script.get());
+            ctx.emit(AppCmd::ScriptCompleted { result });
+        }
+    })
+```
+
+**Why a method instead of a separate widget type.** A `DynamicButton` would duplicate every line of `Button`'s 650-line implementation — styles, accessibility, focus handling, hover states, keyboard activation, theme integration — for a difference that lives entirely in the action wiring. The user-visible button is identical; only the internal closure storage differs. Encoding that difference in the widget type is a leak: an internal implementation detail surfacing in the public type system without any user-visible distinction. Doubling the widget catalog (`DynamicButton`, `DynamicLink`, `DynamicBreadcrumbItem`, `DynamicMenuItem`) adds maintenance burden for no benefit.
+
+The method name `on_activate_fn` is the signal that the call site has opted out of the typed-command discipline. Code review can flag inappropriate uses by grepping for the method name. The `_fn` suffix is a recognized Rust convention for closure-accepting variants of typed-value methods.
+
+**The discipline is preserved by convention, not by the type system.** A function returning `Vec<Button>` cannot guarantee that no button uses `on_activate_fn`. This is a tradeoff: enforcement happens at code review and through team conventions, not at compile time. For modules that genuinely need type-level enforcement of "no closures here" (some kind of pure-command boundary), the team can wrap `Button` in a newtype that exposes only `on_activate`. This is rare in practice.
+
+**What you lose with `on_activate_fn`.** The same things that the typed-command path gives you in 9.2.2:
+- The action is not a value, so it cannot be recorded for undo, replayed, or serialized.
+- The action is not in the central command enum, so a command palette cannot find it and an automation tool cannot invoke it.
+- Tests cannot assert on emitted commands. They must observe side effects, which is more brittle.
+- Application-wide cross-cutting concerns (logging, telemetry, permission gating) do not see the closure unless the closure explicitly calls into them.
+
+These losses are real. An application that uses `on_activate_fn` for one plugin button still gets all the benefits for the other 200 typed-command buttons. An application that uses `on_activate_fn` for everything has paid the closure cost, by choice, and should use a closure-based framework instead — FernUI is not the right tool for that case.
+
+**Repeated calls.** If both methods are called on the same widget, the last call wins. This is consistent with the rest of the builder API (calling `.label("A").label("B")` produces a button labeled "B"). The action is a single field on the widget; the last setter overwrites the previous.
+
+#### 9.2.7 Method Naming: `on_activate`, not `on_click`
+
+Activation can come from many sources: a pointer click, a keyboard Enter or Space, an accessibility action from a screen reader, a synthetic activation from a parent widget, a hover-then-tap on a touch device. The widget's action fires identically in all cases — there is no way for the handler to distinguish them, and there should not be, because that would let widgets behave differently for keyboard users and screen reader users than for mouse users.
+
+The verb `click` is misleading because it suggests a pointer-specific event. The correct verb is `activate` — the widget is being activated, regardless of how. FernUI uses `on_activate` consistently across `Button`, `Link`, `BreadcrumbItem`, and `MenuItem`. There is no `on_click` method.
+
+### 9.3 Focus Management
+
+The tree maintains a `focused_widget: Option<WidgetId>`. Tab/Shift-Tab cycles focus through focusable widgets in tree order (document order). Widgets declare focusability and optional tab index. `FocusPolicy::Scope` allows a composite to act as a single focus unit (the clearable text input pattern — internal buttons respond to clicks but don't participate in tab navigation).
+
+When dormant subtrees reactivate, focus is restored to the previously focused widget within that subtree.
+
+### 9.4 Deferred Operations via EventContext
+
+Event handlers run while the widget tree is mid-dispatch. Mutating the tree, changing focus, or showing an overlay synchronously during a handler would invalidate iterators, borrow guards, or the dispatch state. Instead, handlers enqueue operations on `EventContext` that are applied after dispatch completes, before the next frame.
+
+The deferred operations supported by `EventContext` are: `emit(command)` for typed application commands; `activate(id)` / `deactivate(id)` / `destroy(id)` for dormancy changes; `request_focus(id)` for programmatic focus transfer (used when opening menus, dialogs, or overlay content that should receive keyboard input); `show_overlay(request)` for displaying an overlay; `dismiss_all_overlays()` for closing the entire overlay stack (used when navigating between menu bar entries); `cancel_delayed_overlay(content_id)` for aborting a pending delayed overlay (used when a submenu hover ends before the open delay elapses); `synthetic_click(id)` for triggering a click from keyboard Enter activation; `capture_pointer()` / `release_pointer()` for drag operations; `set_theme(theme)` and `set_locale(locale)` for runtime configuration changes that trigger composite rebuild.
+
+These operations compose: a menu bar Left-arrow handler can dismiss the current overlay, request focus on the trigger, and show the next overlay in a single handler call, with all three operations applied atomically after the handler returns.
+
+---
+
+## 10. Gesture Recognition
+
+FernUI uses a UIKit-style gesture recognizer model. Gesture recognizers are composable state machines attached to widgets. Each recognizer monitors the raw event stream and emits recognized gestures when patterns complete.
+
+```rust
+pub trait GestureRecognizer {
+    fn process(&mut self, event: &RawPointerEvent) -> GestureResult;
+    fn reset(&mut self);
+    fn priority(&self) -> u32;
+}
+```
+
+Built-in recognizers include tap, double-tap, long-press, drag, pinch, and swipe. When multiple recognizers could match the same input (tap vs. drag vs. long-press), they run in parallel with priority-based arbitration. When one commits, the others reset.
+
+On desktop, most trackpad gestures arrive as already-recognized events from the OS (winit's `TouchpadMagnify`, `TouchpadRotate`). The recognizer pipeline becomes essential for touch targets.
+
+Gesture recognizers are pure state machines with no platform dependencies, making them trivially unit-testable.
+
+---
+
+## 11. Keyboard Shortcuts
+
+### 11.1 The ShortcutMap
+
+Shortcuts are stored in a `ShortcutMap<C: AppCommand>` — a bidirectional map between `Shortcut` (key + modifiers) and application commands. The map is consulted during the preview (tunneling) pass, before any widget sees the key event.
+
+Shortcuts are data, not code. They are modifiable at runtime (user preferences) and persistable (the application chooses the storage format). When the user remaps a shortcut, the change takes effect immediately — no restart, no widget tree rebuild.
+
+### 11.2 Translatable Display
+
+Shortcut display strings are locale-aware and platform-aware. A `ShortcutFormatter` in fern-i18n handles the conversion: "Ctrl+S" on Windows/Linux becomes "⌘S" on macOS and "Strg+S" in German. Modifier translations ship with fern-i18n as built-in Fluent entries.
+
+### 11.3 Automatic Menu Integration
+
+`MenuItem` widgets automatically look up their command's shortcut binding in the `ShortcutMap` and display the formatted shortcut string. The developer never writes the shortcut label manually. If the user remaps the shortcut, the menu label updates automatically on the next render pass.
+
+Shortcuts bind to logical keys (the character the key produces), not physical key positions (scancodes). This ensures that "Ctrl+Z" works on AZERTY keyboards where the Z key is in a different physical position.
+
+---
+
+## 12. Internationalization
+
+### 12.1 Architecture
+
+Translation is a UI concern, structurally parallel to the palette — both are environment data that flows down the widget tree. The domain layer (Qleany use cases) does not handle translation. If localized data is needed in a use case, it arrives through the input DTO.
+
+FernUI provides translation through the fern-i18n crate, which wraps Mozilla's Fluent via fluent-rs. The `tr!` macro resolves translation keys against the active locale bundle:
+
+```rust
+Button::new(tr!("btn-save"))
+let status = tr!("word-count", count = word_count);
+```
+
+### 12.2 Source Format
+
+Translation sources use Fluent's `.ftl` format, which handles plurals, gender, and complex grammar naturally:
+
+```ftl
+btn-save = Save document
+word-count = { $count ->
+    [one] {$count} word
+   *[other] {$count} words
+}
+```
+
+### 12.3 Layout Direction
+
+RTL/LTR layout direction lives in fern-core (not fern-i18n, as it is not optional). A `LayoutDirection` environment value propagates down the tree. Layout containers like `HStack` automatically reverse child order in RTL mode. `Leading`/`Trailing` semantics replace Left/Right for directional properties.
+
+### 12.4 Accessibility Strings
+
+FernUI ships built-in translation files for its own accessibility strings (close button labels, scroll descriptions, etc.) via fern-i18n. The application can override these with custom translations.
+
+---
+
+## 13. Overlay System
+
+Tooltips, dropdown menus, context menus, and popovers render outside the normal layout hierarchy. They do not participate in their parent's layout negotiation — they float above the main content, positioned relative to an anchor widget or the pointer. They are managed by an `OverlayManager` in fern-core, which coordinates creation, positioning, stacking, dismissal, event routing, and accessibility.
+
+### 13.1 Core Data Structures
+
+An overlay is requested through an `OverlayRequest` that specifies what to show, where to show it, how to dismiss it, and whether to use an in-tree layer or a native popup window.
+
+The `OverlayPlacement` enum determines positioning relative to the anchor: `Below` (dropdown: below the anchor, leading-edge-aligned), `Above` (fallback when no space below), `BelowPreferred` (like `Below`, but automatically flips to `Above` when there is insufficient space below the anchor — used by ComboBox and MenuBar dropdowns), `TrailingEdge` (submenu: to the trailing side of the parent menu item), `AtPointer` (context menu: at the click position), and `NearAnchor` (tooltip: near the anchor with a preferred alignment and offset). The framework performs smart positioning — if the primary placement would position the overlay outside the visible window bounds, it falls back to the opposite direction (Below → Above, TrailingEdge → LeadingEdge) automatically.
+
+The `DismissBehavior` enum controls when the overlay is dismissed: `ClickOutside` (dismiss when the user clicks anywhere outside the overlay — standard for menus and dropdowns), `PointerLeave` with a configurable delay (dismiss when the pointer leaves both the anchor and the overlay — standard for tooltips), `Manual` (dismiss only via explicit API call — for modeless popovers), and `Any` (a combination of multiple behaviors).
+
+The `OverlayLayer` enum determines the rendering mechanism: `InTree` (rendered within the application window's wgpu surface), `NativePopup` (rendered in a separate native OS window), or `Auto` (the framework decides based on content size and available space).
+
+### 13.2 Two Rendering Mechanisms
+
+**In-tree overlays** (`OverlayLayer::InTree`) are widget subtrees in the same arena as the main content, tagged as overlay members. The rendering pass draws the main content first, then overlays in stack order. Hit testing checks overlays first (topmost wins). Suitable for tooltips, small popups, and any overlay that fits within the application window.
+
+**Native popup overlays** (`OverlayLayer::NativePopup`) create separate winit windows with their own wgpu surfaces. Each popup window has its own widget subtree but shares the same state arena, palette, locale, and shortcut map as the main window. Necessary for menus that must extend beyond the application window boundary — a dropdown menu near the bottom of the screen should not be clipped to the window edge.
+
+Both mechanisms share the same `OverlayManager` and the same logical parent chain. The rendering mechanism is invisible to the widget author and to the event routing system.
+
+### 13.3 Overlay Stack and Cascading
+
+The `OverlayManager` maintains a stack of active overlays. Each active overlay records its ID, anchor widget, parent overlay (for submenu cascading), dismissal behavior, rendering layer, and root widget ID of the overlay's content subtree.
+
+Overlays can be nested — a context menu item that triggers a submenu opens a secondary overlay anchored to the submenu item, with a parent reference to the first overlay. Dismissing an overlay at level N also dismisses all overlays at level N+1, N+2, and so on. Pressing Escape closes the topmost overlay. Clicking outside all overlays closes the entire stack.
+
+### 13.4 Command Routing Through Logical Parents
+
+When a `MenuItem` inside a native popup overlay emits a command, that command must bubble through the *anchor widget's* tree path in the main window, not through the popup window's own tree. The menu is logically parented to the widget that triggered it, even though it is rendered in a separate window. The overlay manager maintains this logical parentage so that command routing works correctly: the command bubbles from the menu item to the overlay's anchor widget, then continues up through the main tree to the application root where the Qleany controller handles it.
+
+This design ensures that a context menu on an editor widget emits commands that reach the editor's command handling context, not a detached popup context.
+
+### 13.5 Tooltips
+
+A tooltip is the simplest overlay — a non-interactive text label (or rich content widget) that appears after a hover delay and disappears when the pointer moves away.
+
+Tooltips are attached to any widget via a builder method (`.tooltip(text)` for simple text, `.rich_tooltip(|| content)` for arbitrary widget content). Under the hood, the builder wraps the widget in a `TooltipHost` that monitors `PointerEnter` and `PointerLeave` events and manages a timer. After a configurable delay (defaulting to approximately 500ms, sourced from the theme's `MotionTokens` or a platform-appropriate value), the `TooltipHost` requests an overlay with `OverlayLayer::InTree`, `OverlayPlacement::NearAnchor`, and `DismissBehavior::PointerLeave`.
+
+The tooltip's visual appearance (background color, text color, corner radius, padding, font size) is resolved from the theme's tooltip tokens (`tooltip_surface`, `tooltip_text`). The tooltip does not receive focus and does not participate in tab navigation.
+
+For accessibility, the `TooltipHost` sets AccessKit's `DescribedBy` property on the anchor widget, pointing to the tooltip's AccessKit node when the tooltip is visible. Screen readers announce the tooltip content when the user focuses the anchor widget.
+
+### 13.6 Context Menus
+
+A context menu appears at the pointer position on right-click (or long-press on touch devices). It is a vertical list of actionable items, potentially with submenus, separators, icons, keyboard shortcut labels, and disabled states.
+
+Context menus are attached to any widget via a builder method (`.context_menu(|ctx| menu_content)`). The closure is called at show-time, not at build-time. This is deliberate — the menu content may depend on the current application state (some items enabled or disabled, some items conditionally present based on selection state). The closure receives a context that allows it to query state.
+
+Context menus render as native popup overlays (`OverlayLayer::NativePopup`) because they must be able to extend beyond the application window boundary. Dismissal uses `DismissBehavior::ClickOutside` — clicking any menu item or clicking outside the menu dismisses it. Activating a menu item emits a command and then dismisses the menu.
+
+**Submenu cascade.** A menu item that has a submenu indicator opens a secondary overlay anchored to the submenu item, with placement `TrailingEdge` (to the right in LTR, to the left in RTL). The submenu opens on hover with a brief delay (approximately 200ms) to avoid accidental activation. The diagonal movement problem — where the user moves the pointer diagonally from the parent item to the submenu, briefly passing over other items — is handled by a triangular hit-test zone between the parent item and the submenu boundary. While the pointer is within this triangle, other menu items do not activate.
+
+**Keyboard navigation within menus.** When a menu is open, Arrow Up and Arrow Down move the highlight between items (skipping separators and disabled items). Arrow Right opens a submenu on the highlighted item. Arrow Left closes the current submenu and returns to the parent menu. Enter activates the highlighted item. Escape closes the topmost menu. Home and End jump to the first and last items. Type-ahead (typing a character) jumps to the next item whose label starts with that character.
+
+**Accessibility.** The menu's AccessKit structure uses `Role::Menu` for the container and `Role::MenuItem` for each item. Submenu triggers declare `HasPopup::Menu`. The anchor widget declares `HasPopup::Menu` when a context menu is attached. Disabled items are marked with the disabled state. Keyboard shortcut labels are included via the `KeyboardShortcut` property, resolved from the `ShortcutMap`.
+
+### 13.7 Dropdown (Combobox / Select)
+
+A dropdown is structurally similar to a context menu but differs in two important ways: it is anchored to a specific trigger widget (a button with a chevron) rather than appearing at the pointer position, and it has two-way state binding — the selected item drives both the trigger's display text and which item is highlighted in the open list.
+
+The dropdown trigger is built with the unified `Widget` trait, composed of an HStack containing a label (showing the current selection or a placeholder) and a chevron icon. Clicking the trigger opens an overlay with `OverlayPlacement::BelowPreferred`, which automatically flips to `Above` when there is insufficient space below. The overlay contains a list of items (a scrollable ListView once Milestone 6 ships — currently a VStack). Selecting an item updates the bound `Signal<Option<usize>>`, dismisses the overlay, and returns focus to the trigger.
+
+The selected value is bound via a `Signal<Option<T>>` handle provided by the application. When the state changes (either through the dropdown or through external application logic), the trigger's display text updates via the binding system.
+
+**Accessibility.** The trigger widget declares `Role::ComboBox` with `HasPopup::ListBox` and `Expanded` state (true when the overlay is open). The overlay list uses `Role::ListBox` with `Role::Option` for each item. The selected item is marked with `Selected`. Arrow Up and Arrow Down navigate the list while the dropdown is open. Typing characters performs type-ahead filtering.
+
+### 13.8 Menu Bar
+
+Context menus and dropdowns cover popup-style overlays. The application-level menu bar (File, Edit, View, Help) is a related but distinct concern. On macOS, the menu bar is a native `NSMenu` managed by the OS and rendered outside the application window entirely. On Windows and Linux, the menu bar is a widget rendered inside the application window, typically at the top.
+
+FernUI must abstract this platform difference. The menu bar is defined through the `FernApp` builder using a declarative `MenuBar` description. On macOS, `fern-platform` translates this description into native `NSMenu` items. On Windows and Linux, `fern-widgets` renders it as a horizontal bar of menu triggers, each opening a dropdown overlay. Both paths emit the same typed commands to the application's command handler.
+
+This is listed as an open question for post-first-milestone design (Section 28) because the native menu bar integration requires platform-specific code in `fern-platform` that goes beyond what winit currently provides.
+
+### 13.9 Overlay Manager Internals
+
+The `OverlayManager` is a component within `fern-core`, separate from the widget arena and the state arena. It maintains the overlay stack, coordinates between in-tree and native popup layers, tracks logical parent relationships for command routing, and handles the smart positioning fallback logic.
+
+For in-tree overlays, the overlay's widget subtree is part of the main arena but tagged as an overlay member. The rendering pass draws the main content first, then overlays in stack order. Hit testing checks the overlay layer before the main content layer — the topmost overlay receives pointer events first.
+
+For native popup overlays, each popup has its own winit window, its own wgpu surface, and its own widget subtree. The overlay manager coordinates between the main window and popup windows for dismissal detection (clicking on the main window while a popup menu is open dismisses the menu).
+
+### 13.10 Testability
+
+Overlays are testable headlessly because the `OverlayManager` is a data structure in `fern-core` with no platform dependencies. In headless tests, `NativePopup` overlays are downgraded to `InTree` overlays — same behavior, same event routing, just no actual second window. The simulated clock (`tree.advance_time()`) enables deterministic testing of time-dependent overlay behavior (tooltip hover delay, submenu open delay, double-click interval) without `thread::sleep` or flaky timing in CI.
+
+---
+
+## 14. Drag and Drop
+
+### 14.1 Three Scenarios
+
+**Intra-widget rearrangement** — reordering items within a single list or tree. No serialization needed. The drag source and target are the same widget.
+
+**Inter-widget transfer** — dragging content between widgets within the same application. Source and target agree on a typed payload. Serialization is optional.
+
+**Cross-application transfer** — dragging to/from other applications via OS-native protocols. Data must be serialized into MIME types. Requires platform integration through a `PlatformDragBackend` trait.
+
+### 14.2 Typed Payload Model
+
+A `DragPayload` carries multiple MIME-typed representations of the same content. For intra-application use, FernUI provides a typed wrapper via the `DragData` trait, avoiding raw byte manipulation. Drop targets declare which types they accept without deserializing the payload — only MIME type lists are checked during hover. Deserialization occurs on drop.
+
+### 14.3 Source and Target Traits
+
+`DragSource` produces the payload and visual preview when a drag begins. `DropTarget` evaluates acceptance and handles the drop. Visual feedback (insertion lines, highlight rectangles) is rendered by the drop target during its paint pass, using `DropFeedback` descriptors.
+
+### 14.4 Accessibility Contract
+
+Every drag-and-drop operation must have a keyboard-accessible equivalent that emits the same command. A `ReorderableList` supports both drag gesture and Alt+Arrow keyboard shortcuts, both calling the same `move_item` method and emitting the same `AppCmd::ReorderItem` command. The semantic operation is decoupled from the input gesture.
+
+---
+
+## 15. Data Model
+
+### 15.1 Why Data Models Exist
+
+Virtualization (a list with 10,000 items cannot instantiate 10,000 widget subtrees), shared data across multiple views, and change notification for incremental updates all require a data model abstraction between the domain layer and the view widgets. FernUI provides two concrete reactive collection types (`ListModel<T>`, `TreeModel<T>`) for the common case, and one trait (`ListDataSource`) for large or external datasets.
+
+### 15.2 ListModel<T>
+
+`ListModel<T>` is a concrete framework type that stores items in an internal `Vec<T>` behind `Rc<RefCell<>>`. It is the primary data model for flat collections. Cloning a `ListModel` gives a second handle to the same data — multiple widgets can hold clones and all see the same items.
+
+```rust
+pub struct ListModel<T> { /* Rc<RefCell<ListModelInner<T>>> */ }
+
+impl<T: 'static> ListModel<T> {
+    pub fn new() -> Self;
+    pub fn from_vec(items: Vec<T>) -> Self;
+
+    // Queries
+    pub fn count(&self) -> usize;
+    pub fn with_item<R>(&self, index: usize, f: impl FnOnce(&T) -> R) -> R;
+
+    // Mutations — each emits the corresponding DataChange automatically
+    pub fn push(&self, item: T);
+    pub fn insert(&self, index: usize, item: T);
+    pub fn remove(&self, index: usize);
+    pub fn set(&self, index: usize, item: T);
+    pub fn move_item(&self, from: usize, to: usize);
+    pub fn replace_all(&self, items: Vec<T>);
+    pub fn clear(&self);
+
+    // Observation
+    pub fn observe_changes(&self, callback: impl Fn(&DataChange) + 'static) -> ObserverHandle;
+}
+
+pub enum DataChange {
+    ItemsInserted { range: Range<usize> },
+    ItemsRemoved { range: Range<usize> },
+    ItemsMoved { from: usize, to: usize, count: usize },
+    ItemUpdated { index: usize },
+    Reset,
+}
+```
+
+Every mutation method is atomic: it modifies the internal Vec, drops the mutable borrow, then notifies observers. By the time any observer runs (including a ListView's internal watcher), the borrow is released and shared borrows (for `count()` and `with_item()`) are safe. This prevents the `RefCell` double-borrow panic.
+
+The `with_item()` callback API avoids returning a reference that would need to outlive the `RefCell` borrow guard. The ListView calls `with_item()` during layout to pass each item to the delegate closure.
+
+`ListModel<T>` is suitable for any collection where the data fits in memory: project lists (tens of items), chapter lists (hundreds), tag lists (dozens), combo box option lists (tens), toolbar button sets (a few). These are the vast majority of lists in a desktop application.
+
+`ListModel<T>` can live anywhere — on an application-wide ViewModel struct for shared data, or as a local field on a widget for ephemeral data (a combo box's option list, a filtered search result). The `Rc`-based ownership means it is deallocated only when all handles are dropped.
+
+### 15.3 ListDataSource Trait
+
+`ListDataSource` is a trait for the rare case where the data is too large to hold in memory or lives in an external system (paged database cursor, filesystem directory listing, memory-mapped log file). It is not related to `ListModel<T>` by inheritance — they are two separate input paths.
+
+```rust
+pub trait ListDataSource: 'static {
+    type Item;
+
+    fn count(&self) -> usize;
+    fn with_item<R>(&self, index: usize, f: &mut dyn FnMut(&Self::Item) -> R) -> R;
+    fn observe_changes(&self, callback: impl Fn(&DataChange) + 'static) -> ObserverHandle;
+}
+```
+
+The `with_item()` callback pattern (rather than returning `&Item`) allows the implementor to hold internal locks, borrow guards, or temporary buffers for the duration of the callback. A paged data source can fetch a page into a cache, call `f(&cached_item)`, and release the page. A filesystem browser can read a directory entry, call `f(&entry)`, and move on.
+
+The implementor is responsible for emitting correct `DataChange` notifications when the data changes. This is the cost of not using `ListModel<T>`, which handles notifications automatically.
+
+`ListModel<T>` does not implement `ListDataSource`. They share the same `DataChange` enum and the same callback-based item access pattern, but they are consumed through separate paths on the view widgets.
+
+### 15.4 ListView and Repeater Consumption
+
+ListView accepts either a `ListModel<T>` or a `dyn ListDataSource` through two constructors:
+
+```rust
+impl ListView {
+    pub fn new<T>(model: ListModel<T>, delegate: impl Fn(&T) -> Box<dyn Widget>) -> Self;
+    pub fn from_source<S: ListDataSource>(source: S, delegate: impl Fn(&S::Item) -> Box<dyn Widget>) -> Self;
+}
+```
+
+Internally, the ListView stores an enum distinguishing the two sources. When the source is a `ListModel`, the ListView borrows the internal Vec directly during layout (holding the `Ref` for the duration of the layout pass). When the source is a `ListDataSource`, the ListView uses `with_item()` callbacks.
+
+The Repeater accepts only `ListModel<T>`. It is designed for small, non-virtualized dynamic collections where all items have widget subtrees simultaneously. The `ListDataSource` escape hatch is not needed because the Repeater instantiates every item — if the dataset were large enough to need paging, a ListView with virtualization would be the correct widget.
+
+### 15.5 TreeModel<T>
+
+`TreeModel<T>` is a concrete framework type that stores a hierarchy of items. It is `Rc<RefCell<>>` internally, cheaply cloneable, shared across multiple views. It stores nodes in a flat arena (SlotMap or similar) with parent-child links, identified by opaque `NodeId` handles.
+
+```rust
+pub struct TreeModel<T> { /* Rc<RefCell<TreeModelInner<T>>> */ }
+pub struct NodeId(/* opaque */);
+
+impl<T: 'static> TreeModel<T> {
+    pub fn new() -> Self;
+
+    // Structural queries
+    pub fn root_count(&self) -> usize;
+    pub fn root(&self, index: usize) -> NodeId;
+    pub fn child_count(&self, parent: NodeId) -> usize;
+    pub fn child(&self, parent: NodeId, index: usize) -> NodeId;
+    pub fn parent(&self, node: NodeId) -> Option<NodeId>;
+    pub fn depth(&self, node: NodeId) -> usize;
+    pub fn with_item<R>(&self, node: NodeId, f: impl FnOnce(&T) -> R) -> R;
+    pub fn find_by(&self, predicate: impl Fn(&T) -> bool) -> Option<NodeId>;
+
+    // Mutations — each emits the corresponding TreeChange automatically
+    pub fn insert_root(&self, index: usize, item: T) -> NodeId;
+    pub fn insert_child(&self, parent: NodeId, index: usize, item: T) -> NodeId;
+    pub fn remove(&self, node: NodeId);       // removes entire subtree
+    pub fn move_node(&self, node: NodeId, new_parent: NodeId, index: usize);
+    pub fn update(&self, node: NodeId, item: T);
+
+    // Observation
+    pub fn observe_changes(&self, callback: impl Fn(&TreeChange) + 'static) -> ObserverHandle;
+
+    // Per-view flattened projection
+    pub fn create_slice(&self) -> TreeSlice<T>;
+}
+
+pub enum TreeChange {
+    Inserted { node: NodeId, parent: Option<NodeId>, index: usize },
+    Removed { node: NodeId, parent: Option<NodeId> },
+    Moved { node: NodeId, old_parent: Option<NodeId>, new_parent: Option<NodeId>, new_index: usize },
+    Updated { node: NodeId },
+    Reset,
+}
+```
+
+The `TreeModel` is the shared source of truth for the hierarchy. It knows nothing about expand/collapse state, which is per-view.
+
+### 15.6 TreeSlice<T> — Per-View Flattened Projection
+
+The expand/collapse state of a tree is view state, not data state. Two TreeViews showing the same data (a sidebar tree and a "Move to..." dialog) will have different nodes expanded. The `TreeSlice<T>` manages this per-view state.
+
+A `TreeSlice` references a shared `TreeModel`, owns its own set of expanded node IDs, and maintains a flat list of currently-visible nodes with depth information. It observes the `TreeModel`'s `TreeChange` notifications and translates them into flat `DataChange` notifications that the TreeView consumes identically to a ListView consuming a ListModel.
+
+```rust
+pub struct TreeSlice<T> {
+    // References the source TreeModel (Rc clone)
+    // Owns: HashSet<NodeId> for expanded nodes
+    // Maintains: Vec<(NodeId, usize /* depth */)> — the current flat visible list
+}
+
+impl<T: 'static> TreeSlice<T> {
+    // Flat visible-node access (what TreeView consumes)
+    pub fn visible_count(&self) -> usize;
+    pub fn visible_item(&self, index: usize, f: impl FnOnce(&T, usize /* depth */));
+    pub fn visible_node_id(&self, index: usize) -> NodeId;
+
+    // Expand/collapse (per-view state)
+    pub fn is_expanded(&self, node: NodeId) -> bool;
+    pub fn expand(&self, node: NodeId);     // emits DataChange::ItemsInserted for newly visible children
+    pub fn collapse(&self, node: NodeId);   // emits DataChange::ItemsRemoved for hidden children
+    pub fn toggle(&self, node: NodeId);
+    pub fn expand_all(&self);
+    pub fn collapse_all(&self);
+    pub fn expanded_nodes(&self) -> Vec<NodeId>;          // for persistence
+    pub fn set_expanded_nodes(&self, nodes: &[NodeId]);   // for restore
+
+    // Flat change observation (same protocol as ListModel)
+    pub fn observe_flat(&self, callback: impl Fn(&DataChange) + 'static) -> ObserverHandle;
+}
+```
+
+When the `TreeModel` mutates (a node is inserted, removed, moved, or updated), every `TreeSlice` observing it receives the `TreeChange` and independently determines the impact on its own flat visible list. If TreeSlice A has the parent expanded, the new child appears in the flat list and `DataChange::ItemsInserted` is emitted. If TreeSlice B has the parent collapsed, the flat list does not change and no `DataChange` is emitted.
+
+The consumer never creates a `TreeSlice` directly. The TreeView calls `tree_model.create_slice()` internally during its `build()`:
+
+```rust
+TreeView::new(chapters_model.clone(), |chapter, depth| {
+    HStack::new()
+        .child(Padding::left(depth as f32 * 20.0))
+        .child(IconWidget::chevron_right(16.0))
+        .child(TextWidget::new(&chapter.title))
+})
+```
+
+If the consumer needs programmatic control over expand state (expand-all from a toolbar button, restoring saved state), the TreeView exposes methods that delegate to its internal TreeSlice.
+
+### 15.7 MVVM Command Flow
+
+The overall architecture follows MVVM with unidirectional command flow. User interaction produces typed commands that reach Qleany controllers. The domain model emits events through the event hub. The data model receives these events, updates its cached data (via `ListModel` and `TreeModel` mutations), and the reactive binding system propagates the changes to the view.
+
+```
+User clicks "Delete" -> View emits AppCmd::DeleteProject(id)
+    -> Controller calls use case -> Domain emits ProjectDeleted
+        -> ViewModel calls projects.remove(index)
+            -> ListModel emits DataChange::ItemsRemoved
+                -> ListView removes visible widget, relayouts
+```
+
+The view never mutates the data model directly in response to user actions — it emits commands. The data model never pushes UI updates directly — it mutates its reactive collections, and the binding system propagates the changes. This is unidirectional data flow.
+
+### 15.8 Qleany Integration — Generated EntityListModel
+
+For Qleany-structured applications, the repetitive wiring between event notifications, controllers, and data models is generated by Qleany. The framework provides `ListModel<T>`, `Signal<T>`, and `ObserverHandle` as building blocks. Qleany generates entity-specific model structs that assemble them.
+
+A generated model manages three concerns: the reactive collection (`ListModel<T>`), the parent relationship (`Signal<Option<i32>>` for the parent entity ID), and the event wiring (observers on the Qleany event registry that trigger data refresh).
+
+```rust
+// Generated by Qleany
+pub struct WorkspaceProjectsModel {
+    pub items: ListModel<ProjectDto>,
+    pub parent_id: Signal<Option<i32>>,
+    pub loading: Signal<LoadingStatus>,
+    pub error: Signal<Option<String>>,
+    event_handles: Vec<ObserverHandle>,
+}
+```
+
+The generated constructor wires three behaviors. When `parent_id` changes (the user selects a different workspace), the model fetches the projects for that workspace via the controller and calls `items.replace_all(dtos)`. When the event registry signals that a project was created, updated, or removed, the model performs the corresponding `items.push()`, `items.set()`, or `items.remove()`. The `ObserverHandle` values are stored on the model struct and cleaned up when the model is dropped.
+
+The widget binds to `model.items` (a `ListModel<ProjectDto>` clone) without knowing about the controller, the events, or the parent relationship:
+
+```rust
+ListView::new(model.items.clone(), |project| {
+    HStack::new()
+        .child(TextWidget::new(&project.title))
+        .child(Spacer::new())
+})
+```
+
+When the user selects a workspace in the sidebar, a handler calls `model.parent_id.set(Some(workspace_id))`. The observer inside the model triggers a refetch. The `ListModel` emits `DataChange::Reset`. The ListView rebuilds its visible items.
+
+### 15.9 Model Lifetime and Scope
+
+Data models can live at any scope appropriate to the use case.
+
+**Application-wide.** A `WorkspaceProjectsModel` is created once at startup, stored on an `AppViewModel` struct, and shared with widgets via constructor arguments or environment propagation. It persists for the lifetime of the application (or the workspace session). When the user switches workspaces, `parent_id.set(Some(new_id))` triggers a refetch — the model instance is reused, not recreated.
+
+**Component-scoped.** A combo box's option list is a `ListModel<ComboOption>` created during a widget's `build()`, stored as a struct field on the widget, and destroyed when the widget is destroyed. It is not shared with any other widget. It may be populated statically (from an enum) or dynamically (fetched once from a controller).
+
+**Dialog-scoped.** A search results list in a "Find and Replace" dialog is a `ListModel<SearchResult>` that lives for the duration of the dialog. It is created when the dialog opens, populated when the user types a query, and destroyed when the dialog closes.
+
+The `Rc`-based ownership ensures that a model is deallocated when all handles are dropped. No explicit lifecycle management is needed. A model created in `build()` is stored on the widget struct; when the widget is destroyed, the handle is dropped. If no other widget holds a clone, the model is deallocated. If a parent widget or ViewModel also holds a clone, the model persists.
+
+### 15.10 Summary of Types
+
+| Type | What it is | Who provides it | Ownership |
+|------|-----------|----------------|-----------|
+| `ListModel<T>` | Concrete reactive list. Owns the data as `Vec<T>`. Mutations emit `DataChange` automatically. | Framework | `Rc`-based, cloneable |
+| `ListDataSource` | Trait for large/external datasets. Implementor owns the data and emits `DataChange` manually. | Application | Implementor-defined |
+| `TreeModel<T>` | Concrete reactive tree. Owns the hierarchy. Mutations emit `TreeChange` automatically. | Framework | `Rc`-based, cloneable |
+| `TreeSlice<T>` | Per-view flattened projection of a `TreeModel`. Owns expand/collapse state. Emits flat `DataChange`. | Framework (created internally by TreeView) | Owned by TreeView |
+| `DataChange` | Enum describing a flat list mutation (inserted, removed, moved, updated, reset). | Framework | Value type |
+| `TreeChange` | Enum describing a tree mutation (inserted, removed, moved, updated, reset, with node/parent info). | Framework | Value type |
+| Entity-specific models (e.g., `WorkspaceProjectsModel`) | Generated struct wrapping `ListModel<T>` + parent ID signal + event wiring + loading state. | Qleany generator | `Rc`-based via contained fields |
+
+---
+
+## 16. Canvas API
+
+### 16.1 Purpose
+
+The Canvas is the high-level drawing API that widget authors program against. It replaces direct `RenderFrame` manipulation with operations that match how developers think about graphics — shapes, colors, text, transforms.
+
+```rust
+fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+    canvas.fill_rounded_rect(bounds, CornerRadius::uniform(6.0), theme.colors.primary);
+    canvas.draw_text(&self.label, bounds.center(), &theme.typography.label);
+}
+```
+
+### 16.2 Three-Tier Rendering
+
+The Canvas internally classifies each drawing operation and routes it to the appropriate rendering tier.
+
+**Tier 1 — Axis-aligned rectangles.** `fill_rect`, `stroke_rect`, simple `draw_line`. Translated directly to `DecorationRect` entries. Zero rasterization cost. Covers the majority of UI drawing.
+
+**Tier 2 — SDF shader shapes.** Rounded rectangles, circles, ellipses, gradients. Rendered as quads with a specialized fragment shader computing signed distance fields. Smooth antialiasing at any resolution without rasterization. The `RenderFrame` gains `ShapeQuad` entries for this tier.
+
+**Tier 3 — Arbitrary paths.** Complex shapes, custom curves, SVG icons. Rasterized on CPU via tiny-skia, cached in a shape atlas, rendered as textured quads. Rasterization is amortized by caching — static paths rasterize once.
+
+### 16.3 Path Builder
+
+The `Path` type provides a builder for arbitrary shapes:
+
+```rust
+let star = Path::star(center, outer_radius, inner_radius, 5);
+canvas.fill_path(&star, Color::GOLD);
+```
+
+### 16.4 Text Integration
+
+The Canvas delegates text rendering to the shared `Typesetter` instance from text-typeset. `draw_text` handles simple single-line text. `draw_text_layout` renders pre-measured text for cases where layout measurement and painting are separated. The RichTextEditor widget uses `draw_render_frame` to embed a complete text-typeset `RenderFrame` at a specific position, sharing the same glyph atlas.
+
+### 16.5 Paint Types
+
+Beyond solid colors, the Canvas supports `Paint` types: `LinearGradient`, `RadialGradient`, and `Image`. Gradients are rendered in the SDF fragment shader (Tier 2).
+
+---
+
+## 17. Rendering Pipeline
+
+### 17.1 Frame Lifecycle
+
+A frame is produced only when something has changed. Between frames, the application is idle and the GPU is quiescent. The frame lifecycle has five phases executing sequentially on the main thread.
+
+**Phase 1: Event processing.** Raw input from winit is translated and dispatched through the widget tree. State changes from property bindings are resolved. Widgets are marked dirty.
+
+**Phase 2: Layout.** SwiftUI-style negotiation runs only on dirty subtrees. Output: positioned rectangle for every active widget.
+
+**Phase 3: Accessibility sync.** The AccessKit tree is updated incrementally — only changed nodes are pushed.
+
+**Phase 4: Paint.** Each dirty widget's `paint()` is called with a Canvas. The Canvas accumulates drawing operations and produces a merged `RenderFrame`.
+
+**Phase 5: GPU submission.** Atlas textures are uploaded, vertex buffers are built, draw calls are issued through wgpu. The surface presents.
+
+### 17.2 RenderFrame
+
+The `RenderFrame` is the boundary between platform-independent logic (fern-core, fern-canvas) and GPU-specific code (fern-render). It contains five drawable types: `GlyphQuad` (textured from glyph atlas), `ImageQuad` (textured from image), `DecorationRect` (untextured colored rectangle), `ShapeQuad` (SDF-rendered shape), and `RasterizedQuad` (textured from shape atlas). A `draw_order` array records painter's order (back-to-front) for correct occlusion across all drawable types.
+
+### 17.3 GPU Pipeline
+
+Three shader pipelines in fern-render: the **quad pipeline** (textured quads for glyphs, images, rasterized paths), the **rect pipeline** (untextured colored quads for decorations), and the **SDF pipeline** (signed distance field shapes with optional gradient fills). A typical frame produces five to six draw calls total.
+
+### 17.4 Atlas Management
+
+Three atlas textures serve different purposes. The **glyph atlas** is owned by the shared Typesetter (from text-typeset), containing rasterized glyph bitmaps. The **shape atlas** stores Tier 3 rasterized path results from tiny-skia. The **image atlas** (or texture array) stores application images. All use LRU eviction — dormant widgets' entries age out naturally.
+
+### 17.5 Dirty Tracking
+
+Each widget has a dirty flag at two granularities: **needs relayout** (size may have changed) and **needs repaint** (appearance changed, size unchanged). Clean widgets replay cached Canvas output without recomputation.
+
+---
+
+## 18. HiDPI and Scaling
+
+Layout works in logical pixels. Rendering works in physical pixels. The conversion happens at the boundary between Phase 4 (paint) and Phase 5 (GPU submission).
+
+`SizeProposal`, widget dimensions, spacing, padding, and font sizes are all logical. The Canvas also works in logical coordinates — `canvas.fill_circle(center, 10.0, color)` draws a circle with a 10-logical-pixel radius regardless of display density.
+
+The scale factor is applied in two places: text-typeset rasterizes glyphs at physical pixel size (logical × scale factor), and fern-render multiplies screen coordinates by the scale factor when building vertex buffers.
+
+When the scale factor changes (window dragged to a different monitor), the glyph and shape atlases are invalidated and a full relayout is triggered.
+
+---
+
+## 19. Theming — Design Tokens
+
+### 19.1 Why Not QPalette
+
+QPalette organizes colors along two axes: color roles (Window, WindowText, Button, ButtonText, Base, Text, Highlight, HighlightedText) and color groups (Active, Inactive, Disabled). This design has four structural problems that FernUI must avoid. The role set is fixed — adding `SidebarBackground` or `AccentHover` requires modifying QPalette's source. The roles are widget-centric rather than semantic — `Button` and `Window` name specific widgets, not design intent. QPalette handles only color — there is no concept of spacing, typography, corner radii, or shadows. And the three color groups (Active, Inactive, Disabled) do not cover hover, pressed, focused, or other modern interaction states, forcing every widget to compute its own state-dependent colors by ad-hoc blending.
+
+FernUI replaces QPalette with a design token system inspired by modern web/mobile design systems (Material Design, Atlassian Design Tokens, GitLab Pajamas) and SwiftUI's environment-based theming.
+
+### 19.2 The Theme Struct
+
+The `Theme` struct covers five dimensions of visual design. All visual properties of all widgets are resolved from these tokens — no widget contains hardcoded visual values.
+
+**ColorTokens** provides semantic color roles organized by purpose, not by widget. Surface colors (`surface`, `surface_secondary`, `surface_tertiary`) define background layers. Each surface color has a corresponding "on-" text color (`on_surface`, `on_surface_secondary`) following the Material Design convention — `on_primary` is the text color to use on a `primary` background. Primary and secondary action colors include explicit interaction state variants (`primary_hover`, `primary_pressed`) so that widgets do not need to compute blended colors at paint time. Semantic status colors (`error`, `warning`, `success`, `info`) each have foreground and "on-" variants. Interactive state colors (`disabled_fill`, `disabled_text`, `focus_ring`, `border`, `border_strong`) cover interaction feedback. Overlay colors (`scrim`, `tooltip_surface`, `tooltip_text`) serve the overlay system. Selection and highlight colors (`selection`, `on_selection`, `highlight`) serve text editors and list views.
+
+**SpacingTokens** provides a scale (`xs` through `xxl` — typically 4, 8, 16, 24, 32, 48 logical pixels) plus semantic values (`widget_padding` for internal padding within widgets, `content_padding` for padding around content areas, `item_spacing` for spacing between list items). All layout spacing in FernUI is resolved from these tokens, ensuring consistent spatial rhythm.
+
+**TypographyTokens** defines named text styles (`body`, `body_small`, `heading_1` through `heading_3`, `label`, `caption`, `monospace`). Each `TextStyle` specifies font family, size, weight, line height, and letter spacing. Typography tokens bridge to text-typeset's `TextFormat` — the Canvas's `draw_text` method constructs a `TextFormat` from the active theme's `TextStyle` when the widget does not provide an explicit format.
+
+**ShapeTokens** covers corner radii (`radius_sm` for subtle rounding on buttons and inputs, `radius_md` for cards and panels, `radius_lg` for dialogs and modals, `radius_full` for pills and circular elements), border widths (`border_width`, `border_width_strong`), and shadow definitions (`shadow_sm`, `shadow_md`, `shadow_lg`).
+
+**MotionTokens** defines animation durations (`duration_fast` for hover and color changes, `duration_normal` for expand/collapse, `duration_slow` for page transitions) and easing curves (`easing_standard`, `easing_decelerate`, `easing_accelerate`). These tokens are consumed by the animation system  and by time-dependent UI behaviors (tooltip delay, cursor blink rate).
+
+### 19.3 Theme Storage and Access
+
+The theme is a shared, application-level resource managed by the `WindowManager` in `fern-app`. It is not stored per-widget or per-tree — it is stored once and referenced by all windows.
+
+Widgets access the theme during layout and paint through their context objects. `LayoutContext::theme()` provides the theme during `size_that_fits` and `place_children`, allowing widgets to read spacing and typography tokens for size calculations. `PaintContext::theme()` provides the theme during `paint()`, allowing widgets to read color, shape, and typography tokens for rendering. `BuildContext::theme()` provides the theme during `build()`, allowing composites to capture token values into derived state closures (see Section 7.1.2).
+
+### 19.4 Environment Propagation and Subtree Overrides
+
+The theme flows downward through the widget tree via the environment system. Every widget inherits the theme from its parent. A subtree can override the theme partially — a dark sidebar inside a light application is achieved by overriding only the color tokens within that subtree while inheriting spacing, typography, and shape tokens from the parent.
+
+The override is applied via `theme_override()` on any container widget. The override closure receives the current theme and mutates the fields it wants to change. The modified theme becomes the environment value for all descendants of that container.
+
+Nodes without overrides inherit from their parent with no per-node storage cost. Only nodes with active overrides store a modified theme. The environment lookup walks up the tree until it finds a node with an override or reaches the root, which holds the application-level theme.
+
+Subtree overrides participate in the composite rebuild mechanism (Section 7.1.2). When the application-level theme changes, all subtree overrides are re-applied on top of the new base theme during the rebuild pass. A dark sidebar override that sets `colors = ColorTokens::dark_default()` will still produce dark colors regardless of whether the base theme was light or dark — the override replaces the color tokens entirely.
+
+### 19.5 Theme Switching from Command Handlers
+
+Theme switching is an application-level action triggered by the user (selecting a theme in preferences, toggling dark mode). In FernUI's architecture, this action flows through the typed command system like any other user action.
+
+The `CommandContext` (the context object received by the application's command handler) exposes a `set_theme()` method. This method does not apply the theme immediately — it queues the theme change as a pending operation. The `WindowManager` applies the pending theme change after the command handler returns, before the next frame's layout pass. This mirrors how `create_window()` and `close_window()` work on the `CommandContext` — they queue operations rather than executing them mid-handler.
+
+When the theme change is applied, the following cascade occurs. The `WindowManager` stores the new theme as the application-level theme. For each active window, the `WindowManager` updates the window's `WidgetTree` environment with the new theme. The framework marks all composite widgets across all windows as needing reconstruction (Section 7.1.2). During the next frame, `build()` is re-run for each composite, creating fresh derived state closures that capture the new theme tokens. Subtree overrides are re-applied on top of the new base theme. Layout reruns because typography and spacing tokens may have changed. Paint reruns because color and shape tokens have changed. AccessKit nodes are re-synced because widget names and states may have changed (high-contrast themes may affect accessibility properties).
+
+The full cascade — rebuild all composites, relayout all trees, repaint all windows — is expensive but occurs at most a few times per application session. It is never on the keystroke path.
+
+For the locale system (`set_locale()`), the same mechanism applies: `CommandContext` exposes `set_locale()`, the change is queued, and a full composite rebuild is triggered across all windows.
+
+### 19.6 Built-In Themes
+
+FernUI ships with two built-in themes: `Theme::light_default()` and `Theme::dark_default()`. These provide sensible defaults for all token categories. They are not intended to be visually distinctive — they are neutral baselines that applications customize.
+
+Custom themes are created either from scratch or by modifying an existing theme using Rust's struct spread syntax:
+
+```rust
+let skribisto_light = Theme {
+    colors: ColorTokens {
+        primary: Color::from_hex("#2E7D32"),
+        primary_hover: Color::from_hex("#1B5E20"),
+        on_primary: Color::WHITE,
+        surface: Color::from_hex("#FAFAF5"),
+        ..ColorTokens::light_default()
+    },
+    typography: TypographyTokens {
+        body: TextStyle {
+            family: "Literata".to_string(),
+            size: 16.0,
+            ..TextStyle::default()
+        },
+        ..TypographyTokens::default()
+    },
+    ..Theme::light_default()
+};
+```
+
+### 19.7 Serialization and User-Defined Themes
+
+The `Theme` struct and all its sub-structs derive `Serialize` and `Deserialize` (via serde). This enables themes to be loaded from files in any format the application chooses (TOML, JSON, YAML). A theme file defines token values; the application deserializes it into a `Theme` and applies it via `set_theme()`.
+
+This enables user-created themes, theme marketplaces, and runtime theme loading — all without code changes. The application loads the file, deserializes it, and applies the result. Incomplete theme files can be handled by deserializing with defaults — missing fields fall back to `Theme::light_default()` or `Theme::dark_default()` values.
+
+### 19.8 Accessibility-Driven Theming
+
+High-contrast, large-text, and reduced-motion accessibility needs are served by theme variants, not by separate accessibility mechanisms. A high-contrast theme overrides color tokens to meet WCAG AAA contrast ratios. A large-text theme increases all typography token sizes by a configurable factor. A reduced-motion theme sets all motion token durations to zero.
+
+The `PaintContext` exposes OS-level accessibility preference flags: `prefers_high_contrast` (from the OS accessibility settings), `prefers_reduced_motion` (from the OS), and `prefers_large_text` (from the OS or from application preferences). The application reads these flags at startup and selects an appropriate theme variant. FernUI does not automatically apply accessibility themes — the application makes the choice, because the correct response to `prefers_high_contrast` depends on the application's visual design (a dark-themed application may already meet contrast requirements).
+
+The relationship between the theme and AccessKit is indirect. The theme determines visual appearance; AccessKit determines what screen readers announce. They are independent systems that happen to be affected by the same user preference. A high-contrast theme changes colors but does not change AccessKit node properties. A large-text theme changes font sizes, which affects layout and therefore AccessKit node positions, but does not change roles or names.
+
+### 19.9 Theme and Text-Typeset Integration
+
+Typography tokens must bridge to text-typeset's `TextFormat`. The `TextStyle` struct in the theme maps directly to the fields that `TextFormat` expects: font family, font size, font weight, line height, letter spacing. The Canvas's `draw_text` method constructs a `TextFormat` from the theme's `TextStyle` when the widget does not provide an explicit format. This means changing the theme's typography tokens automatically changes how all text in the application renders — button labels, menu items, tooltips, headings — without any widget code changes.
+
+The font size in the theme is specified in logical pixels. Text-typeset rasterizes glyphs at physical pixel size (logical × scale factor), so the glyph atlas is sensitive to both theme changes (which may change font size) and scale factor changes (which change physical pixel size). Both trigger atlas invalidation and re-rasterization.
+
+---
+
+## 20. Threading Model
+
+### 20.1 Single UI Thread
+
+All five phases of the frame lifecycle run sequentially on the main thread. The widget tree, state arena, overlay manager, Canvas, and all contexts are non-`Send` types — the compiler prevents accidental access from background threads.
+
+This matches Qleany's synchronous model. A Qleany controller call from a FernUI command handler executes synchronously. No `async`/`await`, no tokio, no runtime.
+
+### 20.2 Background Work
+
+Long operations use Qleany's `LongOperationManager`, which runs use cases on background threads. The background thread communicates with the UI thread through winit's `EventLoopProxy` — a unidirectional channel that wakes the event loop and delivers custom events. The UI thread processes these events like any other input, triggering data source refreshes and widget repaints.
+
+### 20.3 Incremental Work
+
+Operations that take 5–50ms (too short for a background thread, too long for a single frame) are broken into chunks via `request_idle_callback`. The event loop runs idle work during gaps between frames, respecting a time budget.
+
+### 20.4 Event Loop
+
+The winit event loop uses `ControlFlow::Wait` — it sleeps when no events are pending and no widgets are dirty. CPU and GPU consumption is near-zero when the user is not interacting.
+
+---
+
+## 21. Accessibility
+
+### 21.1 First-Class Integration
+
+AccessKit is integrated at the trait level. Every `Widget` and `CompositeWidget` implementation includes an `accessibility()` method that declares the widget's role, name, state, and available actions. CompositeWidget automatically generates AccessKit nodes from its composed children.
+
+### 21.2 Structural Guarantees
+
+The focus system, overlay system, keyboard shortcut system, and drag-and-drop system all have accessibility paths designed in. AccessKit actions (from screen readers) flow through the same event system as pointer and keyboard input — `WidgetEvent::AccessAction`. The test harness queries widgets by AccessKit role and label, ensuring accessibility is verified by every test.
+
+### 21.3 Dormancy and Overlays
+
+Dormant subtrees produce no AccessKit nodes (screen readers only see active content). Overlay content generates correct AccessKit tree structures — tab lists have `Role::TabList` and `Role::Tab` nodes, menus have `Role::Menu` and `Role::MenuItem` nodes, tooltips are linked to their anchor widget via `DescribedBy`.
+
+---
+
+## 22. Window Management
+
+### 22.1 Architecture: Per-Window Trees with Shared Application State
+
+Each window owns its own independent `WidgetTree`, its own layout pass, its own paint pass, its own `RenderFrame`, and its own wgpu surface. What windows share is application-level context: the theme, the locale, the `ShortcutMap`, the data sources, the command handler, and the Qleany backend. This is the same model used by Qt, SwiftUI, and WPF.
+
+This approach requires no changes to `fern-core`'s tree, layout, event dispatch, or rendering logic. A `WidgetTree` remains a single-rooted tree with all existing behavior intact. Multi-window management lives entirely in `fern-app` (window manager, environment broadcast) and `fern-platform` (multi-window event routing, per-window surface management).
+
+### 22.2 Window Lifecycle
+
+The `FernApp` owns a window manager that maintains a collection of active `Window` instances. The application creates windows through the `FernApp` API, providing a configuration (title, size, position, decorations) and a root widget builder. Each window's `WidgetTree` receives a clone of the shared environment (theme, locale, shortcuts) at creation time. When the application changes the theme or locale, the change propagates to all active windows.
+
+Window closure is initiated either by the user (clicking the OS close button) or by the application (calling `ctx.close_window(id)` from a command handler). When a window closes, its `WidgetTree` is destroyed, its wgpu surface is released, and its AccessKit adapter is torn down.
+
+### 22.3 Event Routing
+
+Winit tags every event with a window ID. The `fern-platform` event loop routes each event to the correct window's `WidgetTree`. Keyboard events go to the active window (the one with OS-level focus). When the user clicks on a different window, the previously active window receives a deactivation event and the newly active window receives an activation event.
+
+Keyboard shortcuts are handled per-window during the preview pass, but the resulting command reaches the shared application command handler. The `ShortcutMap` is shared, so the same shortcuts work in every window.
+
+### 22.4 Focus Across Windows
+
+Each window's `WidgetTree` has its own independent `FocusManager`. OS-level focus determines which window receives keyboard events; widget-level focus within that window operates as designed. When a window is deactivated, its focused widget retains its focus state but does not receive keyboard events. When the window is reactivated, the previously focused widget resumes receiving input.
+
+### 22.5 Command Context and Window Identity
+
+Commands emitted by widgets carry a `source_window` identifier through the `EventContext`. The application's command handler can use this to distinguish window-specific commands (close window, zoom in) from window-agnostic commands (save document, toggle bold):
+
+```rust
+app.on_command(|cmd, ctx| match cmd {
+    AppCmd::CloseWindow => {
+        ctx.close_window(ctx.source_window());
+    }
+    AppCmd::ZoomIn => {
+        ctx.window(ctx.source_window()).set_zoom(current + 0.1);
+    }
+    AppCmd::DocumentSave => {
+        // Window-agnostic — operates on the domain model.
+        document_controller::save(&db, &hub, &mut undo)?;
+    }
+});
+```
+
+### 22.6 Data Source Sharing
+
+Data models are application-level objects, not window-level. Multiple windows can observe the same `ListModel<T>` or `TreeModel<T>`. When the domain model changes, the data model emits change notifications to all observers across all windows, and each window updates independently. No structural change to the data model types is needed.
+
+### 22.7 Modal Dialogs
+
+A modal dialog is a window that blocks interaction with its parent window until dismissed. The `WindowConfig` accepts a `modal` flag and a `parent` window reference. When a modal is active, `fern-platform` sets the OS-level parent relationship via winit's window builder (so the OS handles input blocking and correct Z-ordering) and ignores events for the parent window.
+
+Modal dialogs participate in the overlay stack conceptually — dismissing a modal by pressing Escape or clicking a "Cancel" button follows the same dismissal pattern as overlay menus. The modal window's `WidgetTree` emits commands through the same shared command handler, and results are communicated back to the parent window through application state (data sources, `State<T>` handles shared between the two trees, or direct command-handler logic).
+
+```rust
+app.on_command(|cmd, ctx| match cmd {
+    AppCmd::ShowPreferences => {
+        ctx.create_window(
+            WindowConfig::new()
+                .title(tr!("window-preferences"))
+                .size(600, 400)
+                .modal(true)
+                .parent(ctx.source_window())
+                .root(|| build_preferences_ui())
+        );
+    }
+    AppCmd::ClosePreferences => {
+        ctx.close_window(ctx.source_window());
+    }
+});
+```
+
+### 22.8 Modeless Dialogs
+
+Modeless dialogs (find/replace, inspector panels) are regular windows with no parent blocking. They float alongside the main window and can be interacted with simultaneously. They are created with `WindowConfig` without the `modal` flag. Their `WidgetTree` shares data sources and application state with the main window but operates independently for layout, events, and rendering.
+
+### 22.9 Impact on Crate Structure
+
+Multi-window support requires additions to `fern-app` (window manager, environment broadcast to multiple trees, window-aware command context) and to `fern-platform` (multi-window event routing, modal window support, per-window wgpu surface management). It requires no changes to `fern-core`, `fern-canvas`, `fern-tokens`, `fern-widgets`, `fern-text`, `fern-i18n`, or `fern-render`. The initial single-window implementation needs only one discipline: using winit's window ID consistently rather than assuming a global window reference.
+
+---
+
+## 23. Testability
+
+### 23.1 Headless by Design
+
+The widget tree runs without a window, without GPU, and without winit. All five phases (minus GPU submission) execute in pure Rust with no platform dependencies. Tests use fern-core's `WidgetTree` directly:
+
+```rust
+#[test]
+fn button_click_fires_command() {
+    let mut tree = WidgetTree::new();
+    let mut clicked = false;
+    tree.on_command(|cmd| if let AppCmd::Save = cmd { clicked = true; });
+    let button = tree.add(Button::new("Save").command(AppCmd::Save));
+    tree.layout(SizeProposal::exact(200.0, 40.0));
+    tree.click(button);
+    assert!(clicked);
+}
+```
+
+### 23.2 What Is Testable
+
+Layout (given a widget tree, do children end up at the right positions), event dispatch (does the right widget receive events, does focus cycle correctly), state transitions (hover/pressed/disabled), accessibility (correct AccessKit role, name, actions), render output (expected quads/shapes in the RenderFrame), theming (palette swap produces correct colors), gesture recognition (pure state machine tests), overlay behavior (tooltip timing via simulated clock), drag-and-drop (payload transfer, insertion indicator rendering), and composition (multiple widgets interacting correctly).
+
+### 23.3 Mock Backend
+
+Cargo feature flags (`mock-backend`) swap Qleany controller implementations with mock modules providing static data. Same API surface, zero backend. Familiar to the developer from Qleany's C++/Qt mock system for QtQuick.
+
+### 23.4 CI Friendly
+
+No `Xvfb`, no GPU, no display server required. Pure logic tests run in `cargo test` in milliseconds. The simulated clock (`tree.advance_time()`) enables deterministic testing of time-dependent behavior.
+
+---
+
+## 24. Crate Structure
+
+### 24.1 Crate Map
+
+```
+fern-tokens          Pure data types: Theme, Color, TextStyle, SpacingTokens, etc.
+                     Dependencies: serde
+
+fern-canvas          Canvas API, RenderFrame, Path, Paint, ShapeQuad, shape cache.
+                     Defines the TextBackend trait for pluggable text rendering.
+                     Dependencies: fern-tokens, tiny-skia
+
+fern-core            Unified Widget trait (V2), arena, layout, events, focus,
+                     shortcuts, overlays, DnD, signal, state (V1 internals),
+                     environment, gesture recognizers, headless test harness,
+                     build_context, event_handlers, widget_builder, compat (V1<->V2 bridge).
+                     The widget_tree module is split into eight implementation files:
+                     accessibility_impl, event_dispatch_impl, focus_impl, layout_impl,
+                     overlay_impl, query_impl, rendering_impl, test_api.
+                     Dependencies: fern-tokens, fern-canvas, accesskit
+
+fern-text            TextBackend implementation backed by text-typeset.
+                     Manages the shared Typesetter instance (glyph atlas, shaping,
+                     rasterization). Provides layout_single_line fast path.
+                     Contains NO widgets.
+                     Dependencies: fern-canvas, text-typeset
+
+fern-widgets         All standard widgets: Button, Label, TextWidget, TextInput,
+                     TabWidget, ListView, TreeView, Menu, ScrollArea, Panel,
+                     Slider, Checkbox, etc.
+                     TextWidget renders via Canvas::draw_text (delegates to
+                     whatever TextBackend is registered — no fern-text dependency).
+                     Optional [rich-text] feature: RichTextEditor widget, which
+                     accepts externally-owned TextDocument and Typesetter references.
+                     Dependencies: fern-core, fern-tokens, fern-canvas
+                     Optional [rich-text]: + text-document, text-typeset
+
+fern-i18n            Fluent integration, tr! macro, ShortcutFormatter, locale management
+                     Dependencies: fluent-rs, unic-langid
+
+fern-render          wgpu renderer, shader pipelines (quad/rect/SDF), atlas GPU upload
+                     Dependencies: fern-canvas, wgpu
+
+fern-platform        winit integration, AccessKit winit adapter, cursor management,
+                     native popup windows, IME bridge, platform DnD backend
+                     Dependencies: fern-core, fern-render, winit, accesskit-winit
+
+fern-app             Application runner, FernApp builder, event loop glue.
+                     Wires the fern-text TextBackend into the Canvas system.
+                     Dependencies: fern-core, fern-canvas, fern-render, fern-platform
+                     Optional: fern-text, fern-widgets, fern-i18n
+
+fern-ui              Umbrella crate with re-exports and default features.
+                     Dependencies: all of the above
+```
+
+### 24.2 Dependency Graph
+
+```
+fern-tokens
+    ↑
+fern-canvas ← tiny-skia
+    ↑           ↑
+fern-core    fern-text ← text-typeset
+    ↑ ← accesskit
+    │
+    ├── fern-widgets
+    │   └── [rich-text] ← text-document, text-typeset
+    │
+    │   fern-i18n ← fluent-rs
+    │
+fern-render ← wgpu
+    ↑
+fern-platform ← winit, accesskit-winit
+    ↑
+fern-app (wires fern-text into Canvas, optional fern-widgets, fern-i18n)
+    ↑
+fern-ui (umbrella, re-exports)
+```
+
+Note that fern-text depends only on fern-canvas (for the `TextBackend` trait) and text-typeset. It does not depend on fern-core, text-document, or any platform crate. The `TextBackend` trait is defined in fern-canvas so that the Canvas can call text rendering methods without knowing which backend implementation is active.
+
+The RichTextEditor widget (in fern-widgets behind the `rich-text` feature) depends directly on text-document and text-typeset. The application owns the `TextDocument` instance and passes it to the widget — FernUI never owns or wraps the document model. The application depends on text-document directly for model access (highlighter, cursors, import/export). Cargo deduplicates the shared dependency automatically.
+
+Platform-specific code (winit, wgpu, accesskit-winit) is confined to fern-render and fern-platform. Everything above them is platform-independent and headlessly testable.
+
+### 24.3 The fern-ui Umbrella
+
+The standard application developer depends on a single crate:
+
+```toml
+[dependencies]
+fern-ui = "0.1"
+```
+
+fern-ui re-exports the public API and controls feature flags. `text`, `i18n`, and `rich-text` are default features (opt-out, not opt-in), because virtually every application needs text rendering, most need translations, and the primary target (Skribisto) requires rich text editing.
+
+```toml
+[features]
+default = ["widgets", "text", "i18n", "rich-text"]
+widgets = ["dep:fern-widgets"]
+text = ["dep:fern-text"]
+i18n = ["dep:fern-i18n"]
+rich-text = ["fern-widgets/rich-text"]
+```
+
+A Skribisto application's dependencies:
+
+```toml
+[dependencies]
+fern-ui = "0.1"
+text-document = "0.1"    # direct dependency for document model access
+skribisto-core = { path = "../skribisto-core" }
+```
+
+The application depends on text-document directly — not through FernUI — for full access to the document model API (highlighter setup, cursor operations, format queries, import/export, document events). The `RichTextEditor` widget accepts a reference to the externally-owned `TextDocument` and renders it; it does not expose text-document's API.
+
+Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
+
+---
+
+## 25. Button — Reference Widget Design
+
+The button serves as the reference implementation exercising most architectural features. It is a `CompositeWidget` composed of primitives.
+
+### 25.1 Composition
+
+A button is composed of a `RectWidget` (background, border, corner radius, shadow), an internal layout container (HStack or VStack depending on icon position), a `TextWidget` (label), and optionally an `IconWidget`. The internal layout direction follows `IconPosition::Leading`/`Trailing`/`Top`/`Bottom`, with Leading/Trailing respecting the locale's `LayoutDirection`.
+
+### 25.2 Visual States
+
+Five visual states: idle, hovered, pressed, focused, disabled. Each state resolves different color tokens from the palette. Four button styles: Filled, Outlined, Flat, Tonal. The combination of state and style determines background, border, and text colors.
+
+### 25.3 Behavior
+
+Pointer events (enter/leave/down/up) drive visual state transitions. Keyboard activation (Space, Enter) triggers the button when focused. A `TapRecognizer` gesture provides the click interaction. The cursor changes to `Pointer` on hover.
+
+### 25.4 Accessibility
+
+Role::Button, name from the label (resolved from TextContent/translation key), disabled state, available actions (Click, Focus). Focus ring rendered when focused via keyboard.
+
+---
+
+## 26. Architectural Comparisons
+
+### 26.1 vs. QPalette → Design Tokens
+
+QPalette provides a fixed set of color roles across three interaction groups, with no support for spacing, typography, or shape. FernUI's design token system covers the full visual vocabulary, uses typed Rust structs instead of role/group enums, and supports subtree overrides through environment propagation.
+
+### 26.2 vs. QAbstractItemModel → ListModel<T> and TreeModel<T>
+
+Qt's model uses type-erased `QVariant` with role-based data access and `void*` internal pointers. FernUI's `ListModel<T>` and `TreeModel<T>` are concrete generic types with compile-time type safety. The delegate closure receives `&T` directly — no variant casting, no role integers. The `ListDataSource` trait provides an escape hatch for large/external datasets, also with an associated `Item` type.
+
+### 26.3 vs. Existing Rust GUI Frameworks
+
+FernUI is architecturally ahead on accessibility (AccessKit at the trait level, tested by every test), text rendering (text-document + text-typeset), and widget extensibility (two-tier model with slots). It is comparable to Xilem/Masonry on layout and event design. It is weaker on rendering sophistication (quad-based vs. Vello's GPU compute renderer) and has zero maturity compared to established frameworks.
+
+The honest comparison is not against other Rust GUI frameworks but against Qt Widgets — the framework FernUI is designed to replace for the specific use case of a writing application.
+
+---
+
+## 27. Widget Catalog
+
+This section defines every widget in `fern-widgets`, organized by implementation tier. Each entry specifies the widget's purpose, its implementation approach, its accessibility contract, and whether any infrastructure blocks it. The codebase currently provides: animation system (AnimationScheduler with easing), image rendering pipeline (Canvas::draw_image, ImageManager), CPU-rasterized path rendering with atlas caching (PathAtlas with tiny-skia), overlay system with dismissal and cascading, scrolling infrastructure (clips_children, scissor rects, ScrollIntoView), two-level reactive bindings, and gesture recognizers. These capabilities unblock most widgets in the catalog.
+
+### 27.1 Primitives (`fern-widgets/src/primitives/`)
+
+Primitives are Level 2 widgets that serve as building blocks for composition. They implement the `Widget` trait directly, have no reactive internal state, and read theme tokens from context during layout and paint. They are not composites.
+
+**RectWidget** — exists. Axis-aligned rectangle with fill color, border color, border width, and corner radius. Supports reactive bindings for background and border color (`bind_background`, `bind_border_color`). The most basic visual primitive.
+
+**TextWidget** — exists. Single-line text rendered via the TextBackend. Supports reactive color binding (`bind_color`), static or reactive text content (`bind_text`), and text style from theme typography tokens. Accessibility: `Role::Label`.
+
+**HStack** — exists. Horizontal layout container. Cross-axis alignment (`VAlignment`), spacing between children, spacer-aware distribution. Supports per-child alignment overrides.
+
+**VStack** — exists. Vertical layout container. Cross-axis alignment (`HAlignment`), spacing, spacer-aware distribution.
+
+**ZStack** — exists. Overlay layout container. All children positioned at the same origin, stacked in insertion order. Two-axis alignment (`Alignment`).
+
+**Padding** — exists. Single-child wrapper adding uniform or per-edge padding. Adjusts `size_that_fits` and `place_children` to account for padding.
+
+**Spacer** — exists. Flexible space filler. Claims all remaining space on the container's primary axis. Used in stacks to push siblings to edges.
+
+**Center** — exists. Single-child wrapper that centers its child within the available space. Equivalent to a ZStack with `Alignment::center`.
+
+**Expand** — exists. Single-child wrapper that claims all available space on one or both axes. Content alignment within the expanded bounds.
+
+**FixedSize** — exists. Single-child wrapper that reports a fixed size regardless of the parent's proposal. Prevents children from expanding.
+
+**MinSize** — exists. Single-child wrapper that clamps the reported size to a minimum. Used for minimum touch target enforcement.
+
+**MaxSize** — exists. Single-child wrapper that clamps the reported size to a maximum.
+
+**Divider** — new primitive. A 1-pixel line (horizontal or vertical) colored from the theme's `border` token. `size_that_fits` returns 1px on the cross axis and claims the full proposed size on the primary axis. Used as a visual separator in stacks, toolbars, and menus. Accessibility: `Role::Splitter` (non-interactive) or `Role::GenericContainer` with `set_hidden(true)` since it is purely decorative.
+
+**IconWidget** — new primitive. Renders a vector icon from a predefined icon set. Icons are defined as `Path` data (sequences of `PathCommand`) and rendered via the Canvas's `fill_path` method, which is CPU-rasterized by tiny-skia and cached in the PathAtlas. Supports color (from theme or explicit), size (defaulting to 16×16 or 24×24 from theme), and reactive color binding. Accessibility: `Role::Image` with `set_name` describing the icon's meaning. The icon set is a separate data module (`fern-icons` or an icon enum in `fern-widgets`) providing named paths: `Icon::Search`, `Icon::Close`, `Icon::ChevronDown`, `Icon::ChevronRight`, `Icon::Check`, `Icon::Plus`, `Icon::Minus`, etc. This widget is a dependency for many composites (Button with icon, ComboBox chevron, TreeView expand arrow, Checkbox checkmark).
+
+### 27.2 Layout Primitives (`fern-widgets/src/primitives/`)
+
+These are Level 2 widgets that provide layout behavior beyond simple stacking.
+
+**Grid** — new. Two-dimensional layout with row and column tracks. Tracks are defined as fixed, fractional (`1fr`, `2fr`), or auto-sized. `place_children` distributes space across tracks, then places each child in its assigned cell (row, column, optional row/column span). Unlike CSS Grid, the track definitions and child assignments are explicit — no auto-placement algorithm. Accessibility: `Role::Grid` with children as `Role::Row` containing `Role::Cell`, or `Role::GenericContainer` when used purely for layout.
+
+**Wrap / FlowLayout** — new. Children flow horizontally, wrapping to the next line when the available width is exhausted. `place_children` fills rows left-to-right (or right-to-left in RTL), breaking to a new row when the next child would exceed the container's width. Configurable spacing between items and between rows. Used for tag lists, chip collections, and responsive layouts. Accessibility: `Role::GenericContainer`.
+
+**AspectRatio** — new. Single-child wrapper that constrains the child's bounds to a specific width-to-height ratio. `size_that_fits` computes the largest rectangle with the given ratio that fits within the proposal. Used for images, videos, and fixed-proportion containers.
+
+### 27.3 Container Widgets (`fern-widgets/src/`)
+
+These are higher-level widgets built from primitives, providing themed visual framing and structural organization.
+
+**Panel** — exists. Themed container with background, border, corner radius, and padding. Reads defaults from theme tokens, all overridable. Used as the visual foundation for cards, sections, and framed content.
+
+**Card** — new composite. A Panel with elevated styling: shadow (from `ShapeTokens::shadow_md`), surface background, and optional header/footer slots. Header slot typically contains a title and optional action buttons. Footer slot typically contains action buttons or metadata. Accessibility: `Role::Group` with an accessible name from the header content.
+
+**Toolbar** — new composite. An HStack wrapped in a Panel with tight spacing and a themed background (`surface_secondary`). Children are typically Buttons with `ButtonStyle::Flat` and compact sizing, Dividers for visual grouping, and Spacers for alignment. Provides a theme override that reduces `widget_padding` for denser layout. Accessibility: `Role::Toolbar`.
+
+**StatusBar** — new composite. An HStack in a Panel positioned at the bottom of a window. Similar structure to Toolbar but with `caption` typography. Typically contains read-only text labels showing application state (word count, line number, connection status). Accessibility: `Role::Status`.
+
+### 27.4 Interactive Controls (`fern-widgets/src/`)
+
+**Button** — exists. Non-generic composite with closure-based command erasure (Approach B). Four visual styles (Filled, Outlined, Flat, Tonal), five interaction states (Idle, Hovered, Pressed, Focused, Disabled). Reactive color bindings driven by `State<InteractionState>` and `DerivedState<Color>`. TapRecognizer for pointer interaction. MinSize wrapper for touch target enforcement. Supports optional icon (leading or trailing) via the slot system. Tooltip attachment via builder method. Accessibility: `Role::Button`.
+
+**Checkbox** — new composite. An HStack containing a check box (ZStack of a bordered RectWidget and a checkmark IconWidget) and an optional TextWidget label. Bound to a `Signal<bool>`. Clicking or pressing Space toggles the state. The checkmark icon's visibility is driven by `visible_when` on the `Signal<bool>`. The box's border and background change on hover/press via interaction state bindings, identical to Button's pattern. Accessibility: `Role::CheckBox` with `set_toggled`.
+
+**RadioButton** — new composite. Visually similar to Checkbox but with a circular indicator (filled circle inside an outlined circle) and mutual exclusion. A RadioButton does not manage its own state in isolation — it receives a shared `State<T>` (where T is the value this radio represents) from a RadioGroup or from the application. Clicking a RadioButton sets the shared state to its own value. The filled indicator's visibility is driven by `selected_value.map(|v| *v == self.value)`. Accessibility: `Role::RadioButton` with `set_toggled`, and `set_member_of` referencing the radio group's AccessKit node.
+
+**Toggle / Switch** — new composite. A track (horizontal RectWidget with pill-shaped corners) and a circular knob (RectWidget or circle). Bound to a `Signal<bool>`. The knob's horizontal position is driven by a `Signal<f32>` derived from the boolean state via `signal.map()`, animated via `Signal<f32>::animate_to()` for smooth sliding. Accessibility: `Role::Switch` with `set_toggled`.
+
+**SegmentedControl** — new composite. A horizontal bar of mutually exclusive segments, visually connected with shared corners. Bound to a `Signal<usize>` for the selected index. Internally composes an HStack of segment elements with custom corner radius logic: the first segment has leading corner radius only, the last has trailing corner radius only, middle segments have no corner radius. The selected segment has a distinct background color. Clicking a segment updates the index state. Accessibility: `Role::RadioGroup` containing `Role::RadioButton` children, each with `set_toggled` and `set_position_in_set`.
+
+**Slider** — new Level 2 widget. A horizontal or vertical track with a draggable thumb. Bound to a `Signal<f32>` with configurable min/max range and optional step. The thumb position is computed from the state value and the track length. DragRecognizer handles thumb dragging. Track clicks jump the thumb to the click position (or page-step toward it, depending on configuration). Keyboard: Left/Right (or Up/Down for vertical) adjusts by step, Home/End jump to min/max. Accessibility: `Role::Slider` with `set_numeric_value`, `set_min_numeric_value`, `set_max_numeric_value`, `set_numeric_value_step`, `Action::SetValue`.
+
+**ComboBox / Dropdown** ✅ implemented (Milestone 4). A trigger button (HStack of label TextWidget + ChevronDown IconWidget) that opens an overlay list of selectable items. Non-generic, index-based via `Signal<Option<usize>>`. The trigger's display text is derived from the selected index and the items vector. The dropdown content is pre-created as a dormant subtree during `build()` and activated via `ctx.activate()` when the combo box opens. Overlay placement is `BelowPreferred` (flips to `Above` when no space below), with `DismissBehavior::ClickOutside`. Selecting an item updates the signal, dismisses the overlay, and restores focus to the trigger. Arrow Up/Down navigate the list while open. Type-ahead filtering by first character. Accessibility: trigger is `Role::ComboBox` with `HasPopup::ListBox` and `set_expanded`; list is `Role::ListBox`; items are `Role::ListBoxOption` with `set_selected`.
+
+**ContextMenu** ✅ implemented (Milestone 4). A menu shown at the pointer position on right-click. Built using the overlay system (`OverlayPlacement::AtPointer`, `DismissBehavior::ClickOutside`). The menu content is a MenuList widget provided via a closure called at show-time to reflect current application state. Submenu cascade, keyboard navigation (Arrow Up/Down/Left/Right), and diagonal movement tolerance via 200ms submenu open delay and 150ms close delay. Accessibility: `Role::Menu` with `Role::MenuItem` children.
+
+**MenuBar** ✅ implemented (Milestone 4). A horizontal bar of top-level menu triggers with dropdown menus. Each trigger opens its MenuList as an overlay (`OverlayPlacement::BelowPreferred`). `MenuContext` coordinates open index, trigger focus, and cross-menu Left/Right navigation. Keyboard: Tab focuses the menu bar, Arrow Left/Right navigates between triggers, Enter or Arrow Down opens the active menu, Escape closes. Supports a trailing slot for additional actions (e.g., settings button). On macOS, this is replaced by native `NSMenu` at runtime — Milestone 10 handles the platform abstraction.
+
+**MenuList** ✅ implemented (Milestone 4). A vertical container for `MenuItem` and `MenuSeparator` widgets, providing a themed surface (background, border, corner radius) and keyboard navigation (Arrow Up/Down, Enter, Escape). `KeyboardHighlightWrapper` adds a subtle background behind the currently focused item, driven by a shared `focused_index` signal. Used by MenuBar, ContextMenu, and any widget that needs a vertical menu structure.
+
+**MenuItem** ✅ implemented (Milestone 4). A single clickable item in a MenuList. Non-generic, closure-based command erasure (same pattern as Button). Supports icon, label, shortcut label (auto-looked-up from ShortcutMap via `ctx.shortcut_label_for_any()` — the developer never writes the label manually), disabled state, and submenu triggers. Submenu opens after 200ms of hover (providing diagonal movement tolerance across other menu items) and closes after 150ms. Keyboard Enter activates the item and closes the menu stack; Arrow Right opens a submenu; Arrow Left closes the current submenu. Accessibility: `Role::MenuItem` with `set_disabled`, keyboard shortcut in `KeyboardShortcut`, `HasPopup::Menu` for submenu items.
+
+**MenuSeparator** ✅ implemented (Milestone 4). A 1px horizontal line with 4px padding top and bottom. Themed via `theme.colors.border` at 0.3 alpha. Accessibility: `Role::Splitter`.
+
+**Link** — new composite. A focusable, clickable TextWidget with underline decoration and `CursorIcon::Pointer` on hover. Emits a command on click. Visually distinguished from plain text by color (theme `primary`) and underline. Accessibility: `Role::Link` with `set_name`.
+
+### 27.5 Display Widgets (`fern-widgets/src/`)
+
+**ProgressBar** — new composite. A ZStack of a background track RectWidget and a foreground fill RectWidget. The fill width is driven by a `Signal<f32>` (0.0 to 1.0) that computes the fill width as `value * track_width`. Optionally displays a percentage label. Determinate mode (known progress) shows the fill bar. Indeterminate mode (unknown duration) uses an animated sweep driven by the AnimationScheduler. Accessibility: `Role::ProgressIndicator` with `set_numeric_value`, `set_min_numeric_value(0.0)`, `set_max_numeric_value(1.0)`.
+
+**Badge / Chip** — new composite. A small labeled element with a pill-shaped background, optional leading icon, and optional trailing dismiss button. Used for tags, filters, and selected items in multi-select inputs. Accessibility: `Role::Group` or `Role::Button` (if interactive/dismissible).
+
+**Avatar** — new composite. A circular element displaying user initials (TextWidget on a colored circle RectWidget) or an image (when image loading is implemented). The initials color is computed from the user's name hash for consistent per-user coloring. Accessibility: `Role::Image` with `set_name`.
+
+**Accordion / CollapsibleSection** — new composite. A clickable header bar (HStack of label + chevron IconWidget) above a content panel. Bound to a `Signal<bool>` for expanded/collapsed. The content panel uses `visible_when` for instant show/hide, or animated expand/collapse via `Signal<f32>::animate_to()` on a max-height signal. The chevron rotates (via a rotation path or by swapping between ChevronDown and ChevronRight icons). Accessibility: header is `Role::Button` with `set_expanded`; content is `Role::Group`.
+
+### 27.6 Scroll and Split (`fern-widgets/src/`)
+
+**ScrollBar** ✅ implemented (Milestones 3 and 4). Detailed in Section 3.6. Standalone interactive scroll bar with thumb drag, track click, and keyboard adjustment. Shared `Signal<f32>` for scroll position with ScrollArea. Supports an `overlay_mode(true)` flag for the Ubuntu-style thin-to-full expansion: a `resting_thickness` (default 4px) indicator paints at rest, expanding to the full thickness (default 12px) when hovered. Accessibility: `Role::ScrollBar` with `set_numeric_value`, `set_orientation`, `Action::SetValue`.
+
+**ScrollArea** ✅ implemented (Milestones 3 and 4). Detailed in Section 3.8. Viewport-clipping container with two scroll bar modes selected via `ScrollBarStyle`: `Overlay` (default — thin indicator expands to full scroll bar as overlay on hover, viewport width unchanged) or `Permanent` (scroll bar is a layout sibling, reducing viewport by its thickness). The scroll bar widget is always the standalone ScrollBar — ScrollArea does not paint scroll indicators itself. Accessibility: `Role::ScrollView`.
+
+**SplitView** — new Level 2 widget. Two children separated by a draggable divider. The divider's position is a `Signal<f32>` representing the proportion or pixel width of the first child. DragRecognizer on the divider handles resizing. `CursorIcon::ColResize` (horizontal split) or `CursorIcon::RowResize` (vertical split) on hover. Configurable minimum sizes for each pane. Keyboard: when focused, Left/Right (or Up/Down) adjusts the split position by a step. Double-click on divider resets to default position. Accessibility: divider declares `Role::Splitter` with `set_numeric_value`, `Action::SetValue`.
+
+### 27.7 Tabs and Navigation (`fern-widgets/src/`)
+
+**Switcher** — new primitive (in `fern-widgets/src/primitives/`). A container that shows exactly one child at a time, driven by an external `Signal<usize>` index. Internally a ZStack where each child has a `visible_when` binding derived from `selected_index.map(|i| *i == this_child_index)`. The selected child is active (layout, paint, events, accessibility); all others are dormant (state preserved, no rendering cost). The Switcher does not own the selection logic — it receives the `Signal<usize>` from outside, so it composes with any navigation pattern (wizard Next/Back buttons, sidebar navigation, routing logic, tab headers) without encoding assumptions about how the index changes. Used for wizard flows, view mode switching (list/grid/detail), authentication gates (login → main), and navigation-driven content areas. If animated transitions are desired (crossfade, slide), the outgoing and incoming children's opacity or position are driven by the AnimationScheduler before the dormancy toggle completes. Accessibility: `Role::GenericContainer` — the semantic meaning comes from the external control, not the Switcher itself. Only the active child produces AccessKit nodes.
+
+**TabWidget** — new composite. An HStack of tab headers above a Switcher. Bound to a `Signal<usize>` for the selected tab index. The tab headers drive the index state; the Switcher consumes it. Each tab header is a clickable element whose background is driven by `selected_index.map(|i| *i == this_tab_index)`. The TabWidget does not implement switching logic — it delegates to Switcher, which handles dormancy toggling through the binding system. Trailing slot for tab-level actions (add tab button, overflow menu). Keyboard: Arrow Left/Right moves between tab headers; the content pane is focusable independently. Accessibility: `Role::TabList` containing `Role::Tab` headers; content panes are `Role::TabPanel` with `labelled_by` referencing the corresponding tab header.
+
+**Breadcrumb** — new composite. An HStack of clickable path segments separated by chevron or slash icons. Each segment emits a navigation command. The last segment is non-interactive (current location). Accessibility: `Role::Navigation` containing `Role::Link` items, with the last item marked `aria-current`.
+
+### 27.8 Overlays and Dialogs (`fern-widgets/src/`)
+
+**Tooltip** — exists. Non-interactive text or rich content shown after a hover delay. Managed by the TooltipHost wrapper and the WidgetTree's tooltip timer system.
+
+**Popover** — new composite. An interactive overlay anchored to a trigger widget, containing arbitrary content (a form, settings panel, mini-editor). Uses the overlay system with `DismissBehavior::ClickOutside`. Distinguished from tooltip (non-interactive, text-only, short delay) and from menu (structured list of actions). The popover's content receives focus when shown. Accessibility: trigger declares `HasPopup::Dialog`; popover content is `Role::Dialog`.
+
+**Dialog** — new composite. A modal Panel shown via `OverlayLayer::NativePopup` (or as an in-window overlay with a scrim backdrop). Contains a title (heading), content area (arbitrary widgets), and an action bar (HStack of buttons). Modal behavior: focus is trapped within the dialog (Tab cycles only within the dialog's widgets), a scrim covers the parent window, and Escape dismisses. Accessibility: `Role::AlertDialog` or `Role::Dialog` with `set_modal`, `labelled_by` pointing to the title.
+
+**Snackbar / Toast** — new. An auto-dismissing notification shown as an overlay near the bottom of the window. Managed by a `SnackbarManager` (similar to OverlayManager) that queues notifications and displays them sequentially. Each notification has a message, an optional action button, and a configurable display duration. The SnackbarManager handles show/hide animation (slide in from bottom, fade out) via the AnimationScheduler. Accessibility: `Role::Alert` with `set_live("polite")` so screen readers announce the notification without interrupting the current task.
+
+### 27.9 Data-Driven Widgets (`fern-widgets/src/`)
+
+**Repeater** — new Level 2 widget. Creates one child subtree per item in a `ListModel<T>`. When the `ListModel` emits `DataChange` notifications (insert, remove, move), the Repeater performs targeted arena mutations. Designed for small, non-virtualized dynamic collections (toolbar buttons, chapter list, tag chips). Detailed in Section 6.4.
+
+**ListView** — new Level 2 widget. Virtualized scrollable list backed by `ListModel<T>` (common case) or `ListDataSource` trait (large/external datasets). Only instantiates widget subtrees for visible items plus a buffer. Manages item lifecycle based on scroll position. The delegate closure creates the widget subtree for each visible item. Inherits scrolling behavior from ScrollArea's mechanisms (offset placement, clips_children, scroll events) but manages item creation/destruction internally. Accessibility: `Role::List` or `Role::ListBox` with `set_size_of_set`; visible items declare `set_position_in_set`.
+
+**TreeView** — new Level 2 widget. Hierarchical list with expand/collapse. Backed by `TreeModel<T>`, with a `TreeSlice<T>` created internally for per-view expand/collapse state and flat visible-node projection. The visible item set is computed from the expanded nodes, then virtualized like ListView. Indent level is computed from tree depth. Expand/collapse toggle via click on the arrow icon or Left/Right arrow keys. Multiple TreeViews can share the same `TreeModel` with independent expand states. Accessibility: `Role::Tree` with `Role::TreeItem` children; items declare `set_expanded`, `set_level`, `set_position_in_set`, `set_size_of_set`.
+
+**SelectionModel** — new utility (not a widget). A `Signal<SelectionSet>` that tracks which items are selected, with methods for single-select (click), toggle (Ctrl+click), range-select (Shift+click), and select-all (Ctrl+A). Consumed by ListView and TreeView. The SelectionSet stores selected indices as a `BTreeSet<usize>`. The SelectionModel emits selection change notifications through the Signal binding system.
+
+### 27.10 Text Editing (`fern-widgets/src/`, feature-gated)
+
+This section is longer than other widget catalog entries because the rich text editor is the most architecturally distinctive widget in FernUI. It cannot use ScrollArea, it cannot delegate text layout to TextWidget, and its frame loop has to bridge text-document's deferred event model into FernUI's reactive Signal model. The design below is informed by `godot-rich-text`, a working reference implementation of the same `text-document` + `text-typeset` integration in Godot 4 (~2,100 lines of editor logic, plus a 780-line read-only viewer).
+
+#### 27.10.1 Two Widgets: RichTextView and RichTextEditor
+
+FernUI ships two text editing widgets, both feature-gated behind the `[rich-text]` cargo feature.
+
+**`RichTextView`** is the read-only display widget. It owns a `TextDocument` (loaded from plain text, HTML, or markdown), a `Typesetter` for layout, and an optional read-only `TextCursor` for selection. It supports text selection via mouse drag, double-click word selection, triple-click paragraph selection, copy to clipboard, link click detection, and image click detection. It does not support editing, IME, or formatting commands. It is the right starting point for documentation viewers, help panels, message displays, log readers, and any case where text content needs rich rendering without modification. Approximately 60% of the editor's code is shared with the viewer and lives in a common module.
+
+**`RichTextEditor`** is the editable widget. It extends `RichTextView` with cursor positioning, character insertion, deletion, formatting commands (bold, italic, underline, headings, lists, tables), undo/redo, IME composition, paste with format preservation, and a debounced text-changed notification. It is the foundation for the writer-IDE use case (Atelier, novelist tools), code editors, note-taking applications, and any case where the user authors rich content.
+
+Both widgets are constructed in `build()` and own their `TextDocument`, `Typesetter`, and `TextCursor` as struct fields. The document can also be externally owned and passed in via constructor, allowing multiple widgets to share a single document or the application to retain access for save/load operations.
+
+```rust
+let editor = ctx.add(
+    RichTextEditor::new(document.clone(), shared_typesetter.clone())
+        .wrap_mode(WrapMode::Word)
+        .editable(true)
+        .zoom(1.0)
+        .on_text_changed(AppCmd::DocumentMarkDirty)
+        .on_link_clicked(|href| AppCmd::OpenUrl(href.into()))
+        .on_undo_redo_changed(|can_undo, can_redo| {
+            AppCmd::UpdateUndoButtons { can_undo, can_redo }
+        })
+);
+```
+
+#### 27.10.2 The Triple Ownership Model
+
+The widget owns three things that work together: a `TextDocument` (the data, with its event log and undo stack), a `Typesetter` (the layout engine that takes a document snapshot and produces glyph positions, line boxes, and decoration rects), and a `TextCursor` (the editing handle that mutates the document and tracks the caret position).
+
+```rust
+pub struct RichTextEditor {
+    // Triple ownership
+    document: TextDocument,
+    typesetter: Typesetter,
+    cursor: TextCursor,
+
+    // Reactive bridge
+    document_version: Signal<u64>,        // increments on every doc event
+    can_undo: Signal<bool>,
+    can_redo: Signal<bool>,
+    has_selection: Signal<bool>,
+    caret_visible: Signal<bool>,          // animated for blink
+
+    // Scroll state — NOT inside a ScrollArea
+    scroll_y: Signal<f32>,
+    scroll_x: Signal<f32>,
+    max_scroll_y: Signal<f32>,
+    max_scroll_x: Signal<f32>,
+    viewport_ratio_y: Signal<f32>,
+    viewport_ratio_x: Signal<f32>,
+
+    // Layout strategy state
+    needs_full_layout: bool,
+    last_relayout_block_id: Option<usize>,
+    content_dirty: bool,
+
+    // Input batching
+    pending_chars: String,                // collected key inputs flushed per frame
+    preferred_x: Option<f32>,             // sticky column for vertical movement
+
+    // Click counting
+    click_count: u32,
+    last_click_time: Instant,
+    last_click_pos: Point,
+
+    // Debounce
+    debounce_timer: f32,
+    pending_text_changed: bool,
+    pending_format_changed: bool,
+    pending_undo_redo: Option<(bool, bool)>,
+
+    // Application command factories
+    on_text_changed: Option<CommandFactory>,
+    on_link_clicked: Option<Box<dyn Fn(&str) -> Box<dyn AppCommand>>>,
+    on_image_clicked: Option<Box<dyn Fn(&str) -> Box<dyn AppCommand>>>,
+    on_undo_redo_changed: Option<Box<dyn Fn(bool, bool) -> Box<dyn AppCommand>>>,
+
+    // Internal child IDs
+    text_area_id: Option<WidgetId>,
+    v_scrollbar_id: Option<WidgetId>,
+    h_scrollbar_id: Option<WidgetId>,
+}
+```
+
+The `TextDocument` is owned, not wrapped in `Rc<RefCell<>>`, because text-document already provides interior mutability through its own internal locking. Mutations go through the cursor (`cursor.insert_text("hello")`); the document records the mutation in its event log and the editor's per-frame effect drains the events.
+
+If the application needs shared access to the document (a save handler, an outline panel, a word counter), it constructs the document externally and passes it to the editor's constructor. The editor then takes a clone of the document handle rather than constructing a new one. text-document's internal Rc-based design makes this cheap.
+
+#### 27.10.3 The Frame Loop
+
+The editor cannot rely on Signal observers alone for its update logic. text-document's mutations produce events asynchronously (the cursor mutates, the document queues an event, the event must be drained later). FernUI's reactive system propagates Signal changes immediately. Bridging these two models requires a per-frame effect that polls the document's event queue, decides what relayout and repaint work is needed, and updates the relevant Signals.
+
+The editor registers a `ctx.effect(&frame_tick, |_| ...)` on the animation scheduler's frame tick signal. The closure runs once per frame and executes the equivalent of the following pseudo-code:
+
+```
+1. Flush pending_chars: if any characters were buffered from key events,
+   call cursor.insert_text(&pending_chars) as a single insertion.
+
+2. Drain document events: events = document.poll_events()
+   - ContentsChanged { position, blocks_affected }: if blocks_affected <= 1,
+     remember the position for incremental relayout. Otherwise mark needs_full_layout.
+   - FormatChanged: needs_full_layout = true.
+   - DocumentReset, FlowElementsInserted/Removed, BlockCountChanged: needs_full_layout = true.
+   - UndoRedoChanged { can_undo, can_redo }: stash for debounced emission.
+   - LongOperationFinished: emit a one-shot DocumentLoaded notification.
+
+3. Pre-adjust viewport for word-wrap mode: if wrap_mode == Word and the
+   vertical scroll bar is visible, set typesetter.viewport_width =
+   widget_width - scrollbar_width and mark needs_full_layout. This breaks
+   the circular dependency between viewport width, content height, and
+   scrollbar visibility.
+
+4. Apply layout strategy:
+   - If needs_full_layout: typesetter.layout_full(&document.snapshot_flow())
+   - Else if a single block changed: typesetter.relayout_block(...) and
+     remember last_relayout_block_id for the incremental render path.
+
+5. Update cursor display: typesetter.set_cursor(CursorDisplay {
+     position: cursor.position(),
+     anchor: cursor.anchor(),
+     visible: caret_visible.get(),
+     ..
+   })
+
+6. Ensure caret visible: if the caret moved off-screen, adjust scroll_y or
+   scroll_x to bring it back into view with a margin.
+
+7. Update scroll signals: set max_scroll_y, max_scroll_x, viewport_ratio_y,
+   viewport_ratio_x from typesetter.content_height(), max_content_width(),
+   and the current widget size.
+
+8. Debounced signal emission: if 150ms have passed since the last edit,
+   emit pending_text_changed, pending_format_changed, and pending_undo_redo
+   as typed application commands.
+
+9. Mark content_dirty for the paint phase if anything changed.
+```
+
+This is the only place where the editor synchronizes with text-document's event model. Everything else (signal observers, gesture handlers, accessibility queries) reacts to the Signals that this loop updates.
+
+#### 27.10.4 Three-Tier Render Strategy
+
+The editor has three distinct render paths, used for different change kinds. The choice between them is based on `content_dirty` and `last_relayout_block_id`:
+
+- **Full render** (`typesetter.render()`): used for structural changes (block insertion, paragraph format change, document reset). Rebuilds the entire `RenderFrame` from scratch. The most expensive path.
+- **Incremental block render** (`typesetter.render_block_only(block_id)`): used after `relayout_block` for a single-block edit (typing inside a paragraph). The typesetter merges the new block's glyphs and decorations into the existing render frame, leaving the rest untouched. Ten to fifty times faster than a full render for documents with hundreds of blocks.
+- **Cursor-only render** (`typesetter.render_cursor_only()`): used for caret blink. Updates only the cursor decoration in the render frame; glyphs and other decorations are unchanged. This is what allows the caret to blink at 60fps without triggering a full re-render twice per second.
+
+The editor's `paint()` method walks the resulting `RenderFrame` in four passes:
+
+1. **Background decorations**: Selection, CellSelection, Background, BlockBackground, TableCellBackground, TableBorder. Drawn first so text renders on top.
+2. **Glyph quads**: each glyph has a screen rect, an atlas rect, and a color. Drawn via `canvas.draw_glyph_quad(screen, atlas, color)`. The atlas is the typesetter's shared glyph atlas, integrated with fern-render's atlas pipeline.
+3. **Inline images**: PNG/JPEG/WebP images embedded in the document. Each has a screen rect and a resource name; the editor's image cache resolves the name to a texture and draws it.
+4. **Foreground decorations**: Cursor, Underline, Overline, Strikeout. Drawn last so they render on top of glyphs.
+
+The Canvas operations are standard FernUI primitives — `canvas.fill_rect()` for background and cursor, `canvas.draw_line()` for underline/overline/strikeout, `canvas.draw_glyph_quad()` for glyphs, `canvas.draw_image()` for inline images. There is no special canvas API for rich text; the editor walks the frame and emits ordinary calls.
+
+#### 27.10.5 Why the Editor Cannot Use ScrollArea
+
+This is the most important architectural distinction in the rich text editor design, and the reason its catalog entry is much longer than every other widget's.
+
+A `ScrollArea` wraps a child widget. The child has an intrinsic size (computed by `size_that_fits` with an unbounded proposal); the ScrollArea derives `max_scroll = max(0, child_size - viewport_size)` and clips the child's painting to the viewport. The scroll bar's visibility is determined after the child's intrinsic size is known.
+
+This works for any widget whose layout does not depend on the viewport. It does not work for the rich text editor, because the editor's layout has a circular dependency:
+
+- The viewport width depends on whether the vertical scroll bar is visible.
+- The vertical scroll bar's visibility depends on whether the content height exceeds the viewport height.
+- The content height depends on text layout.
+- Text layout (in word-wrap mode) depends on the viewport width.
+
+A naive ScrollArea wrapper would either over-allocate width (assume the scroll bar is always visible, leaving an empty strip when content fits) or oscillate (lay out without the scroll bar, discover it's needed, lay out again with it, discover content now fits without it, lay out again...). Neither is acceptable.
+
+The Godot reference resolves this by pre-adjusting the viewport before the layout call: at the start of each frame loop, it checks whether the vertical scroll bar is currently visible, sets `typesetter.viewport_width = widget_width - (vsb_visible ? sb_width : 0)`, and then runs `layout_full`. The decision is one-frame-stale (the scroll bar visibility is based on the previous frame's content height) but converges in two frames for any content change and is invisible to the user. ScrollArea cannot express this pre-adjustment because it does not know about the typesetter or about the widget's frame loop.
+
+The editor therefore manages its own scroll directly. It owns six `Signal<f32>` fields (`scroll_y`, `scroll_x`, `max_scroll_y`, `max_scroll_x`, `viewport_ratio_y`, `viewport_ratio_x`) and constructs two `ScrollBar` widgets as siblings of the text content area in `build()`. The ScrollBars bind to these signals just as they would inside a ScrollArea. The editor's `place_children()` positions the scroll bars at the right edge (vertical) and bottom edge (horizontal), trimming each by the other's thickness when both are visible. The editor's `paint()` translates by `(-scroll_x.get() * zoom, -scroll_y.get() * zoom)` before walking the render frame, which is the equivalent of ScrollArea's offset placement.
+
+```rust
+// Inside RichTextEditor::build():
+let v_sb = ScrollBar::vertical(
+    self.scroll_y.clone(),
+    self.max_scroll_y.clone(),
+    self.viewport_ratio_y.clone(),
+).overlay_mode(false);  // permanent layout sibling, not overlay
+
+let h_sb = ScrollBar::horizontal(
+    self.scroll_x.clone(),
+    self.max_scroll_x.clone(),
+    self.viewport_ratio_x.clone(),
+).overlay_mode(false);
+
+self.v_scrollbar_id = Some(ctx.add(v_sb));
+self.h_scrollbar_id = Some(ctx.add(h_sb));
+self.text_area_id = Some(ctx.self_id());  // the editor itself is the text area
+```
+
+The editor's `place_children()` lays out the two scroll bars manually:
+
+```rust
+fn place_children(&self, bounds: Rect, ...) -> Vec<WidgetPlacement> {
+    let v_visible = self.max_scroll_y.get() > 0.0;
+    let h_visible = self.max_scroll_x.get() > 0.0;
+    let sb = SCROLLBAR_THICKNESS;
+
+    let mut placements = Vec::new();
+    if v_visible {
+        placements.push(WidgetPlacement {
+            id: self.v_scrollbar_id.unwrap(),
+            bounds: Rect {
+                x: bounds.x + bounds.width - sb,
+                y: bounds.y,
+                width: sb,
+                height: bounds.height - if h_visible { sb } else { 0.0 },
+            },
+        });
+    }
+    if h_visible {
+        placements.push(WidgetPlacement {
+            id: self.h_scrollbar_id.unwrap(),
+            bounds: Rect {
+                x: bounds.x,
+                y: bounds.y + bounds.height - sb,
+                width: bounds.width - if v_visible { sb } else { 0.0 },
+                height: sb,
+            },
+        });
+    }
+    placements
+}
+```
+
+The editor uses `ScrollBarStyle::Permanent` semantics (the scroll bars are layout siblings, not overlays), but it does not actually use the `ScrollBarStyle` enum because there is no ScrollArea wrapper to configure. The two ScrollBar widgets are constructed in their permanent-mode form directly.
+
+#### 27.10.6 Hit Testing and HitRegion
+
+`Typesetter::hit_test(x, y)` returns an `Option<HitResult>` where `HitResult` contains a text position and a `HitRegion` enum:
+
+```rust
+pub enum HitRegion {
+    Text,
+    Link { href: String },
+    Image { name: String },
+    TableCell { table_id: usize, row: usize, col: usize },
+}
+```
+
+The editor's pointer handler checks the region first and dispatches differently for each:
+
+- `HitRegion::Link { href }`: emit `link_clicked` with the URL. Do not place the cursor (the click was on a link, not on text).
+- `HitRegion::Image { name }`: emit `image_clicked` with the image name. Do not place the cursor.
+- `HitRegion::Text` or `HitRegion::TableCell`: place the cursor at the hit position via `cursor.set_position(hit.position, MoveMode::MoveAnchor)`.
+
+The hit test runs in document coordinates, so the editor adjusts the input pointer position by the current scroll offset (and zoom factor) before passing it to `hit_test`:
+
+```rust
+let hit_x = pointer.x + self.scroll_x.get() * zoom;
+let hit_y = pointer.y + self.scroll_y.get() * zoom;
+let hit = typesetter.hit_test(hit_x, hit_y);
+```
+
+#### 27.10.7 Click Counting and Selection Modes
+
+Single click positions the cursor. Double click selects the word under the cursor. Triple click selects the paragraph. Shift+click extends the selection to the click position.
+
+The editor implements this by tracking `click_count`, `last_click_time`, and `last_click_pos`. A click within 400ms and 5px of the previous click increments the counter; otherwise it resets to 1. The handler then dispatches based on the counter:
+
+```rust
+match self.click_count {
+    1 => self.place_cursor(position),
+    2 => {
+        self.place_cursor(position);
+        cursor.select(SelectionType::WordUnderCursor);
+    }
+    _ => {  // 3 or more
+        self.place_cursor(position);
+        cursor.select(SelectionType::BlockUnderCursor);
+        self.click_count = 3;  // cap at 3
+    }
+}
+```
+
+FernUI's gesture system has `TapRecognizer` and `DoubleTapRecognizer`. A `TripleTapRecognizer` is a small addition; alternatively, the editor implements click counting itself in its pointer handler (the Godot version does this and it works fine). For Milestone 8, implementing it inline is simpler than adding a third gesture recognizer.
+
+Drag-select is handled separately. When the pointer moves while the button is held, the editor calls `cursor.set_position(hit.position, MoveMode::KeepAnchor)` to extend the selection. If the pointer is within 20px of the top or bottom of the viewport, the editor auto-scrolls toward the pointer at a speed proportional to the distance into the margin.
+
+#### 27.10.8 Caret Blink as a Separate Render Path
+
+The caret blinks at a configurable interval (default 530ms — the Windows default). The blink is implemented as a `Signal<bool>` (`caret_visible`) updated by the animation scheduler:
+
+```rust
+// In build():
+self.caret_visible = ctx.signal(true);
+ctx.effect(&frame_tick, {
+    let visible = self.caret_visible.clone();
+    let mut accumulated = 0.0_f32;
+    move |delta| {
+        accumulated += delta;
+        if accumulated >= 0.530 {
+            accumulated = 0.0;
+            visible.set(!visible.get());
+        }
+    }
+});
+```
+
+The frame loop sets the typesetter's cursor display to match `caret_visible.get()`, then triggers a *cursor-only* render (not a full render). The render frame's glyphs and other decorations are unchanged; only the cursor decoration is replaced. The widget's paint pass walks the same number of glyph quads but the paint is fast because no text layout has changed.
+
+Without this distinction, every caret blink would mark the editor's content_dirty flag and trigger a full re-render of the entire visible page, which would dominate frame time for documents with hundreds of glyphs.
+
+#### 27.10.9 Debounced Signal Emission
+
+Signals like `text_changed`, `format_changed`, and `undo_redo_changed` should not fire on every keystroke. A user typing 100 characters per second would otherwise trigger 100 application command emissions per second, hammering observers (the modified-indicator UI, the document outline panel, the autosave timer).
+
+The editor batches these into pending flags (`pending_text_changed`, `pending_format_changed`, `pending_undo_redo`) that are set during the frame loop. A `debounce_timer` accumulates `delta` each frame. When the timer exceeds 150ms (chosen to feel responsive while still batching bursts of typing), the editor flushes the pending flags by emitting the corresponding typed commands and resets the timer.
+
+This is purely an emission optimization. The document and typesetter are always up to date; only the application-facing notification is debounced. Observers that need real-time access to the document state (a live word counter, for example) read the document directly via the `document_version: Signal<u64>` which is incremented immediately on each event drain.
+
+#### 27.10.10 The Signal<u64> Document Version
+
+The bridge between text-document's imperative-then-events model and FernUI's reactive Signal model is a `Signal<u64>` ("document version") that the editor's frame loop increments whenever it processes a non-empty event batch. This signal is exposed publicly via `editor.document_version()`.
+
+Any widget that wants to react to document changes observes this signal:
+
+```rust
+// A word counter widget:
+let counter = ctx.signal(0_usize);
+ctx.effect(&editor.document_version(), {
+    let document = document.clone();
+    let counter = counter.clone();
+    move |_| {
+        let count = document.to_plain_text()
+            .map(|s| s.split_whitespace().count())
+            .unwrap_or(0);
+        counter.set(count);
+    }
+});
+
+TextWidget::new_bound(counter.map(|n| format!("{} words", n)))
+```
+
+The version signal does not carry information about *what* changed — only that something did. Observers that need granular change information must track their own state and compare against the document. For most use cases (modified indicators, word counts, outline panels), this coarse-grained notification is sufficient and avoids the complexity of typed change events.
+
+#### 27.10.11 Application Commands for Editor Events
+
+The editor exposes typed-command builder methods for application-relevant events:
+
+- `on_text_changed(cmd)`: emitted (debounced) when the document content changes.
+- `on_format_changed(cmd)`: emitted (debounced) when character or block formatting changes.
+- `on_link_clicked(|href| -> AppCmd)`: takes a constructor function that builds a typed command from the clicked URL. The closure exists because the URL is dynamic data; the command type is application-defined.
+- `on_image_clicked(|name| -> AppCmd)`: same pattern for image clicks.
+- `on_undo_redo_changed(|can_undo, can_redo| -> AppCmd)`: emitted when the can_undo or can_redo state changes.
+- `on_document_loaded(cmd)`: emitted once when async loading (`set_html`, `set_markdown`) completes.
+- `on_selection_changed(cmd)`: emitted when the selection range changes.
+- `on_caret_changed(cmd)`: emitted when the caret moves without selecting.
+
+The constructor-function pattern (`|href| AppCmd::OpenUrl(href.into())`) is used for events that carry runtime data (URLs, image names, undo/redo booleans). This is consistent with Section 9.2's typed-command discipline: the closure constructs a typed command from the runtime data, rather than the closure being the action handler itself. The result is a `Box<dyn Fn(...) -> Box<dyn AppCommand>>` that the editor invokes when the event fires.
+
+For applications that need direct closure handling (a plugin system that registers custom link handlers), the `on_*_fn` variants from Section 9.2.6 are also available: `on_link_clicked_fn(|href, ctx| { ... })` accepts a closure that runs directly with `EventContext` access. This is the documented escape hatch for cases where a typed command is not appropriate.
+
+#### 27.10.12 Editing Operations and the Cursor API
+
+All editing happens through the `TextCursor`. The editor's keyboard handler dispatches each key event to the appropriate cursor method:
+
+- Character input: `cursor.insert_text(&str)` (batched via `pending_chars`).
+- Backspace: `cursor.delete_previous_char()`.
+- Delete: `cursor.delete_char()`.
+- Ctrl+Backspace / Ctrl+Delete: `cursor.move_position(WordLeft/WordRight, KeepAnchor, 1)` then `cursor.remove_selected_text()`.
+- Enter: `cursor.insert_block()` (or table cell navigation when inside a table).
+- Tab: `cursor.insert_text("\t")` (or list indent when at the start of a list item).
+- Arrow keys: `cursor.move_position(direction, MoveAnchor, 1)`.
+- Shift+Arrow: `cursor.move_position(direction, KeepAnchor, 1)`.
+- Home/End: `cursor.move_position(StartOfBlock/EndOfBlock, MoveAnchor, 1)`.
+- Ctrl+Home/Ctrl+End: `cursor.move_position(Start/End, MoveAnchor, 1)`.
+- Page Up/Down: compute the target Y (current Y minus/plus viewport height), hit-test for the position, set the cursor.
+- Ctrl+Z: `document.undo()`.
+- Ctrl+Y / Ctrl+Shift+Z: `document.redo()`.
+- Ctrl+B: toggle bold via `cursor.set_char_format(CharFormat { font_bold: Some(!current), .. })`.
+- Ctrl+I, Ctrl+U: same pattern for italic and underline.
+- Ctrl+A: select all (with escalation in tables, see below).
+
+**Sticky preferred X for vertical movement.** When the user moves the cursor up or down across lines, the X coordinate is remembered in `preferred_x`. Successive Up/Down presses use this X to find the target column on each line, even when crossing short lines. Any non-vertical action clears `preferred_x`.
+
+**Ctrl+A escalation in tables.** When the cursor is inside a table cell, the first Ctrl+A selects the cell content. The second Ctrl+A selects the entire cell (including its formatting). The third selects the entire table. The fourth selects the entire document. A fifth resets to the cell content. This is a convenience for table editing and is implemented entirely in the editor's command handling (no framework support needed). Outside of tables, Ctrl+A always selects the entire document.
+
+#### 27.10.13 Clipboard Integration
+
+The editor supports both plain-text and rich (format-preserving) clipboard operations. Cut and copy place the selected content on the system clipboard as plain text via `fern-platform`'s clipboard backend, and additionally store a `DocumentFragment` (the typed rich representation) in the editor's internal `rich_clipboard_fragment` field along with the plain-text version.
+
+On paste, the editor reads the system clipboard. If the system clipboard text matches the editor's stored plain-text (indicating the copy came from this same editor instance and the system clipboard has not been overwritten by another application), it pastes the stored `DocumentFragment` via `cursor.insert_fragment(&fragment)`, preserving formatting. Otherwise it pastes plain text via `cursor.insert_text(&system_text)`.
+
+This is a tradeoff: rich format preservation works within a single editor instance, but inter-application paste is plain-text only. Full rich-format inter-application clipboard would require platform-specific MIME types (RTF on Windows, NSAttributedString on macOS, text/html on Linux) and is deferred to a post-Milestone-8 refinement. The plain-text fallback is correct and unsurprising.
+
+#### 27.10.14 IME and Composition
+
+IME (Input Method Editor) support allows CJK and other complex-script users to compose characters via multi-keystroke sequences. The OS provides composition events: `ime_composition_changed` with the in-progress text, and `ime_commit` with the final committed string.
+
+The editor handles IME via its `on_focus` handler: gaining focus enables IME via `fern-platform` and updates the IME composition window position to sit just below the caret. Losing focus disables IME. Composition events are routed through the editor's pointer/keyboard handler chain and applied to the document via cursor operations.
+
+**IME is deferred to a post-Milestone-9 refinement.** Milestone 8 (RichTextEditor) and Milestone 9 (TextInput) both target Latin-script editing. IME requires platform-specific composition window positioning (winit exposes IME events but the composition window position is OS-specific) and rich text composition rendering (the in-progress text needs distinct visual styling — typically an underline). Both are achievable but add scope. The architectural hooks (`update_ime_position()` on focus enter, IME event handling in the keyboard pipeline) are designed in from the start so that adding IME later does not require API changes.
+
+#### 27.10.15 Accessibility
+
+Both `RichTextView` and `RichTextEditor` declare `Role::MultilineTextInput` (or `Role::Document` for the read-only viewer) with the following AccessKit properties:
+
+- `set_value(text)` — the plain-text content of the document.
+- `set_text_selection(range)` — the current selection range as a character offset pair.
+- `set_caret_position(offset)` — the caret position as a character offset.
+- `set_read_only(true)` for `RichTextView`.
+- `set_multiline(true)` for both.
+- `Action::SetValue` — handled by replacing the document content.
+- `Action::SetTextSelection` — handled by setting the cursor's anchor and position.
+- `Action::ScrollIntoView` — handled by adjusting the scroll signals.
+
+Screen readers can read the entire document content via `set_value` and track the caret position for keyboard navigation. Format information (bold, italic, headings) is not exposed via AccessKit in the first version because AccessKit's text-attribute support is platform-specific and incomplete. The plain-text representation is sufficient for the most common screen reader use cases.
+
+#### 27.10.16 What This Means for Milestone 8 Implementation
+
+Milestone 8 is significantly larger than other milestones because of the editor's complexity. The recommended decomposition is:
+
+**M8a: RichTextView** — read-only viewer with text selection, link/image click events, scroll bar integration, the frame loop pattern, the three-tier render strategy, and the document version Signal. This validates the architectural approach (document + typesetter ownership, frame loop bridge, no ScrollArea, dual scroll bars) without the complications of editing, undo, IME, or formatting. Approximately 60% of the editor's eventual code lives in shared modules used by both widgets.
+
+**M8b: RichTextEditor** — adds cursor positioning, character insertion, deletion, formatting commands, undo/redo, debounced signals, click counting for double/triple click, sticky preferred X, drag-select with auto-scroll, plain-text clipboard, and the typed-command builder methods.
+
+Both substages share the same module structure (`fern-widgets/src/rich_text/`) with files for `view.rs` (RichTextView), `editor.rs` (RichTextEditor), `frame_loop.rs` (the per-frame effect logic, shared), `paint.rs` (the four-pass render frame walker, shared), `hit_test.rs` (region dispatch, shared), and `keyboard.rs` (the editor's key handler, editor-only).
+
+The Godot reference at github.com/jacquetc/godot-rich-text is the working implementation of this same design in a different framework. It is approximately 2,100 lines for the editor and 780 lines for the viewer, with another 580 lines of shared bridge/input/fonts code. The FernUI port should be similar in size (~3,500 lines total) with most of the logic translating directly: Godot signals become typed commands, `queue_redraw()` becomes Signal mutations, `_process(delta)` becomes a frame-tick effect, native scroll bar children become FernUI ScrollBar widgets, and the rest is mechanical.
+
+---
+
+**TextInput** — Milestone 9 widget, plain-text specialization of `RichTextEditor`. Constructed by configuring a `RichTextEditor` with formatting commands disabled (the command filter rejects Bold/Italic/Heading at the cursor level), Enter key remapped to `on_submit` instead of `cursor.insert_block()`, and an optional single-line constraint that rejects Enter entirely. Bound to a `Signal<String>` via two-way binding with the underlying TextDocument's plain-text representation. Cursor rendering, selection, keyboard editing, and clipboard are all inherited from RichTextEditor — TextInput is a thin configuration layer, not a reimplementation. NumberInput/SpinBox is TextInput plus increment/decrement buttons plus a numeric validation filter on character input. IME is deferred (see 27.10.14). Accessibility: `Role::TextInput` with `set_value`, `set_text_selection`, `Action::SetValue`.
+
+### 27.11 Platform-Dependent (`fern-platform/`, `fern-app/`)
+
+**Native MenuBar integration** — planned for Milestone 10. The in-window `MenuBar` widget (Milestone 4, above) already provides the Windows/Linux implementation. On macOS, Milestone 10 adds a platform abstraction: the application declares its menu structure once through the FernApp builder, and `fern-platform` translates it to native `NSMenu` at runtime. Blocked on: Cocoa/AppKit interop code that goes beyond what winit provides.
+
+**Clipboard** — new utility (not a widget). Platform-specific read/write of text and typed data via OS clipboard APIs. Shares the MIME-typed payload model with drag-and-drop. Blocked on: platform integration code in `fern-platform` (`arboard` crate or direct OS API calls).
+
+**FileDialog** — new utility (not a widget). Native open/save file dialogs via platform APIs. Implemented via the `rfd` crate or direct OS API calls. Returns a path asynchronously. Blocked on: nothing in principle (rfd is a standalone crate), but integrating the async result back into the single-threaded UI model requires the EventLoopProxy channel pattern.
+
+---
+
+## 28. V2 Widget Authoring Model
+
+This section defines the redesigned widget authoring surface for FernUI. The redesign unifies two traits into one, replaces four reactivity types with one, and moves event handling from a monolithic method to attached handlers. The underlying framework infrastructure — the arena, layout protocol, rendering pipeline, overlay system, animation scheduler, accessibility integration, window management — is unchanged. What changes is the API that widget authors program against.
+
+The redesign is motivated by three problems identified during Milestone 3 implementation. The `Widget` / `CompositeWidget` split forces the wrong decision at definition time — a widget must choose between custom painting and child composition, when real widgets need both. The `RefCell<Option<State<T>>>` pattern is required by every stateful composite because `CompositeWidget::build()` takes `&self` while `event()` needs mutable access to state created during `build()`. The four reactivity types (`State<T>`, `DerivedState<T>`, `Reactive<T>`, `StateHandle<T>`) expose implementation details that widget authors should not need to understand.
+
+### 28.1 Unified Widget Trait
+
+The `CompositeWidget` trait (composite_widget.rs) and `CompositeWidgetAdapter` (composite_adapter.rs) are removed. There is one trait:
+
+```rust
+pub trait Widget: std::fmt::Debug + 'static {
+    /// Construct children. Called once after the widget is placed in the arena.
+    /// Takes &mut self — store child IDs, signal handles, any state needed later.
+    /// Returns the list of root child IDs (empty for leaf widgets).
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        vec![]
+    }
+
+    /// Respond to the parent's size proposal.
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
+
+    /// Position children within the allocated bounds.
+    fn place_children(
+        &self, _bounds: Rect, _children: &mut [ChildPlacement], _ctx: &LayoutContext,
+    ) {}
+
+    /// Paint this widget's own visuals. Children are painted automatically
+    /// after this method returns.
+    fn paint(&self, _bounds: Rect, _canvas: &mut Canvas, _ctx: &PaintContext) {}
+
+    /// Declare accessibility identity.
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+
+    /// Return child widget IDs (for arena traversal).
+    fn children(&self) -> Vec<WidgetId> { vec![] }
+}
+```
+
+Six methods. Only `size_that_fits` is required — all others have defaults. A leaf widget (TextWidget, RectWidget, IconWidget) implements `size_that_fits` and `paint`. A layout container (HStack, VStack, ZStack) implements `size_that_fits`, `place_children`, and `children`. A composing widget (Button, Checkbox) implements `build` and `accessibility`. A hybrid widget (Card, Toggle, ScrollArea) implements `build` for children and `paint` for its own visuals.
+
+Methods removed from the trait compared to V1:
+- `event()`, `preview_event()` — replaced by attached handlers (Section 28.3).
+- `is_focusable()`, `tab_index()` — replaced by `.focusable(true)`, `.tab_index(n)` builder methods stored on the arena node.
+- `is_spacer()` — replaced by a flag on the arena node, set by Spacer during construction.
+- `is_composite()`, `as_any_mut()` — gone, no composite adapter to distinguish or downcast.
+- `register_bindings()` — gone, signal-to-widget bindings register automatically through `Prop<T>` resolution.
+- `take_pending_children()`, `set_resolved_children()`, `take_visible_when()`, `take_enabled_when()` — moved to the `WidgetBuilder` blanket impl and arena resolution.
+
+### 28.2 The `build(&mut self)` Lifecycle
+
+The `build` method takes `&mut self`, eliminating the `RefCell<Option<State<T>>>` pattern. Widget authors store child IDs, signal handles, and any construction-time state as plain struct fields:
+
+```rust
+pub struct Button {
+    label: String,
+    style: ButtonStyle,
+    action: Option<Box<dyn Fn(&mut EventContext)>>,
+    // Plain fields — no RefCell, no Option wrapper
+    interaction: Signal<InteractionState>,
+    rect_id: WidgetId,
+    text_id: WidgetId,
+}
+```
+
+The `interaction` signal, `rect_id`, and `text_id` are set during `build()` with `&mut self` access:
+
+```rust
+fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+    self.interaction = ctx.signal(InteractionState::Idle);
+    self.text_id = ctx.add(TextWidget::new(&self.label).color(text_color));
+    self.rect_id = ctx.add(RectWidget::new().background(bg_color));
+    // ...
+    vec![root_id]
+}
+```
+
+**Borrow safety.** The widget is stored in the arena. During `build()`, both `&mut self` (the widget) and `&mut BuildContext` (wrapping `&mut WidgetTree`, which owns the arena) are needed. This would be a double mutable borrow if the widget remained in the arena. The solution already exists in the codebase: `arena.take_widget(id)` extracts the widget box from its arena node (replacing it with a `PlaceholderWidget`), the extracted widget is mutated freely, then `arena.restore_widget(id, widget_box)` puts it back. The borrow checker is satisfied because the widget is not in the arena during the `build()` call:
+
+```rust
+// Inside WidgetTree — widget authors never see this:
+fn build_widget(&mut self, id: WidgetId) {
+    let mut widget_box = self.arena.take_widget(id).unwrap();
+    let child_ids = {
+        let mut ctx = BuildContext { tree: self };
+        widget_box.build(&mut ctx)
+    };
+    self.arena.restore_widget(id, widget_box);
+    // Wire child_ids as children of id in the arena
+}
+```
+
+**When build() is called.** Once, after the widget is inserted into the arena via `ctx.add()` or `tree.add()`. On environment change (theme switch, locale switch), `build()` is called again on the same widget: the old child subtree is destroyed, effects from the previous build are cleaned up, and `build()` runs with `&mut self` to construct a fresh subtree. The widget struct persists across rebuilds — only the children are replaced.
+
+**Constraint.** During `build()`, the widget cannot read its own arena node (bounds, parent, activation state) because it has been extracted. This is correct — `build()` runs before the first layout, so the widget has no bounds yet. If a widget needs its own ID during `build()`, `BuildContext` provides `ctx.self_id()`.
+
+### 28.3 Attached Event Handlers
+
+Instead of implementing a monolithic `event()` method with a match on every event variant, widgets attach named handlers that express intent. Handlers are closures stored on the arena node, dispatched by the framework during the existing preview/bubble event passes.
+
+```rust
+// At the widget construction site or inside build():
+MinSize::new(48.0, 48.0)
+    .child(content)
+    .on_tap(|ctx| { ctx.emit(Cmd::Clicked); })
+    .on_hover(|entered, ctx| {
+        interaction.set(if entered { Hovered } else { Idle });
+    })
+    .focusable(true)
+    .cursor(CursorIcon::Pointer)
+```
+
+The handler methods are defined on a `WidgetBuilder` trait that is blanket-implemented for all `Widget` types:
+
+```rust
+pub trait WidgetBuilder: Widget + Sized {
+    // Gesture handlers — the framework attaches the appropriate recognizer
+    fn on_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
+    fn on_double_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
+    fn on_long_press(self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self;
+    fn on_drag(self, f: impl FnMut(DragPhase, &mut EventContext) + 'static) -> Self;
+
+    // Focus and keyboard
+    fn on_focus(self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self;
+    fn on_key(self, f: impl FnMut(Key, Modifiers, &mut EventContext) -> bool + 'static) -> Self;
+    fn focusable(self, focusable: bool) -> Self;
+    fn tab_index(self, index: i32) -> Self;
+
+    // Pointer (low-level escape hatch for custom interaction)
+    fn on_pointer_event(self, f: impl FnMut(&PointerEvent, &mut EventContext) -> bool + 'static) -> Self;
+    fn on_hover(self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self;
+    fn cursor(self, cursor: CursorIcon) -> Self;
+
+    // Scroll
+    fn on_scroll(self, f: impl FnMut(ScrollDelta, &mut EventContext) -> bool + 'static) -> Self;
+
+    // Accessibility actions
+    fn on_access_action(self, f: impl FnMut(accesskit::Action, &mut EventContext) -> bool + 'static) -> Self;
+
+    // Framework-level properties
+    fn visible_when(self, signal: impl Into<Prop<bool>>) -> Self;
+    fn enabled_when(self, signal: impl Into<Prop<bool>>) -> Self;
+    fn tooltip(self, text: impl Into<String>) -> Self;
+}
+```
+
+Handler attachment works by storing closures temporarily on the widget value (via a generic metadata wrapper or a separate `HandlerSet` struct stored alongside the widget). When `BuildContext::add()` or `WidgetTree::add()` inserts the widget into the arena, the handlers are transferred to the `WidgetNode`. This is the same mechanism currently used for `take_visible_when()` and `take_pending_children()`, generalized to all node metadata.
+
+**How dispatch works.** The framework's event dispatch path (preview pass root → target, bubble pass target → root) is unchanged. At each node, instead of calling `node.widget.event(event, ctx)`, the framework checks which handler is relevant for the event type and calls it. A `PointerDown`/`PointerUp` sequence on a node with `on_tap` feeds through a `TapRecognizer` (attached automatically when `on_tap` is called) and invokes the handler when the recognizer reports a recognized tap. A `PointerEnter`/`PointerLeave` on a node with `on_hover` invokes the hover handler. The gesture recognizer infrastructure (`TapRecognizer`, `DragRecognizer`, `GestureArena`) is used internally — the widget author never instantiates a recognizer.
+
+**Low-level escape hatch.** For widgets that need raw pointer events (a color wheel, a node graph editor, a custom drawing canvas), `on_pointer_event` provides unprocessed `PointerEvent::Down`, `PointerEvent::Move`, `PointerEvent::Up` with full position and button information.
+
+### 28.4 Signal<T> — Unified Reactivity
+
+`State<T>`, `DerivedState<T>`, `Reactive<T>`, and `StateHandle<T>` are replaced by a single public type: `Signal<T>`.
+
+```rust
+pub struct Signal<T> { /* Rc<RefCell<SignalInner<T>>> */ }
+
+impl<T: 'static> Signal<T> {
+    /// Create a mutable signal with an initial value.
+    pub fn new(value: T) -> Self;
+
+    /// Read the current value.
+    pub fn get(&self) -> Ref<'_, T>;
+
+    /// Set a new value. Marks the signal as dirty, which causes
+    /// the framework to mark bound widgets for repaint or relayout.
+    /// Panics if called on a derived (read-only) signal.
+    pub fn set(&self, value: T);
+
+    /// Create a derived (read-only) signal whose value is computed
+    /// from this signal. The closure runs lazily when the derived
+    /// signal is read, not eagerly when the source changes.
+    pub fn map<U: 'static>(&self, f: impl Fn(&T) -> U + 'static) -> Signal<U>;
+
+    /// Register an observer callback. Returns an ObserverHandle —
+    /// dropping the handle removes the callback. For application-level
+    /// coordination, not for widget bindings (use properties or effects).
+    pub fn observe(&self, f: impl Fn(&T) + 'static) -> ObserverHandle;
+
+    /// Whether two Signal handles point to the same underlying value.
+    pub fn same(a: &Self, b: &Self) -> bool;
+}
+
+impl Signal<f32> {
+    /// Animate to a target value over a duration with an easing curve.
+    /// Registers the animation with the AnimationScheduler.
+    pub fn animate_to(&self, target: f32, duration: Duration, easing: Easing);
+}
+```
+
+Internally, `Signal<T>` has two variants: mutable (created via `Signal::new`) and derived (created via `signal.map()`). The mutable variant stores the value and a dirty flag. The derived variant stores a computation closure and a reference to the source signal's dirty flag. This is the same internal structure as the current `State<T>` and `DerivedState<T>`, but exposed through a single type.
+
+`ObserverHandle` is a RAII guard. Dropping it removes the observer callback from the signal, fixing the memory leak in the current `observe()` which has no unsubscribe mechanism.
+
+**Prop<T>** replaces `Reactive<T>` as the widget property type:
+
+```rust
+pub enum Prop<T: Clone + 'static> {
+    Static(T),
+    Bound(Signal<T>),
+}
+
+impl<T: Clone> From<T> for Prop<T> { /* Static */ }
+impl<T: Clone> From<Signal<T>> for Prop<T> { /* Bound */ }
+```
+
+Widget property methods accept `impl Into<Prop<T>>`, allowing both plain values and signals:
+
+```rust
+// Static — set once, never changes:
+TextWidget::new("Hello").color(Color::RED)
+
+// Reactive — updates when signal changes:
+TextWidget::new("Hello").color(text_color_signal)
+
+// Same method signature handles both:
+fn color(mut self, color: impl Into<Prop<Color>>) -> Self
+```
+
+The dirty tracking level (repaint vs relayout) is determined by the property method, not by the consumer. `.color()` registers a repaint-level binding. `.text()` registers a relayout-level binding. The `BindingRegistry` remains as an internal framework mechanism — widget authors never see it.
+
+### 28.5 Scoped Effects
+
+`ctx.effect()` replaces the unscoped `state.observe()` pattern for widget-internal side effects. Effects registered during `build()` are tied to the build cycle — on rebuild, old effects are cleaned up before the new `build()` runs. On widget destruction, effects are cleaned up with the widget.
+
+```rust
+fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+    // This effect fires whenever self.selected_chapter changes.
+    // Automatically cleaned up on rebuild or destruction.
+    ctx.effect(&self.selected_chapter, |chapter_id| {
+        println!("Chapter selected: {chapter_id}");
+    });
+
+    // ...
+}
+```
+
+The `BuildContext` tracks all effects registered during this build call as a list of `ObserverHandle` values. Before each rebuild, the framework drops the handles from the previous build, removing the old callbacks. This is the same lifecycle model as SolidJS createEffect or React useEffect cleanup.
+
+### 28.6 Arena Node Changes
+
+The `WidgetNode` in `arena.rs` stores handlers and framework-level properties that were previously on the Widget trait or on the widget struct:
+
+```rust
+pub struct WidgetNode {
+    // Unchanged from V1:
+    pub widget: Box<dyn Widget>,
+    pub parent: Option<WidgetId>,
+    pub children: Vec<WidgetId>,
+    pub activation: ActivationState,
+    pub dirty: DirtyFlags,
+    pub bounds: Rect,
+    pub clips_children: bool,
+    pub cached_paint: Option<RenderFrame>,
+    pub(crate) theme_override: Option<ThemeOverride>,
+    pub(crate) alignment_override: Option<fern_tokens::Alignment>,
+
+    // V2: replaces gesture_binding, visible_state, enabled_state
+    pub(crate) handlers: EventHandlers,
+    pub(crate) visible_signal: Option<Signal<bool>>,
+    pub(crate) enabled_signal: Option<Signal<bool>>,
+    pub(crate) focusable: bool,
+    pub(crate) tab_index: Option<i32>,
+    pub(crate) is_spacer: bool,
+    pub(crate) cursor: Option<CursorIcon>,
+    pub(crate) has_built_children: bool,
+    pub(crate) effect_handles: Vec<ObserverHandle>,
+}
+```
+
+`EventHandlers` is a struct holding optional closures for each handler type:
+
+```rust
+pub(crate) struct EventHandlers {
+    pub on_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
+    pub on_double_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
+    pub on_long_press: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
+    pub on_drag: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
+    pub on_hover: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+    pub on_key: Option<Box<dyn FnMut(Key, Modifiers, &mut EventContext) -> bool>>,
+    pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
+    pub on_pointer_event: Option<Box<dyn FnMut(&PointerEvent, &mut EventContext) -> bool>>,
+    pub on_scroll: Option<Box<dyn FnMut(ScrollDelta, &mut EventContext) -> bool>>,
+    pub on_access_action: Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> bool>>,
+    pub(crate) gesture_arena: Option<GestureArena>,
+}
+```
+
+When a widget with `on_tap` is added to the arena, the framework creates a `TapRecognizer` in the `gesture_arena`. When a widget has both `on_tap` and `on_drag`, both recognizers compete in the same `GestureArena`. The widget author never manages this — the framework infers the correct recognizer configuration from which handlers are attached.
+
+### 28.7 Widget Tree Changes
+
+The `WidgetTree` in `widget_tree.rs` simplifies:
+
+**Insertion.** Two public methods replace the current five:
+
+```rust
+pub fn add(&mut self, widget: impl Widget) -> WidgetId;
+pub fn add_child(&mut self, parent: WidgetId, widget: impl Widget) -> WidgetId;
+```
+
+No `add_widget()`, `add_composite()`, `add_composite_inner()`, `add_widget_direct()`. No `IntoWidgetTree` trait. No `impl_composite_into_widget_tree!` macro. One insertion path for all widgets.
+
+**Build dispatch.** After insertion, if the widget's `build()` method returns a non-empty `Vec<WidgetId>`, the framework records `has_built_children = true` on the arena node. This replaces the `composite_ids: Vec<WidgetId>` tracking list.
+
+**Rebuild on environment change.** When `set_theme()` or `set_locale()` is called, the framework iterates all nodes with `has_built_children == true`, calls the `take_widget` / `build` / `restore_widget` sequence for each, destroying old child subtrees and constructing new ones. This replaces `rebuild_composites()` and its `CompositeWidgetAdapter` downcast.
+
+**Event dispatch.** The `dispatch_to_widget` method changes from calling `node.widget.event(event, ctx)` to checking the appropriate handler on `node.handlers` and calling it. The preview/bubble pass structure is unchanged. The gesture recognizer integration moves from per-node `gesture_binding` to `handlers.gesture_arena`, with the framework feeding raw pointer events through the arena and dispatching recognized gestures to the corresponding handler.
+
+### 28.8 What Each Widget Type Looks Like
+
+**Leaf primitive (TextWidget, RectWidget, IconWidget, Divider).** Implements `size_that_fits` and `paint`. Properties use `Prop<T>` with `Into<Prop<T>>` for static/reactive flexibility. No `build()`, no handlers, no `children()`. Binding registration happens automatically during arena insertion through `Prop<T>` resolution. Migration: replace `Reactive<T>` with `Prop<T>`, remove `register_bindings()`, `take_visible_when()`, `take_enabled_when()`. Net change per file: ~20 lines.
+
+**Layout container (HStack, VStack, ZStack, Grid, Wrap, Padding, Expand, MinSize, MaxSize, FixedSize, Center, AspectRatio, Spacer, Switcher).** Implements `size_that_fits`, `place_children`, and `children`. No `build()`, no `paint()`, no handlers. The `place_children` logic is unchanged — it is the container's core responsibility and the SwiftUI layout negotiation is preserved exactly. Migration: remove trait methods that moved off Widget, replace `Reactive<bool>` with `Prop<bool>`. Net change per file: ~15 lines.
+
+**Composing widget (Button, Checkbox, RadioButton).** Implements `build(&mut self)` to construct child subtrees, `size_that_fits` (delegates to child subtree via `ctx.child_size()`), and `accessibility`. Handlers (`on_tap`, `on_hover`, `on_key`) are attached to child widgets inside `build()`. The `RefCell<Option<State<T>>>` pattern is eliminated — state handles are plain struct fields set in `build()`. Migration: merge CompositeWidget impl into Widget impl, replace `State<T>` with `Signal<T>`, move `event()` match arms to handler attachments. Net reduction: ~30%.
+
+**Custom-paint widget (Toggle, Slider, ScrollBar, ProgressBar).** Implements `paint` for custom rendering, `size_that_fits` for sizing, and optionally `build` if it has children (e.g., Toggle with a label). Handlers are attached at the construction site: `.on_tap(...)`, `.on_drag(...)`, `.on_pointer_event(...)`. The monolithic `event()` match block is replaced by focused handler closures. Migration: remove `event()`, attach handlers at construction. Net reduction: ~20%.
+
+**Hybrid widget (Card, Panel, ScrollArea, Accordion).** Implements both `build` for child construction and `paint` for custom background/shadow/decoration rendering. This combination was awkward in V1 — Card had to be a Widget with manual child management because CompositeWidget had no `paint()`. In V2, `build()` and `paint()` coexist naturally on the same trait. Migration: add `build()` for child creation, keep `paint()` for visuals. Net simplification for every hybrid widget.
+
+### 28.9 DSL Readiness
+
+The unified model has one construction pattern for every widget: `WidgetType::new(args).property(value).on_event(handler).child(child_widget)`. This uniformity means a proc macro can provide a thin syntactic transform:
+
+```rust
+// Builder form:
+ctx.add(
+    VStack::new().spacing(8.0)
+        .child(TextWidget::new("Title").style(heading))
+        .child(
+            HStack::new().spacing(4.0)
+                .child(Checkbox::new(checked).label("Accept"))
+                .child(Spacer::new())
+                .child(Button::new("Submit").on_activate(Cmd::Submit))
+        )
+)
+
+// Equivalent DSL form (future proc macro):
+fern! {
+    VStack(spacing: 8) {
+        TextWidget("Title", style: heading)
+        HStack(spacing: 4) {
+            Checkbox(checked, label: "Accept")
+            Spacer
+            Button("Submit", on_activate: Cmd::Submit)
+        }
+    }
+}
+```
+
+The macro compiles to the builder calls. No runtime overhead, no hidden allocation. Builder and DSL can be mixed — use DSL for tree structure, drop to builder for complex conditional logic. The macro can be added later without changing any widget code because the underlying builder API is the stable target.
+
+### 28.10 Impact Assessment (Post-Migration)
+
+The V2 migration is complete. All widgets use the unified Widget trait and Signal<T> reactivity.
+
+**Deleted.** `composite_widget.rs` (142 lines) and `composite_adapter.rs` (139 lines). No `CompositeWidget` references remain anywhere in the codebase. No `RefCell<Option<State<T>>>` pattern remains.
+
+**New files in fern-core.** `signal.rs` (793 lines) implements `Signal<T>`, `Prop<T>`, `ObserverHandle`, with bridge `From` impls to/from V1 types. `build_context.rs` (139 lines) provides `BuildContext` with V2 APIs (`ctx.signal()`, `ctx.effect()`, `ctx.animated_signal()`, `ctx.self_id()`, `ctx.apply_self_handlers()`) and V1 compatibility APIs (marked as legacy). `event_handlers.rs` (86 lines) defines `EventHandlers` struct with optional closures for each handler type. `widget_builder.rs` (438 lines) defines `HandlerSet` and the `WidgetBuilder` blanket trait.
+
+**Unified Widget trait.** `widget.rs` (266 lines) has the six-method trait: `build(&mut self)`, `size_that_fits`, `place_children`, `paint`, `accessibility`, `children`. All 22 widget files in fern-widgets use `impl Widget for` with no composite distinction. All container primitives (HStack, VStack, Grid, Wrap, Expand, FixedSize, MinSize, MaxSize, Center, AspectRatio) implement `build()` for PendingChild resolution.
+
+**Signal<T> adoption.** Every interactive widget uses `Signal<T>`: Button, Toggle, Checkbox, RadioButton, Slider, Accordion, Badge, Card, Link, SegmentedControl, ScrollArea, ScrollBar, ProgressBar. ScrollArea uses `Signal<f32>` for all six scroll state fields (scroll_y, scroll_x, max_scroll_y, max_scroll_x, viewport_ratio_y, viewport_ratio_x). Toggle is fully Signal-ified (no `Rc<Cell<>>` remaining). ProgressBar uses `Prop<T>` for fill/track colors and `Signal<f32>` for indeterminate animation. The widget_catalog example uses exclusively `ctx.signal()` (14 calls, zero `ctx.state()`).
+
+**Handler attachment.** Two valid patterns: widgets attach handlers to child widgets via `.on_tap()` builder methods (Checkbox on MinSize, Accordion on its header), or attach handlers to themselves via `HandlerSet::new()` + `ctx.apply_self_handlers()` (Button, Toggle, Slider, SegmentedControl). The framework auto-wires gesture recognizers when handlers are attached.
+
+**Animation.** The `AnimationScheduler` supports both `State<f32>` (V1) and `Signal<f32>` (V2) for animation targets. Toggle, Accordion, ScrollArea, and ProgressBar use `Signal<f32>::animate_to()` for smooth animated transitions.
+
+**Remaining V1 internals.** `state.rs` (758 lines) is retained with `BindingRegistry`, `BindingLevel`, `State<T>`, `Reactive<T>`, `StateHandle<T>`. These serve as the internal binding infrastructure. Widget-facing usage is limited to `BindingLevel` (imported by 3 widget files for `signal.bind_to()` calls) and `Reactive<bool>` (accepted by `ctx.visible_when()` / `ctx.enabled_when()` via bridge conversions from Signal). `BuildContext` retains V1 legacy methods (`ctx.state()`, `ctx.observe()`, `ctx.animated_state()`) marked as deprecated. ScrollBar uses `Rc<Cell<>>` for drag interaction state (pointer position, drag-in-progress flag) — this is legitimate low-level interaction state that does not need reactivity.
+
+**Final line counts.** fern-core: 9,989 lines (was 8,554 in V1 — net increase from signal.rs, build_context.rs, event_handlers.rs, widget_builder.rs, animation.rs expansion, offset by composite deletions). fern-widgets: 11,641 lines (was 11,780 in V1 — slight net reduction despite adding more features, each widget simpler). Infrastructure crates (tokens, canvas, text, render, platform, app): 8,946 lines — untouched by V2 migration.
+
+### 28.11 Superseded Sections
+
+The following sections describe the V1 model and should be read as historical context:
+
+- Section 5 (Widget Extensibility) — the two-tier Widget/CompositeWidget model is replaced by the unified Widget trait.
+- Section 7 (Reactivity Model) — State/DerivedState/Reactive is replaced by Signal/Prop. The V1 types remain in state.rs for internal use and backward compatibility but are not the primary API.
+- Section 9.1 (Input Event Routing) — the `event()` dispatch model is replaced by attached handlers. Widgets no longer implement `event()` on the trait.
+- Section 25 (Button — Reference Widget Design) — the Button implementation should be updated to V2 patterns (the actual Button code in button.rs is already V2).
+
+Sections 2 (Layout Model), 3 (Scrolling), 6 (UI Construction Patterns), 8 (Dormancy), 10 (Gesture Recognition), and all infrastructure sections remain current and accurate.
+
+---
+
+## 29. Open Questions for Post-First-Milestone
+
+The following topics have been identified but not fully designed.
+
+**Text input and IME.** Complete TextInputCore design, IME composition interaction with the overlay system (composition window positioning), CJK input handling.
+
+**Selection model.** Single, multi (Ctrl+click), range (Shift+click), and select-all for lists and trees. Selection state location (data source vs. view).
+
+**Native menu bars.** The application menu bar (File, Edit, View, Help) is a native `NSMenu` on macOS but a widget rendered inside the window on Windows and Linux. FernUI must abstract this platform difference.
+
+**Clipboard.** Copy/paste sharing the MIME-typed payload model with drag-and-drop. Integration with text-document's existing clipboard operations.
+
+**Widget-level undo.** Text input undo (last few characters) vs. application-level undo (Qleany use case). Coexistence strategy.
+
+---
+
+## 30. First Milestone: Button in a Window
+
+The first concrete deliverable is a window displaying a single button that responds to clicks, changes visual state on hover/press, renders text via text-typeset, announces itself to screen readers via AccessKit, and respects a theme.
+
+This milestone exercises: fern-tokens (theme definition), fern-canvas (Canvas API, SDF rounded rect), fern-core (arena, layout, event dispatch, focus, accessibility), fern-text (shared Typesetter for button label), fern-render (wgpu pipeline, atlas upload, quad/rect/SDF shaders), fern-platform (winit window, input translation, AccessKit adapter), and fern-app (event loop, FernApp builder).
+
+The milestone does not require: fern-i18n (use literal strings), fern-widgets (the button is built inline as a test), overlays, drag-and-drop, data sources, dormancy, or scrolling.
