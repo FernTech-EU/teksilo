@@ -178,6 +178,7 @@ pub struct EventContext {
     pub(crate) tree_mutations: Vec<TreeMutation>,
     pub(crate) idle_callbacks: Vec<crate::idle::IdleCallback>,
     pub(crate) modal_requests: Vec<crate::modal::ModalRequest>,
+    pub(crate) dismiss_modal: bool,
     pub(crate) overlay_requests: Vec<crate::overlay::OverlayRequest>,
     pub(crate) overlay_dismissals: Vec<crate::overlay::OverlayId>,
     /// Whether to dismiss all overlays (e.g., after menu item activation).
@@ -231,6 +232,7 @@ impl EventContext {
             tree_mutations: Vec::new(),
             idle_callbacks: Vec::new(),
             modal_requests: Vec::new(),
+            dismiss_modal: false,
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
             dismiss_all_overlays: false,
@@ -334,6 +336,11 @@ impl EventContext {
     /// concrete presentation backend.
     pub fn present_modal(&mut self, request: crate::modal::ModalRequest) {
         self.modal_requests.push(request);
+    }
+
+    /// Dismiss the current framework-owned modal presentation.
+    pub fn dismiss_modal(&mut self) {
+        self.dismiss_modal = true;
     }
 
     /// Show an overlay after a delay. The widget tree checks pending delayed

@@ -18,8 +18,9 @@ pub mod prelude {
     // Core widget types
     pub use fern_core::{
         AccessNodeBuilder, AppCommand, BuildContext, CursorIcon, DerivedState, EventContext,
-        EventResponse, FocusPolicy, Key, LayoutContext, Modifiers, PaintContext, Shortcut,
-        ShortcutMap, State, Widget, WidgetBuilder, WidgetEvent, WidgetId,
+        EventResponse, FocusPolicy, Key, LayoutContext, ModalCloseBehavior, ModalPresentation,
+        Modifiers, PaintContext, Shortcut, ShortcutMap, State, Widget, WidgetBuilder,
+        WidgetEvent, WidgetId,
     };
 
     // Geometry (lives in fern-canvas)

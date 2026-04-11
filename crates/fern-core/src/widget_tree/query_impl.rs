@@ -43,6 +43,10 @@ impl WidgetTree {
         !self.pending_modal_requests.is_empty()
     }
 
+    pub fn has_pending_modal_dismissal(&self) -> bool {
+        self.pending_modal_dismissal
+    }
+
     pub fn current_cursor(&self) -> crate::widget::CursorIcon {
         self.current_cursor
     }
@@ -60,11 +64,22 @@ impl WidgetTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
     use crate::test_widgets::FillWidget;
     use crate::widget_builder::WidgetBuilder;
     use crate::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
+    use fern_canvas::Size;
     use std::cell::Cell;
     use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct FixedWidget(f32, f32);
+
+    impl Widget for FixedWidget {
+        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+            Size::new(self.0, self.1)
+        }
+    }
 
     #[test]
     fn destroy_removes_from_arena() {
@@ -155,5 +170,56 @@ mod tests {
         tree.click(trigger);
         assert_eq!(tree.drain_pending_modal_requests().len(), 1);
         assert!(tree.drain_pending_modal_requests().is_empty());
+    }
+
+    #[test]
+    fn dismiss_modal_closes_centered_overlay_for_source_widget() {
+        let mut tree = WidgetTree::new();
+        let trigger = tree.add(FillWidget::new().label("Trigger"));
+        let modal_content = tree.add(FixedWidget(120.0, 48.0).on_tap(|ctx| {
+            ctx.dismiss_modal();
+        }));
+        tree.layout(SizeProposal::exact(320.0, 200.0));
+
+        tree.show_overlay(OverlayRequest {
+            content_id: modal_content,
+            anchor: trigger,
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+        });
+        tree.layout(SizeProposal::exact(320.0, 200.0));
+
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        let center = tree
+            .overlay_manager()
+            .topmost_centered()
+            .expect("expected centered modal overlay")
+            .bounds
+            .center();
+        tree.pointer_down_button(center, PointerButton::Primary);
+        tree.pointer_up_button(center, PointerButton::Primary);
+
+        assert!(tree.active_overlays().is_empty());
+        assert!(!tree.has_pending_modal_dismissal());
+    }
+
+    #[test]
+    fn dismiss_modal_without_in_tree_modal_queues_window_dismissal() {
+        let mut tree = WidgetTree::new();
+        let trigger = tree.add(FillWidget::new().on_tap(|ctx| {
+            ctx.dismiss_modal();
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert!(!tree.has_pending_modal_dismissal());
+
+        tree.click(trigger);
+
+        assert!(tree.has_pending_modal_dismissal());
+        assert!(tree.drain_pending_modal_dismissal());
+        assert!(!tree.has_pending_modal_dismissal());
     }
 }

@@ -365,6 +365,17 @@ impl FernAppHandler {
         had_requests
     }
 
+    fn process_modal_dismissals(&mut self) -> bool {
+        let windows_to_close = self.wm.drain_pending_modal_dismissals();
+        let had_dismissals = !windows_to_close.is_empty();
+
+        for window_id in windows_to_close {
+            self.wm.queue_close(window_id);
+        }
+
+        had_dismissals
+    }
+
     fn maybe_exit(&self, event_loop: &ActiveEventLoop) {
         if self.wm.is_empty() {
             event_loop.exit();
@@ -411,8 +422,9 @@ impl FernAppHandler {
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
         let had_commands = self.flush_commands();
         let had_modal_requests = self.process_modal_requests();
+        let had_modal_dismissals = self.process_modal_dismissals();
         self.process_pending(event_loop);
-        if had_commands || had_modal_requests {
+        if had_commands || had_modal_requests || had_modal_dismissals {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
             }

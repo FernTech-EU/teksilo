@@ -2,7 +2,7 @@ use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use fern_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
 use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
@@ -14,6 +14,8 @@ use crate::primitives::{Divider, TextWidget, VStack};
 
 const DEFAULT_MODAL_PADDING: f32 = 24.0;
 const DEFAULT_MODAL_MIN_WIDTH: f32 = 320.0;
+
+type DialogFactory = std::rc::Rc<dyn Fn() -> Box<dyn Widget>>;
 
 pub struct ModalContainer {
     content_id: Option<WidgetId>,
@@ -123,22 +125,24 @@ impl Widget for ModalContainer {
     }
 }
 
-fn show_centered_modal_overlay(
+fn queue_dialog_request(
     ctx: &mut EventContext,
-    content_id: WidgetId,
-    anchor: WidgetId,
-    dismiss: &DismissBehavior,
+    factory: &DialogFactory,
+    presentation: ModalPresentation,
+    close_behavior: ModalCloseBehavior,
+    title: &str,
 ) {
-    ctx.dismiss_all_overlays();
-    ctx.activate(content_id);
-    ctx.show_overlay(OverlayRequest {
-        content_id,
-        anchor,
-        placement: OverlayPlacement::Centered,
-        dismiss: dismiss.clone(),
-        layer: OverlayLayer::InTree,
-        parent_overlay: None,
-    });
+    let factory = factory.clone();
+    ctx.present_modal(
+        ModalRequest::deferred(move |tree| {
+            let content = (factory.as_ref())();
+            tree.add(ModalContainer::boxed(content))
+        })
+        .presentation(presentation)
+        .close_behavior(close_behavior)
+        .title(title)
+        .size(460, 260),
+    );
 }
 
 pub struct DialogContent {
@@ -269,20 +273,28 @@ pub struct Dialog {
     label: String,
     style: ButtonStyle,
     enabled: bool,
-    dismiss: DismissBehavior,
-    pending_content: Option<Box<dyn Widget>>,
+    presentation: ModalPresentation,
+    close_behavior: ModalCloseBehavior,
+    content_factory: DialogFactory,
     pending_trigger: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
 }
 
 impl Dialog {
-    pub fn new(label: impl Into<String>, content: impl Widget + 'static) -> Self {
+    pub fn new<W, F>(label: impl Into<String>, factory: F) -> Self
+    where
+        W: Widget + 'static,
+        F: Fn() -> W + 'static,
+    {
         Self {
             label: label.into(),
             style: ButtonStyle::Filled,
             enabled: true,
-            dismiss: DismissBehavior::ClickOutside,
-            pending_content: Some(Box::new(content)),
+            presentation: ModalPresentation::Auto,
+            close_behavior: ModalCloseBehavior::EscapeOrClickOutside,
+            content_factory: std::rc::Rc::new(move || {
+                Box::new(factory()) as Box<dyn Widget>
+            }),
             pending_trigger: None,
             root_child_id: None,
         }
@@ -298,8 +310,13 @@ impl Dialog {
         self
     }
 
-    pub fn dismiss_behavior(mut self, dismiss: DismissBehavior) -> Self {
-        self.dismiss = dismiss;
+    pub fn presentation(mut self, presentation: ModalPresentation) -> Self {
+        self.presentation = presentation;
+        self
+    }
+
+    pub fn close_behavior(mut self, close_behavior: ModalCloseBehavior) -> Self {
+        self.close_behavior = close_behavior;
         self
     }
 
@@ -321,17 +338,12 @@ impl std::fmt::Debug for Dialog {
 
 impl Widget for Dialog {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let self_id = ctx.self_id();
         let label = self.label.clone();
         let enabled = self.enabled;
-        let dismiss = self.dismiss.clone();
+        let close_behavior = self.close_behavior;
+        let presentation = self.presentation;
         let style = self.style;
-        let content_id = ctx.add(ModalContainer::boxed(
-            self.pending_content
-                .take()
-                .expect("Dialog built without content"),
-        ));
-        ctx.set_dormant(content_id);
+        let content_factory = self.content_factory.clone();
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
             ctx.add(
@@ -341,31 +353,53 @@ impl Widget for Dialog {
                         .focusable(true)
                         .cursor(fern_core::widget::CursorIcon::Pointer)
                         .on_tap({
-                            let dismiss = dismiss.clone();
+                            let label = label.clone();
+                            let content_factory = content_factory.clone();
                             move |ctx| {
                                 if !enabled {
                                     return;
                                 }
-                                show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
+                                queue_dialog_request(
+                                    ctx,
+                                    &content_factory,
+                                    presentation,
+                                    close_behavior,
+                                    &label,
+                                );
                             }
                         })
                         .on_key({
-                            let dismiss = dismiss.clone();
+                            let label = label.clone();
+                            let content_factory = content_factory.clone();
                             move |event, ctx| match event {
                                 WidgetEvent::KeyUp {
                                     key: Key::Enter | Key::Space,
                                     ..
                                 } if enabled => {
-                                    show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
+                                    queue_dialog_request(
+                                        ctx,
+                                        &content_factory,
+                                        presentation,
+                                        close_behavior,
+                                        &label,
+                                    );
                                     EventResponse::Handled
                                 }
                                 _ => EventResponse::Ignored,
                             }
                         })
                         .on_access_action({
+                            let label = label.clone();
+                            let content_factory = content_factory.clone();
                             move |action, ctx| {
                                 if action == fern_core::accesskit::Action::Click && enabled {
-                                    show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
+                                    queue_dialog_request(
+                                        ctx,
+                                        &content_factory,
+                                        presentation,
+                                        close_behavior,
+                                        &label,
+                                    );
                                     EventResponse::Handled
                                 } else {
                                     EventResponse::Ignored
@@ -381,31 +415,53 @@ impl Widget for Dialog {
                     .style(style)
                     .enabled(enabled)
                     .on_tap({
-                        let dismiss = dismiss.clone();
+                        let label = self.label.clone();
+                        let content_factory = content_factory.clone();
                         move |ctx| {
                             if !enabled {
                                 return;
                             }
-                            show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
+                            queue_dialog_request(
+                                ctx,
+                                &content_factory,
+                                presentation,
+                                close_behavior,
+                                &label,
+                            );
                         }
                     })
                     .on_key({
-                        let dismiss = dismiss.clone();
+                        let label = self.label.clone();
+                        let content_factory = content_factory.clone();
                         move |event, ctx| match event {
                             WidgetEvent::KeyUp {
                                 key: Key::Enter | Key::Space,
                                 ..
                             } if enabled => {
-                                show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
+                                queue_dialog_request(
+                                    ctx,
+                                    &content_factory,
+                                    presentation,
+                                    close_behavior,
+                                    &label,
+                                );
                                 EventResponse::Handled
                             }
                             _ => EventResponse::Ignored,
                         }
                     })
                     .on_access_action({
+                        let label = self.label.clone();
+                        let content_factory = content_factory.clone();
                         move |action, ctx| {
                             if action == fern_core::accesskit::Action::Click && enabled {
-                                show_centered_modal_overlay(ctx, content_id, self_id, &dismiss);
+                                queue_dialog_request(
+                                    ctx,
+                                    &content_factory,
+                                    presentation,
+                                    close_behavior,
+                                    &label,
+                                );
                                 EventResponse::Handled
                             } else {
                                 EventResponse::Ignored
@@ -450,6 +506,7 @@ impl Widget for Dialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fern_core::{ModalContent, ModalPresentation};
     use fern_core::widget_tree::WidgetTree;
     use fern_tokens::Theme;
 
@@ -462,32 +519,10 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
-    struct FullSizeFocusable {
-        label: &'static str,
-    }
-
-    impl Widget for FullSizeFocusable {
-        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-            ctx.apply_self_handlers(fern_core::widget_builder::HandlerSet::new().focusable(true));
-            Vec::new()
-        }
-
-        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            proposal.resolve(0.0, 0.0)
-        }
-
-        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-            builder.set_role(fern_core::accesskit::Role::Button);
-            builder.set_name(self.label);
-            builder.add_action(fern_core::accesskit::Action::Focus);
-        }
-    }
-
     #[test]
     fn access_click_opens_centered_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -495,21 +530,21 @@ mod tests {
             action: fern_core::accesskit::Action::Click,
             target: Some(trigger),
         });
-        tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        assert_eq!(tree.active_overlays().len(), 1);
-        let content_id = tree.overlay_manager().active_content_ids()[0];
-        let bounds = tree.bounds(content_id);
-        let expected_x = (800.0 - bounds.width) / 2.0;
-        let expected_y = (600.0 - bounds.height) / 2.0;
-        assert!((bounds.x - expected_x).abs() < 1.0);
-        assert!((bounds.y - expected_y).abs() < 1.0);
+        let requests = tree.drain_pending_modal_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].request.presentation, ModalPresentation::Auto);
+        assert_eq!(
+            requests[0].request.close_behavior,
+            ModalCloseBehavior::EscapeOrClickOutside,
+        );
+        assert!(matches!(requests[0].request.content, ModalContent::Deferred(_)));
     }
 
     #[test]
     fn dialog_surface_exposes_dialog_role() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -517,6 +552,12 @@ mod tests {
             action: fern_core::accesskit::Action::Click,
             target: Some(trigger),
         });
+
+        let request = tree.drain_pending_modal_requests().pop().unwrap().request;
+        let content_id = match request.content {
+            ModalContent::Deferred(builder) => builder(&mut tree),
+            ModalContent::ExistingWidget(_) => unreachable!("dialog now always uses deferred content"),
+        };
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let dialog = tree
@@ -524,6 +565,7 @@ mod tests {
             .unwrap();
         let info = tree.accessibility_node(dialog);
         assert_eq!(info.role(), fern_core::accesskit::Role::Dialog);
+        assert!(tree.bounds(content_id).width > 0.0);
     }
 
     #[test]
@@ -562,7 +604,7 @@ mod tests {
     fn custom_trigger_opens_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)),
+            Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -572,7 +614,7 @@ mod tests {
             target: Some(trigger),
         });
 
-        assert_eq!(tree.active_overlays().len(), 1);
+        assert_eq!(tree.drain_pending_modal_requests().len(), 1);
     }
 
     #[test]
@@ -580,11 +622,13 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(Dialog::new(
             "Open dialog",
-            DialogContent::new()
-                .title("Review Changes")
-                .supporting_text("Confirm the staged updates before continuing.")
-                .body(FixedLeaf(220.0, 120.0))
-                .footer(Button::new("Close")),
+            || {
+                DialogContent::new()
+                    .title("Review Changes")
+                    .supporting_text("Confirm the staged updates before continuing.")
+                    .body(FixedLeaf(220.0, 120.0))
+                    .footer(Button::new("Close"))
+            },
         ));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -593,6 +637,14 @@ mod tests {
             action: fern_core::accesskit::Action::Click,
             target: Some(trigger),
         });
+
+        let request = tree.drain_pending_modal_requests().pop().unwrap().request;
+        match request.content {
+            ModalContent::Deferred(builder) => {
+                builder(&mut tree);
+            }
+            ModalContent::ExistingWidget(_) => unreachable!("dialog now always uses deferred content"),
+        }
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         assert!(tree.find_by_label("Review Changes").is_some());
@@ -600,12 +652,12 @@ mod tests {
     }
 
     #[test]
-    fn centered_dialog_blocks_background_hit_testing() {
+    fn dialog_presentation_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(FullSizeFocusable {
-            label: "Background",
-        });
-        tree.add(Dialog::new("Open dialog", FixedLeaf(220.0, 120.0)));
+        tree.add(
+            Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0))
+                .presentation(ModalPresentation::InTree),
+        );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -613,43 +665,29 @@ mod tests {
             action: fern_core::accesskit::Action::Click,
             target: Some(trigger),
         });
-        tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        let content_id = tree.overlay_manager().active_content_ids()[0];
-        let dialog_bounds = tree.bounds(content_id);
-        let blocked_point =
-            fern_canvas::Point::new(dialog_bounds.right() + 40.0, dialog_bounds.y + 10.0);
-
-        assert_eq!(tree.hit_test(blocked_point), None);
+        let requests = tree.drain_pending_modal_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].request.presentation, ModalPresentation::InTree);
     }
 
     #[test]
-    fn centered_dialog_traps_tab_focus() {
+    fn dialog_close_behavior_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(FullSizeFocusable {
-            label: "Background",
-        });
-        tree.add(Dialog::new(
-            "Open dialog",
-            DialogContent::new()
-                .title("Review Changes")
-                .body(FixedLeaf(220.0, 120.0))
-                .footer(Button::new("Close")),
-        ));
+        tree.add(
+            Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0))
+                .close_behavior(ModalCloseBehavior::Manual),
+        );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.focus(trigger);
         tree.dispatch_event(WidgetEvent::AccessAction {
             action: fern_core::accesskit::Action::Click,
             target: Some(trigger),
         });
-        tree.layout(SizeProposal::exact(800.0, 600.0));
 
-        tree.press_key(Key::Tab, fern_core::event::Modifiers::NONE);
-
-        let close = tree.find_by_label("Close").unwrap();
-        assert_eq!(tree.focused(), Some(close));
-        assert_ne!(tree.find_by_label("Background"), tree.focused());
+        let requests = tree.drain_pending_modal_requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].request.close_behavior, ModalCloseBehavior::Manual);
     }
 }

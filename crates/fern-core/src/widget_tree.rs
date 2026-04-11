@@ -95,6 +95,7 @@ pub struct WidgetTree {
     command_handler: Option<Box<dyn FnMut(&ErasedCommand)>>,
     pending_commands: Vec<ErasedCommand>,
     pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
+    pending_modal_dismissal: bool,
     shortcut_lookup: Option<ShortcutLookup>,
     shortcut_reverse_lookup: Option<ShortcutReverseLookup>,
     binding_registry: crate::state::BindingRegistry,
@@ -169,6 +170,7 @@ impl WidgetTree {
             command_handler: None,
             pending_commands: Vec::new(),
             pending_modal_requests: Vec::new(),
+            pending_modal_dismissal: false,
             shortcut_lookup: None,
             shortcut_reverse_lookup: None,
             binding_registry: crate::state::BindingRegistry::new(),
@@ -696,6 +698,11 @@ impl WidgetTree {
     /// resolve routing and focus behavior relative to the source tree.
     pub fn drain_pending_modal_requests(&mut self) -> Vec<crate::modal::QueuedModalRequest> {
         std::mem::take(&mut self.pending_modal_requests)
+    }
+
+    /// Drain whether the current native modal window should be dismissed.
+    pub fn drain_pending_modal_dismissal(&mut self) -> bool {
+        std::mem::replace(&mut self.pending_modal_dismissal, false)
     }
 
     // --- Widget insertion ---

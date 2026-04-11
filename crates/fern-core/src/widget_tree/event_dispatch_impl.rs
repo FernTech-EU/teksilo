@@ -462,6 +462,9 @@ impl WidgetTree {
                     request,
                 }
             }));
+        if ctx.dismiss_modal && !self.dismiss_modal_for_source(source_widget) {
+            self.pending_modal_dismissal = true;
+        }
         for callback in ctx.idle_callbacks {
             self.idle_queue.push_boxed(callback);
         }

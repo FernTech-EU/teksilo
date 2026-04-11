@@ -361,6 +361,17 @@ impl WindowManager {
         all_requests
     }
 
+    /// Drain native modal-window dismiss requests from all windows.
+    pub fn drain_pending_modal_dismissals(&mut self) -> Vec<FernWindowId> {
+        let mut windows_to_close = Vec::new();
+        for managed in self.windows.values_mut() {
+            if managed.tree.drain_pending_modal_dismissal() && managed.modal {
+                windows_to_close.push(managed.fern_id);
+            }
+        }
+        windows_to_close
+    }
+
     /// Drain pending commands from all windows and route through the handler
     /// with a window-aware `CommandContext`. Returns true if any commands were processed.
     pub fn flush_commands_through(

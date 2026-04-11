@@ -144,6 +144,23 @@ impl WidgetTree {
             .map(|overlay| overlay.id)
     }
 
+    pub(super) fn modal_overlay_for_widget(
+        &self,
+        widget_id: WidgetId,
+    ) -> Option<crate::overlay::OverlayId> {
+        let mut current = self.overlay_ancestor_for_widget(widget_id);
+
+        while let Some(overlay_id) = current {
+            let overlay = self.overlay_manager.overlay(overlay_id)?;
+            if matches!(overlay.placement, crate::overlay::OverlayPlacement::Centered) {
+                return Some(overlay_id);
+            }
+            current = overlay.parent_overlay;
+        }
+
+        None
+    }
+
     fn menu_ancestor_for_widget(&self, widget_id: WidgetId) -> Option<WidgetId> {
         let mut current = Some(widget_id);
         while let Some(id) = current {
@@ -209,6 +226,21 @@ impl WidgetTree {
                 }
             }
         }
+    }
+
+    pub(super) fn dismiss_modal_for_source(&mut self, source_widget: WidgetId) -> bool {
+        let Some(modal_overlay) = self.modal_overlay_for_widget(source_widget) else {
+            return false;
+        };
+
+        let (dismissed, focus_restore) = self.overlay_manager.dismiss_with_focus_restore(modal_overlay);
+        self.dormant_dismissed_content(&dismissed);
+        if let Some(restore_id) = focus_restore {
+            if self.arena.is_active(restore_id) {
+                self.focus(restore_id);
+            }
+        }
+        true
     }
 
     pub(super) fn is_descendant_of(&self, widget_id: WidgetId, ancestor: WidgetId) -> bool {
