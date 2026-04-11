@@ -93,6 +93,7 @@ impl WidgetTree {
                 WidgetEvent::KeyDown {
                     key: Key::Escape, ..
                 } => {
+                    self.cleanup_drag_preview();
                     self.active_drag = None;
                     self.pointer_captured_by = None;
                     return;
@@ -560,17 +561,36 @@ impl WidgetTree {
         }
 
         // --- Drag and drop ---
-        if let Some((source_widget, payload)) = ctx.drag_start_request {
+        if let Some((source_widget, payload, preview_widget)) = ctx.drag_start_request {
+            let (preview_content_id, preview_overlay_id) = if let Some(preview) = preview_widget {
+                let content_id = self.arena.insert(preview);
+                let overlay_id = self.overlay_manager.show(crate::overlay::OverlayRequest {
+                    content_id,
+                    anchor: source_widget,
+                    placement: crate::overlay::OverlayPlacement::AtPointer(
+                        fern_canvas::Point::ZERO,
+                    ),
+                    dismiss: crate::overlay::DismissBehavior::Manual,
+                    layer: crate::overlay::OverlayLayer::InTree,
+                    parent_overlay: None,
+                });
+                (Some(content_id), Some(overlay_id))
+            } else {
+                (None, None)
+            };
             self.active_drag = Some(crate::drag_state::DragSession {
                 payload,
                 source_widget,
                 current_position: fern_canvas::Point::ZERO,
                 current_target: None,
                 feedback: crate::drag_state::DropFeedback::NoFeedback,
+                preview_content_id,
+                preview_overlay_id,
             });
             self.pointer_captured_by = Some(source_widget);
         }
         if ctx.cancel_drag {
+            self.cleanup_drag_preview();
             self.active_drag = None;
             self.pointer_captured_by = None;
         }
@@ -578,12 +598,34 @@ impl WidgetTree {
 
     // --- Drag and drop helpers ---
 
+    /// Clean up drag preview overlay (if any).
+    fn cleanup_drag_preview(&mut self) {
+        if let Some(ref drag) = self.active_drag {
+            if let Some(overlay_id) = drag.preview_overlay_id {
+                self.overlay_manager.dismiss(overlay_id);
+            }
+            if let Some(content_id) = drag.preview_content_id {
+                self.arena.destroy(content_id);
+            }
+        }
+    }
+
     /// Update the drag session on pointer move: find the drop target under the
     /// pointer and call its `on_drag_hover` handler.
     fn handle_drag_move(&mut self, position: fern_canvas::Point) {
         // Update position on the session
         if let Some(ref mut drag) = self.active_drag {
             drag.current_position = position;
+        }
+
+        // Update preview overlay position
+        if let Some(ref drag) = self.active_drag {
+            if let Some(overlay_id) = drag.preview_overlay_id {
+                self.overlay_manager.update_placement(
+                    overlay_id,
+                    crate::overlay::OverlayPlacement::AtPointer(position),
+                );
+            }
         }
 
         // Hit-test to find the widget under the pointer
@@ -639,6 +681,9 @@ impl WidgetTree {
 
     /// Complete the drag: fire `on_drop` on the target widget and end the session.
     fn handle_drag_drop(&mut self, position: fern_canvas::Point) {
+        // Clean up preview overlay
+        self.cleanup_drag_preview();
+
         // Take the drag session
         let drag = match self.active_drag.take() {
             Some(d) => d,

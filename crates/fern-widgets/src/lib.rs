@@ -7,6 +7,7 @@ pub mod checkbox;
 pub mod combo_box;
 pub mod dialog;
 pub mod link;
+pub(crate) mod list_item_a11y;
 pub mod list_view;
 pub mod menu_bar;
 pub(crate) mod menu_context;

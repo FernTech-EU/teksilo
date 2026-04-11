@@ -270,6 +270,13 @@ impl OverlayManager {
         (dismissed_content, focus_restore)
     }
 
+    /// Update the placement of an existing overlay.
+    pub fn update_placement(&mut self, id: OverlayId, placement: OverlayPlacement) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
+            overlay.placement = placement;
+        }
+    }
+
     /// Dismiss an overlay and all its children (cascade).
     /// Returns the content widget IDs of all dismissed overlays.
     pub fn dismiss(&mut self, id: OverlayId) -> Vec<WidgetId> {

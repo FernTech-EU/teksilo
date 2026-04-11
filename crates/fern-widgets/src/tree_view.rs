@@ -402,29 +402,85 @@ impl<T: 'static> Widget for TreeView<T> {
             let ih_for_drop = self.item_height;
             let scroll_for_drop = self.scroll_y.clone();
 
+            let tsh_for_drop = self.tree_slice.handle();
             handlers = handlers.on_drop(move |mut payload, position, _ctx| {
                 let _ = &flattened_for_drop; // keep version signal alive
                 if let Some(drag_data) = payload.take_typed::<TreeViewDragData>() {
                     if drag_data.source_tree_id == my_tree_id {
                         let source_node = drag_data.source_node;
 
-                        // Compute a rough target: move to root at position
+                        // Compute target flat index from Y
                         let scroll = scroll_for_drop.get().max(0.0);
                         let content_y = position.y + scroll;
-                        let target_root_idx = if ih_for_drop > 0.0 {
-                            (content_y / ih_for_drop)
-                                .floor()
-                                .max(0.0)
-                                .min(tree_model_for_drop.root_count() as f32)
-                                as usize
+                        let flat_idx = if ih_for_drop > 0.0 {
+                            (content_y / ih_for_drop).floor().max(0.0) as usize
                         } else {
                             0
                         };
 
-                        // Move to root level at the computed index (simplified).
-                        // A full implementation would compute drop zone (before/after/into)
-                        // from the pointer Y within the row.
-                        tree_model_for_drop.move_to_root(source_node, target_root_idx);
+                        // Get the target entry for drop zone computation
+                        if let Some(entry) = tsh_for_drop.entry_at(flat_idx) {
+                            if entry.node_id == source_node {
+                                return true; // dropped on self, no-op
+                            }
+
+                            // Compute drop zone from Y within the row:
+                            // top third = before, middle = into (if has children), bottom = after
+                            let row_top = flat_idx as f32 * ih_for_drop;
+                            let y_in_row = content_y - row_top;
+                            let third = ih_for_drop / 3.0;
+
+                            if y_in_row < third {
+                                // Drop BEFORE target: move as sibling above
+                                let target = entry.node_id;
+                                if let Some(parent) = tree_model_for_drop.parent(target) {
+                                    let siblings = tree_model_for_drop.children(parent);
+                                    let idx =
+                                        siblings.iter().position(|&n| n == target).unwrap_or(0);
+                                    tree_model_for_drop.move_node(source_node, parent, idx);
+                                } else {
+                                    // Target is a root — move to root before it
+                                    let root_count = tree_model_for_drop.root_count();
+                                    let mut idx = 0;
+                                    for i in 0..root_count {
+                                        if tree_model_for_drop.root(i) == target {
+                                            idx = i;
+                                            break;
+                                        }
+                                    }
+                                    tree_model_for_drop.move_to_root(source_node, idx);
+                                }
+                            } else if y_in_row > 2.0 * third {
+                                // Drop AFTER target: move as sibling below
+                                let target = entry.node_id;
+                                if let Some(parent) = tree_model_for_drop.parent(target) {
+                                    let siblings = tree_model_for_drop.children(parent);
+                                    let idx = siblings
+                                        .iter()
+                                        .position(|&n| n == target)
+                                        .map(|i| i + 1)
+                                        .unwrap_or(0);
+                                    tree_model_for_drop.move_node(source_node, parent, idx);
+                                } else {
+                                    let root_count = tree_model_for_drop.root_count();
+                                    let mut idx = root_count;
+                                    for i in 0..root_count {
+                                        if tree_model_for_drop.root(i) == target {
+                                            idx = i + 1;
+                                            break;
+                                        }
+                                    }
+                                    tree_model_for_drop
+                                        .move_to_root(source_node, idx.min(root_count));
+                                }
+                            } else {
+                                // Drop INTO target (middle third)
+                                if entry.has_children || true {
+                                    // Allow dropping into any node as first child
+                                    tree_model_for_drop.move_node(source_node, entry.node_id, 0);
+                                }
+                            }
+                        }
                         return true;
                     }
                 }
@@ -446,11 +502,28 @@ impl<T: 'static> Widget for TreeView<T> {
                 .as_ref()
                 .map(|s| s.is_selected(i))
                 .unwrap_or(false);
+            // Get entry metadata for accessibility
+            let entry_meta = self.tree_slice.entry_at(i);
             if let Some(widget) = self
                 .tree_slice
                 .with_entry(i, |item, entry| (self.delegate)(item, entry, selected))
             {
-                let child_id = ctx.add_boxed(widget);
+                let inner_id = ctx.add_boxed(widget);
+                let (level, expanded_opt) = entry_meta
+                    .map(|e| {
+                        let exp = if e.has_children {
+                            Some(e.is_expanded)
+                        } else {
+                            None
+                        };
+                        (e.depth + 1, exp)
+                    })
+                    .unwrap_or((1, None));
+                let child_id = ctx.add(crate::list_item_a11y::TreeItemWrapper::new(
+                    inner_id,
+                    level,
+                    expanded_opt,
+                ));
 
                 // Selection click handling
                 if let Some(ref sel) = self.selection {

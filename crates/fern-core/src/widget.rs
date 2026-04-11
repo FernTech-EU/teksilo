@@ -204,9 +204,12 @@ pub struct EventContext {
     pub(crate) synthetic_clicks: Vec<crate::widget_id::WidgetId>,
     /// Focus requests — transfer focus to a specific widget (e.g., overlay content on open).
     pub(crate) focus_requests: Vec<crate::widget_id::WidgetId>,
-    /// Drag start request: (source_widget_id, payload).
-    pub(crate) drag_start_request:
-        Option<(crate::widget_id::WidgetId, crate::drag_payload::DragPayload)>,
+    /// Drag start request: (source_widget_id, payload, optional_preview_widget).
+    pub(crate) drag_start_request: Option<(
+        crate::widget_id::WidgetId,
+        crate::drag_payload::DragPayload,
+        Option<Box<dyn crate::widget::Widget>>,
+    )>,
     /// Cancel any active drag session.
     pub(crate) cancel_drag: bool,
 }
@@ -398,7 +401,17 @@ impl EventContext {
         source_widget: crate::widget_id::WidgetId,
         payload: crate::drag_payload::DragPayload,
     ) {
-        self.drag_start_request = Some((source_widget, payload));
+        self.drag_start_request = Some((source_widget, payload, None));
+    }
+
+    /// Start a drag-and-drop with a preview widget that follows the pointer.
+    pub fn start_drag_with_preview(
+        &mut self,
+        source_widget: crate::widget_id::WidgetId,
+        payload: crate::drag_payload::DragPayload,
+        preview: Box<dyn crate::widget::Widget>,
+    ) {
+        self.drag_start_request = Some((source_widget, payload, Some(preview)));
     }
 
     /// Cancel the active drag-and-drop session (if any).

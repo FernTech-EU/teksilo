@@ -33,6 +33,10 @@ pub(crate) struct DragSession {
     pub current_target: Option<WidgetId>,
     /// Visual feedback from the current drop target.
     pub feedback: DropFeedback,
+    /// Widget ID of the preview overlay content (if any).
+    pub preview_content_id: Option<WidgetId>,
+    /// Overlay ID for the preview (if any).
+    pub preview_overlay_id: Option<crate::overlay::OverlayId>,
 }
 
 impl std::fmt::Debug for DragSession {

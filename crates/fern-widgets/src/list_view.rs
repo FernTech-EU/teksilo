@@ -26,6 +26,51 @@ use fern_data::selection_model::SelectionModel;
 
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
+/// Type-erased data source for ListView (wraps both ListModel and ListDataSource).
+struct ListSource<T: 'static> {
+    len_fn: Rc<dyn Fn() -> usize>,
+    with_item_fn: Rc<dyn Fn(usize, &dyn Fn(&T) -> Box<dyn Widget>) -> Option<Box<dyn Widget>>>,
+    observe_fn: Rc<dyn Fn(Box<dyn Fn(&fern_data::DataChange)>) -> fern_core::ObserverHandle>,
+    /// For reorder: only available when backed by ListModel.
+    move_item_fn: Option<Rc<dyn Fn(usize, usize)>>,
+}
+
+impl<T: 'static> ListSource<T> {
+    fn from_model(model: ListModel<T>) -> Self {
+        let m1 = model.clone();
+        let m2 = model.clone();
+        let m3 = model.clone();
+        let m4 = model.clone();
+        Self {
+            len_fn: Rc::new(move || m1.len()),
+            with_item_fn: Rc::new(move |index, f| m2.with_item(index, |item| f(item))),
+            observe_fn: Rc::new(move |f| m3.observe_changes(move |c| f(c))),
+            move_item_fn: Some(Rc::new(move |from, to| m4.move_item(from, to))),
+        }
+    }
+
+    fn from_data_source<S: fern_data::ListDataSource<Item = T>>(source: S) -> Self {
+        let s = Rc::new(source);
+        let s1 = s.clone();
+        let s2 = s.clone();
+        let s3 = s.clone();
+        Self {
+            len_fn: Rc::new(move || s1.len()),
+            with_item_fn: Rc::new(move |index, f| s2.with_item(index, |item| f(item))),
+            observe_fn: Rc::new(move |f| s3.observe_changes(move |c| f(c))),
+            move_item_fn: None, // External sources don't support move_item
+        }
+    }
+
+    fn len(&self) -> usize {
+        (self.len_fn)()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 /// Internal drag payload for intra-ListView reordering.
 #[derive(Debug, Clone)]
 struct ListViewDragData {
@@ -54,7 +99,7 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 /// .selection(selection_model)
 /// ```
 pub struct ListView<T: 'static> {
-    model: ListModel<T>,
+    source: ListSource<T>,
     delegate: Rc<dyn Fn(usize, &T, bool) -> Box<dyn Widget>>,
     item_height: f32,
     spacing: f32,
@@ -75,6 +120,9 @@ pub struct ListView<T: 'static> {
     max_scroll_y: Signal<f32>,
     viewport_ratio_y: Signal<f32>,
 
+    /// Active drop feedback (set by on_drag_hover, read by paint).
+    drop_feedback: Rc<Cell<Option<(f32, f32)>>>, // (y, width) for insertion line
+
     // Set during build
     item_entries: Vec<(usize, WidgetId)>, // (model_index, widget_id)
     scrollbar_id: Option<WidgetId>,
@@ -93,12 +141,30 @@ impl<T: 'static> ListView<T> {
         model: ListModel<T>,
         delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static,
     ) -> Self {
+        Self::create(ListSource::from_model(model), delegate)
+    }
+
+    /// Create a ListView backed by a custom `ListDataSource`.
+    ///
+    /// Use this for large or external datasets that cannot fit in memory.
+    /// The source must implement `ListDataSource<Item = T>`.
+    pub fn from_source<S: fern_data::ListDataSource<Item = T>>(
+        source: S,
+        delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self::create(ListSource::from_data_source(source), delegate)
+    }
+
+    fn create(
+        source: ListSource<T>,
+        delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static,
+    ) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
         let model_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         Self {
             model_id,
-            model,
+            source,
             delegate: Rc::new(delegate),
             item_height: DEFAULT_ITEM_HEIGHT,
             spacing: 0.0,
@@ -106,6 +172,7 @@ impl<T: 'static> ListView<T> {
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
             on_item_drop: None,
+            drop_feedback: Rc::new(Cell::new(None)),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
@@ -154,7 +221,7 @@ impl<T: 'static> ListView<T> {
 
     /// Total content height (all items + spacing).
     fn total_content_height(&self) -> f32 {
-        let count = self.model.len();
+        let count = self.source.len();
         if count == 0 {
             return 0.0;
         }
@@ -164,7 +231,7 @@ impl<T: 'static> ListView<T> {
 
     /// Compute the visible range of model indices for the current scroll and viewport.
     fn visible_range(&self) -> (usize, usize) {
-        let count = self.model.len();
+        let count = self.source.len();
         if count == 0 {
             return (0, 0);
         }
@@ -195,7 +262,7 @@ impl<T: 'static> ListView<T> {
 impl<T: 'static> std::fmt::Debug for ListView<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ListView")
-            .field("item_count", &self.model.len())
+            .field("item_count", &self.source.len())
             .field("item_height", &self.item_height)
             .field("scroll_y", &self.scroll_y.get())
             .finish()
@@ -214,14 +281,14 @@ impl<T: 'static> Widget for ListView<T> {
         // --- Observe model changes ---
         let version_for_data = version.clone();
         let data_ver = Rc::new(Cell::new(0_u64));
-        let data_handle = self.model.observe_changes({
+        let data_handle = (self.source.observe_fn)(Box::new({
             let dv = data_ver.clone();
             move |_change| {
                 let next = dv.get() + 1;
                 dv.set(next);
                 version_for_data.set(next);
             }
-        });
+        }));
         ctx.own_handle(data_handle);
 
         // --- Observe scroll position changes (rebuild only when visible range changes) ---
@@ -285,7 +352,8 @@ impl<T: 'static> Widget for ListView<T> {
 
         // --- Keyboard navigation + Alt+Arrow reorder ---
         {
-            let model_for_key = self.model.clone();
+            let len_for_key = self.source.len_fn.clone();
+            let move_for_key = self.source.move_item_fn.clone();
             let sel_for_key = self.selection.clone();
             let fi = self.focused_index.clone();
             let reorderable = self.reorderable;
@@ -296,7 +364,7 @@ impl<T: 'static> Widget for ListView<T> {
 
             handlers = handlers.on_key(move |event, _ctx| {
                 if let fern_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
-                    let count = model_for_key.len();
+                    let count = (len_for_key)();
                     if count == 0 {
                         return fern_core::event::EventResponse::Ignored;
                     }
@@ -309,7 +377,9 @@ impl<T: 'static> Widget for ListView<T> {
                         if let Some(idx) = selected_idx {
                             match key {
                                 fern_core::event::Key::ArrowUp if idx > 0 => {
-                                    model_for_key.move_item(idx, idx - 1);
+                                    if let Some(ref mf) = move_for_key {
+                                        mf(idx, idx - 1);
+                                    }
                                     if let Some(ref sel) = sel_for_key {
                                         sel.select(idx - 1);
                                     }
@@ -317,7 +387,9 @@ impl<T: 'static> Widget for ListView<T> {
                                     return fern_core::event::EventResponse::Handled;
                                 }
                                 fern_core::event::Key::ArrowDown if idx + 1 < count => {
-                                    model_for_key.move_item(idx, idx + 1);
+                                    if let Some(ref mf) = move_for_key {
+                                        mf(idx, idx + 1);
+                                    }
                                     if let Some(ref sel) = sel_for_key {
                                         sel.select(idx + 1);
                                     }
@@ -380,35 +452,37 @@ impl<T: 'static> Widget for ListView<T> {
             let row_step_for_hover = self.item_height + self.spacing;
             let ih_for_hover = self.item_height;
             let scroll_for_hover = self.scroll_y.clone();
-            let model_count_for_hover = self.model.clone();
+            let len_for_hover = self.source.len_fn.clone();
             let my_model_id = self.model_id;
 
+            let feedback_for_hover = self.drop_feedback.clone();
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
-                // Compute insertion index from Y position
                 let scroll = scroll_for_hover.get().max(0.0);
-                let content_y = position.y + scroll; // approximate
+                let content_y = position.y + scroll;
                 let index = if row_step_for_hover > 0.0 {
                     ((content_y + ih_for_hover * 0.5) / row_step_for_hover)
                         .floor()
                         .max(0.0)
-                        .min(model_count_for_hover.len() as f32) as usize
+                        .min((len_for_hover)() as f32) as usize
                 } else {
                     0
                 };
 
-                // Accept if it's an intra-widget reorder or if on_item_drop is set
                 if payload.has_typed::<ListViewDragData>() {
                     let insertion_y = index as f32 * row_step_for_hover - scroll;
+                    feedback_for_hover.set(Some((insertion_y, 400.0)));
                     DropFeedback::InsertionLine {
                         y: insertion_y,
-                        width: 400.0, // approximate, will be refined
+                        width: 400.0,
                     }
                 } else {
+                    feedback_for_hover.set(None);
                     DropFeedback::NoFeedback
                 }
             });
 
-            let model_for_drop = self.model.clone();
+            let len_for_drop = self.source.len_fn.clone();
+            let move_for_drop = self.source.move_item_fn.clone();
             let on_item_drop = self.on_item_drop.clone();
             let scroll_for_drop = self.scroll_y.clone();
             let ih_for_drop = self.item_height;
@@ -421,7 +495,7 @@ impl<T: 'static> Widget for ListView<T> {
                     ((content_y + ih_for_drop * 0.5) / row_step_for_drop)
                         .floor()
                         .max(0.0)
-                        .min(model_for_drop.len() as f32) as usize
+                        .min((len_for_drop)() as f32) as usize
                 } else {
                     0
                 };
@@ -437,7 +511,9 @@ impl<T: 'static> Widget for ListView<T> {
                             to_index
                         };
                         if from != adjusted_to {
-                            model_for_drop.move_item(from, adjusted_to);
+                            if let Some(ref mf) = move_for_drop {
+                                mf(from, adjusted_to);
+                            }
                         }
                         return true;
                     }
@@ -466,11 +542,16 @@ impl<T: 'static> Widget for ListView<T> {
                 .as_ref()
                 .map(|s| s.is_selected(i))
                 .unwrap_or(false);
-            if let Some(widget) = self
-                .model
-                .with_item(i, |item| (self.delegate)(i, item, selected))
+            if let Some(widget) =
+                (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
             {
-                let child_id = ctx.add_boxed(widget);
+                let inner_id = ctx.add_boxed(widget);
+                let total = self.source.len();
+                let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
+                    inner_id,
+                    i + 1,
+                    total,
+                ));
 
                 // Selection click handling: plain click selects,
                 // Ctrl+click toggles, Shift+click extends range.
@@ -605,6 +686,23 @@ impl<T: 'static> Widget for ListView<T> {
                 sb_child.origin = bounds.origin();
                 sb_child.size = Size::ZERO;
             }
+        }
+    }
+
+    fn paint(
+        &self,
+        bounds: Rect,
+        canvas: &mut fern_canvas::Canvas,
+        _ctx: &fern_core::widget::PaintContext,
+    ) {
+        // Draw insertion line during drag hover
+        if let Some((y, width)) = self.drop_feedback.get() {
+            let line_y = bounds.y + y;
+            let line_x = bounds.x;
+            canvas.fill_rect(
+                Rect::new(line_x, line_y - 1.0, width, 2.0),
+                fern_tokens::Color::from_rgba(0.2, 0.4, 0.9, 0.8),
+            );
         }
     }
 
