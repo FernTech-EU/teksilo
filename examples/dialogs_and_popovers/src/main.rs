@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use fern_ui::app::WindowConfig;
 use fern_ui::core::WidgetPlacement;
+use fern_ui::platform::supports_native_modal_windows;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
     Badge, Button, ButtonStyle, Dialog, DialogContent, HStack, Panel, Popover, ScrollArea,
@@ -119,6 +120,38 @@ impl Widget for OverlayDemo {
                 ),
         );
 
+        let modal_trigger_id = if supports_native_modal_windows() {
+            ctx.add(
+                Button::new("Native modal window")
+                    .style(ButtonStyle::Tonal)
+                    .on_click(Cmd::OpenNativeModal),
+            )
+        } else {
+            ctx.add(
+                Dialog::new(
+                    "Native modal window",
+                    DialogContent::new()
+                        .title("Modal dialog fallback")
+                        .supporting_text(
+                            "Wayland does not provide reliable native parent-child modal stacking through the current winit backend, so this example falls back to an in-tree dialog.",
+                        )
+                        .body(
+                            TextWidget::new(
+                                "This keeps the parent blocked and the dialog visually attached to the main window instead of opening a detached child surface.",
+                            )
+                            .style(t.body.clone())
+                            .color(c.on_surface_secondary),
+                        )
+                        .footer(
+                            Button::new("Close")
+                                .style(ButtonStyle::Filled)
+                                .on_tap(|ctx| ctx.dismiss_top_overlay()),
+                        ),
+                )
+                .style(ButtonStyle::Tonal),
+            )
+        };
+
         let root = ctx.add(
             ScrollArea::new(
                 VStack::new()
@@ -152,11 +185,7 @@ impl Widget for OverlayDemo {
                                     Snackbar::new("Show snackbar", snackbar_content)
                                         .auto_dismiss_after(Duration::from_millis(2500)),
                                 )
-                                .child(
-                                    Button::new("Native modal window")
-                                        .style(ButtonStyle::Tonal)
-                                        .on_click(Cmd::OpenNativeModal),
-                                ),
+                                .add_child(modal_trigger_id),
                         ),
                     )
                     .child(
@@ -170,7 +199,7 @@ impl Widget for OverlayDemo {
                                 )
                                 .child(
                                     TextWidget::new(
-                                        "Dialogs, popovers, and snackbars all use the shared in-tree overlay system. Dialogs now have a reusable structured content helper, popovers can render a caret, and snackbars can auto-dismiss after a configured duration. The native modal example still uses a separate OS window and blocks its parent until closed.",
+                                        "Dialogs, popovers, and snackbars all use the shared in-tree overlay system. Dialogs now have a reusable structured content helper, popovers can render a caret, and snackbars can auto-dismiss after a configured duration. The modal-window demo uses a native child window on backends that support it and falls back to an in-tree dialog on Wayland.",
                                     )
                                     .style(t.body.clone())
                                     .color(c.on_surface_secondary),
