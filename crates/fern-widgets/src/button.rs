@@ -46,7 +46,7 @@ pub enum InteractionState {
 /// ```ignore
 /// Button::new("Save")
 ///     .style(ButtonStyle::Filled)
-///     .on_click(AppCmd::Save)
+///     .on_activate(AppCmd::Save)
 /// ```
 /// Type-erased command factory — captures the concrete command type
 /// and produces a fresh ErasedCommand each time (since ErasedCommand isn't Clone).
@@ -84,7 +84,7 @@ impl Button {
 
     /// Set the command to emit on activation. The generic only appears at
     /// this call site — the Button struct itself is non-generic (Approach B).
-    pub fn on_click<C: AppCommand>(mut self, command: C) -> Self {
+    pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
         self.action = Some(Box::new(move |ctx: &mut EventContext| {
             ctx.emit(command.clone());
         }));
@@ -401,7 +401,7 @@ mod tests {
 
     fn setup() -> (WidgetTree, WidgetId) {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(Button::new("Save").on_click(TestCmd::Save));
+        let btn = tree.add(Button::new("Save").on_activate(TestCmd::Save));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         (tree, btn)
     }
@@ -453,7 +453,11 @@ mod tests {
     #[test]
     fn disabled_ignores_click() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(Button::new("Save").on_click(TestCmd::Save).enabled(false));
+        let btn = tree.add(
+            Button::new("Save")
+                .on_activate(TestCmd::Save)
+                .enabled(false),
+        );
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let called = Rc::new(Cell::new(false));
         let c = called.clone();
@@ -608,7 +612,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let btn = tree.add(
             Button::new("Save")
-                .on_click(TestCmd::Save)
+                .on_activate(TestCmd::Save)
                 .tooltip("Save the document"),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -632,7 +636,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let btn = tree.add(
             Button::new("Save")
-                .on_click(TestCmd::Save)
+                .on_activate(TestCmd::Save)
                 .tooltip("Save the document"),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));

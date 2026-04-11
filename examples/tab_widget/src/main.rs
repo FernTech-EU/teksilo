@@ -51,7 +51,7 @@ impl Widget for Root {
             .child(
                 Button::new("Toggle Theme")
                     .style(ButtonStyle::Flat)
-                    .on_click(Cmd::ToggleTheme),
+                    .on_activate(Cmd::ToggleTheme),
             );
 
         let tabs = ctx.add(
@@ -137,8 +137,8 @@ impl Widget for Root {
 
         let breadcrumb = ctx.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_click(Cmd::OpenLibrary))
-                .item(BreadcrumbItem::new("Components").on_click(Cmd::OpenComponents))
+                .item(BreadcrumbItem::new("Library").on_activate(Cmd::OpenLibrary))
+                .item(BreadcrumbItem::new("Components").on_activate(Cmd::OpenComponents))
                 .item(BreadcrumbItem::current("TabWidget")),
         );
 

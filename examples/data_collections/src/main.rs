@@ -3,6 +3,9 @@
 //! Demonstrates `Repeater`, `ListView` (with virtualization and selection),
 //! and `TreeView` (with expand/collapse).
 //!
+//! Buttons use `on_activate_fn` to mutate shared models directly via closures,
+//! which is the natural pattern for data-driven UIs (architecture Section 9.2.6).
+//!
 //! Run with: `cargo run -p data-collections`
 
 use std::cell::Cell;
@@ -17,24 +20,6 @@ use fern_ui::widgets::{
 };
 
 // ---------------------------------------------------------------------------
-// Commands
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
-enum Cmd {
-    ToggleTheme,
-    AddTag,
-    RemoveTag,
-    AddListItem,
-    RemoveListItem,
-    AddTreeNode,
-    RemoveTreeNode,
-}
-
-impl AppCommand for Cmd {}
-
-// ---------------------------------------------------------------------------
 // Root widget
 // ---------------------------------------------------------------------------
 
@@ -45,6 +30,9 @@ struct Root {
     list_items: ListModel<String>,
     tree_model: TreeModel<String>,
     selection: SelectionModel,
+    tag_counter: Rc<Cell<usize>>,
+    list_counter: Rc<Cell<usize>>,
+    tree_counter: Rc<Cell<usize>>,
 }
 
 impl Root {
@@ -60,11 +48,17 @@ impl Root {
             list_items,
             tree_model,
             selection,
+            tag_counter: Rc::new(Cell::new(5)),
+            list_counter: Rc::new(Cell::new(201)),
+            tree_counter: Rc::new(Cell::new(1)),
         }
     }
 
     fn build_repeater_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let tags = self.tags.clone();
+        let tags_add = self.tags.clone();
+        let tags_remove = self.tags.clone();
+        let counter = self.tag_counter.clone();
 
         VStack::new().spacing(16.0).child(
             Padding::uniform(16.0).child(
@@ -89,12 +83,20 @@ impl Root {
                             .child(
                                 Button::new("+ Add Tag")
                                     .style(ButtonStyle::Filled)
-                                    .on_click(Cmd::AddTag),
+                                    .on_activate_fn(move |_ctx| {
+                                        let n = counter.get();
+                                        counter.set(n + 1);
+                                        tags_add.push(format!("Tag {}", n));
+                                    }),
                             )
                             .child(
                                 Button::new("- Remove Last")
                                     .style(ButtonStyle::Outlined)
-                                    .on_click(Cmd::RemoveTag),
+                                    .on_activate_fn(move |_ctx| {
+                                        if !tags_remove.is_empty() {
+                                            tags_remove.remove(tags_remove.len() - 1);
+                                        }
+                                    }),
                             ),
                     )
                     .child(
@@ -111,7 +113,10 @@ impl Root {
 
     fn build_listview_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let items = self.list_items.clone();
+        let items_add = self.list_items.clone();
+        let items_remove = self.list_items.clone();
         let selection = self.selection.clone();
+        let counter = self.list_counter.clone();
 
         VStack::new()
             .spacing(0.0)
@@ -138,12 +143,20 @@ impl Root {
                                 .child(
                                     Button::new("+ Add Item")
                                         .style(ButtonStyle::Filled)
-                                        .on_click(Cmd::AddListItem),
+                                        .on_activate_fn(move |_ctx| {
+                                            let n = counter.get();
+                                            counter.set(n + 1);
+                                            items_add.push(format!("Item {}", n));
+                                        }),
                                 )
                                 .child(
                                     Button::new("- Remove First")
                                         .style(ButtonStyle::Outlined)
-                                        .on_click(Cmd::RemoveListItem),
+                                        .on_activate_fn(move |_ctx| {
+                                            if !items_remove.is_empty() {
+                                                items_remove.remove(0);
+                                            }
+                                        }),
                                 ),
                         ),
                 ),
@@ -166,6 +179,9 @@ impl Root {
 
     fn build_treeview_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let tree = self.tree_model.clone();
+        let tree_add = self.tree_model.clone();
+        let tree_remove = self.tree_model.clone();
+        let counter = self.tree_counter.clone();
 
         VStack::new()
             .spacing(0.0)
@@ -192,12 +208,24 @@ impl Root {
                                 .child(
                                     Button::new("+ Add Root Node")
                                         .style(ButtonStyle::Filled)
-                                        .on_click(Cmd::AddTreeNode),
+                                        .on_activate_fn(move |_ctx| {
+                                            let n = counter.get();
+                                            counter.set(n + 1);
+                                            let count = tree_add.root_count();
+                                            tree_add
+                                                .insert_root(count, format!("New Folder {}", n));
+                                        }),
                                 )
                                 .child(
                                     Button::new("- Remove Last Root")
                                         .style(ButtonStyle::Outlined)
-                                        .on_click(Cmd::RemoveTreeNode),
+                                        .on_activate_fn(move |_ctx| {
+                                            let count = tree_remove.root_count();
+                                            if count > 0 {
+                                                let last = tree_remove.root(count - 1);
+                                                tree_remove.remove(last);
+                                            }
+                                        }),
                                 ),
                         ),
                 ),
@@ -272,14 +300,12 @@ impl Widget for Root {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    // Create shared data models in main so the command handler can access them.
     let tags = ListModel::from_vec(vec![
         "Rust".into(),
         "GUI".into(),
         "FernUI".into(),
         "Desktop".into(),
     ]);
-
     let list_items = ListModel::from_vec((1..=200).map(|i| format!("Item {}", i)).collect());
 
     let tree_model = TreeModel::new();
@@ -297,66 +323,10 @@ fn main() {
 
     let selection = SelectionModel::new(SelectionMode::Multi);
 
-    // Counters for generating unique names.
-    let tag_counter = Rc::new(Cell::new(5_usize));
-    let list_counter = Rc::new(Cell::new(201_usize));
-    let tree_counter = Rc::new(Cell::new(1_usize));
-
-    // Clones for the command handler.
-    let tags_cmd = tags.clone();
-    let list_items_cmd = list_items.clone();
-    let tree_model_cmd = tree_model.clone();
-    let tag_ctr = tag_counter.clone();
-    let list_ctr = list_counter.clone();
-    let tree_ctr = tree_counter.clone();
-
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .window_title("Data Collections — Milestone 6")
         .window_size(960, 680)
-        .on_command(move |cmd: &Cmd, ctx| match cmd {
-            Cmd::ToggleTheme => {
-                let next = if ctx.theme().colors.surface == Theme::light_default().colors.surface {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                };
-                ctx.set_theme(next);
-            }
-            Cmd::AddTag => {
-                let n = tag_ctr.get();
-                tag_ctr.set(n + 1);
-                tags_cmd.push(format!("Tag {}", n));
-            }
-            Cmd::RemoveTag => {
-                if !tags_cmd.is_empty() {
-                    tags_cmd.remove(tags_cmd.len() - 1);
-                }
-            }
-            Cmd::AddListItem => {
-                let n = list_ctr.get();
-                list_ctr.set(n + 1);
-                list_items_cmd.push(format!("Item {}", n));
-            }
-            Cmd::RemoveListItem => {
-                if !list_items_cmd.is_empty() {
-                    list_items_cmd.remove(0);
-                }
-            }
-            Cmd::AddTreeNode => {
-                let n = tree_ctr.get();
-                tree_ctr.set(n + 1);
-                let count = tree_model_cmd.root_count();
-                tree_model_cmd.insert_root(count, format!("New Folder {}", n));
-            }
-            Cmd::RemoveTreeNode => {
-                let count = tree_model_cmd.root_count();
-                if count > 0 {
-                    let last = tree_model_cmd.root(count - 1);
-                    tree_model_cmd.remove(last);
-                }
-            }
-        })
         .root(move |tree| {
             tree.add(Root::new(
                 tags.clone(),

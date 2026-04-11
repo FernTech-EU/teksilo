@@ -350,7 +350,7 @@ impl Widget for Root {
                     .child(
                         Button::new("Toggle Dark Mode")
                             .style(ButtonStyle::Outlined)
-                            .on_click(Cmd::ToggleDarkMode),
+                            .on_activate(Cmd::ToggleDarkMode),
                     ),
             ),
         );
@@ -454,7 +454,7 @@ impl Widget for Root {
                 .trailing_slot(
                     Button::new("Settings")
                         .style(ButtonStyle::Flat)
-                        .on_click(Cmd::ToggleDarkMode),
+                        .on_activate(Cmd::ToggleDarkMode),
                 ),
         );
 

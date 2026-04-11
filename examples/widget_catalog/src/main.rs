@@ -540,7 +540,7 @@ impl Widget for WidgetCatalog {
                         .spacing(16.0)
                         .child(
                             Link::new("Click me")
-                                .on_click(Cmd::LinkClicked)
+                                .on_activate(Cmd::LinkClicked)
                                 .tooltip("Fires the LinkClicked command"),
                         )
                         .child(
@@ -634,7 +634,7 @@ impl Widget for WidgetCatalog {
                     .child(
                         Button::new("Toggle Dark Mode")
                             .style(ButtonStyle::Outlined)
-                            .on_click(Cmd::ToggleDarkMode),
+                            .on_activate(Cmd::ToggleDarkMode),
                     ),
             ),
         );

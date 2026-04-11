@@ -70,7 +70,7 @@ impl BreadcrumbItem {
         }
     }
 
-    pub fn on_click<C: AppCommand>(mut self, command: C) -> Self {
+    pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
         self.action = Some(Box::new(move |ctx: &mut EventContext| {
             ctx.emit(command.clone());
         }));
@@ -470,8 +470,8 @@ mod tests {
 
         let breadcrumb = tree.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_click(TestCmd::GoLibrary))
-                .item(BreadcrumbItem::new("Project").on_click(TestCmd::GoProject))
+                .item(BreadcrumbItem::new("Library").on_activate(TestCmd::GoLibrary))
+                .item(BreadcrumbItem::new("Project").on_activate(TestCmd::GoProject))
                 .item(BreadcrumbItem::current("Current")),
         );
         tree.layout(SizeProposal::exact(500.0, 48.0));
@@ -488,7 +488,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let breadcrumb = tree.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_click(TestCmd::GoLibrary))
+                .item(BreadcrumbItem::new("Library").on_activate(TestCmd::GoLibrary))
                 .item(BreadcrumbItem::current("Current")),
         );
         tree.layout(SizeProposal::exact(400.0, 48.0));
@@ -510,7 +510,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let breadcrumb = tree.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_click(TestCmd::GoLibrary))
+                .item(BreadcrumbItem::new("Library").on_activate(TestCmd::GoLibrary))
                 .item(BreadcrumbItem::current("Current")),
         );
         tree.layout(SizeProposal::exact(400.0, 48.0));

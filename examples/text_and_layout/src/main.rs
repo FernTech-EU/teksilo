@@ -69,7 +69,7 @@ impl Widget for RootContent {
                             .child(
                                 Button::new("Toggle Dark Mode")
                                     .style(ButtonStyle::Outlined)
-                                    .on_click(Cmd::ToggleDarkMode),
+                                    .on_activate(Cmd::ToggleDarkMode),
                             ),
                     )
                     // Typography showcase

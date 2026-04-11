@@ -41,7 +41,7 @@ impl Link {
         }
     }
 
-    pub fn on_click<C: AppCommand>(mut self, command: C) -> Self {
+    pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
         self.action = Some(Box::new(move |ctx: &mut EventContext| {
             ctx.emit(command.clone());
         }));
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn click_fires_command() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new("Go here").on_click(TestCmd::Navigate));
+        let link = tree.add(Link::new("Go here").on_activate(TestCmd::Navigate));
         tree.layout(SizeProposal::exact(200.0, 50.0));
 
         let called = Rc::new(Cell::new(false));

@@ -14,7 +14,7 @@
 //!             .item(MenuItem::new("Cut").on_activate(Cmd::Cut))
 //!             .item(MenuItem::new("Copy").on_activate(Cmd::Copy))
 //!     ))
-//!     .trailing_slot(Button::new("Settings").on_click(Cmd::Settings))
+//!     .trailing_slot(Button::new("Settings").on_activate(Cmd::Settings))
 //! ```
 
 use fern_canvas::{Rect, Size, SizeProposal};

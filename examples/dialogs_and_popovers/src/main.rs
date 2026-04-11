@@ -124,7 +124,7 @@ impl Widget for OverlayDemo {
             ctx.add(
                 Button::new("Native modal window")
                     .style(ButtonStyle::Tonal)
-                    .on_click(Cmd::OpenNativeModal),
+                    .on_activate(Cmd::OpenNativeModal),
             )
         } else {
             ctx.add(
@@ -272,7 +272,7 @@ impl Widget for NativeModalRoot {
                         .style(t.body.clone())
                         .color(c.on_surface_secondary),
                     )
-                    .child(Button::new("Close window").on_click(Cmd::CloseNativeModal)),
+                    .child(Button::new("Close window").on_activate(Cmd::CloseNativeModal)),
             ),
         );
         self.root_child_id = Some(root);
