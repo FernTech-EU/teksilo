@@ -275,6 +275,11 @@ impl<T: 'static> Widget for ListView<T> {
         let version = ctx.signal(0_u64);
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
+        // Bind scroll_y at Relayout so place_children runs on every scroll
+        // position change (repositions items) without a full rebuild.
+        self.scroll_y
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
+
         // Register animated signal for smooth scrolling
         ctx.register_animated_signal(&self.scroll_y);
 
@@ -291,39 +296,56 @@ impl<T: 'static> Widget for ListView<T> {
         }));
         ctx.own_handle(data_handle);
 
-        // --- Observe scroll position changes (rebuild only when visible range changes) ---
+        // --- Observe selection changes (rebuild to update delegate's `selected` param) ---
+        if let Some(ref sel) = self.selection {
+            let version_for_sel = version.clone();
+            let sel_ver = Rc::new(Cell::new(0_u64));
+            ctx.effect(&sel.selection_signal(), {
+                let sv = sel_ver.clone();
+                move |_| {
+                    let next = sv.get() + 1;
+                    sv.set(next);
+                    version_for_sel.set(next);
+                }
+            });
+        }
+
+        // --- Observe scroll position changes (rebuild only when items leave/enter buffer) ---
         let item_height = self.item_height;
         let spacing = self.spacing;
         let row_step = item_height + spacing;
         let viewport_h = self.viewport_height.clone();
-        // Initialize to current visible range so the first scroll doesn't
-        // spuriously trigger a rebuild (which would destroy the scrollbar
-        // and break pointer capture during drag).
-        let (init_start, init_end) = self.visible_range();
-        let prev_start = Rc::new(Cell::new(init_start));
-        let prev_end = Rc::new(Cell::new(init_end));
+        // Track the buffered range from this build. Only trigger a rebuild
+        // when the visible range exceeds the buffer — most scrolls just need
+        // a relayout (handled by scroll_y's Relayout binding above).
+        let (built_start, built_end) = self.visible_range();
+        let prev_built_start = Rc::new(Cell::new(built_start));
+        let prev_built_end = Rc::new(Cell::new(built_end));
         let version_for_scroll = version.clone();
         let scroll_ver = Rc::new(Cell::new(0_u64));
         let scroll_handle = self.scroll_y.observe({
-            let ps = prev_start.clone();
-            let pe = prev_end.clone();
+            let pbs = prev_built_start.clone();
+            let pbe = prev_built_end.clone();
             let sv = scroll_ver.clone();
             move |y| {
                 let scroll = y.max(0.0);
                 let vp = viewport_h.get();
-                let new_start = if row_step > 0.0 {
+                let visible_start = if row_step > 0.0 {
                     (scroll / row_step).floor() as usize
                 } else {
                     0
                 };
-                let new_end = if row_step > 0.0 {
+                let visible_end = if row_step > 0.0 {
                     ((scroll + vp) / row_step).ceil() as usize
                 } else {
                     0
                 };
-                if new_start != ps.get() || new_end != pe.get() {
-                    ps.set(new_start);
-                    pe.set(new_end);
+                // Only rebuild when visible items fall outside the currently-built range
+                if visible_start < pbs.get() || visible_end > pbe.get() {
+                    let new_start = visible_start.saturating_sub(BUFFER_ITEMS);
+                    let new_end = visible_end + BUFFER_ITEMS;
+                    pbs.set(new_start);
+                    pbe.set(new_end);
                     let next = sv.get() + 1;
                     sv.set(next);
                     version_for_scroll.set(next);

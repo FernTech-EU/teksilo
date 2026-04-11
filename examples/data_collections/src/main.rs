@@ -44,6 +44,7 @@ struct Root {
     list_items: ListModel<String>,
     tree_model: TreeModel<String>,
     list_selection: SelectionModel,
+    tree_selection: SelectionModel,
     tag_counter: Rc<Cell<usize>>,
     list_counter: Rc<Cell<usize>>,
     tree_counter: Rc<Cell<usize>>,
@@ -61,6 +62,7 @@ impl Root {
             list_items,
             tree_model,
             list_selection: SelectionModel::new(SelectionMode::Multi),
+            tree_selection: SelectionModel::new(SelectionMode::Single),
             tag_counter: Rc::new(Cell::new(5)),
             list_counter: Rc::new(Cell::new(201)),
             tree_counter: Rc::new(Cell::new(1)),
@@ -233,6 +235,7 @@ impl Root {
         let tree = self.tree_model.clone();
         let tree_add = self.tree_model.clone();
         let tree_remove = self.tree_model.clone();
+        let selection = self.tree_selection.clone();
         let counter = self.tree_counter.clone();
         let on_surface = theme.colors.on_surface;
         let body_style = theme.typography.body.clone();
@@ -252,8 +255,8 @@ impl Root {
                         .child(
                             TextWidget::new(
                                 "Hierarchical tree with expand/collapse. \
-                                 Drag to reparent (top=before, middle=into, bottom=after). \
-                                 Keyboard: Arrows navigate, Right/Left expand/collapse.",
+                                 Click to select, Right/Left expand/collapse. \
+                                 Drag to reparent (top=before, middle=into, bottom=after).",
                             )
                             .style(theme.typography.body.clone())
                             .color(theme.colors.on_surface),
@@ -287,7 +290,7 @@ impl Root {
                 ),
             )
             .child(
-                TreeView::new(tree, move |item, entry, _selected| {
+                TreeView::new(tree, move |item, entry, selected| {
                     let indent = entry.depth as f32 * 20.0;
                     let arrow = if entry.has_children {
                         if entry.is_expanded { "v " } else { "> " }
@@ -296,27 +299,40 @@ impl Root {
                     };
                     let is_folder = entry.has_children;
 
+                    let bg = if selected {
+                        Color::from_rgba(0.25, 0.47, 0.85, 0.25)
+                    } else {
+                        Color::TRANSPARENT
+                    };
+
                     Box::new(
-                        Padding::new(2.0, 8.0, 2.0, indent + 8.0).child(
-                            HStack::new()
-                                .spacing(4.0)
-                                .child(
-                                    TextWidget::new(arrow.to_string().leak() as &str)
-                                        .color(Color::from_rgba(0.4, 0.4, 0.4, 1.0))
-                                        .style(label_style.clone()),
-                                )
-                                .child(TextWidget::new(item.as_str()).color(on_surface).style(
-                                    if is_folder {
-                                        body_style.clone()
-                                    } else {
-                                        label_style.clone()
-                                    },
-                                ))
-                                .child(Spacer::new()),
-                        ),
+                        ZStack::new()
+                            .child(RectWidget::new().background(bg))
+                            .child(
+                                Padding::new(2.0, 8.0, 2.0, indent + 8.0).child(
+                                    HStack::new()
+                                        .spacing(4.0)
+                                        .child(
+                                            TextWidget::new(arrow.to_string().leak() as &str)
+                                                .color(Color::from_rgba(0.4, 0.4, 0.4, 1.0))
+                                                .style(label_style.clone()),
+                                        )
+                                        .child(
+                                            TextWidget::new(item.as_str()).color(on_surface).style(
+                                                if is_folder {
+                                                    body_style.clone()
+                                                } else {
+                                                    label_style.clone()
+                                                },
+                                            ),
+                                        )
+                                        .child(Spacer::new()),
+                                ),
+                            ),
                     )
                 })
                 .item_height(28.0)
+                .selection(selection)
                 .reorderable(true),
             )
     }
