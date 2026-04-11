@@ -1,6 +1,8 @@
 pub use fern_app as app;
 pub use fern_canvas as canvas;
 pub use fern_core as core;
+pub use fern_data as data;
+pub use fern_platform as platform;
 pub use fern_tokens as tokens;
 
 #[cfg(feature = "widgets")]

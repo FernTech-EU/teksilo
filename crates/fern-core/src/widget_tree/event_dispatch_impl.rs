@@ -76,6 +76,28 @@ impl WidgetTree {
             }
         }
 
+        // --- Active drag session handling ---
+        if self.active_drag.is_some() {
+            match &event {
+                WidgetEvent::PointerMove { position } => {
+                    self.handle_drag_move(*position);
+                    return;
+                }
+                WidgetEvent::PointerUp { position, .. } => {
+                    self.handle_drag_drop(*position);
+                    return;
+                }
+                WidgetEvent::KeyDown {
+                    key: Key::Escape, ..
+                } => {
+                    self.active_drag = None;
+                    self.pointer_captured_by = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         match &event {
             WidgetEvent::PointerMove { position } => {
                 if let Some(captured) = self.pointer_captured_by {
@@ -527,6 +549,128 @@ impl WidgetTree {
         if let Some(&id) = ctx.focus_requests.last() {
             self.focus(id);
         }
+
+        // --- Drag and drop ---
+        if let Some((source_widget, payload)) = ctx.drag_start_request {
+            self.active_drag = Some(crate::drag_state::DragSession {
+                payload,
+                source_widget,
+                current_position: fern_canvas::Point::ZERO,
+                current_target: None,
+                feedback: crate::drag_state::DropFeedback::NoFeedback,
+            });
+            self.pointer_captured_by = Some(source_widget);
+        }
+        if ctx.cancel_drag {
+            self.active_drag = None;
+            self.pointer_captured_by = None;
+        }
+    }
+
+    // --- Drag and drop helpers ---
+
+    /// Update the drag session on pointer move: find the drop target under the
+    /// pointer and call its `on_drag_hover` handler.
+    fn handle_drag_move(&mut self, position: fern_canvas::Point) {
+        // Update position on the session
+        if let Some(ref mut drag) = self.active_drag {
+            drag.current_position = position;
+        }
+
+        // Hit-test to find the widget under the pointer
+        let target = self.hit_test(position);
+
+        // Walk up from hit target to find a widget with on_drag_hover
+        let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
+
+        // Update current target on the session
+        if let Some(ref mut drag) = self.active_drag {
+            let prev_target = drag.current_target;
+            drag.current_target = drop_target;
+
+            // If target changed, reset feedback
+            if prev_target != drop_target {
+                drag.feedback = crate::drag_state::DropFeedback::NoFeedback;
+            }
+        }
+
+        // Call on_drag_hover on the target if it has one
+        if let Some(target_id) = drop_target {
+            // We need to temporarily take the drag payload reference for the callback.
+            // Since on_drag_hover takes &DragPayload (not owned), we can borrow from the session.
+            // But we also need &mut for the handler. Use take_widget pattern.
+            if let Some(node) = self.arena.get_mut(target_id) {
+                if let Some(mut handler) = node.handlers.on_drag_hover.take() {
+                    // Temporarily read position and create a minimal event context
+                    let mut ctx = crate::widget::EventContext::new();
+
+                    // We need access to the payload — borrow from active_drag
+                    if let Some(ref drag) = self.active_drag {
+                        let feedback = handler(&drag.payload, position, &mut ctx);
+                        // Put handler back
+                        if let Some(node) = self.arena.get_mut(target_id) {
+                            node.handlers.on_drag_hover = Some(handler);
+                        }
+                        // Store feedback
+                        if let Some(ref mut drag) = self.active_drag {
+                            drag.feedback = feedback;
+                        }
+                        // Process any commands emitted
+                        self.collect_from_ctx(ctx, target_id);
+                    } else {
+                        // Put handler back even if drag ended
+                        if let Some(node) = self.arena.get_mut(target_id) {
+                            node.handlers.on_drag_hover = Some(handler);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Complete the drag: fire `on_drop` on the target widget and end the session.
+    fn handle_drag_drop(&mut self, position: fern_canvas::Point) {
+        // Take the drag session
+        let drag = match self.active_drag.take() {
+            Some(d) => d,
+            None => return,
+        };
+        self.pointer_captured_by = None;
+
+        // Hit-test to find drop target
+        let target = self.hit_test(position);
+        let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
+
+        if let Some(target_id) = drop_target {
+            if let Some(node) = self.arena.get_mut(target_id) {
+                if let Some(mut handler) = node.handlers.on_drop.take() {
+                    let mut ctx = crate::widget::EventContext::new();
+                    let _accepted = handler(drag.payload, position, &mut ctx);
+                    // Put handler back
+                    if let Some(node) = self.arena.get_mut(target_id) {
+                        node.handlers.on_drop = Some(handler);
+                    }
+                    self.collect_from_ctx(ctx, target_id);
+                    return;
+                }
+            }
+        }
+        // Drop was not accepted — payload is dropped (Rust Drop)
+    }
+
+    /// Walk up from a widget to find the nearest ancestor (or self) with a
+    /// drop handler (`on_drop` or `on_drag_hover`).
+    fn find_drop_target_at_or_above(&self, start: WidgetId) -> Option<WidgetId> {
+        let mut current = Some(start);
+        while let Some(id) = current {
+            if let Some(node) = self.arena.get(id) {
+                if node.handlers.on_drop.is_some() || node.handlers.on_drag_hover.is_some() {
+                    return Some(id);
+                }
+            }
+            current = self.arena.parent(id);
+        }
+        None
     }
 
     fn feed_gesture_recognizers(&mut self, target: WidgetId, raw: &RawPointerEvent) {
@@ -916,5 +1060,164 @@ mod tests {
         tree.focus(child);
         tree.press_key(Key::Z, Modifiers::CTRL);
         assert_eq!(fired.get(), Some(Cmd::GlobalAction));
+    }
+
+    // --- Drag and Drop tests ---
+
+    #[test]
+    fn start_drag_creates_session() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new().on_tap({
+            move |ctx: &mut crate::widget::EventContext| {
+                ctx.start_drag(
+                    ctx.focus_requests.first().copied().unwrap_or_default(),
+                    crate::drag_payload::DragPayload::typed(42_u32),
+                );
+            }
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Manually start a drag via EventContext
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        assert!(tree.active_drag.is_some());
+        let drag = tree.active_drag.as_ref().unwrap();
+        assert_eq!(drag.source_widget, source);
+        assert!(drag.payload.has_typed::<u32>());
+    }
+
+    #[test]
+    fn drag_move_updates_position() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Start a drag session
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed("hello"));
+        tree.collect_from_ctx(ctx, source);
+        assert!(tree.active_drag.is_some());
+
+        // Move the pointer
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(50.0, 30.0),
+        });
+
+        let drag = tree.active_drag.as_ref().unwrap();
+        assert!((drag.current_position.x - 50.0).abs() < 0.01);
+        assert!((drag.current_position.y - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn escape_cancels_drag() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(99_i32));
+        tree.collect_from_ctx(ctx, source);
+        assert!(tree.active_drag.is_some());
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert!(tree.active_drag.is_none());
+    }
+
+    #[test]
+    fn drop_on_target_fires_handler() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let dropped = Rc::new(Cell::new(false));
+        let dropped_value = Rc::new(Cell::new(0_u32));
+        let d = dropped.clone();
+        let dv = dropped_value.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        // Target occupies right half (100..200, 0..100)
+        let _target = tree.add(FillWidget::new().on_drop(move |mut payload, _pos, _ctx| {
+            d.set(true);
+            if let Some(val) = payload.take_typed::<u32>() {
+                dv.set(val);
+            }
+            true
+        }));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Start drag from source
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Drop at a position over the target
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(150.0, 50.0),
+            button: PointerButton::Primary,
+        });
+
+        assert!(tree.active_drag.is_none(), "drag session should be cleared");
+        assert!(dropped.get(), "on_drop should have been called");
+        assert_eq!(dropped_value.get(), 42);
+    }
+
+    #[test]
+    fn drop_on_no_target_cancels() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Drop outside any widget
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(999.0, 999.0),
+            button: PointerButton::Primary,
+        });
+
+        assert!(tree.active_drag.is_none(), "drag session should be cleared");
+    }
+
+    #[test]
+    fn drag_hover_calls_on_drag_hover() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let hover_count = Rc::new(Cell::new(0));
+        let hc = hover_count.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(move |_payload, _pos, _ctx| {
+                    hc.set(hc.get() + 1);
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 50.0,
+                        width: 200.0,
+                    }
+                })
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Start drag
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed("test"));
+        tree.collect_from_ctx(ctx, source);
+
+        // Move over the target
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(150.0, 50.0),
+        });
+
+        assert!(
+            hover_count.get() > 0,
+            "on_drag_hover should have been called"
+        );
     }
 }

@@ -6,6 +6,8 @@
 
 use fern_canvas::Point;
 
+use crate::drag_payload::DragPayload;
+use crate::drag_state::DropFeedback;
 use crate::event::{EventResponse, WidgetEvent};
 use crate::gesture::{GestureArena, GestureEvent};
 use crate::widget::EventContext;
@@ -25,6 +27,15 @@ pub(crate) struct EventHandlers {
     pub on_scroll: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_access_action:
         Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> EventResponse>>,
+    // --- Drag and Drop handlers ---
+    /// Called when a compatible drag payload hovers over this widget.
+    /// Returns `DropFeedback` to indicate acceptance and visual feedback.
+    pub on_drag_hover:
+        Option<Box<dyn FnMut(&DragPayload, Point, &mut EventContext) -> DropFeedback>>,
+    /// Called when a payload is dropped on this widget.
+    /// Returns `true` if the drop was accepted.
+    pub on_drop: Option<Box<dyn FnMut(DragPayload, Point, &mut EventContext) -> bool>>,
+
     #[allow(dead_code)] // V2 API: gesture arena for attached gesture recognizers
     pub gesture_arena: Option<GestureArena>,
 }
@@ -42,6 +53,8 @@ impl EventHandlers {
             on_pointer_event: None,
             on_scroll: None,
             on_access_action: None,
+            on_drag_hover: None,
+            on_drop: None,
             gesture_arena: None,
         }
     }
@@ -59,6 +72,8 @@ impl EventHandlers {
             || self.on_pointer_event.is_some()
             || self.on_scroll.is_some()
             || self.on_access_action.is_some()
+            || self.on_drag_hover.is_some()
+            || self.on_drop.is_some()
     }
 
     pub fn merge(self, other: EventHandlers) -> EventHandlers {
@@ -73,6 +88,8 @@ impl EventHandlers {
             on_pointer_event: merge_event_handler(self.on_pointer_event, other.on_pointer_event),
             on_scroll: merge_event_handler(self.on_scroll, other.on_scroll),
             on_access_action: merge_access_handler(self.on_access_action, other.on_access_action),
+            on_drag_hover: other.on_drag_hover.or(self.on_drag_hover),
+            on_drop: other.on_drop.or(self.on_drop),
             gesture_arena: other.gesture_arena.or(self.gesture_arena),
         }
     }
@@ -212,6 +229,8 @@ impl std::fmt::Debug for EventHandlers {
             .field("on_pointer_event", &self.on_pointer_event.is_some())
             .field("on_scroll", &self.on_scroll.is_some())
             .field("on_access_action", &self.on_access_action.is_some())
+            .field("on_drag_hover", &self.on_drag_hover.is_some())
+            .field("on_drop", &self.on_drop.is_some())
             .finish()
     }
 }

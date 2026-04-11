@@ -12,7 +12,9 @@ use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 
+use fern_core::DropFeedback;
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::drag_payload::DragPayload;
 use fern_core::signal::Signal;
 use fern_core::state::BindingLevel;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
@@ -23,6 +25,15 @@ use fern_data::ListModel;
 use fern_data::selection_model::SelectionModel;
 
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
+
+/// Internal drag payload for intra-ListView reordering.
+#[derive(Debug, Clone)]
+struct ListViewDragData {
+    /// The model index being dragged.
+    source_index: usize,
+    /// An ID to disambiguate different ListViews (pointer equality of the model).
+    source_model_id: usize,
+}
 
 /// Default number of extra items to create above and below the viewport.
 const BUFFER_ITEMS: usize = 5;
@@ -49,6 +60,13 @@ pub struct ListView<T: 'static> {
     spacing: f32,
     selection: Option<SelectionModel>,
 
+    /// Enable intra-widget drag reordering + keyboard Alt+Arrow.
+    reorderable: bool,
+
+    /// Callback for inter-widget drops from external drag sources.
+    #[allow(clippy::type_complexity)]
+    on_item_drop: Option<Rc<dyn Fn(DragPayload, usize) -> bool>>,
+
     // Persistent state (survives rebuild)
     scroll_y: Signal<f32>,
     max_scroll_y: Signal<f32>,
@@ -58,7 +76,9 @@ pub struct ListView<T: 'static> {
     item_entries: Vec<(usize, WidgetId)>, // (model_index, widget_id)
     scrollbar_id: Option<WidgetId>,
     viewport_height: Cell<f32>,
-    data_version: Option<Signal<u64>>,
+
+    /// Stable ID for this ListView instance (used to identify intra-widget reorder).
+    model_id: usize,
 }
 
 impl<T: 'static> ListView<T> {
@@ -70,19 +90,24 @@ impl<T: 'static> ListView<T> {
         model: ListModel<T>,
         delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static,
     ) -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
+        let model_id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         Self {
+            model_id,
             model,
             delegate: Rc::new(delegate),
             item_height: DEFAULT_ITEM_HEIGHT,
             spacing: 0.0,
             selection: None,
+            reorderable: false,
+            on_item_drop: None,
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
             item_entries: Vec::new(),
             scrollbar_id: None,
-            viewport_height: Cell::new(600.0), // reasonable default for first build
-            data_version: None,
+            viewport_height: Cell::new(600.0),
         }
     }
 
@@ -101,6 +126,25 @@ impl<T: 'static> ListView<T> {
     /// Set the selection model.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
         self.selection = Some(sel);
+        self
+    }
+
+    /// Enable intra-widget drag reordering.
+    ///
+    /// When enabled, items can be dragged and dropped within this ListView
+    /// to reorder them. The underlying `ListModel::move_item()` is called
+    /// automatically. Keyboard equivalent: Alt+ArrowUp/Down.
+    pub fn reorderable(mut self, enabled: bool) -> Self {
+        self.reorderable = enabled;
+        self
+    }
+
+    /// Set a callback for inter-widget drops from external drag sources.
+    ///
+    /// The callback receives `(payload, insertion_index)` and returns `true`
+    /// if the drop was accepted.
+    pub fn on_item_drop(mut self, f: impl Fn(DragPayload, usize) -> bool + 'static) -> Self {
+        self.on_item_drop = Some(Rc::new(f));
         self
     }
 
@@ -159,7 +203,6 @@ impl<T: 'static> Widget for ListView<T> {
         // --- Version signal for rebuild triggering ---
         let version = ctx.signal(0_u64);
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
-        self.data_version = Some(version.clone());
 
         // Register animated signal for smooth scrolling
         ctx.register_animated_signal(&self.scroll_y);
@@ -214,11 +257,11 @@ impl<T: 'static> Widget for ListView<T> {
         });
         ctx.own_handle(scroll_handle);
 
-        // --- Set up scroll event handler ---
+        // --- Set up scroll event handler + DnD handlers on self ---
         let scroll_y = self.scroll_y.clone();
         let max_scroll = self.max_scroll_y.clone();
         let line_height = self.item_height;
-        let handlers = HandlerSet::new()
+        let mut handlers = HandlerSet::new()
             .on_scroll(move |event, _ctx| match event {
                 fern_core::event::WidgetEvent::Scroll { delta, .. } => {
                     let dy = match delta {
@@ -234,12 +277,129 @@ impl<T: 'static> Widget for ListView<T> {
                 _ => fern_core::event::EventResponse::Ignored,
             })
             .clips_children(true);
+
+        // --- DnD: register self as drop target when reorderable or on_item_drop ---
+        if self.reorderable || self.on_item_drop.is_some() {
+            let row_step_for_hover = self.item_height + self.spacing;
+            let ih_for_hover = self.item_height;
+            let scroll_for_hover = self.scroll_y.clone();
+            let model_count_for_hover = self.model.clone();
+            let my_model_id = self.model_id;
+
+            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+                // Compute insertion index from Y position
+                let scroll = scroll_for_hover.get().max(0.0);
+                let content_y = position.y + scroll; // approximate
+                let index = if row_step_for_hover > 0.0 {
+                    ((content_y + ih_for_hover * 0.5) / row_step_for_hover)
+                        .floor()
+                        .max(0.0)
+                        .min(model_count_for_hover.len() as f32) as usize
+                } else {
+                    0
+                };
+
+                // Accept if it's an intra-widget reorder or if on_item_drop is set
+                if payload.has_typed::<ListViewDragData>() {
+                    let insertion_y = index as f32 * row_step_for_hover - scroll;
+                    DropFeedback::InsertionLine {
+                        y: insertion_y,
+                        width: 400.0, // approximate, will be refined
+                    }
+                } else {
+                    DropFeedback::NoFeedback
+                }
+            });
+
+            let model_for_drop = self.model.clone();
+            let on_item_drop = self.on_item_drop.clone();
+            let scroll_for_drop = self.scroll_y.clone();
+            let ih_for_drop = self.item_height;
+            let row_step_for_drop = self.item_height + self.spacing;
+
+            handlers = handlers.on_drop(move |mut payload, position, _ctx| {
+                let scroll = scroll_for_drop.get().max(0.0);
+                let content_y = position.y + scroll;
+                let to_index = if row_step_for_drop > 0.0 {
+                    ((content_y + ih_for_drop * 0.5) / row_step_for_drop)
+                        .floor()
+                        .max(0.0)
+                        .min(model_for_drop.len() as f32) as usize
+                } else {
+                    0
+                };
+
+                // Check if this is an intra-widget reorder
+                if let Some(drag_data) = payload.take_typed::<ListViewDragData>() {
+                    if drag_data.source_model_id == my_model_id {
+                        let from = drag_data.source_index;
+                        // Adjust target index: if dragging down, the removal shifts indices
+                        let adjusted_to = if from < to_index {
+                            to_index.saturating_sub(1)
+                        } else {
+                            to_index
+                        };
+                        if from != adjusted_to {
+                            model_for_drop.move_item(from, adjusted_to);
+                        }
+                        return true;
+                    }
+                }
+
+                // Inter-widget drop
+                if let Some(ref handler) = on_item_drop {
+                    return handler(payload, to_index);
+                }
+
+                false
+            });
+        }
+
+        // --- Alt+Arrow keyboard reorder (accessibility contract) ---
+        if self.reorderable {
+            let model_for_key = self.model.clone();
+            let sel_for_key = self.selection.clone();
+            handlers = handlers.on_key(move |event, _ctx| {
+                if let fern_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
+                    if modifiers.alt() {
+                        let selected_idx = sel_for_key
+                            .as_ref()
+                            .and_then(|s| s.selected_indices().first().copied());
+                        if let Some(idx) = selected_idx {
+                            let count = model_for_key.len();
+                            match key {
+                                fern_core::event::Key::ArrowUp if idx > 0 => {
+                                    model_for_key.move_item(idx, idx - 1);
+                                    if let Some(ref sel) = sel_for_key {
+                                        sel.select(idx - 1);
+                                    }
+                                    return fern_core::event::EventResponse::Handled;
+                                }
+                                fern_core::event::Key::ArrowDown if idx + 1 < count => {
+                                    model_for_key.move_item(idx, idx + 1);
+                                    if let Some(ref sel) = sel_for_key {
+                                        sel.select(idx + 1);
+                                    }
+                                    return fern_core::event::EventResponse::Handled;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                fern_core::event::EventResponse::Ignored
+            });
+        }
+
         ctx.apply_self_handlers(handlers);
 
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
         self.item_entries.clear();
         let selection = &self.selection;
+        let reorderable = self.reorderable;
+        let model_id = self.model_id;
+        let self_id = ctx.self_id();
         for i in start..end {
             let selected = selection
                 .as_ref()
@@ -250,6 +410,30 @@ impl<T: 'static> Widget for ListView<T> {
                 .with_item(i, |item| (self.delegate)(i, item, selected))
             {
                 let child_id = ctx.add_boxed(widget);
+
+                // When reorderable, attach an on_drag handler to start drag
+                if reorderable {
+                    let drag_index = i;
+                    let drag_model_id = model_id;
+                    let drag_self_id = self_id;
+                    ctx.apply_handlers(
+                        child_id,
+                        HandlerSet::new().on_drag(move |gesture_event, ctx| {
+                            if let fern_core::gesture::GestureEvent::DragStarted { .. } =
+                                gesture_event
+                            {
+                                ctx.start_drag(
+                                    drag_self_id,
+                                    DragPayload::typed(ListViewDragData {
+                                        source_index: drag_index,
+                                        source_model_id: drag_model_id,
+                                    }),
+                                );
+                            }
+                        }),
+                    );
+                }
+
                 self.item_entries.push((i, child_id));
             }
         }

@@ -13,7 +13,6 @@ use std::rc::Rc;
 use fern_canvas::{Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::signal::{ObserverHandle, Signal};
 use fern_core::state::BindingLevel;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -37,8 +36,6 @@ pub struct Repeater<T: 'static> {
     spacing: f32,
     // Internal state (set during build)
     container_id: Option<WidgetId>,
-    data_version: Option<Signal<u64>>,
-    _change_handle: Option<ObserverHandle>,
 }
 
 impl<T: 'static> Repeater<T> {
@@ -55,8 +52,6 @@ impl<T: 'static> Repeater<T> {
             factory: Rc::new(factory),
             spacing: 0.0,
             container_id: None,
-            data_version: None,
-            _change_handle: None,
         }
     }
 
@@ -91,8 +86,6 @@ impl<T: 'static> Widget for Repeater<T> {
             version_for_observer.set(next);
         });
         ctx.own_handle(handle);
-
-        self.data_version = Some(version);
 
         // Build child widgets from the current model state.
         let mut container = VStack::new().spacing(self.spacing);

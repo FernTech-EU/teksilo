@@ -67,6 +67,15 @@ impl HandlerSet {
         self
     }
 
+    /// Set the on_drag handler (gesture-based drag).
+    pub fn on_drag(
+        mut self,
+        f: impl FnMut(crate::gesture::GestureEvent, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handlers.on_drag = Some(Box::new(f));
+        self
+    }
+
     /// Set the on_focus handler.
     pub fn on_focus(mut self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self {
         self.handlers.on_focus = Some(Box::new(f));
@@ -122,6 +131,32 @@ impl HandlerSet {
     /// to produce the overlay content widget (typically a `MenuList`).
     pub fn context_menu(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
         self.context_menu_factory = Some(Box::new(factory));
+        self
+    }
+
+    /// Set the drag hover handler. Called when a drag payload hovers over this widget.
+    /// Return `DropFeedback` to indicate acceptance and visual feedback.
+    pub fn on_drag_hover(
+        mut self,
+        f: impl FnMut(
+            &crate::drag_payload::DragPayload,
+            fern_canvas::Point,
+            &mut EventContext,
+        ) -> crate::drag_state::DropFeedback
+        + 'static,
+    ) -> Self {
+        self.handlers.on_drag_hover = Some(Box::new(f));
+        self
+    }
+
+    /// Set the drop handler. Called when a payload is dropped on this widget.
+    /// Return `true` if the drop was accepted.
+    pub fn on_drop(
+        mut self,
+        f: impl FnMut(crate::drag_payload::DragPayload, fern_canvas::Point, &mut EventContext) -> bool
+        + 'static,
+    ) -> Self {
+        self.handlers.on_drop = Some(Box::new(f));
         self
     }
 }
@@ -264,6 +299,30 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     pub fn context_menu(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
         self.handler_set.context_menu_factory = Some(Box::new(factory));
+        self
+    }
+
+    /// Set the drag hover handler. Called when a drag payload hovers over this widget.
+    pub fn on_drag_hover(
+        mut self,
+        f: impl FnMut(
+            &crate::drag_payload::DragPayload,
+            fern_canvas::Point,
+            &mut EventContext,
+        ) -> crate::drag_state::DropFeedback
+        + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_drag_hover = Some(Box::new(f));
+        self
+    }
+
+    /// Set the drop handler. Called when a payload is dropped on this widget.
+    pub fn on_drop(
+        mut self,
+        f: impl FnMut(crate::drag_payload::DragPayload, fern_canvas::Point, &mut EventContext) -> bool
+        + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_drop = Some(Box::new(f));
         self
     }
 }
@@ -489,6 +548,26 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         factory: impl Fn() -> Box<dyn Widget> + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).context_menu(factory)
+    }
+
+    fn on_drag_hover(
+        self,
+        f: impl FnMut(
+            &crate::drag_payload::DragPayload,
+            fern_canvas::Point,
+            &mut EventContext,
+        ) -> crate::drag_state::DropFeedback
+        + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_drag_hover(f)
+    }
+
+    fn on_drop(
+        self,
+        f: impl FnMut(crate::drag_payload::DragPayload, fern_canvas::Point, &mut EventContext) -> bool
+        + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_drop(f)
     }
 }
 

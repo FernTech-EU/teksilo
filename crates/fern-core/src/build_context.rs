@@ -144,4 +144,15 @@ impl<'a> BuildContext<'a> {
         let id = self.self_id();
         self.tree.apply_handler_set(id, handler_set);
     }
+
+    /// Apply a `HandlerSet` to a child widget created during this build.
+    /// Use this to attach event handlers to children without wrapping them
+    /// in `WidgetWithHandlers`.
+    pub fn apply_handlers(
+        &mut self,
+        id: crate::widget_id::WidgetId,
+        handler_set: crate::widget_builder::HandlerSet,
+    ) {
+        self.tree.apply_handler_set(id, handler_set);
+    }
 }

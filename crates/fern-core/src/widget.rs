@@ -204,6 +204,11 @@ pub struct EventContext {
     pub(crate) synthetic_clicks: Vec<crate::widget_id::WidgetId>,
     /// Focus requests — transfer focus to a specific widget (e.g., overlay content on open).
     pub(crate) focus_requests: Vec<crate::widget_id::WidgetId>,
+    /// Drag start request: (source_widget_id, payload).
+    pub(crate) drag_start_request:
+        Option<(crate::widget_id::WidgetId, crate::drag_payload::DragPayload)>,
+    /// Cancel any active drag session.
+    pub(crate) cancel_drag: bool,
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -233,6 +238,8 @@ impl EventContext {
             repaint_requests: Vec::new(),
             synthetic_clicks: Vec::new(),
             focus_requests: Vec::new(),
+            drag_start_request: None,
+            cancel_drag: false,
         }
     }
 
@@ -377,5 +384,25 @@ impl EventContext {
     /// hit-test dispatch.
     pub fn release_pointer(&mut self) {
         self.pointer_capture = Some(false);
+    }
+
+    /// Start a drag-and-drop operation from the given source widget.
+    ///
+    /// The `payload` carries the data being dragged. During the drag:
+    /// - `PointerMove` events update the drag position and fire `on_drag_hover`
+    ///   on widgets under the pointer that have drop handlers
+    /// - `PointerUp` fires `on_drop` on the target widget (if any)
+    /// - `Escape` cancels the drag
+    pub fn start_drag(
+        &mut self,
+        source_widget: crate::widget_id::WidgetId,
+        payload: crate::drag_payload::DragPayload,
+    ) {
+        self.drag_start_request = Some((source_widget, payload));
+    }
+
+    /// Cancel the active drag-and-drop session (if any).
+    pub fn cancel_drag(&mut self) {
+        self.cancel_drag = true;
     }
 }

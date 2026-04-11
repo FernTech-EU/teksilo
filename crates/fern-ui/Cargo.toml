@@ -17,6 +17,7 @@ rich-text = ["widgets", "fern-widgets/rich-text"]
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-core = { workspace = true }
+fern-data = { workspace = true }
 fern-render = { workspace = true }
 fern-platform = { workspace = true }
 fern-app = { workspace = true }

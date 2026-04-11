@@ -129,6 +129,8 @@ pub struct WidgetTree {
     prefers_high_contrast: bool,
     prefers_reduced_motion: bool,
     text_scale_factor: f64,
+    /// Active drag-and-drop session, if any.
+    pub(crate) active_drag: Option<crate::drag_state::DragSession>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -185,6 +187,7 @@ impl WidgetTree {
             prefers_high_contrast: false,
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
+            active_drag: None,
         }
     }
 
