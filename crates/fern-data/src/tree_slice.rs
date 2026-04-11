@@ -355,6 +355,18 @@ impl<T: 'static> TreeSliceHandle<T> {
         self.expanded.borrow().contains(&node)
     }
 
+    pub fn toggle_expand(&self, node: NodeId) {
+        {
+            let mut exp = self.expanded.borrow_mut();
+            if exp.contains(&node) {
+                exp.remove(&node);
+            } else {
+                exp.insert(node);
+            }
+        }
+        self.reflatten_and_notify();
+    }
+
     pub fn tree(&self) -> &TreeModel<T> {
         &self.tree
     }

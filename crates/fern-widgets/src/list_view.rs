@@ -296,8 +296,12 @@ impl<T: 'static> Widget for ListView<T> {
         let spacing = self.spacing;
         let row_step = item_height + spacing;
         let viewport_h = self.viewport_height.clone();
-        let prev_start = Rc::new(Cell::new(usize::MAX));
-        let prev_end = Rc::new(Cell::new(usize::MAX));
+        // Initialize to current visible range so the first scroll doesn't
+        // spuriously trigger a rebuild (which would destroy the scrollbar
+        // and break pointer capture during drag).
+        let (init_start, init_end) = self.visible_range();
+        let prev_start = Rc::new(Cell::new(init_start));
+        let prev_end = Rc::new(Cell::new(init_end));
         let version_for_scroll = version.clone();
         let scroll_ver = Rc::new(Cell::new(0_u64));
         let scroll_handle = self.scroll_y.observe({

@@ -504,6 +504,7 @@ impl<T: 'static> Widget for TreeView<T> {
                 .unwrap_or(false);
             // Get entry metadata for accessibility
             let entry_meta = self.tree_slice.entry_at(i);
+            let item_has_children = entry_meta.as_ref().is_some_and(|e| e.has_children);
             if let Some(widget) = self
                 .tree_slice
                 .with_entry(i, |item, entry| (self.delegate)(item, entry, selected))
@@ -525,10 +526,14 @@ impl<T: 'static> Widget for TreeView<T> {
                     expanded_opt,
                 ));
 
-                // Selection click handling
-                if let Some(ref sel) = self.selection {
-                    let sel_click = sel.clone();
+                // Click handling: selection + expand/collapse for items with children
+                {
+                    let sel_click = self.selection.clone();
                     let click_index = i;
+                    let tsh_click = self.tree_slice.handle();
+                    let has_children = item_has_children;
+                    let node_for_toggle = self.tree_slice.visible_node_id(i);
+
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
@@ -537,12 +542,21 @@ impl<T: 'static> Widget for TreeView<T> {
                                 button: fern_core::event::PointerButton::Primary,
                                 ..
                             } => {
-                                if modifiers.ctrl() {
-                                    sel_click.toggle(click_index);
-                                } else if modifiers.shift() {
-                                    sel_click.extend_to(click_index);
-                                } else {
-                                    sel_click.select(click_index);
+                                // Selection
+                                if let Some(ref sel) = sel_click {
+                                    if modifiers.ctrl() {
+                                        sel.toggle(click_index);
+                                    } else if modifiers.shift() {
+                                        sel.extend_to(click_index);
+                                    } else {
+                                        sel.select(click_index);
+                                    }
+                                }
+                                // Expand/collapse on click for nodes with children
+                                if has_children {
+                                    if let Some(node_id) = node_for_toggle {
+                                        tsh_click.toggle_expand(node_id);
+                                    }
                                 }
                                 fern_core::event::EventResponse::Handled
                             }
