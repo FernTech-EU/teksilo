@@ -12,6 +12,9 @@ use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
 use fern_platform::event_translation::TranslationState;
 use fern_tokens::{ColorTokens, Theme};
+use winit::raw_window_handle::HasWindowHandle;
+use winit::window::UserAttentionType;
+use winit::window::WindowLevel;
 
 use crate::app::ThemeMode;
 
@@ -100,10 +103,25 @@ impl WindowManager {
     ) -> FernWindowId {
         let fern_id = self.alloc_id();
 
-        let window_attrs = winit::window::Window::default_attributes()
+        let mut window_attrs = winit::window::Window::default_attributes()
             .with_title(&config.title)
             .with_inner_size(winit::dpi::LogicalSize::new(config.width, config.height))
             .with_visible(false); // Must be invisible for AccessKit adapter creation
+
+        if config.modal {
+            window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
+
+            if let Some(parent_id) = config.parent
+                && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
+                && let Some(parent_managed) = self.windows.get(&parent_winit)
+                && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
+            {
+                // Safe: the parent window is managed by the WindowManager and remains
+                // alive for the lifetime of the modal child.
+                window_attrs =
+                    unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
+            }
+        }
 
         let window = target.create_window(window_attrs).unwrap();
         let winit_id = window.id();
@@ -139,6 +157,11 @@ impl WindowManager {
 
         // Create with AccessKit adapter (shows window after adapter is ready)
         let pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
+
+        if config.modal {
+            pw.window().set_window_level(WindowLevel::AlwaysOnTop);
+            pw.window().focus_window();
+        }
 
         let mut tree = WidgetTree::new().with_theme(initial_theme);
         tree.set_accessibility_preferences(
@@ -245,6 +268,33 @@ impl WindowManager {
     /// Whether a window is blocked by a modal child.
     pub fn is_blocked(&self, fern_id: FernWindowId) -> bool {
         self.modal_blocked.contains_key(&fern_id)
+    }
+
+    pub fn blocking_modal_child(&self, fern_id: FernWindowId) -> Option<FernWindowId> {
+        self.modal_blocked.get(&fern_id).copied()
+    }
+
+    pub fn refocus_modal_child(&self, blocked_parent: FernWindowId) {
+        let Some(child_id) = self.blocking_modal_child(blocked_parent) else {
+            return;
+        };
+        let Some(child_winit) = self.winit_id_for_fern(child_id) else {
+            return;
+        };
+        let Some(child) = self.windows.get(&child_winit) else {
+            return;
+        };
+
+        child
+            .platform_window
+            .window()
+            .set_window_level(WindowLevel::AlwaysOnTop);
+        child.platform_window.window().focus_window();
+        child
+            .platform_window
+            .window()
+            .request_user_attention(Some(UserAttentionType::Informational));
+        child.platform_window.request_redraw();
     }
 
     /// Broadcast a theme change to all windows.

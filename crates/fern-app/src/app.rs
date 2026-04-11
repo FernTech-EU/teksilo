@@ -380,6 +380,7 @@ impl FernAppHandler {
 
         if let Some(fid) = fern_id {
             if self.wm.is_blocked(fid) && !matches!(event, WindowEvent::CloseRequested) {
+                self.wm.refocus_modal_child(fid);
                 self.update_control_flow(event_loop);
                 return;
             }
