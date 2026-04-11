@@ -179,7 +179,12 @@ impl WindowManager {
         }
 
         if let Some(root_builder) = config.root_builder {
-            root_builder(&mut tree);
+            let root_id = root_builder(&mut tree);
+            if config.modal
+                && let Some(focus_target) = tree.first_focusable_descendant(root_id)
+            {
+                tree.focus(focus_target);
+            }
         }
 
         // Handle modal blocking

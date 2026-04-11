@@ -101,6 +101,10 @@ fn present_in_tree_modal_request(
             parent_overlay: None,
         },
     );
+
+    if let Some(focus_target) = tree.first_focusable_descendant(content_id) {
+        tree.focus(focus_target);
+    }
 }
 
 fn apply_cursor_to_window(
@@ -951,7 +955,7 @@ impl HeadlessApp {
 mod tests {
     use super::*;
     use fern_tokens::Color;
-    use fern_widgets::Button;
+    use fern_widgets::{Button, ModalContainer};
 
     #[test]
     fn builder_accepts_theme() {
@@ -1030,5 +1034,25 @@ mod tests {
 
         assert_eq!(tree.active_overlays().len(), 1);
         assert!(tree.find_by_label("Deferred modal").is_some());
+    }
+
+    #[test]
+    fn present_in_tree_modal_request_moves_focus_into_modal() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let source = tree.add(Button::new("Trigger"));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.focus(source);
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(ModalContainer::new(Button::new("Continue")))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+
+        let continue_button = tree.find_by_label("Continue").unwrap();
+        assert_eq!(tree.focused(), Some(continue_button));
     }
 }

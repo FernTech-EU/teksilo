@@ -71,6 +71,17 @@ impl WidgetTree {
         self.focused
     }
 
+    /// Find the first focusable widget in depth-first order within a subtree.
+    pub fn first_focusable_descendant(&self, root: WidgetId) -> Option<WidgetId> {
+        if !self.arena.is_active(root) {
+            return None;
+        }
+
+        let mut focusable = Vec::new();
+        self.collect_focusable_tree_order(root, &mut focusable);
+        focusable.into_iter().next()
+    }
+
     /// How the currently focused widget gained focus.
     pub fn focus_origin(&self) -> Option<crate::focus::FocusOrigin> {
         self.focus_origin
@@ -185,6 +196,18 @@ mod tests {
         assert_eq!(tree.focused(), Some(a));
         tree.focus(b);
         assert_eq!(tree.focused(), Some(b));
+    }
+
+    #[test]
+    fn first_focusable_descendant_prefers_first_focusable_child() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let _not_focusable = tree.add(FillWidget::new());
+        let b = tree.add(FillWidget::new().focusable());
+        let root = tree.add(crate::test_widgets::StackWidget::new().add_child(a).add_child(b));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert_eq!(tree.first_focusable_descendant(root), Some(a));
     }
 
     #[test]
