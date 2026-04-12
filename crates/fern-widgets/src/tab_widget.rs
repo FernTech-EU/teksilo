@@ -320,32 +320,35 @@ impl Widget for TabHeader {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Int UI tab visual — follows the IntelliJ new UI / VS Code
-        // convention where the **selected tab is the content surface**
-        // poking up into the tab strip, not a chip with an underline:
+        // Int UI tab visual — IntelliJ new UI / VS Code convention:
         //
         //   * Selected, enabled:
         //       background = `surface_content` (same fill as the pane
         //         below, so the tab "merges" into the content area)
         //       label      = `text_primary`
-        //       indicator  = 3 dp `accent` bar at the bottom edge, drawn
-        //         last so it overpaints the tab bar's own 1 dp separator
+        //       indicator  = 1 dp `accent` bar at the **top** edge
+        //       bottom     = the tab's `surface_content` fill extends
+        //         all the way to `bounds.bottom`, overpainting the
+        //         TabBar's own 1 dp separator so there is NO visible
+        //         bottom border under the selected tab — the tab and
+        //         the content pane read as one continuous surface.
         //
         //   * Unselected, hovered:
-        //       background = `surface_hover`
+        //       background = `surface_hover`, inset from the envelope
         //       label      = `text_primary`
+        //       bottom     = separator remains visible
         //
         //   * Unselected, idle:
-        //       background = TRANSPARENT (same as the tab bar)
+        //       background = TRANSPARENT
         //       label      = `text_secondary`
+        //       bottom     = separator remains visible
         //
         //   * Disabled: TRANSPARENT background, `text_disabled` label,
-        //     no accent indicator.
+        //     no top indicator, separator remains visible.
         //
         //   * Focus ring: 2 dp `focus_ring` stroke drawn outside the
         //     reserved envelope — but **only on keyboard focus**. A
-        //     click-to-focus does not trigger the ring. This matches
-        //     every other focusable widget in the toolkit.
+        //     click-to-focus does not trigger the ring.
 
         let selected = self.selected.get() == self.index;
         let interaction = self.interaction.get();
@@ -353,10 +356,14 @@ impl Widget for TabHeader {
         let tab_style = ctx.theme.components.tab;
         let shape = &ctx.theme.shape;
         let pad_h = tab_style.padding_horizontal;
-        let underline = tab_style.underline_active;
+        let top_indicator = shape.border_width;
 
-        // Reserve the focus-ring envelope so the ring isn't clipped. The
-        // visual tab sits inside that envelope.
+        // Envelope reserves space for the keyboard focus ring on all
+        // four sides. The visual rect is the symmetric inset — the label
+        // never shifts, and selected-tab bottom-border erasure is handled
+        // by the TabBar drawing its separator *inside* the visual rect
+        // (at `bounds.bottom - envelope - 1`) so the selected tab's fill
+        // naturally covers it without any out-of-bounds painting.
         let envelope = shape.focus_ring_offset + shape.focus_ring_width;
         let visual = Rect::new(
             bounds.x + envelope,
@@ -365,8 +372,7 @@ impl Widget for TabHeader {
             (bounds.height - envelope * 2.0).max(0.0),
         );
 
-        // Background. Selection wins over hover; disabled tabs keep the
-        // tab-bar background regardless of state.
+        // Background fill.
         let background = if !self.enabled {
             Color::TRANSPARENT
         } else if selected {
@@ -380,17 +386,10 @@ impl Widget for TabHeader {
             canvas.fill_rect(visual, background);
         }
 
-        // Selected-tab accent bar at the bottom. Drawn after the fill
-        // so it overpaints both the content-surface fill and the tab
-        // bar's separator, producing the "tab reaches down into the
-        // pane" look.
+        // 1 dp accent indicator along the top edge of the selected tab.
+        // Drawn after the fill so it sits on top of it.
         if selected && self.enabled {
-            let indicator = Rect::new(
-                visual.x,
-                visual.bottom() - underline,
-                visual.width,
-                underline,
-            );
+            let indicator = Rect::new(visual.x, visual.y, visual.width, top_indicator);
             canvas.fill_rect(indicator, colors.accent);
         }
 
@@ -401,7 +400,7 @@ impl Widget for TabHeader {
         } else {
             colors.text_secondary
         };
-        let text_bounds = Rect::new(
+        let text_rect = Rect::new(
             visual.x + pad_h,
             visual.y + HEADER_PADDING_V,
             (visual.width - pad_h * 2.0).max(0.0),
@@ -409,7 +408,7 @@ impl Widget for TabHeader {
         );
         canvas.draw_text(
             &self.label,
-            text_bounds,
+            text_rect,
             &ctx.theme.typography.small,
             text_color,
         );
@@ -491,7 +490,15 @@ impl Widget for TabBar {
             headers = headers.add_child(header_id);
         }
 
-        let header_min_height = ctx.theme().components.tab.editor_tab_height;
+        // TabHeader's intrinsic height is `editor_tab_height + envelope*2`
+        // — it reserves the focus-ring envelope on all four sides. The
+        // ScrollArea's preferred height must match, or the 38-dp-tall
+        // headers get clipped inside a 30-dp viewport, causing visible
+        // pixel shifts in labels whenever layout is re-run.
+        let shape = &ctx.theme().shape;
+        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
+        let header_min_height =
+            ctx.theme().components.tab.editor_tab_height + envelope * 2.0;
         let headers_scroll_id = ctx.add(
             ScrollArea::new(headers)
                 .scroll_bar_style(ScrollBarMode::Overlay)
@@ -536,15 +543,20 @@ impl Widget for TabBar {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Int UI tab bar is a flat row on the same surface as the content —
-        // no fill, no rounded corners. The only chrome is a 1 dp horizontal
-        // separator at the bottom edge between the tab row and the content
-        // pane. Selected tabs draw their own `underline_active` accent bar
-        // on top of this separator, producing the "notched" look.
+        // Int UI tab bar is a flat row on the same surface as the content.
+        // The only chrome is a 1 dp horizontal separator that runs along
+        // the bottom of the **visual** tab row. Each TabHeader reserves a
+        // focus-ring envelope on all four sides, so the visual row bottom
+        // sits at `bounds.bottom - envelope`, not at `bounds.bottom`.
+        // Drawing the separator there places it *inside* the headers'
+        // visual rect — the selected header's `surface_content` fill then
+        // overpaints it in its own column, producing the "tab merges into
+        // content pane" effect without depending on out-of-bounds painting.
         let border_width = ctx.theme.shape.border_width;
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let separator = fern_canvas::Rect::new(
             bounds.x,
-            bounds.bottom() - border_width,
+            (bounds.bottom() - envelope - border_width).max(bounds.y),
             bounds.width,
             border_width,
         );
