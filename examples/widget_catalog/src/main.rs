@@ -33,8 +33,8 @@ use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
     FixedSize, Grid, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel,
-    ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget,
-    Toggle, Toolbar, TrackSize, VStack, Wrap,
+    ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TabItem,
+    TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
 
 // ---------------------------------------------------------------------------
@@ -988,6 +988,112 @@ impl Widget for WidgetCatalog {
         // Section 6: Navigation
         // =====================================================================
 
+        // TabWidget demo — three tabs, a trailing flat button slot, and
+        // enough intrinsic content to prove the tab bar stays on top and
+        // the content doesn't bleed over it. The whole thing is wrapped
+        // in a FixedSize so the catalog's scrolling column gives it a
+        // concrete height instead of asking for intrinsic size.
+        let tabs_selected = ctx.signal(0_usize);
+        let tabs = ctx.add(
+            TabWidget::new(tabs_selected)
+                .tab(
+                    "Overview",
+                    Panel::new().padding(16.0).child(
+                        VStack::new()
+                            .spacing(8.0)
+                            .child(
+                                TextWidget::new("Overview")
+                                    .style(t.body_bold.clone())
+                                    .color(c.text_primary),
+                            )
+                            .child(
+                                TextWidget::new(
+                                    "TabWidget is a retained container with dormant panes: \
+                                     only the active tab is built, inactive panes keep \
+                                     their state but don't receive layout or paint until \
+                                     they're re-activated.",
+                                )
+                                .style(t.body.clone())
+                                .color(c.text_primary),
+                            )
+                            .child(
+                                HStack::new()
+                                    .spacing(8.0)
+                                    .child(Badge::new("Dormant panes"))
+                                    .child(Badge::new("Arrow keys"))
+                                    .child(Badge::new("Trailing slot")),
+                            ),
+                    ),
+                )
+                .tab(
+                    "Usage",
+                    Panel::new().padding(16.0).child(
+                        VStack::new()
+                            .spacing(8.0)
+                            .child(
+                                TextWidget::new("Usage")
+                                    .style(t.body_bold.clone())
+                                    .color(c.text_primary),
+                            )
+                            .child(
+                                TextWidget::new(
+                                    "Press Tab to move focus into the tab strip, then \
+                                     Arrow Left / Arrow Right to switch between tabs. \
+                                     Disabled tabs are skipped by keyboard navigation.",
+                                )
+                                .style(t.body.clone())
+                                .color(c.text_primary),
+                            ),
+                    ),
+                )
+                .tab(
+                    "Structure",
+                    Panel::new().padding(16.0).child(
+                        VStack::new()
+                            .spacing(8.0)
+                            .child(
+                                TextWidget::new("Structure")
+                                    .style(t.body_bold.clone())
+                                    .color(c.text_primary),
+                            )
+                            .child(
+                                TextWidget::new(
+                                    "Int UI tabs: flat headers, no rounded corners, no \
+                                     borders. The selected tab is marked only by a 3 dp \
+                                     accent underline at its bottom edge, which \
+                                     overpaints the tab bar's own 1 dp separator.",
+                                )
+                                .style(t.body.clone())
+                                .color(c.text_primary),
+                            ),
+                    ),
+                )
+                .tab_item(
+                    TabItem::new(
+                        "Disabled",
+                        Panel::new().padding(16.0).child(
+                            TextWidget::new(
+                                "Disabled panes are still listed in the tab bar but \
+                                 cannot be activated by click or keyboard.",
+                            )
+                            .style(t.body.clone())
+                            .color(c.text_primary),
+                        ),
+                    )
+                    .enabled(false),
+                )
+                .trailing_slot(
+                    Button::new("More")
+                        .style(ButtonVariant::Flat)
+                        .on_activate(Cmd::LinkClicked),
+                ),
+        );
+        let tabs_block = ctx.add(
+            FixedSize::new()
+                .bind_height(240.0_f32)
+                .set_child(tabs),
+        );
+
         let nav_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -996,6 +1102,12 @@ impl Widget for WidgetCatalog {
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
+                .child(
+                    TextWidget::new("TabWidget")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .add_child(tabs_block)
                 .child(
                     TextWidget::new("Link")
                         .style(t.small.clone())

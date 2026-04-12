@@ -76,7 +76,13 @@ impl Widget for HStack {
             return proposal.resolve(0.0, 0.0);
         }
 
-        // Query each child's intrinsic size: width=None (ideal), height from proposal
+        // Query each child's intrinsic size: width=None (ideal), height
+        // from proposal. See the matching comment in VStack — every child
+        // is queried including spacers, because `Expand::fills_stack`
+        // (which reports `is_spacer == true`) carries a content child
+        // whose natural size must be included in the stack's intrinsic
+        // width; a plain `Spacer` reports 0 anyway so this doesn't change
+        // the gap-spacer case.
         let child_proposal = SizeProposal {
             width: None,
             height: proposal.height,
@@ -85,14 +91,6 @@ impl Widget for HStack {
         let mut total_width: f32 = 0.0;
         let mut max_height: f32 = 0.0;
         for &child_id in &self.child_ids {
-            if ctx.child_is_spacer(child_id) {
-                // Spacers don't contribute intrinsic width (primary axis),
-                // but they still contribute to cross-axis height.
-                if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
-                    max_height = max_height.max(child_size.height);
-                }
-                continue;
-            }
             if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
                 total_width += child_size.width;
                 max_height = max_height.max(child_size.height);
@@ -103,8 +101,9 @@ impl Widget for HStack {
         let total_spacing = self.spacing * (n as f32 - 1.0).max(0.0);
         total_width += total_spacing;
 
-        // Primary axis: fill the offered width only when spacers need to expand.
-        // Without spacers, use the intrinsic content width.
+        // Primary axis: if we have spacers AND the parent gave us a width,
+        // fill it so spacers can stretch. Otherwise just report
+        // `total_width` (which now includes content-carrying expands).
         let has_spacers = self.child_ids.iter().any(|&id| ctx.child_is_spacer(id));
         let width = if has_spacers {
             proposal.width.unwrap_or(total_width)

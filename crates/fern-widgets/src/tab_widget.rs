@@ -63,7 +63,6 @@ impl TabItem {
 enum TabHeaderInteraction {
     Idle,
     Hovered,
-    Focused,
 }
 
 #[derive(Debug)]
@@ -129,6 +128,12 @@ struct TabHeader {
     header_ids: Rc<RefCell<Vec<WidgetId>>>,
     enabled_tabs: Rc<Vec<bool>>,
     interaction: Signal<TabHeaderInteraction>,
+    /// Focus origin at the moment focus was gained. The focus ring only
+    /// paints when this is `Some(Keyboard)` — pointer-clicking a tab moves
+    /// focus to it but must not show the ring, matching IntelliJ's and
+    /// VS Code's behavior. Follows the same pattern used by
+    /// `SegmentedControl`, `Slider`, and `Toggle`.
+    focus_origin: Signal<Option<fern_core::focus::FocusOrigin>>,
 }
 
 impl TabHeader {
@@ -148,6 +153,7 @@ impl TabHeader {
             header_ids,
             enabled_tabs,
             interaction: Signal::new(TabHeaderInteraction::Idle),
+            focus_origin: Signal::new(None),
         }
     }
 
@@ -171,12 +177,15 @@ impl Widget for TabHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
         let interaction = ctx.signal(TabHeaderInteraction::Idle);
+        let focus_origin: Signal<Option<fern_core::focus::FocusOrigin>> = ctx.signal(None);
         let registry = ctx.binding_registry();
 
         self.selected
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
         interaction.bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        focus_origin.bind_to(self_id, registry, BindingLevel::RepaintOnly);
         self.interaction = interaction.clone();
+        self.focus_origin = focus_origin.clone();
 
         let index = self.index;
         let enabled = self.enabled;
@@ -184,6 +193,11 @@ impl Widget for TabHeader {
         let header_ids = self.header_ids.clone();
         let enabled_tabs = self.enabled_tabs.clone();
 
+        // Shared hover flag the focus handler reads to decide the origin:
+        // if the pointer is over the tab at the moment focus is gained,
+        // the focus came from a click and we mark it as `Pointer`.
+        // Otherwise we assume `Keyboard`. This matches how SegmentedControl,
+        // Slider, and Toggle handle it.
         let handler_set = HandlerSet::new()
             .on_tap(move |_ctx: &mut EventContext| {
                 if enabled {
@@ -197,9 +211,6 @@ impl Widget for TabHeader {
                         interaction.set(TabHeaderInteraction::Idle);
                         return;
                     }
-                    if interaction.get() == TabHeaderInteraction::Focused {
-                        return;
-                    }
                     interaction.set(if entered {
                         TabHeaderInteraction::Hovered
                     } else {
@@ -208,17 +219,23 @@ impl Widget for TabHeader {
                 }
             })
             .on_focus({
-                let interaction = interaction.clone();
+                let focus_origin = focus_origin.clone();
+                let interaction_for_focus = interaction.clone();
                 move |gained: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        interaction.set(TabHeaderInteraction::Idle);
+                    if !enabled || !gained {
+                        focus_origin.set(None);
                         return;
                     }
-                    if gained {
-                        interaction.set(TabHeaderInteraction::Focused);
+                    // If the pointer is currently over this tab, focus came
+                    // from a click — mark as Pointer so paint() skips the
+                    // focus ring. Otherwise treat it as a keyboard-driven
+                    // focus.
+                    let origin = if interaction_for_focus.get() == TabHeaderInteraction::Hovered {
+                        fern_core::focus::FocusOrigin::Pointer
                     } else {
-                        interaction.set(TabHeaderInteraction::Idle);
-                    }
+                        fern_core::focus::FocusOrigin::Keyboard
+                    };
+                    focus_origin.set(Some(origin));
                 }
             })
             .on_key({
@@ -303,20 +320,32 @@ impl Widget for TabHeader {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Int UI tab visual:
-        //   * Rectangular (no corner radius, no border) — the tab occupies
-        //     its full allotted rect flat on the tab bar surface.
-        //   * Idle background: TRANSPARENT (same as the tab bar).
-        //   * Hover background: `surface_hover`.
-        //   * Pressed / selected background: no change from hover.
-        //   * Selected indicator: a solid `accent` bar of height
-        //     `tab_style.underline_active` at the bottom edge, overpainting
-        //     the tab bar's separator so the selected tab "reaches down"
-        //     into the content.
-        //   * Text: `text_secondary` at idle, `text_primary` on hover /
-        //     selected; `text_disabled` when disabled.
+        // Int UI tab visual — follows the IntelliJ new UI / VS Code
+        // convention where the **selected tab is the content surface**
+        // poking up into the tab strip, not a chip with an underline:
+        //
+        //   * Selected, enabled:
+        //       background = `surface_content` (same fill as the pane
+        //         below, so the tab "merges" into the content area)
+        //       label      = `text_primary`
+        //       indicator  = 3 dp `accent` bar at the bottom edge, drawn
+        //         last so it overpaints the tab bar's own 1 dp separator
+        //
+        //   * Unselected, hovered:
+        //       background = `surface_hover`
+        //       label      = `text_primary`
+        //
+        //   * Unselected, idle:
+        //       background = TRANSPARENT (same as the tab bar)
+        //       label      = `text_secondary`
+        //
+        //   * Disabled: TRANSPARENT background, `text_disabled` label,
+        //     no accent indicator.
+        //
         //   * Focus ring: 2 dp `focus_ring` stroke drawn outside the
-        //     reserved envelope, same convention as every other widget.
+        //     reserved envelope — but **only on keyboard focus**. A
+        //     click-to-focus does not trigger the ring. This matches
+        //     every other focusable widget in the toolkit.
 
         let selected = self.selected.get() == self.index;
         let interaction = self.interaction.get();
@@ -336,10 +365,12 @@ impl Widget for TabHeader {
             (bounds.height - envelope * 2.0).max(0.0),
         );
 
-        // Background — only the hovered state gets a fill; selection is
-        // signaled by the underline, not by a background change.
+        // Background. Selection wins over hover; disabled tabs keep the
+        // tab-bar background regardless of state.
         let background = if !self.enabled {
             Color::TRANSPARENT
+        } else if selected {
+            colors.surface_content
         } else if interaction == TabHeaderInteraction::Hovered {
             colors.surface_hover
         } else {
@@ -349,8 +380,10 @@ impl Widget for TabHeader {
             canvas.fill_rect(visual, background);
         }
 
-        // Selected-tab underline. Drawn last so it overpaints the tab
-        // bar's bottom separator cleanly.
+        // Selected-tab accent bar at the bottom. Drawn after the fill
+        // so it overpaints both the content-surface fill and the tab
+        // bar's separator, producing the "tab reaches down into the
+        // pane" look.
         if selected && self.enabled {
             let indicator = Rect::new(
                 visual.x,
@@ -381,10 +414,9 @@ impl Widget for TabHeader {
             text_color,
         );
 
-        // Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
-        // Even though the visual is rectangular, the focus ring uses
-        // `radius_control` for a concentric feel.
-        if interaction == TabHeaderInteraction::Focused {
+        // Focus ring — ONLY on keyboard focus. Click-to-focus sets
+        // `focus_origin = Pointer` and this branch is skipped.
+        if self.focus_origin.get() == Some(fern_core::focus::FocusOrigin::Keyboard) {
             let half_stroke = shape.focus_ring_width * 0.5;
             let ring_rect = Rect::new(
                 bounds.x + half_stroke,

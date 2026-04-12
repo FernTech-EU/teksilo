@@ -76,7 +76,13 @@ impl Widget for VStack {
             return proposal.resolve(0.0, 0.0);
         }
 
-        // Query each child's intrinsic size: height=None (ideal), width from proposal
+        // Query each child's intrinsic size: height=None (ideal), width from
+        // proposal. We ask every child, *including spacers*: a plain `Spacer`
+        // reports `min_length` (0) at an unspecified height and so contributes
+        // nothing to the total, but `Expand::fills_stack` wrapping a content
+        // child reports that child's natural size — which must be included
+        // or the stack under-reports its own intrinsic height and the
+        // content spills over siblings.
         let child_proposal = SizeProposal {
             width: proposal.width,
             height: None,
@@ -86,14 +92,6 @@ impl Widget for VStack {
         let mut max_width: f32 = 0.0;
 
         for &child_id in &self.child_ids {
-            if ctx.child_is_spacer(child_id) {
-                // Spacers don't contribute intrinsic height (primary axis),
-                // but they still contribute to cross-axis width.
-                if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
-                    max_width = max_width.max(child_size.width);
-                }
-                continue;
-            }
             if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
                 total_height += child_size.height;
                 max_width = max_width.max(child_size.width);
@@ -105,8 +103,10 @@ impl Widget for VStack {
         total_height += total_spacing;
 
         let width = proposal.width.unwrap_or(max_width);
-        // Primary axis: fill the offered height only when spacers need to expand.
-        // Without spacers, use the intrinsic content height.
+        // Primary axis: if the container has spacers AND the parent gave us
+        // a height, fill that height so spacers can stretch. Otherwise just
+        // report `total_height` (which, with the loop above, now includes
+        // content-carrying expands).
         let has_spacers = self.child_ids.iter().any(|&id| ctx.child_is_spacer(id));
         let height = if has_spacers {
             proposal.height.unwrap_or(total_height)
@@ -242,6 +242,64 @@ mod tests {
         assert!((tree.bounds(a).height - 30.0).abs() < 0.01);
         assert!((tree.bounds(b).height - 50.0).abs() < 0.01);
         assert!((tree.bounds(b).y - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn nested_vstack_with_content_carrying_expand_reports_full_height() {
+        // Regression for the TabWidget "tabs half-visible behind switcher"
+        // bug. An inner VStack contains [leaf(32), Expand::fills_stack(leaf(200))].
+        // Without the fix, VStack reports height=32 because spacers were
+        // skipped in size_that_fits, so the outer VStack squashes the inner
+        // stack into a 32-dp slot and the content spills over siblings.
+        use crate::primitives::expand::Expand;
+
+        let mut tree = WidgetTree::new();
+        let tab_bar = tree.add(FixedLeaf(120.0, 32.0));
+        let content = tree.add(FixedLeaf(120.0, 200.0));
+        let filled = tree.add(Expand::vertical().fills_stack().set_child(content));
+        let inner = tree.add(VStack::new().add_child(tab_bar).add_child(filled));
+
+        // Outer VStack with another sibling underneath. Height is
+        // unconstrained so the outer has to fall back to intrinsic sizes.
+        let sibling = tree.add(FixedLeaf(120.0, 40.0));
+        let outer = tree.add(VStack::new().add_child(inner).add_child(sibling));
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: None,
+        });
+
+        // Inner stack should report 32 + 200 = 232, not 32.
+        let inner_bounds = tree.bounds(inner);
+        assert!(
+            (inner_bounds.height - 232.0).abs() < 0.01,
+            "inner VStack height should include the content-carrying Expand, got {}",
+            inner_bounds.height,
+        );
+
+        // Sibling must sit BELOW the inner stack's full height, not overlap
+        // it.
+        let sibling_bounds = tree.bounds(sibling);
+        assert!(
+            sibling_bounds.y >= inner_bounds.bottom() - 0.01,
+            "sibling should be placed below the inner stack; \
+             inner bottom {}, sibling y {}",
+            inner_bounds.bottom(),
+            sibling_bounds.y,
+        );
+
+        // And the tab_bar should live at the TOP of the inner stack, with
+        // the content filling the remaining ~200 dp below it.
+        assert!((tree.bounds(tab_bar).y - inner_bounds.y).abs() < 0.01);
+        let filled_bounds = tree.bounds(filled);
+        assert!(filled_bounds.y >= inner_bounds.y + 32.0 - 0.01);
+
+        // Outer container also behaves: its full height is 232 + 40 = 272.
+        let outer_bounds = tree.bounds(outer);
+        assert!(
+            (outer_bounds.height - 272.0).abs() < 0.01,
+            "outer VStack height got {}, expected 272",
+            outer_bounds.height,
+        );
     }
 
     #[test]
