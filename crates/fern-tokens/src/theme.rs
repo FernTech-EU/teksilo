@@ -115,7 +115,7 @@ impl ColorTokens {
             surface_sunken: Color::from_hex("#EBECF0"),
             surface_hover: Color::from_hex("#EBECF0"),
             surface_pressed: Color::from_hex("#DFE1E5"),
-            surface_selected: Color::from_hex("#D4E2FF"),
+            surface_selected: Color::from_hex("#D4F0F5"),
             surface_selected_inactive: Color::from_hex("#EBECF0"),
 
             // Text — cross-checked against Jewel IntUiLightTheme.kt:
@@ -128,31 +128,34 @@ impl ColorTokens {
             text_secondary: Color::from_hex("#818594"),
             text_disabled: Color::from_hex("#A8ADBD"),
             text_on_accent: Color::from_hex("#FFFFFF"),
-            text_link: Color::from_hex("#3D7AF5"),
-            text_link_hover: Color::from_hex("#3369D6"),
+            text_link: Color::from_hex("#0FB5CC"),
+            text_link_hover: Color::from_hex("#0E9BB0"),
             text_error: Color::from_hex("#DB3B4B"),
             text_warning: Color::from_hex("#A07527"),
             text_success: Color::from_hex("#369650"),
 
-            // Accent
-            accent: Color::from_hex("#3D7AF5"),
-            accent_hover: Color::from_hex("#3369D6"),
-            accent_pressed: Color::from_hex("#315FBD"),
-            accent_disabled: Color::from_hex("#A0BDF8"),
-            accent_subtle_bg: Color::from_hex("#EBF1FE"),
+            // Accent — FernTech teal, pulled from the middle of the brand
+            // gradient (#0088DD → #00B8F0 → #10C9F4 → #00E5CC) and desaturated
+            // ~10% from the pure logo cyan for use at 13 sp on dense UI.
+            // Distinct from text_success (#369650) by ~50° in hue.
+            accent: Color::from_hex("#0FB5CC"),
+            accent_hover: Color::from_hex("#0E9BB0"),
+            accent_pressed: Color::from_hex("#0C8294"),
+            accent_disabled: Color::from_hex("#A8DDE5"),
+            accent_subtle_bg: Color::from_hex("#E6F7FA"),
 
             // Borders
             border: Color::from_hex("#EBECF0"),
             border_strong: Color::from_hex("#A8ADBD"),
-            border_focused: Color::from_hex("#3D7AF5"),
+            border_focused: Color::from_hex("#0FB5CC"),
             border_error: Color::from_hex("#DB3B4B"),
             border_warning: Color::from_hex("#E8A33D"),
             divider: Color::from_hex("#EBECF0"),
             divider_strong: Color::from_hex("#DFE1E5"),
 
             // Status
-            status_info_fg: Color::from_hex("#3D7AF5"),
-            status_info_bg: Color::from_hex("#EBF1FE"),
+            status_info_fg: Color::from_hex("#0FB5CC"),
+            status_info_bg: Color::from_hex("#E6F7FA"),
             status_success_fg: Color::from_hex("#369650"),
             status_success_bg: Color::from_hex("#E6F5E8"),
             status_warning_fg: Color::from_hex("#E8A33D"),
@@ -161,7 +164,7 @@ impl ColorTokens {
             status_error_bg: Color::from_hex("#FFE2E3"),
 
             // Selection
-            selection_bg_active: Color::from_hex("#2675BF"),
+            selection_bg_active: Color::from_hex("#0F8FA3"),
             selection_text_active: Color::from_hex("#FFFFFF"),
             selection_bg_inactive: Color::from_hex("#D4D4D4"),
             selection_text_inactive: Color::from_hex("#000000"),
@@ -187,10 +190,10 @@ impl ColorTokens {
             editor_caret: Color::from_hex("#000000"),
             editor_current_line_bg: Color::from_hex("#FFFEEB"),
             editor_gutter_fg: Color::from_hex("#C9CCD6"),
-            editor_selection_bg: Color::from_hex("#A6D2FF"),
+            editor_selection_bg: Color::from_hex("#A8E0E8"),
 
             // Misc
-            focus_ring: Color::from_hex("#3D7AF5"),
+            focus_ring: Color::from_hex("#0FB5CC"),
             focus_ring_error: Color::from_hex("#DB3B4B"),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.32),
         }
@@ -205,7 +208,7 @@ impl ColorTokens {
             surface_sunken: Color::from_hex("#1E1F22"),
             surface_hover: Color::from_hex("#393B40"),
             surface_pressed: Color::from_hex("#43454A"),
-            surface_selected: Color::from_hex("#2E436E"),
+            surface_selected: Color::from_hex("#1A3D47"),
             surface_selected_inactive: Color::from_hex("#393B40"),
 
             // Text — values cross-checked against the Jewel standalone
@@ -221,31 +224,33 @@ impl ColorTokens {
             text_secondary: Color::from_hex("#6F737A"),
             text_disabled: Color::from_hex("#5A5D63"),
             text_on_accent: Color::from_hex("#FFFFFF"),
-            text_link: Color::from_hex("#3D7AFB"),
-            text_link_hover: Color::from_hex("#6BA1FF"),
+            text_link: Color::from_hex("#19BDD4"),
+            text_link_hover: Color::from_hex("#3DD0E0"),
             text_error: Color::from_hex("#E55765"),
             text_warning: Color::from_hex("#E8A33D"),
             text_success: Color::from_hex("#5FAD65"),
 
-            // Accent
-            accent: Color::from_hex("#3D7AFB"),
-            accent_hover: Color::from_hex("#436AC2"),
-            accent_pressed: Color::from_hex("#375FAD"),
-            accent_disabled: Color::from_hex("#43618C"),
-            accent_subtle_bg: Color::from_hex("#25324D"),
+            // Accent — dark-mode FernTech teal. Brighter and more saturated
+            // than the light variant so it carries against dark surfaces.
+            // Distinct from text_success (#5FAD65) by ~50° in hue.
+            accent: Color::from_hex("#19BDD4"),
+            accent_hover: Color::from_hex("#1499AD"),
+            accent_pressed: Color::from_hex("#107E8F"),
+            accent_disabled: Color::from_hex("#2D5A63"),
+            accent_subtle_bg: Color::from_hex("#1A3A42"),
 
             // Borders
             border: Color::from_hex("#393B40"),
             border_strong: Color::from_hex("#5A5D63"),
-            border_focused: Color::from_hex("#3D7AFB"),
+            border_focused: Color::from_hex("#19BDD4"),
             border_error: Color::from_hex("#E55765"),
             border_warning: Color::from_hex("#E8A33D"),
             divider: Color::from_hex("#393B40"),
             divider_strong: Color::from_hex("#43454A"),
 
             // Status
-            status_info_fg: Color::from_hex("#3D7AFB"),
-            status_info_bg: Color::from_hex("#25324D"),
+            status_info_fg: Color::from_hex("#19BDD4"),
+            status_info_bg: Color::from_hex("#1A3A42"),
             status_success_fg: Color::from_hex("#5FAD65"),
             status_success_bg: Color::from_hex("#1F4D2B"),
             status_warning_fg: Color::from_hex("#E8A33D"),
@@ -254,7 +259,7 @@ impl ColorTokens {
             status_error_bg: Color::from_hex("#7E353C"),
 
             // Selection
-            selection_bg_active: Color::from_hex("#43618C"),
+            selection_bg_active: Color::from_hex("#1F4D57"),
             selection_text_active: Color::from_hex("#DFE1E5"),
             selection_bg_inactive: Color::from_hex("#43454A"),
             selection_text_inactive: Color::from_hex("#DFE1E5"),
@@ -279,8 +284,8 @@ impl ColorTokens {
             //   * editor_fg #BCBEC4 is noticeably dimmer than text_primary
             //     #DFE1E5. Long reading sessions want a lower-contrast
             //     foreground to reduce eye strain.
-            //   * editor_selection_bg #214283 is more saturated than
-            //     surface_selected #2E436E (the list-row selection) and
+            //   * editor_selection_bg #1A4D5C is more saturated than
+            //     surface_selected #1A3D47 (the list-row selection) and
             //     doesn't replace the glyph color — selected text keeps
             //     its editor_fg and shows the blue through.
             //   * editor_current_line_bg #26282E is a dedicated row
@@ -290,10 +295,10 @@ impl ColorTokens {
             editor_caret: Color::from_hex("#CED0D6"),
             editor_current_line_bg: Color::from_hex("#26282E"),
             editor_gutter_fg: Color::from_hex("#4E5157"),
-            editor_selection_bg: Color::from_hex("#214283"),
+            editor_selection_bg: Color::from_hex("#1A4D5C"),
 
             // Misc
-            focus_ring: Color::from_hex("#3D7AFB"),
+            focus_ring: Color::from_hex("#19BDD4"),
             focus_ring_error: Color::from_hex("#E55765"),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.64),
         }
