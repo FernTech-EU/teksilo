@@ -16,10 +16,6 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing};
 
-const TRACK_WIDTH: f32 = 44.0;
-const TRACK_HEIGHT: f32 = 24.0;
-const KNOB_SIZE: f32 = 20.0;
-const KNOB_MARGIN: f32 = 2.0;
 
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
@@ -54,10 +50,10 @@ impl Toggle {
         self
     }
 
-    fn knob_x(&self, bounds: Rect) -> f32 {
+    fn knob_x(&self, track: Rect, knob_size: f32, inset: f32) -> f32 {
         let t = self.knob_position.get().clamp(0.0, 1.0);
-        let min_x = bounds.x + KNOB_MARGIN;
-        let max_x = bounds.x + TRACK_WIDTH - KNOB_SIZE - KNOB_MARGIN;
+        let min_x = track.x + inset;
+        let max_x = track.x + track.width - knob_size - inset;
         fern_tokens::lerp(min_x, max_x, t)
     }
 }
@@ -184,8 +180,9 @@ impl Widget for Toggle {
     }
 
     fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        let track_w = TRACK_WIDTH.max(48.0);
-        let h = TRACK_HEIGHT.max(48.0);
+        let style = ctx.theme.components.toggle;
+        // Reserve a 24 dp hit-area row but draw the track centered within it.
+        let row_h = style.track_height.max(24.0);
         if let Some(ref label) = self.label {
             let label_w = if let Some(backend) = ctx.text_backend {
                 let mut b = backend.borrow_mut();
@@ -194,9 +191,9 @@ impl Widget for Toggle {
             } else {
                 label.len() as f32 * 8.0
             };
-            Size::new(track_w + 8.0 + label_w, h)
+            Size::new(style.track_width + style.label_gap + label_w, row_h)
         } else {
-            Size::new(track_w, h)
+            Size::new(style.track_width, row_h)
         }
     }
 
@@ -211,20 +208,25 @@ impl Widget for Toggle {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
+        let style = ctx.theme.components.toggle;
+        let track_w = style.track_width;
+        let track_h = style.track_height;
+        let knob_size = style.thumb_diameter;
+        let knob_inset = style.thumb_inset;
 
-        // Center the track within the (possibly 48x48) bounds
-        let track_x = bounds.x + (bounds.width - TRACK_WIDTH) / 2.0;
-        let track_y = bounds.y + (bounds.height - TRACK_HEIGHT) / 2.0;
-        let track_rect = Rect::new(track_x, track_y, TRACK_WIDTH, TRACK_HEIGHT);
+        // Center the track within the (possibly larger) hit-area row.
+        let track_x = bounds.x + (bounds.width - track_w).max(0.0) * 0.0;
+        let track_y = bounds.y + (bounds.height - track_h) / 2.0;
+        let track_rect = Rect::new(track_x, track_y, track_w, track_h);
 
         // Track color based on on-state
         let t = self.knob_position.get();
         let track_color = if !self.enabled {
-            colors.disabled_fill
+            colors.accent_disabled
         } else {
             // Interpolate between off and on colors
-            let off = colors.surface_tertiary;
-            let on = colors.primary;
+            let off = colors.surface_sunken;
+            let on = colors.accent;
             Color::new(
                 fern_tokens::lerp(off.r(), on.r(), t),
                 fern_tokens::lerp(off.g(), on.g(), t),
@@ -234,14 +236,14 @@ impl Widget for Toggle {
         };
         canvas.fill_rounded_rect(
             track_rect,
-            CornerRadius::uniform(TRACK_HEIGHT / 2.0),
+            CornerRadius::uniform(track_h / 2.0),
             track_color,
         );
 
         // Focus ring — only for keyboard navigation, not pointer clicks.
-        // Drawn with a 2px offset outside the track so it's visible over any fill color.
+        // Drawn with the theme's focus_ring_offset outside the track.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = 3.0; // 2px gap + half of 2px stroke
+            let offset = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width / 2.0;
             let ring_rect = Rect::new(
                 track_rect.x - offset,
                 track_rect.y - offset,
@@ -250,40 +252,40 @@ impl Widget for Toggle {
             );
             canvas.stroke_rounded_rect(
                 ring_rect,
-                CornerRadius::uniform(TRACK_HEIGHT / 2.0 + offset),
+                CornerRadius::uniform(track_h / 2.0 + offset),
                 colors.focus_ring,
-                2.0,
+                ctx.theme.shape.focus_ring_width,
             );
         }
 
         // Knob
-        let knob_x = self.knob_x(Rect::new(track_x, track_y, TRACK_WIDTH, TRACK_HEIGHT));
-        let knob_y = track_y + (TRACK_HEIGHT - KNOB_SIZE) / 2.0;
-        let knob_rect = Rect::new(knob_x, knob_y, KNOB_SIZE, KNOB_SIZE);
+        let knob_x = self.knob_x(track_rect, knob_size, knob_inset);
+        let knob_y = track_y + (track_h - knob_size) / 2.0;
+        let knob_rect = Rect::new(knob_x, knob_y, knob_size, knob_size);
         let knob_color = if !self.enabled {
-            colors.disabled_text
+            colors.text_disabled
         } else {
             Color::WHITE
         };
         canvas.fill_rounded_rect(
             knob_rect,
-            CornerRadius::uniform(KNOB_SIZE / 2.0),
+            CornerRadius::uniform(knob_size / 2.0),
             knob_color,
         );
 
         // Label text (drawn to the right of the track)
         if let Some(ref label) = self.label {
             let text_color = if self.enabled {
-                colors.on_surface
+                colors.text_primary
             } else {
-                colors.disabled_text
+                colors.text_disabled
             };
-            let text_x = track_x + TRACK_WIDTH + 8.0;
-            let text_y = bounds.y;
+            let gap = style.label_gap;
+            let text_x = track_x + track_w + gap;
             let text_rect = Rect::new(
                 text_x,
-                text_y,
-                (bounds.width - TRACK_WIDTH - 8.0).max(0.0),
+                bounds.y,
+                (bounds.width - track_w - gap).max(0.0),
                 bounds.height,
             );
             canvas.draw_text(label, text_rect, &ctx.theme.typography.body, text_color);

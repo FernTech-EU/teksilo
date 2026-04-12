@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 pub enum Easing {
     Linear,
     EaseIn,
-    EaseOut,
     #[default]
+    EaseOut,
     EaseInOut,
 }
 
@@ -37,29 +37,37 @@ pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-/// Motion tokens: durations and easing curves for animations.
+/// Motion tokens — Int UI durations and easing.
+///
+/// Int UI's philosophy: hover and press are **instant**; animation is reserved
+/// for floating elements (tooltips, balloons, dialogs). JetBrains explicitly
+/// avoids decorative animation. A single mild ease-out is used everywhere.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MotionTokens {
+    /// 0 ms — most state changes (hover, press).
+    #[serde(with = "duration_millis")]
+    pub duration_instant: Duration,
+    /// ~120 ms — tooltip fade, popup fade.
     #[serde(with = "duration_millis")]
     pub duration_fast: Duration,
+    /// ~200 ms — notification balloon slide.
     #[serde(with = "duration_millis")]
     pub duration_normal: Duration,
+    /// ~300 ms — dialog appearance.
     #[serde(with = "duration_millis")]
     pub duration_slow: Duration,
+    /// Standard easing curve. Int UI uses one mild ease-out everywhere.
     pub easing_standard: Easing,
-    pub easing_decelerate: Easing,
-    pub easing_accelerate: Easing,
 }
 
 impl Default for MotionTokens {
     fn default() -> Self {
         Self {
-            duration_fast: Duration::from_millis(100),
+            duration_instant: Duration::from_millis(0),
+            duration_fast: Duration::from_millis(120),
             duration_normal: Duration::from_millis(200),
-            duration_slow: Duration::from_millis(400),
-            easing_standard: Easing::EaseInOut,
-            easing_decelerate: Easing::EaseOut,
-            easing_accelerate: Easing::EaseIn,
+            duration_slow: Duration::from_millis(300),
+            easing_standard: Easing::EaseOut,
         }
     }
 }
@@ -86,6 +94,7 @@ mod tests {
     #[test]
     fn motion_default_durations_increasing() {
         let m = MotionTokens::default();
+        assert!(m.duration_instant < m.duration_fast);
         assert!(m.duration_fast < m.duration_normal);
         assert!(m.duration_normal < m.duration_slow);
     }

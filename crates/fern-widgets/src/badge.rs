@@ -47,18 +47,27 @@ impl std::fmt::Debug for Badge {
 impl Widget for Badge {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
-        let bg = self.color.unwrap_or(theme.colors.secondary);
-        let text = self.text_color.unwrap_or(theme.colors.on_secondary);
+        let badge_style = theme.components.badge;
+        // Badges are tinted by default — use status_info_bg for the soft fill
+        // and the matching foreground for text. Both can be overridden.
+        let bg = self
+            .color
+            .unwrap_or(theme.colors.accent_subtle_bg);
+        let text = self.text_color.unwrap_or(theme.colors.status_info_fg);
 
         let text_widget = TextWidget::new(&self.label)
-            .style(theme.typography.caption.clone())
+            .style(theme.typography.tiny.clone())
             .color(text);
         let bg_rect = RectWidget::new()
             .background(bg)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_full));
+            .corner_radius(CornerRadius::uniform(badge_style.corner_radius));
 
         let text_id = ctx.add(text_widget);
-        let padding = Padding::symmetric(4.0, 12.0).set_child(text_id);
+        let padding = Padding::symmetric(
+            badge_style.padding_vertical,
+            badge_style.padding_horizontal,
+        )
+        .set_child(text_id);
         let padding_id = ctx.add(padding);
         let bg_id = ctx.add(bg_rect);
 

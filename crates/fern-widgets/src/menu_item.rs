@@ -181,15 +181,15 @@ impl Widget for MenuItem {
         });
         self.interaction = interaction.clone();
 
-        let on_surface = theme.colors.on_surface;
+        let on_surface = theme.colors.text_primary;
         let bg_color = {
             let on_surface = on_surface;
             interaction.map(move |s| resolve_bg(*s, on_surface))
         };
 
         let text_color = {
-            let text = theme.colors.on_surface;
-            let disabled = theme.colors.disabled_text;
+            let text = theme.colors.text_primary;
+            let disabled = theme.colors.text_disabled;
             interaction.map(move |s| resolve_text(*s, text, disabled))
         };
 
@@ -219,12 +219,12 @@ impl Widget for MenuItem {
         });
         if let Some(ref shortcut_text) = resolved_shortcut {
             let shortcut_color = {
-                let text = theme.colors.on_surface.with_alpha(0.5);
-                let disabled = theme.colors.disabled_text;
+                let text = theme.colors.text_primary.with_alpha(0.5);
+                let disabled = theme.colors.text_disabled;
                 interaction.map(move |s| resolve_text(*s, text, disabled))
             };
             let shortcut = TextWidget::new(shortcut_text)
-                .style(theme.typography.label.clone())
+                .style(theme.typography.small.clone())
                 .bind_color(shortcut_color);
             row = row.child(shortcut);
         }
@@ -244,7 +244,9 @@ impl Widget for MenuItem {
 
         let row_id = ctx.add(row);
 
-        let padding = Padding::symmetric(6.0, 12.0).set_child(row_id);
+        let menu_style = theme.components.menu;
+        let pad_v = (menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5;
+        let padding = Padding::symmetric(pad_v, menu_style.item_padding_horizontal).set_child(row_id);
         let padding_id = ctx.add(padding);
 
         // Background rect

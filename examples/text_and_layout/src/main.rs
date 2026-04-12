@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, TextStyle};
-use fern_ui::widgets::{Button, ButtonStyle, HStack, Padding, Panel, Spacer, TextWidget, VStack};
+use fern_ui::widgets::{Button, ButtonVariant, HStack, Padding, Panel, Spacer, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // Application commands
@@ -62,13 +62,13 @@ impl Widget for RootContent {
                         HStack::new()
                             .child(
                                 TextWidget::new("Text & Layout")
-                                    .style(t.heading_2.clone())
-                                    .color(c.on_surface),
+                                    .style(t.body_bold.clone())
+                                    .color(c.text_primary),
                             )
                             .child(Spacer::new())
                             .child(
                                 Button::new("Toggle Dark Mode")
-                                    .style(ButtonStyle::Outlined)
+                                    .style(ButtonVariant::Regular)
                                     .on_activate(Cmd::ToggleDarkMode),
                             ),
                     )
@@ -78,36 +78,36 @@ impl Widget for RootContent {
                             .spacing(6.0)
                             .child(
                                 TextWidget::new("Typography Styles")
-                                    .style(t.heading_3.clone())
-                                    .color(c.on_surface),
+                                    .style(t.body_bold.clone())
+                                    .color(c.text_primary),
                             )
                             .child(
                                 TextWidget::new(
                                     "Body text (14px) — the default reading style for content.",
                                 )
                                 .style(t.body.clone())
-                                .color(c.on_surface),
+                                .color(c.text_primary),
                             )
                             .child(
                                 TextWidget::new(
                                     "Body small (12px) — secondary information and descriptions.",
                                 )
-                                .style(t.body_small.clone())
-                                .color(c.on_surface),
+                                .style(t.small.clone())
+                                .color(c.text_primary),
                             )
                             .child(
                                 TextWidget::new(
                                     "Caption (11px) — timestamps, footnotes, and fine print.",
                                 )
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_primary),
                             )
                             .child(
                                 TextWidget::new(
                                     "LABEL (12px medium, +0.5 tracking) — form labels and tags.",
                                 )
-                                .style(t.label.clone())
-                                .color(c.on_surface),
+                                .style(t.small.clone())
+                                .color(c.text_primary),
                             ),
                     )
                     // Layout showcase
@@ -116,39 +116,39 @@ impl Widget for RootContent {
                             .spacing(6.0)
                             .child(
                                 TextWidget::new("Layout Primitives")
-                                    .style(t.heading_3.clone())
-                                    .color(c.on_surface),
+                                    .style(t.body_bold.clone())
+                                    .color(c.text_primary),
                             )
                             .child(
                                 HStack::new()
                                     .spacing(8.0)
-                                    .child(build_color_box(c.primary, "A"))
-                                    .child(build_color_box(c.secondary, "B"))
-                                    .child(build_color_box(c.error, "C")),
+                                    .child(build_color_box(c.accent, "A"))
+                                    .child(build_color_box(c.accent_subtle_bg, "B"))
+                                    .child(build_color_box(c.text_error, "C")),
                             )
                             .child(
                                 TextWidget::new("HStack with spacing — three colored boxes")
-                                    .style(t.caption.clone())
-                                    .color(c.on_surface),
+                                    .style(t.tiny.clone())
+                                    .color(c.text_primary),
                             )
                             .child(
                                 HStack::new()
                                     .child(
                                         TextWidget::new("Leading")
                                             .style(t.body.clone())
-                                            .color(c.on_surface),
+                                            .color(c.text_primary),
                                     )
                                     .child(Spacer::new())
                                     .child(
                                         TextWidget::new("Trailing")
                                             .style(t.body.clone())
-                                            .color(c.on_surface),
+                                            .color(c.text_primary),
                                     ),
                             )
                             .child(
                                 TextWidget::new("Spacer pushing items to edges")
-                                    .style(t.caption.clone())
-                                    .color(c.on_surface),
+                                    .style(t.tiny.clone())
+                                    .color(c.text_primary),
                             ),
                     ),
             ),
@@ -263,12 +263,12 @@ mod tests {
         let light = Theme::light_default();
         let dark = Theme::dark_default();
         assert_ne!(
-            light.colors.surface.to_array(),
-            dark.colors.surface.to_array()
+            light.colors.surface_main.to_array(),
+            dark.colors.surface_main.to_array()
         );
         assert_ne!(
-            light.colors.on_surface.to_array(),
-            dark.colors.on_surface.to_array()
+            light.colors.text_primary.to_array(),
+            dark.colors.text_primary.to_array()
         );
     }
 

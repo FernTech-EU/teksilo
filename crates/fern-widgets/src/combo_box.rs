@@ -93,25 +93,25 @@ impl std::fmt::Debug for ComboBox {
 
 fn resolve_bg(state: ComboBoxState, colors: &fern_tokens::ColorTokens) -> Color {
     match state {
-        ComboBoxState::Idle | ComboBoxState::Focused => colors.surface,
-        ComboBoxState::Hovered => colors.on_surface.with_alpha(0.04),
-        ComboBoxState::Open => colors.on_surface.with_alpha(0.04),
-        ComboBoxState::Disabled => colors.disabled_fill,
+        ComboBoxState::Idle | ComboBoxState::Focused => colors.surface_main,
+        ComboBoxState::Hovered => colors.text_primary.with_alpha(0.04),
+        ComboBoxState::Open => colors.text_primary.with_alpha(0.04),
+        ComboBoxState::Disabled => colors.accent_disabled,
     }
 }
 
 fn resolve_border(state: ComboBoxState, colors: &fern_tokens::ColorTokens) -> Color {
+    // Int UI: focus uses the FocusRing wrapper, not a border color change.
     match state {
-        ComboBoxState::Focused => colors.focus_ring,
-        ComboBoxState::Disabled => colors.disabled_fill,
+        ComboBoxState::Disabled => colors.accent_disabled,
         _ => colors.border,
     }
 }
 
 fn resolve_text(state: ComboBoxState, colors: &fern_tokens::ColorTokens) -> Color {
     match state {
-        ComboBoxState::Disabled => colors.disabled_text,
-        _ => colors.on_surface,
+        ComboBoxState::Disabled => colors.text_disabled,
+        _ => colors.text_primary,
     }
 }
 
@@ -142,7 +142,7 @@ impl Widget for DropdownItem {
         }
 
         let bg_color = highlighted.map({
-            let primary = theme.colors.primary;
+            let primary = theme.colors.accent;
             move |h| {
                 if *h {
                     primary.with_alpha(0.12)
@@ -154,10 +154,14 @@ impl Widget for DropdownItem {
 
         let text = TextWidget::new(&self.label)
             .style(theme.typography.body.clone())
-            .color(theme.colors.on_surface);
+            .color(theme.colors.text_primary);
         let text_id = ctx.add(text);
 
-        let padding = Padding::symmetric(6.0, 12.0).set_child(text_id);
+        let menu_style = theme.components.menu;
+        let pad_v =
+            ((menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5).max(0.0);
+        let padding =
+            Padding::symmetric(pad_v, menu_style.item_padding_horizontal).set_child(text_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new().bind_background(bg_color);
@@ -186,14 +190,15 @@ impl Widget for DropdownItem {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let min_h = ctx.theme.components.menu.item_height;
         match self.root_child_id {
             Some(id) => {
                 let s = ctx
                     .child_size(id, proposal)
                     .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
-                Size::new(s.width, s.height.max(32.0))
+                Size::new(s.width, s.height.max(min_h))
             }
-            None => proposal.resolve(120.0, 32.0),
+            None => proposal.resolve(120.0, min_h),
         }
     }
 
@@ -244,14 +249,16 @@ impl Widget for DropdownPanel {
         }
         let vstack_id = ctx.add(vstack);
 
+        let menu_style = theme.components.menu;
         let padding = Padding::uniform(4.0).set_child(vstack_id);
         let padding_id = ctx.add(padding);
 
+        // Dropdown panel — same surface treatment as MenuList (raised + popup radius)
         let bg = RectWidget::new()
-            .background(theme.colors.surface)
-            .border_color(theme.colors.border.with_alpha(0.3))
-            .border_width(1.0)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
+            .background(theme.colors.surface_raised)
+            .border_color(theme.colors.border)
+            .border_width(menu_style.popup_border_width)
+            .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
@@ -335,7 +342,7 @@ impl Widget for ComboBox {
             .bind_color(text_color);
         let label_id = ctx.add(label);
 
-        let chevron = IconWidget::chevron_down(12.0).color(theme.colors.on_surface.with_alpha(0.5));
+        let chevron = IconWidget::chevron_down(12.0).color(theme.colors.text_primary.with_alpha(0.5));
         let chevron_id = ctx.add(chevron);
 
         let row = HStack::new()
@@ -345,9 +352,10 @@ impl Widget for ComboBox {
             .add_child(chevron_id);
         let row_id = ctx.add(row);
 
+        let combo_style = theme.components.combo_box;
         let padding = Padding::symmetric(
-            theme.spacing.widget_padding,
-            theme.spacing.widget_padding * 1.5,
+            combo_style.padding_horizontal * 0.5,
+            combo_style.padding_horizontal,
         )
         .set_child(row_id);
         let padding_id = ctx.add(padding);
@@ -356,11 +364,22 @@ impl Widget for ComboBox {
             .bind_background(bg_color)
             .bind_border_color(border_color)
             .border_width(theme.shape.border_width)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
+            .corner_radius(CornerRadius::uniform(combo_style.corner_radius));
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
-        let root_id = ctx.add(zstack);
+        let visual_zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
+        let visual_id = ctx.add(visual_zstack);
+        let sized_id = ctx.add(
+            crate::primitives::MinSize::new(0.0, combo_style.height).set_child(visual_id),
+        );
+
+        // Wrap in a FocusRing — drawn outside the control on keyboard focus.
+        let focused = interaction.map(|s| *s == ComboBoxState::Focused);
+        let root_id = ctx.add(
+            crate::primitives::FocusRing::new(focused)
+                .corner_radius(combo_style.corner_radius)
+                .set_child(sized_id),
+        );
         self.root_child_id = Some(root_id);
 
         // Pre-create the dropdown panel (dormant until opened)

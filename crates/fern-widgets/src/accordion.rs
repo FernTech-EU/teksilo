@@ -17,11 +17,7 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
-use fern_tokens::{Color, CornerRadius};
-
-use crate::primitives::{
-    HStack, IconWidget, MaxSize, RectWidget, Spacer, TextWidget, VStack, ZStack,
-};
+use crate::primitives::{HStack, IconWidget, MaxSize, Spacer, TextWidget, VStack};
 
 /// Large enough to never clip content when fully expanded.
 const EXPANDED_MAX_HEIGHT: f32 = 10000.0;
@@ -88,15 +84,15 @@ impl Widget for Accordion {
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
         let chevron_down_id =
-            ctx.add(IconWidget::chevron_down(16.0).color(theme.colors.on_surface));
+            ctx.add(IconWidget::chevron_down(16.0).color(theme.colors.text_primary));
         let chevron_right_id =
-            ctx.add(IconWidget::chevron_right(16.0).color(theme.colors.on_surface));
+            ctx.add(IconWidget::chevron_right(16.0).color(theme.colors.text_primary));
         ctx.visible_when(chevron_down_id, expanded.clone());
         ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
         let title_widget = TextWidget::new(&self.title)
             .style(theme.typography.body.clone())
-            .color(theme.colors.on_surface);
+            .color(theme.colors.text_primary);
         let title_id = ctx.add(title_widget);
         let spacer_id = ctx.add(Spacer::new());
 
@@ -109,27 +105,15 @@ impl Widget for Accordion {
                 .add_child(chevron_right_id),
         );
 
-        // Focus ring border around the header
-        let focus_ring_color = {
-            let colors = theme.colors.clone();
-            kb_focused.map(move |focused| {
-                if *focused {
-                    colors.focus_ring
-                } else {
-                    Color::TRANSPARENT
-                }
-            })
-        };
-        let focus_ring_width = kb_focused.map(|focused| if *focused { 2.0_f32 } else { 0.0 });
-        let focus_rect = RectWidget::new()
-            .bind_border_color(focus_ring_color)
-            .bind_border_width(focus_ring_width)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
-        let focus_rect_id = ctx.add(focus_rect);
-        let header_with_ring = ctx.add(ZStack::new().add_child(focus_rect_id).add_child(header));
+        // Focus ring — drawn outside the header on keyboard focus.
+        let header_with_ring = ctx.add(
+            crate::primitives::FocusRing::new(kb_focused.clone())
+                .corner_radius(theme.components.accordion.corner_radius)
+                .set_child(header),
+        );
 
         let mut vstack = VStack::new()
-            .spacing(theme.spacing.xs)
+            .spacing(2.0)
             .add_child(header_with_ring);
         if let Some(content_id) = self.content_id {
             // Wrap content in MaxSize with animated height for smooth expand/collapse

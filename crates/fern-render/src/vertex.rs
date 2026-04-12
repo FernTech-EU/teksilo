@@ -3,6 +3,29 @@ use bytemuck::{Pod, Zeroable};
 use fern_canvas::render_frame::PaintData;
 use fern_canvas::{DecorationRect, GlyphQuad, ShadowQuad, ShapeQuad};
 
+/// Convert a single sRGB channel (0..1) to linear light (0..1).
+///
+/// `fern_tokens::Color::from_hex` parses hex values as sRGB-encoded f32
+/// without gamma conversion, which matches how designers specify colors.
+/// The wgpu surface is `Rgba8UnormSrgb`, which expects **linear** shader
+/// output and applies sRGB encoding on write. To avoid double gamma-
+/// encoding we linearize color data at the vertex-packing boundary.
+#[inline]
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Linearize an RGBA color for GPU upload. Alpha passes through unchanged
+/// because `Rgba8UnormSrgb` only gamma-encodes RGB.
+#[inline]
+pub fn srgb_to_linear_rgba(c: [f32; 4]) -> [f32; 4] {
+    [srgb_to_linear(c[0]), srgb_to_linear(c[1]), srgb_to_linear(c[2]), c[3]]
+}
+
 /// Vertex for the textured quad pipeline (glyphs, images).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -41,22 +64,22 @@ impl QuadVertex {
             QuadVertex {
                 position: [sx, sy],
                 tex_coord: [u0, v0],
-                color: quad.color,
+                color: srgb_to_linear_rgba(quad.color),
             },
             QuadVertex {
                 position: [sx + sw, sy],
                 tex_coord: [u1, v0],
-                color: quad.color,
+                color: srgb_to_linear_rgba(quad.color),
             },
             QuadVertex {
                 position: [sx + sw, sy + sh],
                 tex_coord: [u1, v1],
-                color: quad.color,
+                color: srgb_to_linear_rgba(quad.color),
             },
             QuadVertex {
                 position: [sx, sy + sh],
                 tex_coord: [u0, v1],
-                color: quad.color,
+                color: srgb_to_linear_rgba(quad.color),
             },
         ]
     }
@@ -82,19 +105,19 @@ impl RectVertex {
         [
             RectVertex {
                 position: [sx, sy],
-                color: rect.color,
+                color: srgb_to_linear_rgba(rect.color),
             },
             RectVertex {
                 position: [sx + sw, sy],
-                color: rect.color,
+                color: srgb_to_linear_rgba(rect.color),
             },
             RectVertex {
                 position: [sx + sw, sy + sh],
-                color: rect.color,
+                color: srgb_to_linear_rgba(rect.color),
             },
             RectVertex {
                 position: [sx, sy + sh],
-                color: rect.color,
+                color: srgb_to_linear_rgba(rect.color),
             },
         ]
     }
@@ -128,6 +151,16 @@ pub struct SdfVertex {
 
 impl SdfVertex {
     /// Convert a shape quad to 4 vertices.
+    ///
+    /// The rasterized quad is expanded outward by `stroke_width / 2 + 1` on
+    /// every side. The SDF shader paints strokes **centered** on the rect
+    /// edge, so the outer half of the stroke falls outside the shape's
+    /// bounds — if the quad isn't padded, those fragments are never
+    /// rasterized and the stroke is visibly truncated by 1 dp on every
+    /// side (most noticeable on focus rings). `local_uv` is extrapolated
+    /// past `[0, 1]` for the padding fragments; the SDF still clips
+    /// correctly because `sd_rounded_rect` returns positive distances
+    /// outside the shape.
     pub fn from_shape_quad(shape: &ShapeQuad, scale_factor: f32) -> [SdfVertex; 4] {
         let [x, y, w, h] = shape.screen;
         let sx = x * scale_factor;
@@ -139,41 +172,49 @@ impl SdfVertex {
         let (paint_type, gradient_geo, colors, offsets) =
             encode_paint_data(&shape.paint_data, w, h);
 
-        let params = [sw, sh, shape.stroke_width * scale_factor, paint_type as f32];
+        let stroke = shape.stroke_width * scale_factor;
+        // Rasterization padding: enough to contain the outer half of the
+        // centered stroke plus a 1 px anti-aliasing margin. Filled shapes
+        // (stroke = 0) still get the AA margin so their edges don't clip.
+        let pad = stroke * 0.5 + 1.0;
+        let u_pad = if sw > 0.0 { pad / sw } else { 0.0 };
+        let v_pad = if sh > 0.0 { pad / sh } else { 0.0 };
+
+        let params = [sw, sh, stroke, paint_type as f32];
 
         let base = SdfVertex {
             position: [0.0, 0.0],
             local_uv: [0.0, 0.0],
-            color: shape.color,
+            color: srgb_to_linear_rgba(shape.color),
             corner_radii: shape.corner_radii,
             shape_params: params,
             gradient_geo,
-            gradient_color0: colors[0],
-            gradient_color1: colors[1],
-            gradient_color2: colors[2],
-            gradient_color3: colors[3],
+            gradient_color0: srgb_to_linear_rgba(colors[0]),
+            gradient_color1: srgb_to_linear_rgba(colors[1]),
+            gradient_color2: srgb_to_linear_rgba(colors[2]),
+            gradient_color3: srgb_to_linear_rgba(colors[3]),
             gradient_offsets: offsets,
         };
 
         [
             SdfVertex {
-                position: [sx, sy],
-                local_uv: [0.0, 0.0],
+                position: [sx - pad, sy - pad],
+                local_uv: [-u_pad, -v_pad],
                 ..base
             },
             SdfVertex {
-                position: [sx + sw, sy],
-                local_uv: [1.0, 0.0],
+                position: [sx + sw + pad, sy - pad],
+                local_uv: [1.0 + u_pad, -v_pad],
                 ..base
             },
             SdfVertex {
-                position: [sx + sw, sy + sh],
-                local_uv: [1.0, 1.0],
+                position: [sx + sw + pad, sy + sh + pad],
+                local_uv: [1.0 + u_pad, 1.0 + v_pad],
                 ..base
             },
             SdfVertex {
-                position: [sx, sy + sh],
-                local_uv: [0.0, 1.0],
+                position: [sx - pad, sy + sh + pad],
+                local_uv: [-u_pad, 1.0 + v_pad],
                 ..base
             },
         ]
@@ -316,7 +357,7 @@ impl ShadowVertex {
             ShadowVertex {
                 position: [sx, sy],
                 local_uv: [0.0, 0.0],
-                shadow_color: shadow.color,
+                shadow_color: srgb_to_linear_rgba(shadow.color),
                 corner_radii: shadow.corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
@@ -324,7 +365,7 @@ impl ShadowVertex {
             ShadowVertex {
                 position: [sx + sw, sy],
                 local_uv: [1.0, 0.0],
-                shadow_color: shadow.color,
+                shadow_color: srgb_to_linear_rgba(shadow.color),
                 corner_radii: shadow.corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
@@ -332,7 +373,7 @@ impl ShadowVertex {
             ShadowVertex {
                 position: [sx + sw, sy + sh],
                 local_uv: [1.0, 1.0],
-                shadow_color: shadow.color,
+                shadow_color: srgb_to_linear_rgba(shadow.color),
                 corner_radii: shadow.corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
@@ -340,7 +381,7 @@ impl ShadowVertex {
             ShadowVertex {
                 position: [sx, sy + sh],
                 local_uv: [0.0, 1.0],
-                shadow_color: shadow.color,
+                shadow_color: srgb_to_linear_rgba(shadow.color),
                 corner_radii: shadow.corner_radii,
                 shadow_params: params,
                 shape_offset: offset,
@@ -410,8 +451,14 @@ mod tests {
         let verts = SdfVertex::from_shape_quad(&shape, 1.0);
         assert_eq!(verts.len(), 4);
         assert_eq!(verts[0].corner_radii, [6.0, 6.0, 6.0, 6.0]);
-        assert_eq!(verts[0].local_uv, [0.0, 0.0]);
-        assert_eq!(verts[2].local_uv, [1.0, 1.0]);
+        // Unfilled: quad is padded by the 1 dp AA margin on each side.
+        // local_uv is extrapolated correspondingly.
+        assert_eq!(verts[0].position, [-1.0, -1.0]);
+        assert_eq!(verts[2].position, [101.0, 41.0]);
+        assert!((verts[0].local_uv[0] - (-0.01)).abs() < 1e-5);
+        assert!((verts[0].local_uv[1] - (-0.025)).abs() < 1e-5);
+        assert!((verts[2].local_uv[0] - 1.01).abs() < 1e-5);
+        assert!((verts[2].local_uv[1] - 1.025).abs() < 1e-5);
     }
 
     #[test]
@@ -425,7 +472,9 @@ mod tests {
             paint_data: PaintData::Solid,
         };
         let verts = SdfVertex::from_shape_quad(&shape, 2.0);
-        assert_eq!(verts[0].position, [20.0, 20.0]);
+        // Scaled origin (20, 20) is further offset by the rasterization pad
+        // (stroke/2 + 1) = (2*2)/2 + 1 = 3 pixels.
+        assert_eq!(verts[0].position, [17.0, 17.0]);
         assert_eq!(verts[0].shape_params[2], 4.0); // stroke_width * 2
     }
 

@@ -502,7 +502,13 @@ impl FernAppHandler {
                 }
             }
 
-            let clear = managed.tree.theme().colors.surface.to_array();
+            // The wgpu surface is Rgba8UnormSrgb: it expects linear-light color
+            // values and applies sRGB encoding on write. Our Color stores sRGB-
+            // encoded bytes (as designers specify them), so we must linearize
+            // the clear color here the same way we do for vertex colors.
+            let clear = fern_render::vertex::srgb_to_linear_rgba(
+                managed.tree.theme().colors.surface_main.to_array(),
+            );
             if let Err(e) = managed.platform_window.render_frame(&frame, clear) {
                 eprintln!("fern-app: {e}, reconfiguring surface");
                 managed.platform_window.reconfigure_surface();
@@ -1003,7 +1009,7 @@ mod tests {
         let app = FernAppBuilder::new()
             .theme(Theme::light_default())
             .build_headless();
-        assert_ne!(app.theme().colors.primary, Color::TRANSPARENT);
+        assert_ne!(app.theme().colors.accent, Color::TRANSPARENT);
     }
 
     #[test]

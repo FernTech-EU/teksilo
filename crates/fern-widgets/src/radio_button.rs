@@ -76,18 +76,10 @@ fn resolve_circle_border(
     colors: &fern_tokens::ColorTokens,
 ) -> Color {
     match state {
-        InteractionState::Disabled => colors.disabled_fill,
-        _ if selected => colors.primary,
+        InteractionState::Disabled => colors.accent_disabled,
+        _ if selected => colors.accent,
         InteractionState::Hovered => colors.border_strong,
         _ => colors.border,
-    }
-}
-
-fn resolve_focus_ring(state: InteractionState, colors: &fern_tokens::ColorTokens) -> Color {
-    if state == InteractionState::Focused {
-        colors.focus_ring
-    } else {
-        Color::TRANSPARENT
     }
 }
 
@@ -105,7 +97,8 @@ impl Widget for RadioButton {
         });
         self.interaction = Some(interaction.clone());
 
-        // Outer circle border
+        let radio_style = theme.components.radio;
+
         let border_color = {
             let colors = theme.colors.clone();
             let selected = selected.clone();
@@ -113,83 +106,62 @@ impl Widget for RadioButton {
         };
         let outer = RectWidget::new()
             .bind_border_color(border_color)
-            .border_width(2.0)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_full));
+            .border_width(theme.shape.border_width)
+            .corner_radius(CornerRadius::uniform(theme.shape.radius_pill));
         let outer_id = ctx.add(outer);
         let outer_sized = ctx.add(
             FixedSize::new()
-                .bind_width(18.0_f32)
-                .bind_height(18.0_f32)
+                .bind_width(radio_style.visual_size)
+                .bind_height(radio_style.visual_size)
                 .set_child(outer_id),
         );
 
-        // Inner dot — visible when selected via observer-driven State<bool>
         let dot_color = {
             let colors = theme.colors.clone();
             interaction.map(move |s| {
                 if *s == InteractionState::Disabled {
-                    colors.disabled_text
+                    colors.text_disabled
                 } else {
-                    colors.primary
+                    colors.accent
                 }
             })
         };
         let dot = RectWidget::new()
             .bind_background(dot_color)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_full));
+            .corner_radius(CornerRadius::uniform(theme.shape.radius_pill));
         let dot_id = ctx.add(dot);
         let dot_sized = ctx.add(
             FixedSize::new()
-                .bind_width(10.0_f32)
-                .bind_height(10.0_f32)
+                .bind_width(radio_style.inner_dot_size)
+                .bind_height(radio_style.inner_dot_size)
                 .set_child(dot_id),
         );
 
-        // Drive dot visibility from the shared selected state
         ctx.visible_when(dot_sized, selected.map(move |s| *s == value));
 
-        // Outer focus ring — 3px offset outside the 18x18 circle (24x24 total)
-        let focus_ring_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_focus_ring(*s, &colors))
-        };
-        let focus_ring_width = interaction.map(|s| {
-            if *s == InteractionState::Focused {
-                2.0_f32
-            } else {
-                0.0
-            }
-        });
-        let focus_ring = RectWidget::new()
-            .bind_border_color(focus_ring_color)
-            .bind_border_width(focus_ring_width)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_full));
-        let focus_ring_id = ctx.add(focus_ring);
-        let focus_ring_sized = ctx.add(
-            FixedSize::new()
-                .bind_width(24.0_f32)
-                .bind_height(24.0_f32)
-                .set_child(focus_ring_id),
-        );
+        // Compose the visual circle with the inner dot.
+        let visual = ctx.add(ZStack::new().add_child(outer_sized).add_child(dot_sized));
 
+        // Wrap in a FocusRing — drawn outside the circle on keyboard focus.
+        let focused = interaction.map(|s| *s == InteractionState::Focused);
         let radio = ctx.add(
-            ZStack::new()
-                .add_child(focus_ring_sized)
-                .add_child(outer_sized)
-                .add_child(dot_sized),
+            crate::primitives::FocusRing::new(focused)
+                .corner_radius(theme.shape.radius_pill)
+                .set_child(visual),
         );
 
-        let mut row = HStack::new().spacing(8.0).add_child(radio);
+        let mut row = HStack::new().spacing(radio_style.label_gap).add_child(radio);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new(label)
                 .style(theme.typography.body.clone())
-                .color(theme.colors.on_surface);
+                .color(theme.colors.text_primary);
             let label_id = ctx.add(label_widget);
             row = row.add_child(label_id);
         }
 
         let row_id = ctx.add(row);
-        let root_id = ctx.add(MinSize::new(48.0, 48.0).set_child(row_id));
+        let root_id =
+            ctx.add(MinSize::new(radio_style.hit_area, radio_style.hit_area).set_child(row_id));
 
         if let Some(ref tooltip_text) = self.tooltip_text {
             let tw = crate::tooltip::TooltipWidget::new(tooltip_text);

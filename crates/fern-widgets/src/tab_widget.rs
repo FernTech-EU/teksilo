@@ -12,18 +12,15 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
+use fern_tokens::{Color, CornerRadius};
 
-use crate::primitives::{Divider, Expand, HStack, Padding, Switcher, VStack};
-use crate::scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarStyle};
+use crate::primitives::{Expand, HStack, Switcher, VStack};
+use crate::scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarMode};
 
-const HEADER_PADDING_H: f32 = 14.0;
-const HEADER_PADDING_V: f32 = 10.0;
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
 const FALLBACK_LINE_HEIGHT: f32 = 16.0;
 const HEADER_MIN_WIDTH: f32 = 72.0;
-const HEADER_MIN_HEIGHT: f32 = 40.0;
-const CONTENT_TOP_INSET: f32 = 8.0;
+const HEADER_PADDING_V: f32 = 6.0;
 
 struct TabEntry {
     label: String,
@@ -155,15 +152,18 @@ impl TabHeader {
     }
 
     fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
+        let pad_h = ctx.theme.components.tab.padding_horizontal;
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let text_width = if let Some(backend) = ctx.text_backend {
             backend
                 .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.label, None)
+                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
                 .width
         } else {
             self.label.len() as f32 * FALLBACK_CHAR_WIDTH
         };
-        (text_width + HEADER_PADDING_H * 2.0).max(HEADER_MIN_WIDTH)
+        // Reserve the focus-ring envelope on both sides so the ring isn't clipped.
+        (text_width + pad_h * 2.0 + envelope * 2.0).max(HEADER_MIN_WIDTH + envelope * 2.0)
     }
 }
 
@@ -285,96 +285,120 @@ impl Widget for TabHeader {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let tab_style = ctx.theme.components.tab;
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        // Reserve the focus-ring envelope around the visual tab.
+        let min_height = tab_style.editor_tab_height + envelope * 2.0;
         let width = proposal.width.unwrap_or_else(|| self.estimate_width(ctx));
         let height = if let Some(backend) = ctx.text_backend {
             let text_height = backend
                 .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.label, None)
+                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
                 .height;
-            (text_height + HEADER_PADDING_V * 2.0).max(HEADER_MIN_HEIGHT)
+            (text_height + HEADER_PADDING_V * 2.0 + envelope * 2.0).max(min_height)
         } else {
-            (FALLBACK_LINE_HEIGHT + HEADER_PADDING_V * 2.0).max(HEADER_MIN_HEIGHT)
+            (FALLBACK_LINE_HEIGHT + HEADER_PADDING_V * 2.0 + envelope * 2.0).max(min_height)
         };
         Size::new(width, proposal.height.unwrap_or(height))
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        // Int UI tab visual:
+        //   * Rectangular (no corner radius, no border) — the tab occupies
+        //     its full allotted rect flat on the tab bar surface.
+        //   * Idle background: TRANSPARENT (same as the tab bar).
+        //   * Hover background: `surface_hover`.
+        //   * Pressed / selected background: no change from hover.
+        //   * Selected indicator: a solid `accent` bar of height
+        //     `tab_style.underline_active` at the bottom edge, overpainting
+        //     the tab bar's separator so the selected tab "reaches down"
+        //     into the content.
+        //   * Text: `text_secondary` at idle, `text_primary` on hover /
+        //     selected; `text_disabled` when disabled.
+        //   * Focus ring: 2 dp `focus_ring` stroke drawn outside the
+        //     reserved envelope, same convention as every other widget.
+
         let selected = self.selected.get() == self.index;
         let interaction = self.interaction.get();
         let colors = &ctx.theme.colors;
-        let radius = ctx.theme.shape.radius_sm;
-        let corner_radius = CornerRadius {
-            top_left: radius,
-            top_right: radius,
-            bottom_left: 0.0,
-            bottom_right: 0.0,
-        };
+        let tab_style = ctx.theme.components.tab;
+        let shape = &ctx.theme.shape;
+        let pad_h = tab_style.padding_horizontal;
+        let underline = tab_style.underline_active;
 
-        let background = if !self.enabled {
-            colors.disabled_fill
-        } else if selected {
-            colors.surface
-        } else if interaction == TabHeaderInteraction::Hovered
-            || interaction == TabHeaderInteraction::Focused
-        {
-            colors.surface
-        } else {
-            colors.surface_secondary
-        };
-
-        canvas.fill_rounded_rect(bounds, corner_radius, background);
-
-        let border = if !self.enabled {
-            colors.border
-        } else if interaction == TabHeaderInteraction::Focused {
-            colors.focus_ring
-        } else if selected {
-            colors.primary.with_alpha(0.45)
-        } else if interaction == TabHeaderInteraction::Hovered {
-            colors.border_strong
-        } else {
-            colors.border
-        };
-        canvas.stroke_rounded_rect(
-            Rect::new(bounds.x, bounds.y, bounds.width, bounds.height - 1.0),
-            corner_radius,
-            border,
-            1.0,
+        // Reserve the focus-ring envelope so the ring isn't clipped. The
+        // visual tab sits inside that envelope.
+        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
+        let visual = Rect::new(
+            bounds.x + envelope,
+            bounds.y + envelope,
+            (bounds.width - envelope * 2.0).max(0.0),
+            (bounds.height - envelope * 2.0).max(0.0),
         );
 
+        // Background — only the hovered state gets a fill; selection is
+        // signaled by the underline, not by a background change.
+        let background = if !self.enabled {
+            Color::TRANSPARENT
+        } else if interaction == TabHeaderInteraction::Hovered {
+            colors.surface_hover
+        } else {
+            Color::TRANSPARENT
+        };
+        if background.a() > 0.0 {
+            canvas.fill_rect(visual, background);
+        }
+
+        // Selected-tab underline. Drawn last so it overpaints the tab
+        // bar's bottom separator cleanly.
         if selected && self.enabled {
-            let indicator = Rect::new(bounds.x, bounds.bottom() - 3.0, bounds.width, 3.0);
-            canvas.fill_rect(indicator, colors.primary);
+            let indicator = Rect::new(
+                visual.x,
+                visual.bottom() - underline,
+                visual.width,
+                underline,
+            );
+            canvas.fill_rect(indicator, colors.accent);
         }
 
         let text_color = if !self.enabled {
-            colors.disabled_text
-        } else if selected {
-            colors.primary
-        } else if interaction == TabHeaderInteraction::Hovered {
-            colors.on_surface
+            colors.text_disabled
+        } else if selected || interaction == TabHeaderInteraction::Hovered {
+            colors.text_primary
         } else {
-            colors.on_surface_secondary
+            colors.text_secondary
         };
         let text_bounds = Rect::new(
-            bounds.x + HEADER_PADDING_H,
-            bounds.y + HEADER_PADDING_V,
-            (bounds.width - HEADER_PADDING_H * 2.0).max(0.0),
-            (bounds.height - HEADER_PADDING_V * 2.0).max(0.0),
+            visual.x + pad_h,
+            visual.y + HEADER_PADDING_V,
+            (visual.width - pad_h * 2.0).max(0.0),
+            (visual.height - HEADER_PADDING_V * 2.0).max(0.0),
         );
         canvas.draw_text(
             &self.label,
             text_bounds,
-            &ctx.theme.typography.label,
+            &ctx.theme.typography.small,
             text_color,
         );
 
+        // Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
+        // Even though the visual is rectangular, the focus ring uses
+        // `radius_control` for a concentric feel.
         if interaction == TabHeaderInteraction::Focused {
+            let half_stroke = shape.focus_ring_width * 0.5;
+            let ring_rect = Rect::new(
+                bounds.x + half_stroke,
+                bounds.y + half_stroke,
+                (bounds.width - half_stroke * 2.0).max(0.0),
+                (bounds.height - half_stroke * 2.0).max(0.0),
+            );
+            let ring_radius =
+                shape.radius_control + shape.focus_ring_offset + half_stroke;
             canvas.stroke_rounded_rect(
-                Rect::new(bounds.x, bounds.y, bounds.width, bounds.height - 3.0),
-                corner_radius,
+                ring_rect,
+                CornerRadius::uniform(ring_radius),
                 colors.focus_ring,
-                2.0,
+                shape.focus_ring_width,
             );
         }
     }
@@ -435,13 +459,14 @@ impl Widget for TabBar {
             headers = headers.add_child(header_id);
         }
 
+        let header_min_height = ctx.theme().components.tab.editor_tab_height;
         let headers_scroll_id = ctx.add(
             ScrollArea::new(headers)
-                .scroll_bar_style(ScrollBarStyle::Overlay)
+                .scroll_bar_style(ScrollBarMode::Overlay)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AsNeeded)
                 .widget_resizable(true)
-                .preferred_size(0.0, HEADER_MIN_HEIGHT),
+                .preferred_size(0.0, header_min_height),
         );
 
         let mut row = HStack::new().spacing(8.0).child(
@@ -479,14 +504,19 @@ impl Widget for TabBar {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(ctx.theme.shape.radius_sm);
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.surface_tertiary);
-        canvas.stroke_rounded_rect(
-            bounds,
-            radius,
-            ctx.theme.colors.border,
-            ctx.theme.shape.border_width,
+        // Int UI tab bar is a flat row on the same surface as the content —
+        // no fill, no rounded corners. The only chrome is a 1 dp horizontal
+        // separator at the bottom edge between the tab row and the content
+        // pane. Selected tabs draw their own `underline_active` accent bar
+        // on top of this separator, producing the "notched" look.
+        let border_width = ctx.theme.shape.border_width;
+        let separator = fern_canvas::Rect::new(
+            bounds.x,
+            bounds.bottom() - border_width,
+            bounds.width,
+            border_width,
         );
+        canvas.fill_rect(separator, ctx.theme.colors.border);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -582,20 +612,15 @@ impl Widget for TabWidget {
             .take()
             .map(|widget| ctx.add_boxed(widget));
         let tab_bar_id = ctx.add(TabBar::new(header_ids, trailing_child_id));
-        let divider_id = ctx.add(Divider::new());
         let switcher_id = ctx.add(switcher);
-        let padded_content_id =
-            ctx.add(Padding::new(CONTENT_TOP_INSET, 0.0, 0.0, 0.0).set_child(switcher_id));
-        let content_id = ctx.add(
-            Expand::vertical()
-                .fills_stack()
-                .set_child(padded_content_id),
-        );
+        // Content sits flush under the tab bar — the TabBar paints its own
+        // 1 dp bottom separator, and selected tabs overpaint that with
+        // their 3 dp underline. No inset, no extra divider.
+        let content_id = ctx.add(Expand::vertical().fills_stack().set_child(switcher_id));
 
         let root_id = ctx.add(
             VStack::new()
                 .add_child(tab_bar_id)
-                .add_child(divider_id)
                 .add_child(content_id),
         );
 
@@ -676,10 +701,12 @@ mod tests {
     }
 
     fn switcher_id(tree: &WidgetTree, tabs_id: WidgetId) -> WidgetId {
+        // Root VStack now has two children: tab bar (index 0) and the
+        // content Expand (index 1). The padding wrapper was dropped —
+        // content sits flush under the tab bar's own bottom separator.
         let root = tree.child_widget(tabs_id, 0);
-        let expand = tree.child_widget(root, 2);
-        let padded_content = tree.child_widget(expand, 0);
-        tree.child_widget(padded_content, 0)
+        let expand = tree.child_widget(root, 1);
+        tree.child_widget(expand, 0)
     }
 
     #[test]
@@ -849,6 +876,9 @@ mod tests {
 
     #[test]
     fn content_is_positioned_below_tab_strip() {
+        // Int UI: no Divider child between the tab bar and the content —
+        // the TabBar paints its own 1 dp bottom separator. The VStack now
+        // has exactly two children: the TabBar and the content Expand.
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let tabs = tree.add(
@@ -861,17 +891,13 @@ mod tests {
 
         let root = tree.child_widget(tabs, 0);
         let tab_bar = tree.child_widget(root, 0);
-        let divider = tree.child_widget(root, 1);
-        let content_expand = tree.child_widget(root, 2);
-        let padded_content = tree.child_widget(content_expand, 0);
-        let switcher = tree.child_widget(padded_content, 0);
+        let content_expand = tree.child_widget(root, 1);
+        let switcher = tree.child_widget(content_expand, 0);
 
         let tab_bar_bounds = tree.bounds(tab_bar);
-        let divider_bounds = tree.bounds(divider);
         let switcher_bounds = tree.bounds(switcher);
 
-        assert!(divider_bounds.y >= tab_bar_bounds.bottom() - 0.01);
-        assert!(switcher_bounds.y >= divider_bounds.bottom() + CONTENT_TOP_INSET - 0.01);
+        assert!(switcher_bounds.y >= tab_bar_bounds.bottom() - 0.01);
     }
 
     #[test]

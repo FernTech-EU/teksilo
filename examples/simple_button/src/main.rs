@@ -11,7 +11,7 @@
 //! - Focus-visible behavior (focus ring only on keyboard focus)
 
 use fern_ui::prelude::*;
-use fern_ui::widgets::{Button, ButtonStyle, tooltip};
+use fern_ui::widgets::{Button, ButtonVariant, tooltip};
 
 // ---------------------------------------------------------------------------
 // Application command
@@ -41,7 +41,7 @@ fn main() {
         .root(|tree| {
             tree.add(
                 Button::new("Click Me")
-                    .style(ButtonStyle::Filled)
+                    .style(ButtonVariant::Default)
                     .on_activate(DemoCmd::ButtonClicked)
                     .tooltip("This is a simple button. Click it to see a message in the console."),
             )

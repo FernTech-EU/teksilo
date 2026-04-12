@@ -73,7 +73,7 @@ impl Card {
     }
 
     fn resolve_padding(&self, theme: &fern_tokens::Theme) -> f32 {
-        self.padding.unwrap_or(theme.spacing.content_padding)
+        self.padding.unwrap_or(theme.components.card.padding)
     }
 }
 
@@ -166,7 +166,7 @@ impl Widget for Card {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = self.corner_radius.unwrap_or(ctx.theme.shape.radius_md);
+        let radius = self.corner_radius.unwrap_or(ctx.theme.shape.radius_popup);
         let cr = CornerRadius::uniform(radius);
 
         // Shadow
@@ -174,7 +174,7 @@ impl Widget for Card {
         canvas.draw_shadow(bounds, cr, &shadow);
 
         // Background
-        let bg = self.background.unwrap_or(ctx.theme.colors.surface);
+        let bg = self.background.unwrap_or(ctx.theme.colors.surface_main);
         canvas.fill_rounded_rect(bounds, cr, bg);
     }
 

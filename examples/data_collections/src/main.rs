@@ -18,7 +18,7 @@ use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonStyle, Card, HStack, ListView, Padding, Panel, RectWidget, Repeater, Spacer,
+    Button, ButtonVariant, Card, HStack, ListView, Padding, Panel, RectWidget, Repeater, Spacer,
     TabWidget, TextWidget, TreeView, VStack, ZStack,
 };
 
@@ -82,8 +82,8 @@ impl Root {
                     .spacing(12.0)
                     .child(
                         TextWidget::new("Dynamic Tags (Repeater)")
-                            .style(theme.typography.heading_2.clone())
-                            .color(theme.colors.on_surface),
+                            .style(theme.typography.body_bold.clone())
+                            .color(theme.colors.text_primary),
                     )
                     .child(
                         TextWidget::new(
@@ -91,14 +91,14 @@ impl Root {
                              Add uses on_activate_fn, Remove uses on_activate.",
                         )
                         .style(theme.typography.body.clone())
-                        .color(theme.colors.on_surface),
+                        .color(theme.colors.text_primary),
                     )
                     .child(
                         HStack::new()
                             .spacing(8.0)
                             .child(
                                 Button::new("+ Add Tag")
-                                    .style(ButtonStyle::Filled)
+                                    .style(ButtonVariant::Default)
                                     .on_activate_fn(move |_ctx| {
                                         let n = counter.get();
                                         counter.set(n + 1);
@@ -107,7 +107,7 @@ impl Root {
                             )
                             .child(
                                 Button::new("- Remove Last")
-                                    .style(ButtonStyle::Outlined)
+                                    .style(ButtonVariant::Regular)
                                     .on_activate(Cmd::RemoveTag),
                             ),
                     )
@@ -145,7 +145,7 @@ impl Root {
         let items_remove = self.list_items.clone();
         let selection = self.list_selection.clone();
         let counter = self.list_counter.clone();
-        let on_surface = theme.colors.on_surface;
+        let on_surface = theme.colors.text_primary;
         let body_style = theme.typography.body.clone();
 
         VStack::new()
@@ -156,8 +156,8 @@ impl Root {
                         .spacing(12.0)
                         .child(
                             TextWidget::new("Virtualized List (ListView)")
-                                .style(theme.typography.heading_2.clone())
-                                .color(theme.colors.on_surface),
+                                .style(theme.typography.body_bold.clone())
+                                .color(theme.colors.text_primary),
                         )
                         .child(
                             TextWidget::new(
@@ -166,14 +166,14 @@ impl Root {
                                  Drag to reorder. Alt+Arrow to reorder via keyboard.",
                             )
                             .style(theme.typography.body.clone())
-                            .color(theme.colors.on_surface),
+                            .color(theme.colors.text_primary),
                         )
                         .child(
                             HStack::new()
                                 .spacing(8.0)
                                 .child(
                                     Button::new("+ Add Item")
-                                        .style(ButtonStyle::Filled)
+                                        .style(ButtonVariant::Default)
                                         .on_activate_fn(move |_ctx| {
                                             let n = counter.get();
                                             counter.set(n + 1);
@@ -182,7 +182,7 @@ impl Root {
                                 )
                                 .child(
                                     Button::new("- Remove First")
-                                        .style(ButtonStyle::Outlined)
+                                        .style(ButtonVariant::Regular)
                                         .on_activate_fn(move |_ctx| {
                                             if !items_remove.is_empty() {
                                                 items_remove.remove(0);
@@ -237,9 +237,9 @@ impl Root {
         let tree_remove = self.tree_model.clone();
         let selection = self.tree_selection.clone();
         let counter = self.tree_counter.clone();
-        let on_surface = theme.colors.on_surface;
+        let on_surface = theme.colors.text_primary;
         let body_style = theme.typography.body.clone();
-        let label_style = theme.typography.label.clone();
+        let label_style = theme.typography.small.clone();
 
         VStack::new()
             .spacing(0.0)
@@ -249,8 +249,8 @@ impl Root {
                         .spacing(12.0)
                         .child(
                             TextWidget::new("File Tree (TreeView)")
-                                .style(theme.typography.heading_2.clone())
-                                .color(theme.colors.on_surface),
+                                .style(theme.typography.body_bold.clone())
+                                .color(theme.colors.text_primary),
                         )
                         .child(
                             TextWidget::new(
@@ -259,14 +259,14 @@ impl Root {
                                  Drag to reparent (top=before, middle=into, bottom=after).",
                             )
                             .style(theme.typography.body.clone())
-                            .color(theme.colors.on_surface),
+                            .color(theme.colors.text_primary),
                         )
                         .child(
                             HStack::new()
                                 .spacing(8.0)
                                 .child(
                                     Button::new("+ Add Root")
-                                        .style(ButtonStyle::Filled)
+                                        .style(ButtonVariant::Default)
                                         .on_activate_fn(move |_ctx| {
                                             let n = counter.get();
                                             counter.set(n + 1);
@@ -277,7 +277,7 @@ impl Root {
                                 )
                                 .child(
                                     Button::new("- Remove Last Root")
-                                        .style(ButtonStyle::Outlined)
+                                        .style(ButtonVariant::Regular)
                                         .on_activate_fn(move |_ctx| {
                                             let count = tree_remove.root_count();
                                             if count > 0 {

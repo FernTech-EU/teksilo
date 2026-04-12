@@ -268,10 +268,15 @@ impl Widget for SegmentedControl {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        let width = proposal.width.unwrap_or(self.estimate_width());
-        let height = (FALLBACK_LINE_HEIGHT + SEGMENT_PADDING_V * 2.0).max(48.0);
-        Size::new(width, height)
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        let sc_style = ctx.theme.components.segmented_control;
+        let width = proposal
+            .width
+            .unwrap_or_else(|| self.estimate_width() + envelope * 2.0);
+        // Reserve the focus-ring envelope on top and bottom.
+        let visual_h = (FALLBACK_LINE_HEIGHT + SEGMENT_PADDING_V * 2.0).max(sc_style.height);
+        Size::new(width, visual_h + envelope * 2.0)
     }
 
     fn place_children(
@@ -284,28 +289,39 @@ impl Widget for SegmentedControl {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        self.cached_bounds.set(bounds);
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
+        let sc_style = ctx.theme.components.segmented_control;
+        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
         let n = self.segment_count();
         if n == 0 {
             return;
         }
 
+        // Visual bounds are inset by the focus-ring envelope; hit testing
+        // uses `cached_bounds` which we set to the visual bounds.
+        let visual = Rect::new(
+            bounds.x + envelope,
+            bounds.y + envelope,
+            (bounds.width - envelope * 2.0).max(0.0),
+            (bounds.height - envelope * 2.0).max(0.0),
+        );
+        self.cached_bounds.set(visual);
+
         let selected = self.selected.get();
         let hovered = self.hovered_segment.get();
 
         for i in 0..n {
-            let rect = self.segment_rect(i, bounds);
-            let cr = self.segment_corner_radius(i, shape.radius_sm);
+            let rect = self.segment_rect(i, visual);
+            let cr = self.segment_corner_radius(i, sc_style.corner_radius);
 
             // Background
             let bg = if !self.enabled {
-                colors.disabled_fill
+                colors.accent_disabled
             } else if i == selected {
-                colors.primary
+                colors.accent
             } else if hovered == Some(i) {
-                colors.primary.with_alpha(0.08)
+                colors.accent.with_alpha(0.08)
             } else {
                 Color::TRANSPARENT
             };
@@ -314,15 +330,15 @@ impl Widget for SegmentedControl {
             }
 
             // Border
-            canvas.stroke_rounded_rect(rect, cr, colors.border, shape.border_width);
+            canvas.stroke_rounded_rect(rect, cr, colors.border, sc_style.border_width);
 
             // Text
             let text_color = if !self.enabled {
-                colors.disabled_text
+                colors.text_disabled
             } else if i == selected {
-                colors.on_primary
+                colors.text_on_accent
             } else {
-                colors.on_surface
+                colors.text_primary
             };
             let text_rect = Rect::new(
                 rect.x + SEGMENT_PADDING_H,
@@ -333,18 +349,26 @@ impl Widget for SegmentedControl {
             canvas.draw_text(
                 &self.labels[i],
                 text_rect,
-                &ctx.theme.typography.label,
+                &ctx.theme.typography.small,
                 text_color,
             );
         }
 
-        // Focus ring around the whole control
+        // Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
+            let half_stroke = shape.focus_ring_width * 0.5;
+            let ring_rect = Rect::new(
+                bounds.x + half_stroke,
+                bounds.y + half_stroke,
+                (bounds.width - half_stroke * 2.0).max(0.0),
+                (bounds.height - half_stroke * 2.0).max(0.0),
+            );
+            let ring_radius = sc_style.corner_radius + shape.focus_ring_offset + half_stroke;
             canvas.stroke_rounded_rect(
-                bounds,
-                CornerRadius::uniform(shape.radius_sm),
+                ring_rect,
+                CornerRadius::uniform(ring_radius),
                 colors.focus_ring,
-                2.0,
+                shape.focus_ring_width,
             );
         }
     }
@@ -443,7 +467,7 @@ mod tests {
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let frame = tree.render();
-        let primary = Theme::light_default().colors.primary.to_array();
+        let primary = Theme::light_default().colors.accent.to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == primary),
             "selected segment should render with primary color"
@@ -460,7 +484,7 @@ mod tests {
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let frame = tree.render();
-        let primary = Theme::light_default().colors.primary.to_array();
+        let primary = Theme::light_default().colors.accent.to_array();
         let primary_count = frame.shapes.iter().filter(|s| s.color == primary).count();
         assert_eq!(
             primary_count, 1,

@@ -81,7 +81,7 @@ impl Panel {
     }
 
     fn resolve_padding(&self, theme: &fern_tokens::Theme) -> f32 {
-        self.padding.unwrap_or(theme.spacing.content_padding)
+        self.padding.unwrap_or(theme.components.panel.padding)
     }
 }
 
@@ -139,8 +139,8 @@ impl Widget for Panel {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let bg = self
             .background
-            .unwrap_or(ctx.theme.colors.surface_secondary);
-        let radius = self.corner_radius.unwrap_or(ctx.theme.shape.radius_md);
+            .unwrap_or(ctx.theme.colors.surface_main);
+        let radius = self.corner_radius.unwrap_or(ctx.theme.shape.radius_popup);
         let border_w = self.border_width.unwrap_or(0.0);
 
         canvas.fill_rounded_rect(bounds, CornerRadius::uniform(radius), bg);

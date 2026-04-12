@@ -158,9 +158,9 @@ impl Widget for ProgressBar {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let track_color = self
             .track_color
-            .unwrap_or(ctx.theme.colors.surface_tertiary);
-        let fill_color = self.fill_color.unwrap_or(ctx.theme.colors.primary);
-        let radius = CornerRadius::uniform(ctx.theme.shape.radius_sm);
+            .unwrap_or(ctx.theme.colors.surface_sunken);
+        let fill_color = self.fill_color.unwrap_or(ctx.theme.colors.accent);
+        let radius = CornerRadius::uniform(ctx.theme.components.progress_bar.corner_radius);
 
         // Track
         canvas.fill_rounded_rect(bounds, radius, track_color);

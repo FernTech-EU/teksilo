@@ -53,7 +53,7 @@ impl std::fmt::Debug for Toolbar {
 impl Widget for Toolbar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
-        let spacing = theme.spacing.xs;
+        let spacing = theme.components.toolbar.separator_inset;
 
         // Resolve pending children
         let pending = std::mem::take(&mut self.pending);

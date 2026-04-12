@@ -183,11 +183,11 @@ fn resolve_box_bg(
     colors: &fern_tokens::ColorTokens,
 ) -> Color {
     match state {
-        InteractionState::Disabled => colors.disabled_fill,
+        InteractionState::Disabled => colors.accent_disabled,
         _ if check.is_filled() => match state {
-            InteractionState::Hovered => colors.primary_hover,
-            InteractionState::Pressed => colors.primary_pressed,
-            _ => colors.primary,
+            InteractionState::Hovered => colors.accent_hover,
+            InteractionState::Pressed => colors.accent_pressed,
+            _ => colors.accent,
         },
         _ => Color::TRANSPARENT,
     }
@@ -199,18 +199,10 @@ fn resolve_box_border(
     colors: &fern_tokens::ColorTokens,
 ) -> Color {
     match state {
-        InteractionState::Disabled => colors.disabled_fill,
+        InteractionState::Disabled => colors.accent_disabled,
         _ if check.is_filled() => Color::TRANSPARENT,
         InteractionState::Hovered => colors.border_strong,
         _ => colors.border,
-    }
-}
-
-fn resolve_focus_ring(state: InteractionState, colors: &fern_tokens::ColorTokens) -> Color {
-    if state == InteractionState::Focused {
-        colors.focus_ring
-    } else {
-        Color::TRANSPARENT
     }
 }
 
@@ -256,41 +248,39 @@ impl Widget for Checkbox {
             interaction.map(move |s| resolve_box_border(*s, kind.check_state(), &colors))
         };
 
-        // Checkbox box (18x18)
+        let cb_style = theme.components.checkbox;
+        let icon_size = cb_style.box_visual_size * 0.75;
+
         let box_rect = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
             .border_width(theme.shape.border_width)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
+            .corner_radius(CornerRadius::uniform(cb_style.corner_radius));
         let box_id = ctx.add(box_rect);
         let box_sized = ctx.add(
             FixedSize::new()
-                .bind_width(18.0_f32)
-                .bind_height(18.0_f32)
+                .bind_width(cb_style.box_visual_size)
+                .bind_height(cb_style.box_visual_size)
                 .set_child(box_id),
         );
 
-        // Icon color (on-primary or disabled)
         let icon_color = {
             let colors = theme.colors.clone();
             interaction.map(move |s| {
                 if *s == InteractionState::Disabled {
-                    colors.disabled_text
+                    colors.text_disabled
                 } else {
-                    colors.on_primary
+                    colors.text_on_accent
                 }
             })
         };
 
-        // Checkmark icon — visible when Checked
-        let checkmark = IconWidget::checkmark(14.0).bind_color(icon_color.clone());
+        let checkmark = IconWidget::checkmark(icon_size).bind_color(icon_color.clone());
         let checkmark_id = ctx.add(checkmark);
 
-        // Indeterminate dash icon — visible when Indeterminate
-        let dash = indeterminate_icon(14.0).bind_color(icon_color);
+        let dash = indeterminate_icon(icon_size).bind_color(icon_color);
         let dash_id = ctx.add(dash);
 
-        // Control visibility based on check state.
         match &self.kind {
             CheckKind::TwoState(checked) => {
                 ctx.visible_when(checkmark_id, checked.clone());
@@ -302,50 +292,35 @@ impl Widget for Checkbox {
             }
         }
 
-        // Outer focus ring — 3px offset outside the 18x18 box (24x24 total)
-        let focus_ring_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_focus_ring(*s, &colors))
-        };
-        let focus_ring_width = interaction.map(|s| {
-            if *s == InteractionState::Focused {
-                2.0_f32
-            } else {
-                0.0
-            }
-        });
-        let focus_ring = RectWidget::new()
-            .bind_border_color(focus_ring_color)
-            .bind_border_width(focus_ring_width)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm + 3.0));
-        let focus_ring_id = ctx.add(focus_ring);
-        let focus_ring_sized = ctx.add(
-            FixedSize::new()
-                .bind_width(24.0_f32)
-                .bind_height(24.0_f32)
-                .set_child(focus_ring_id),
-        );
-
-        let check_box = ctx.add(
+        // Compose the visual box with checkmark/dash icons on top.
+        let visual_box = ctx.add(
             ZStack::new()
-                .add_child(focus_ring_sized)
                 .add_child(box_sized)
                 .add_child(checkmark_id)
                 .add_child(dash_id),
         );
 
-        // Compose with optional label
-        let mut row = HStack::new().spacing(8.0).add_child(check_box);
+        // Wrap the visual in a FocusRing — drawn outside the box when focused.
+        let focused = interaction.map(|s| *s == InteractionState::Focused);
+        let check_box = ctx.add(
+            crate::primitives::FocusRing::new(focused)
+                .corner_radius(cb_style.corner_radius)
+                .set_child(visual_box),
+        );
+
+        let mut row = HStack::new().spacing(cb_style.label_gap).add_child(check_box);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new(label)
                 .style(theme.typography.body.clone())
-                .color(theme.colors.on_surface);
+                .color(theme.colors.text_primary);
             let label_id = ctx.add(label_widget);
             row = row.add_child(label_id);
         }
 
         let row_id = ctx.add(row);
-        let root_id = ctx.add(MinSize::new(48.0, 48.0).set_child(row_id));
+        let root_id = ctx.add(
+            MinSize::new(cb_style.box_hit_area, cb_style.box_hit_area).set_child(row_id),
+        );
 
         if let Some(ref tooltip_text) = self.tooltip_text {
             let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
@@ -598,7 +573,7 @@ mod tests {
         tree.add(Checkbox::tristate(state).label("Partial"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
-        let primary = Theme::light_default().colors.primary.to_array();
+        let primary = Theme::light_default().colors.accent.to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == primary),
             "indeterminate checkbox should have primary-colored background"
@@ -621,7 +596,7 @@ mod tests {
         tree.add(Checkbox::new(checked).label("Disabled").enabled(false));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
-        let disabled_fill = Theme::light_default().colors.disabled_fill.to_array();
+        let disabled_fill = Theme::light_default().colors.accent_disabled.to_array();
         assert!(
             frame.shapes.iter().any(|s| s.color == disabled_fill),
             "disabled checkbox should render with disabled_fill color"

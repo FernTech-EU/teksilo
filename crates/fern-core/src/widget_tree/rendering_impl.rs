@@ -198,7 +198,7 @@ mod tests {
             canvas.fill_rounded_rect(
                 bounds,
                 fern_tokens::CornerRadius::uniform(4.0),
-                ctx.theme.colors.primary,
+                ctx.theme.colors.accent,
             );
         }
     }
@@ -321,9 +321,9 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
 
-        let dark_primary = fern_tokens::ColorTokens::dark_default().primary.to_array();
-        assert_eq!(frame.shapes[0].color, dark_primary);
-        assert_eq!(frame.shapes[1].color, dark_primary);
+        let dark_accent = fern_tokens::ColorTokens::dark_default().accent.to_array();
+        assert_eq!(frame.shapes[0].color, dark_accent);
+        assert_eq!(frame.shapes[1].color, dark_accent);
     }
 
     #[test]
@@ -340,11 +340,11 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let frame = tree.render();
 
-        let light_primary = fern_tokens::ColorTokens::light_default().primary.to_array();
-        let dark_primary = fern_tokens::ColorTokens::dark_default().primary.to_array();
+        let light_accent = fern_tokens::ColorTokens::light_default().accent.to_array();
+        let dark_accent = fern_tokens::ColorTokens::dark_default().accent.to_array();
 
-        assert_eq!(frame.shapes[0].color, light_primary);
-        assert_eq!(frame.shapes[1].color, dark_primary);
+        assert_eq!(frame.shapes[0].color, light_accent);
+        assert_eq!(frame.shapes[1].color, dark_accent);
     }
 
     #[test]
@@ -355,16 +355,16 @@ mod tests {
         let child = tree.add_child(parent, FillWidget::new());
 
         tree.set_theme_override(parent, |theme| {
-            theme.colors.primary = Color::RED;
+            theme.colors.accent = Color::RED;
         });
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let parent_theme = tree.resolved_theme(parent);
-        assert_eq!(parent_theme.colors.primary, Color::RED);
+        assert_eq!(parent_theme.colors.accent, Color::RED);
 
         let child_theme = tree.resolved_theme(child);
-        assert_eq!(child_theme.colors.primary, Color::RED);
+        assert_eq!(child_theme.colors.accent, Color::RED);
     }
 
     #[test]
@@ -376,16 +376,16 @@ mod tests {
         let child = tree.add_child(parent, FillWidget::new());
 
         tree.set_theme_override(grandparent, |theme| {
-            theme.colors.primary = Color::RED;
+            theme.colors.accent = Color::RED;
         });
         tree.set_theme_override(parent, |theme| {
-            theme.colors.secondary = Color::GREEN;
+            theme.colors.text_secondary = Color::GREEN;
         });
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let child_theme = tree.resolved_theme(child);
-        assert_eq!(child_theme.colors.primary, Color::RED);
-        assert_eq!(child_theme.colors.secondary, Color::GREEN);
+        assert_eq!(child_theme.colors.accent, Color::RED);
+        assert_eq!(child_theme.colors.text_secondary, Color::GREEN);
     }
 }

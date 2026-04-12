@@ -16,7 +16,7 @@ use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 /// How the scroll bar is displayed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ScrollBarStyle {
+pub enum ScrollBarMode {
     /// Scroll bar overlays the content (macOS-style). A thin passive
     /// indicator is painted during scrolling; the full interactive ScrollBar
     /// is shown as an overlay on pointer proximity.
@@ -44,13 +44,13 @@ pub enum ScrollBarPolicy {
 /// scroll events. The scroll offset is stored as `Signal<f32>` per axis,
 /// shared with the ScrollBar widget via the reactive binding system.
 ///
-/// Supports two display modes via `ScrollBarStyle`:
+/// Supports two display modes via `ScrollBarMode`:
 /// - **Overlay** (default): thin indicator painted during scrolling
 /// - **Permanent**: ScrollBar is a layout child alongside the viewport
 pub struct ScrollArea {
     content_child: Option<Box<dyn Widget>>,
     content_child_id: Option<WidgetId>,
-    scroll_bar_style: ScrollBarStyle,
+    scroll_bar_style: ScrollBarMode,
     /// Per-axis scroll bar visibility policy.
     vertical_policy: ScrollBarPolicy,
     horizontal_policy: ScrollBarPolicy,
@@ -111,7 +111,7 @@ impl ScrollArea {
         Self {
             content_child: Some(Box::new(child)),
             content_child_id: None,
-            scroll_bar_style: ScrollBarStyle::default(),
+            scroll_bar_style: ScrollBarMode::default(),
             vertical_policy: ScrollBarPolicy::default(),
             horizontal_policy: ScrollBarPolicy::default(),
             line_height: 20.0,
@@ -137,7 +137,7 @@ impl ScrollArea {
         Self {
             content_child: None,
             content_child_id: Some(child),
-            scroll_bar_style: ScrollBarStyle::default(),
+            scroll_bar_style: ScrollBarMode::default(),
             vertical_policy: ScrollBarPolicy::default(),
             horizontal_policy: ScrollBarPolicy::default(),
             line_height: 20.0,
@@ -158,7 +158,7 @@ impl ScrollArea {
         }
     }
 
-    pub fn scroll_bar_style(mut self, style: ScrollBarStyle) -> Self {
+    pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
         self.scroll_bar_style = style;
         self
     }
@@ -254,7 +254,7 @@ impl Widget for ScrollArea {
         ids.push(content_id);
 
         // Scrollbar visual tuning depends on mode
-        let is_overlay = self.scroll_bar_style == ScrollBarStyle::Overlay;
+        let is_overlay = self.scroll_bar_style == ScrollBarMode::Overlay;
         let thickness = self.scroll_bar_thickness; // full thickness for both modes
         let track = !is_overlay; // Permanent shows track always; overlay shows on hover
 
@@ -514,7 +514,7 @@ impl Widget for ScrollArea {
 
         // Pass 1: measure with optimistic vertical reservation.
         let v_reserved_1 = match self.scroll_bar_style {
-            ScrollBarStyle::Permanent if has_v && !v_off => sb_thickness,
+            ScrollBarMode::Permanent if has_v && !v_off => sb_thickness,
             _ => 0.0,
         };
         let vp_w1 = (bounds.width - v_reserved_1).max(0.0);
@@ -533,11 +533,11 @@ impl Widget for ScrollArea {
 
         // Compute actual reservations from pass-1 results.
         let v_res = match self.scroll_bar_style {
-            ScrollBarStyle::Permanent if show_v_1 => sb_thickness,
+            ScrollBarMode::Permanent if show_v_1 => sb_thickness,
             _ => 0.0,
         };
         let h_res = match self.scroll_bar_style {
-            ScrollBarStyle::Permanent if show_h_1 => sb_thickness,
+            ScrollBarMode::Permanent if show_h_1 => sb_thickness,
             _ => 0.0,
         };
 
@@ -546,7 +546,7 @@ impl Widget for ScrollArea {
         let new_needs_v = content_size_1.height > vp_h_after_h + 0.5;
         let show_v = resolve_show(self.vertical_policy, has_v, new_needs_v);
         let new_v_res = match self.scroll_bar_style {
-            ScrollBarStyle::Permanent if show_v => sb_thickness,
+            ScrollBarMode::Permanent if show_v => sb_thickness,
             _ => 0.0,
         };
 
@@ -570,7 +570,7 @@ impl Widget for ScrollArea {
 
         let v_reserved = new_v_res;
         let h_reserved = match self.scroll_bar_style {
-            ScrollBarStyle::Permanent if show_h => sb_thickness,
+            ScrollBarMode::Permanent if show_h => sb_thickness,
             _ => 0.0,
         };
         let viewport_height = (bounds.height - h_reserved).max(0.0);
@@ -625,7 +625,7 @@ impl Widget for ScrollArea {
                     bounds.right() - sb_thickness
                 };
                 let sb_h = if h_reserved > 0.0
-                    || (self.scroll_bar_style == ScrollBarStyle::Overlay && show_h)
+                    || (self.scroll_bar_style == ScrollBarMode::Overlay && show_h)
                 {
                     bounds.height - sb_thickness
                 } else {
@@ -650,7 +650,7 @@ impl Widget for ScrollArea {
                     bounds.x
                 };
                 let sb_w = if v_reserved > 0.0
-                    || (self.scroll_bar_style == ScrollBarStyle::Overlay && show_v)
+                    || (self.scroll_bar_style == ScrollBarMode::Overlay && show_v)
                 {
                     bounds.width - sb_thickness
                 } else {
@@ -825,7 +825,7 @@ mod tests {
         let content = TallLeaf::new(200.0, 500.0);
         let scroll = tree.add(
             ScrollArea::new(content)
-                .scroll_bar_style(ScrollBarStyle::Permanent)
+                .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
 
@@ -842,7 +842,7 @@ mod tests {
         let mut tree = WidgetTree::new();
 
         let leaf = TallLeaf::new(180.0, 500.0);
-        let scroll = tree.add(ScrollArea::new(leaf).scroll_bar_style(ScrollBarStyle::Permanent));
+        let scroll = tree.add(ScrollArea::new(leaf).scroll_bar_style(ScrollBarMode::Permanent));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -922,7 +922,7 @@ mod tests {
         // Content wider and taller than viewport
         let scroll = tree.add(
             ScrollArea::new(WideLeaf::new(400.0, 500.0))
-                .scroll_bar_style(ScrollBarStyle::Permanent)
+                .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
 
@@ -968,7 +968,7 @@ mod tests {
         // Content taller but NOT wider than viewport (accounting for v_sb)
         let scroll = tree.add(
             ScrollArea::new(TallLeaf::new(180.0, 500.0))
-                .scroll_bar_style(ScrollBarStyle::Permanent)
+                .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
 
@@ -991,7 +991,7 @@ mod tests {
     fn overlay_scrollbar_does_not_reduce_viewport() {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
-            ScrollArea::new(WideLeaf::new(400.0, 500.0)).scroll_bar_style(ScrollBarStyle::Overlay),
+            ScrollArea::new(WideLeaf::new(400.0, 500.0)).scroll_bar_style(ScrollBarMode::Overlay),
         );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1037,7 +1037,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
             ScrollArea::new(WideLeaf::new(400.0, 100.0))
-                .scroll_bar_style(ScrollBarStyle::Permanent)
+                .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
 
@@ -1068,7 +1068,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
             ScrollArea::new(TallLeaf::new(200.0, 500.0))
-                .scroll_bar_style(ScrollBarStyle::Permanent)
+                .scroll_bar_style(ScrollBarMode::Permanent)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .scroll_bar_thickness(12.0),
         );
@@ -1103,7 +1103,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
             ScrollArea::new(WideLeaf::new(400.0, 500.0))
-                .scroll_bar_style(ScrollBarStyle::Permanent)
+                .scroll_bar_style(ScrollBarMode::Permanent)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .scroll_bar_thickness(12.0),
         );
@@ -1134,7 +1134,7 @@ mod tests {
         // Content fits in viewport — normally scrollbar would hide
         let scroll = tree.add(
             ScrollArea::new(TallLeaf::new(100.0, 50.0))
-                .scroll_bar_style(ScrollBarStyle::Permanent)
+                .scroll_bar_style(ScrollBarMode::Permanent)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOn)
                 .scroll_bar_thickness(12.0),
         );

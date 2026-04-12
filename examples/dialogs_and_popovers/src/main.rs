@@ -3,7 +3,7 @@ use std::time::Duration;
 use fern_ui::core::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Badge, Button, ButtonStyle, Dialog, DialogContent, HStack, Panel, Popover, ScrollArea,
+    Badge, Button, ButtonVariant, Dialog, DialogContent, HStack, Panel, Popover, ScrollArea,
     Snackbar, TextWidget, VStack,
 };
 
@@ -32,15 +32,15 @@ impl Widget for OverlayDemo {
             .spacing(12.0)
             .child(
                 TextWidget::new("Popover")
-                    .style(t.label.clone())
-                    .color(c.on_surface),
+                    .style(t.small.clone())
+                    .color(c.text_primary),
             )
             .child(
                 TextWidget::new(
                     "Use popovers for compact contextual actions without leaving the current surface.",
                 )
                 .style(t.body.clone())
-                .color(c.on_surface_secondary),
+                .color(c.text_secondary),
             )
             .child(
                 HStack::new()
@@ -59,7 +59,7 @@ impl Widget for OverlayDemo {
             )
             .child(
                 Button::new("Dismiss")
-                    .style(ButtonStyle::Outlined)
+                    .style(ButtonVariant::Regular)
                     .on_tap(|ctx| ctx.dismiss_top_overlay()),
             );
 
@@ -69,8 +69,8 @@ impl Widget for OverlayDemo {
                 .child(Badge::new("Context"))
                 .child(
                     TextWidget::new("Popover actions")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_primary),
                 ),
         );
 
@@ -80,8 +80,8 @@ impl Widget for OverlayDemo {
                 .child(Badge::new("Modal"))
                 .child(
                     TextWidget::new("Review changes")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_primary),
                 ),
         );
 
@@ -100,15 +100,15 @@ impl Widget for OverlayDemo {
                             "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets FernUI resolve it.",
                         )
                         .style(t.body.clone())
-                        .color(c.on_surface_secondary),
+                        .color(c.text_secondary),
                     )
                     .footer(
                         Button::new("Close")
-                            .style(ButtonStyle::Filled)
+                            .style(ButtonVariant::Default)
                             .on_tap(|ctx| ctx.dismiss_modal()),
                     )
             })
-            .style(ButtonStyle::Tonal),
+            .style(ButtonVariant::Regular),
         );
 
         let root = ctx.add(
@@ -117,15 +117,15 @@ impl Widget for OverlayDemo {
                     .spacing(24.0)
                     .child(
                         TextWidget::new("Dialogs and Popovers")
-                            .style(t.heading_1.clone())
-                            .color(c.on_surface),
+                            .style(t.body_bold.clone())
+                            .color(c.text_primary),
                     )
                     .child(
                         TextWidget::new(
                             "FernUI now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.",
                         )
                         .style(t.body.clone())
-                        .color(c.on_surface_secondary),
+                        .color(c.text_secondary),
                     )
                     .child(
                         Panel::new().padding(20.0).child(
@@ -150,19 +150,19 @@ impl Widget for OverlayDemo {
                                                     "This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout.",
                                                 )
                                                 .style(t.body.clone())
-                                                .color(c.on_surface_secondary),
+                                                .color(c.text_secondary),
                                             )
                                             .footer(
                                                 HStack::new()
                                                     .spacing(12.0)
                                                     .child(
                                                         Button::new("Cancel")
-                                                            .style(ButtonStyle::Outlined)
+                                                            .style(ButtonVariant::Regular)
                                                             .on_tap(|ctx| ctx.dismiss_modal()),
                                                     )
                                                     .child(
                                                         Button::new("Apply")
-                                                            .style(ButtonStyle::Filled)
+                                                            .style(ButtonVariant::Default)
                                                             .on_tap(|ctx| ctx.dismiss_modal()),
                                                     ),
                                             )
@@ -182,15 +182,15 @@ impl Widget for OverlayDemo {
                                 .spacing(10.0)
                                 .child(
                                     TextWidget::new("Notes")
-                                        .style(t.heading_3.clone())
-                                        .color(c.on_surface),
+                                        .style(t.body_bold.clone())
+                                        .color(c.text_primary),
                                 )
                                 .child(
                                     TextWidget::new(
                                         "Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether FernUI resolved it to an in-tree overlay or a native modal child window.",
                                     )
                                     .style(t.body.clone())
-                                    .color(c.on_surface_secondary),
+                                    .color(c.text_secondary),
                                 ),
                         ),
                     ),

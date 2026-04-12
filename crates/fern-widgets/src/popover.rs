@@ -8,7 +8,7 @@ use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
-use crate::button::{Button, ButtonStyle};
+use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
 
 const SURFACE_PADDING: f32 = 16.0;
@@ -152,8 +152,8 @@ impl Widget for PopoverSurface {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let panel = self.panel_bounds(bounds);
-        let radius = CornerRadius::uniform(ctx.theme.shape.radius_md);
-        canvas.fill_rounded_rect(panel, radius, ctx.theme.colors.surface);
+        let radius = CornerRadius::uniform(ctx.theme.shape.radius_popup);
+        canvas.fill_rounded_rect(panel, radius, ctx.theme.colors.surface_main);
         canvas.stroke_rounded_rect(
             panel,
             radius,
@@ -161,7 +161,7 @@ impl Widget for PopoverSurface {
             ctx.theme.shape.border_width,
         );
         if let Some(path) = self.caret_path(bounds) {
-            canvas.fill_path(&path, ctx.theme.colors.surface);
+            canvas.fill_path(&path, ctx.theme.colors.surface_main);
             canvas.stroke_path(&path, ctx.theme.colors.border, ctx.theme.shape.border_width);
         }
     }
@@ -177,7 +177,7 @@ impl Widget for PopoverSurface {
 
 pub struct Popover {
     label: String,
-    style: ButtonStyle,
+    style: ButtonVariant,
     enabled: bool,
     placement: OverlayPlacement,
     dismiss: DismissBehavior,
@@ -192,7 +192,7 @@ impl Popover {
     pub fn new(label: impl Into<String>, content: impl Widget + 'static) -> Self {
         Self {
             label: label.into(),
-            style: ButtonStyle::Outlined,
+            style: ButtonVariant::Regular,
             enabled: true,
             placement: OverlayPlacement::BelowPreferred,
             dismiss: DismissBehavior::EscapeOrClickOutside,
@@ -204,7 +204,7 @@ impl Popover {
         }
     }
 
-    pub fn style(mut self, style: ButtonStyle) -> Self {
+    pub fn style(mut self, style: ButtonVariant) -> Self {
         self.style = style;
         self
     }

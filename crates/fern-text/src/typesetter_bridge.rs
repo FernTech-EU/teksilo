@@ -75,7 +75,7 @@ impl TypesetterBridge {
 
     /// Register and set the bundled default font.
     fn register_default_font(&mut self) {
-        let font_data = include_bytes!("../fonts/NotoSans-Regular.ttf");
+        let font_data = include_bytes!("../fonts/InterVariable.ttf");
         let face_id = self.typesetter.register_font(font_data);
         self.typesetter.set_default_font(face_id, 14.0);
         self.default_font = Some(face_id);

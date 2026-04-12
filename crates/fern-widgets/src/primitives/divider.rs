@@ -8,11 +8,12 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_tokens::{Color, Orientation};
 
-/// A themed 1px separator line.
+/// A themed separator line. Thickness defaults to `DividerStyle::thickness`
+/// and the color defaults to `colors.divider`; both can be overridden.
 #[derive(Debug)]
 pub struct Divider {
     orientation: Orientation,
-    thickness: f32,
+    thickness: Option<f32>,
     color: Option<Color>,
 }
 
@@ -20,7 +21,7 @@ impl Divider {
     pub fn new() -> Self {
         Self {
             orientation: Orientation::Horizontal,
-            thickness: 1.0,
+            thickness: None,
             color: None,
         }
     }
@@ -37,13 +38,18 @@ impl Divider {
     }
 
     pub fn thickness(mut self, thickness: f32) -> Self {
-        self.thickness = thickness;
+        self.thickness = Some(thickness);
         self
     }
 
     pub fn color(mut self, color: Color) -> Self {
         self.color = Some(color);
         self
+    }
+
+    fn resolved_thickness(&self, theme: &fern_tokens::Theme) -> f32 {
+        self.thickness
+            .unwrap_or(theme.components.divider.thickness)
     }
 }
 
@@ -54,21 +60,23 @@ impl Default for Divider {
 }
 
 impl Widget for Divider {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let thickness = self.resolved_thickness(ctx.theme);
         match self.orientation {
             Orientation::Horizontal => {
                 let width = proposal.width.unwrap_or(0.0);
-                Size::new(width, self.thickness)
+                Size::new(width, thickness)
             }
             Orientation::Vertical => {
                 let height = proposal.height.unwrap_or(0.0);
-                Size::new(self.thickness, height)
+                Size::new(thickness, height)
             }
         }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let color = self.color.unwrap_or(ctx.theme.colors.border);
+        let color = self.color.unwrap_or(ctx.theme.colors.divider);
+        let thickness = self.resolved_thickness(ctx.theme);
         let (from, to) = match self.orientation {
             Orientation::Horizontal => {
                 let y = bounds.y + bounds.height / 2.0;
@@ -79,7 +87,7 @@ impl Widget for Divider {
                 (Point::new(x, bounds.y), Point::new(x, bounds.bottom()))
             }
         };
-        canvas.draw_line(from, to, color, StrokeStyle::solid(self.thickness));
+        canvas.draw_line(from, to, color, StrokeStyle::solid(thickness));
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

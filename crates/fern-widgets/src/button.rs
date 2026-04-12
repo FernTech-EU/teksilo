@@ -21,14 +21,33 @@ use fern_tokens::{Color, ColorTokens, CornerRadius};
 
 use crate::primitives::{Padding, RectWidget, TextWidget, ZStack};
 
-/// Visual style of the button.
+/// Visual role of the button.
+///
+/// - [`ButtonVariant::Default`] — the primary action in a dialog or form.
+///   Filled with `accent`, white label, no border. There should be at most
+///   one Default button per dialog (the one that Enter activates).
+/// - [`ButtonVariant::Regular`] — any non-primary button. A visible surface
+///   fill with a 1 dp border and a `text_primary` label. This is the default
+///   because most buttons are not the primary action.
+/// - [`ButtonVariant::Flat`] — a borderless button used in toolbars, action
+///   rows, and inline contexts. Transparent at idle, `surface_hover` on
+///   hover, `text_primary` label.
+///
+/// Int UI does **not** use filled red "destructive" buttons. Destructive
+/// actions in IntelliJ are plain `Regular` buttons ("Delete", "Revert", …)
+/// in confirmation dialogs where the dialog title, icon, and body text
+/// carry the warning — the button itself is not colored. For inline row
+/// actions ("Remove this plugin"), use a `Flat` button or a `Link` widget
+/// with an error-colored label. Do not reintroduce a filled red variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ButtonStyle {
+pub enum ButtonVariant {
+    /// Primary action — accent-filled, one per dialog.
+    Default,
+    /// Non-primary action — surface fill with a 1 dp border.
     #[default]
-    Filled,
-    Outlined,
+    Regular,
+    /// Borderless — toolbar / inline actions.
     Flat,
-    Tonal,
 }
 
 /// Internal interaction state.
@@ -45,7 +64,7 @@ pub enum InteractionState {
 ///
 /// ```ignore
 /// Button::new("Save")
-///     .style(ButtonStyle::Filled)
+///     .style(ButtonVariant::Default)
 ///     .on_activate(AppCmd::Save)
 /// ```
 /// Type-erased command factory — captures the concrete command type
@@ -54,7 +73,7 @@ type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 pub struct Button {
     label: String,
-    style: ButtonStyle,
+    style: ButtonVariant,
     action: Option<CommandFactory>,
     enabled: bool,
     tooltip_text: Option<String>,
@@ -68,7 +87,9 @@ impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
-            style: ButtonStyle::Filled,
+            // Int UI default is a Regular (non-primary) button; the caller
+            // opts into `ButtonVariant::Default` for the one primary action.
+            style: ButtonVariant::Regular,
             action: None,
             enabled: true,
             tooltip_text: None,
@@ -77,7 +98,7 @@ impl Button {
         }
     }
 
-    pub fn style(mut self, style: ButtonStyle) -> Self {
+    pub fn style(mut self, style: ButtonVariant) -> Self {
         self.style = style;
         self
     }
@@ -123,55 +144,61 @@ impl std::fmt::Debug for Button {
     }
 }
 
-// --- Color resolution: style × state × theme (resolved at paint time) ---
+// --- Color resolution: variant × state × theme (resolved at paint time) ---
+//
+// Per the Int UI reference (v2 §1), emphasis comes from fill color not from
+// border thickness or stroke style. Each variant maps to a distinct surface
+// role; only Default uses the accent family.
 
-fn resolve_bg(style: ButtonStyle, state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_bg(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
     match (style, state) {
-        (_, InteractionState::Disabled) => colors.disabled_fill,
-        (ButtonStyle::Filled, InteractionState::Idle | InteractionState::Focused) => colors.primary,
-        (ButtonStyle::Filled, InteractionState::Hovered) => colors.primary_hover,
-        (ButtonStyle::Filled, InteractionState::Pressed) => colors.primary_pressed,
-        (ButtonStyle::Outlined, InteractionState::Hovered) => colors.primary.with_alpha(0.08),
-        (ButtonStyle::Outlined, InteractionState::Pressed) => colors.primary.with_alpha(0.12),
-        (ButtonStyle::Outlined, _) => Color::TRANSPARENT,
-        (ButtonStyle::Flat, InteractionState::Hovered) => colors.primary.with_alpha(0.08),
-        (ButtonStyle::Flat, InteractionState::Pressed) => colors.primary.with_alpha(0.12),
-        (ButtonStyle::Flat, _) => Color::TRANSPARENT,
-        (ButtonStyle::Tonal, InteractionState::Idle | InteractionState::Focused) => {
-            colors.secondary
-        }
-        (ButtonStyle::Tonal, InteractionState::Hovered) => colors.secondary_hover,
-        (ButtonStyle::Tonal, InteractionState::Pressed) => colors.secondary_pressed,
+        // Default: accent-filled primary action.
+        (ButtonVariant::Default, InteractionState::Disabled) => colors.accent_disabled,
+        (ButtonVariant::Default, InteractionState::Pressed) => colors.accent_pressed,
+        (ButtonVariant::Default, InteractionState::Hovered) => colors.accent_hover,
+        (ButtonVariant::Default, _) => colors.accent,
+
+        // Regular: visible surface fill. Disabled keeps surface_main so
+        // the button doesn't look primary; only the label dims.
+        (ButtonVariant::Regular, InteractionState::Pressed) => colors.surface_pressed,
+        (ButtonVariant::Regular, InteractionState::Hovered) => colors.surface_hover,
+        (ButtonVariant::Regular, _) => colors.surface_main,
+
+        // Flat: transparent at idle, light wash on hover/press.
+        (ButtonVariant::Flat, InteractionState::Pressed) => colors.surface_pressed,
+        (ButtonVariant::Flat, InteractionState::Hovered) => colors.surface_hover,
+        (ButtonVariant::Flat, _) => Color::TRANSPARENT,
     }
 }
 
-fn resolve_text(style: ButtonStyle, state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_text(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
     match (style, state) {
-        (_, InteractionState::Disabled) => colors.disabled_text,
-        (ButtonStyle::Filled, _) => colors.on_primary,
-        (ButtonStyle::Outlined | ButtonStyle::Flat, InteractionState::Hovered) => {
-            colors.primary_hover
+        // Default: white label on accent fill.
+        (ButtonVariant::Default, InteractionState::Disabled) => colors.text_disabled,
+        (ButtonVariant::Default, _) => colors.text_on_accent,
+
+        // Regular / Flat: primary text, dim when disabled.
+        (ButtonVariant::Regular | ButtonVariant::Flat, InteractionState::Disabled) => {
+            colors.text_disabled
         }
-        (ButtonStyle::Outlined | ButtonStyle::Flat, InteractionState::Pressed) => {
-            colors.primary_pressed
-        }
-        (ButtonStyle::Outlined | ButtonStyle::Flat, _) => colors.primary,
-        (ButtonStyle::Tonal, _) => colors.on_secondary,
+        (ButtonVariant::Regular | ButtonVariant::Flat, _) => colors.text_primary,
     }
 }
 
-fn resolve_border(style: ButtonStyle, state: InteractionState, colors: &ColorTokens) -> Color {
-    // Focus ring is visible for keyboard-focused state (any style)
-    if state == InteractionState::Focused {
-        return colors.focus_ring;
-    }
+fn resolve_border(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
+    // Int UI: borders are always 1 dp; emphasis is color-only. The focus
+    // ring is drawn outside the control by the `FocusRing` wrapper, so
+    // borders never encode focus state.
     match style {
-        ButtonStyle::Outlined => match state {
-            InteractionState::Disabled => colors.disabled_fill,
+        // Default / Flat: no border — the fill (or absence of one) carries
+        // the affordance.
+        ButtonVariant::Default | ButtonVariant::Flat => Color::TRANSPARENT,
+        // Regular: always a visible border. Strong variant on hover/press.
+        ButtonVariant::Regular => match state {
+            InteractionState::Disabled => colors.border,
             InteractionState::Hovered | InteractionState::Pressed => colors.border_strong,
             _ => colors.border,
         },
-        _ => Color::TRANSPARENT,
     }
 }
 
@@ -207,37 +234,41 @@ impl fern_core::widget::Widget for Button {
         let text = TextWidget::new(&self.label).bind_color(text_color);
         let text_id = ctx.add(text);
 
+        let button_style = theme.components.button;
         let padding = Padding::symmetric(
-            theme.spacing.widget_padding,
-            theme.spacing.widget_padding * 1.5,
+            button_style.padding_vertical,
+            button_style.padding_horizontal,
         )
         .set_child(text_id);
         let padding_id = ctx.add(padding);
 
-        let border_width = {
-            let default_width = theme.shape.border_width;
-            interaction.map(move |s| {
-                if *s == InteractionState::Focused {
-                    2.0_f32.max(default_width) // thicker for focus ring visibility
-                } else {
-                    default_width
-                }
-            })
-        };
-
+        // Int UI: border is fixed at 1 dp. Focus is shown via the FocusRing
+        // wrapper, not by thickening the border.
         let rect = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
-            .bind_border_width(border_width)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
+            .border_width(button_style.border_width)
+            .corner_radius(CornerRadius::uniform(button_style.corner_radius));
         let rect_id = ctx.add(rect);
 
         let zstack = ZStack::new().add_child(rect_id).add_child(padding_id);
         let zstack_id = ctx.add(zstack);
 
-        // Enforce minimum touch target size per architecture
-        let root = crate::primitives::MinSize::new(48.0, 48.0).set_child(zstack_id);
-        let root_id = ctx.add(root);
+        // Int UI buttons are 24 dp tall with a 72 dp minimum width.
+        let sized_id = ctx.add(
+            crate::primitives::MinSize::new(button_style.min_width, button_style.height)
+                .set_child(zstack_id),
+        );
+
+        // Wrap in a FocusRing so the ring is drawn outside the control.
+        // Only keyboard focus shows the ring — `focused` is derived from the
+        // interaction state.
+        let focused = interaction.map(|s| *s == InteractionState::Focused);
+        let root_id = ctx.add(
+            crate::primitives::FocusRing::new(focused)
+                .corner_radius(button_style.corner_radius)
+                .set_child(sized_id),
+        );
 
         // Attach tooltip if configured
         if let Some(ref tooltip_text) = self.tooltip_text {
@@ -489,18 +520,19 @@ mod tests {
     }
 
     #[test]
-    fn filled_renders_primary_background() {
-        let (mut tree, _btn) = setup();
+    fn default_variant_renders_accent_background() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Button::new("Save").style(ButtonVariant::Default));
+        tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
-        let primary = Theme::light_default().colors.primary.to_array();
-        assert!(frame.shapes.iter().any(|s| s.color == primary));
+        let accent = Theme::light_default().colors.accent.to_array();
+        assert!(frame.shapes.iter().any(|s| s.color == accent));
     }
 
     #[test]
-    fn outlined_has_border() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Button::new("Save").style(ButtonStyle::Outlined));
-        tree.layout(SizeProposal::exact(200.0, 80.0));
+    fn regular_variant_has_border() {
+        // Regular is the default constructed variant.
+        let (mut tree, _btn) = setup();
         let frame = tree.render();
         assert!(frame.shapes.iter().any(|s| s.stroke_width > 0.0));
     }

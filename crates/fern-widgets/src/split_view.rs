@@ -317,32 +317,32 @@ impl Widget for SplitHandle {
         let interaction = self.interaction.get();
 
         let background = if !self.enabled {
-            colors.surface_secondary
+            colors.surface_main
         } else if interaction == SplitHandleState::Dragging {
-            colors.primary.with_alpha(0.14)
+            colors.accent.with_alpha(0.14)
         } else if interaction == SplitHandleState::Focused {
-            colors.primary.with_alpha(0.10)
+            colors.accent.with_alpha(0.10)
         } else if interaction == SplitHandleState::Hovered {
-            colors.surface
+            colors.surface_main
         } else {
-            colors.surface_secondary
+            colors.surface_main
         };
         canvas.fill_rounded_rect(
             bounds,
-            CornerRadius::uniform(ctx.theme.shape.radius_sm),
+            CornerRadius::uniform(ctx.theme.shape.radius_control),
             background,
         );
 
         let grip_color = if !self.enabled {
-            colors.disabled_text
+            colors.text_disabled
         } else if interaction == SplitHandleState::Dragging
             || interaction == SplitHandleState::Focused
         {
-            colors.primary
+            colors.accent
         } else if interaction == SplitHandleState::Hovered {
-            colors.on_surface
+            colors.text_primary
         } else {
-            colors.on_surface_secondary
+            colors.text_secondary
         };
 
         let center_x = bounds.x + bounds.width / 2.0;
@@ -371,7 +371,7 @@ impl Widget for SplitHandle {
         if interaction == SplitHandleState::Focused {
             canvas.stroke_rounded_rect(
                 bounds,
-                CornerRadius::uniform(ctx.theme.shape.radius_sm),
+                CornerRadius::uniform(ctx.theme.shape.radius_control),
                 colors.focus_ring,
                 2.0,
             );

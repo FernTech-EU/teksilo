@@ -10,7 +10,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
-use crate::button::{Button, ButtonStyle};
+use crate::button::{Button, ButtonVariant};
 use crate::dialog::ModalContainer;
 use crate::overlay_trigger::OverlayTrigger;
 use crate::primitives::{Divider, HStack, Spacer, Switcher, TextWidget, VStack};
@@ -177,20 +177,20 @@ impl Widget for WizardHeader {
         let progress_id = ctx.add(
             TextWidget::new("")
                 .bind_text(progress)
-                .style(theme.typography.label.clone())
-                .color(theme.colors.on_surface_secondary),
+                .style(theme.typography.small.clone())
+                .color(theme.colors.text_secondary),
         );
         let title_id = ctx.add(
             TextWidget::new("")
                 .bind_text(title)
-                .style(theme.typography.heading_3.clone())
-                .color(theme.colors.on_surface),
+                .style(theme.typography.body_bold.clone())
+                .color(theme.colors.text_primary),
         );
         let supporting_id = ctx.add(
             TextWidget::new("")
                 .bind_text(supporting_text)
                 .style(theme.typography.body.clone())
-                .color(theme.colors.on_surface_secondary),
+                .color(theme.colors.text_secondary),
         );
         ctx.visible_when(supporting_id, show_supporting);
 
@@ -295,7 +295,7 @@ impl Widget for WizardFooter {
 
             let back_id = ctx.add(
                 Button::new(self.back_label.clone())
-                    .style(ButtonStyle::Outlined)
+                    .style(ButtonVariant::Regular)
                     .on_activate_fn({
                         let current_step = current_step.clone();
                         let next_focus_id = next_focus_id.clone();
@@ -314,13 +314,13 @@ impl Widget for WizardFooter {
 
             let cancel_id = ctx.add(
                 Button::new(self.cancel_label.clone())
-                    .style(ButtonStyle::Flat)
+                    .style(ButtonVariant::Flat)
                     .on_activate_fn(|ctx| ctx.dismiss_modal()),
             );
 
             let next_id = ctx.add(
                 Button::new(self.next_label.clone())
-                    .style(ButtonStyle::Filled)
+                    .style(ButtonVariant::Default)
                     .on_activate_fn({
                         let current_step = current_step.clone();
                         let next_focus_id = next_focus_id.clone();
@@ -347,7 +347,7 @@ impl Widget for WizardFooter {
             let finish_action = self.finish_action.clone();
             let finish_id = ctx.add(
                 Button::new(self.finish_label.clone())
-                    .style(ButtonStyle::Filled)
+                    .style(ButtonVariant::Default)
                     .on_activate_fn(move |ctx| {
                         if let Some(action) = &finish_action {
                             action(ctx);
@@ -520,7 +520,7 @@ impl Widget for WizardFlow {
 
 pub struct Wizard {
     label: String,
-    style: ButtonStyle,
+    style: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
@@ -539,7 +539,7 @@ impl Wizard {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
-            style: ButtonStyle::Filled,
+            style: ButtonVariant::Default,
             enabled: true,
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::Manual,
@@ -565,7 +565,7 @@ impl Wizard {
         self
     }
 
-    pub fn style(mut self, style: ButtonStyle) -> Self {
+    pub fn style(mut self, style: ButtonVariant) -> Self {
         self.style = style;
         self
     }

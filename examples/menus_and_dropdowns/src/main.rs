@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonStyle, ComboBox, Divider, Expand, HStack, IconWidget, MenuBar, MenuItem,
+    Button, ButtonVariant, ComboBox, Divider, Expand, HStack, IconWidget, MenuBar, MenuItem,
     MenuList, Padding, Panel, ScrollArea, Spacer, StatusBar, TextWidget, Toolbar, VStack,
 };
 
@@ -75,8 +75,8 @@ impl Widget for Root {
                 .spacing(12.0)
                 .child(
                     TextWidget::new("ComboBox / Dropdown")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new(
@@ -84,7 +84,7 @@ impl Widget for Root {
                          Enter to select, Escape to close.",
                     )
                     .style(t.body.clone())
-                    .color(c.on_surface),
+                    .color(c.text_primary),
                 )
                 .child(
                     HStack::new()
@@ -94,8 +94,8 @@ impl Widget for Root {
                                 .spacing(4.0)
                                 .child(
                                     TextWidget::new("Fruit")
-                                        .style(t.label.clone())
-                                        .color(c.on_surface),
+                                        .style(t.small.clone())
+                                        .color(c.text_primary),
                                 )
                                 .child(
                                     ComboBox::new(
@@ -118,8 +118,8 @@ impl Widget for Root {
                                 .spacing(4.0)
                                 .child(
                                     TextWidget::new("Color")
-                                        .style(t.label.clone())
-                                        .color(c.on_surface),
+                                        .style(t.small.clone())
+                                        .color(c.text_primary),
                                 )
                                 .child(ComboBox::new(
                                     vec!["Red", "Green", "Blue", "Yellow", "Purple"],
@@ -131,8 +131,8 @@ impl Widget for Root {
                                 .spacing(4.0)
                                 .child(
                                     TextWidget::new("Size (disabled)")
-                                        .style(t.label.clone())
-                                        .color(c.on_surface),
+                                        .style(t.small.clone())
+                                        .color(c.text_primary),
                                 )
                                 .child(
                                     ComboBox::new(
@@ -153,8 +153,8 @@ impl Widget for Root {
                 .spacing(12.0)
                 .child(
                     TextWidget::new("Context Menu")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new(
@@ -162,14 +162,14 @@ impl Widget for Root {
                          Each panel has a different menu.",
                     )
                     .style(t.body.clone())
-                    .color(c.on_surface),
+                    .color(c.text_primary),
                 )
                 .child(
                     HStack::new()
                         .spacing(16.0)
                         .child(
                             Panel::new()
-                                .background(c.surface_secondary)
+                                .background(c.surface_main)
                                 .corner_radius(8.0)
                                 .padding(20.0)
                                 .child(
@@ -177,13 +177,13 @@ impl Widget for Root {
                                         .spacing(6.0)
                                         .child(
                                             TextWidget::new("Edit Menu")
-                                                .style(t.label.clone())
-                                                .color(c.on_surface),
+                                                .style(t.small.clone())
+                                                .color(c.text_primary),
                                         )
                                         .child(
                                             TextWidget::new("Right-click for Cut/Copy/Paste")
                                                 .style(t.body.clone())
-                                                .color(c.on_surface),
+                                                .color(c.text_primary),
                                         ),
                                 )
                                 .context_menu(|| {
@@ -248,7 +248,7 @@ impl Widget for Root {
                         )
                         .child(
                             Panel::new()
-                                .background(c.surface_secondary)
+                                .background(c.surface_main)
                                 .corner_radius(8.0)
                                 .padding(20.0)
                                 .child(
@@ -256,13 +256,13 @@ impl Widget for Root {
                                         .spacing(6.0)
                                         .child(
                                             TextWidget::new("File Menu")
-                                                .style(t.label.clone())
-                                                .color(c.on_surface),
+                                                .style(t.small.clone())
+                                                .color(c.text_primary),
                                         )
                                         .child(
                                             TextWidget::new("Right-click for file operations")
                                                 .style(t.body.clone())
-                                                .color(c.on_surface),
+                                                .color(c.text_primary),
                                         ),
                                 )
                                 .context_menu(|| {
@@ -298,8 +298,8 @@ impl Widget for Root {
                 .spacing(12.0)
                 .child(
                     TextWidget::new("Menu Items (inline)")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new(
@@ -307,11 +307,11 @@ impl Widget for Root {
                          their visual styles and interaction states.",
                     )
                     .style(t.body.clone())
-                    .color(c.on_surface),
+                    .color(c.text_primary),
                 )
                 .child(
                     Panel::new()
-                        .background(c.surface)
+                        .background(c.surface_main)
                         .border_color(c.border)
                         .border_width(1.0)
                         .corner_radius(8.0)
@@ -343,13 +343,13 @@ impl Widget for Root {
                 HStack::new()
                     .child(
                         TextWidget::new("Menus & Dropdowns")
-                            .style(t.heading_1.clone())
-                            .color(c.on_surface),
+                            .style(t.body_bold.clone())
+                            .color(c.text_primary),
                     )
                     .child(Spacer::new())
                     .child(
                         Button::new("Toggle Dark Mode")
-                            .style(ButtonStyle::Outlined)
+                            .style(ButtonVariant::Regular)
                             .on_activate(Cmd::ToggleDarkMode),
                     ),
             ),
@@ -366,12 +366,12 @@ impl Widget for Root {
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content));
         let scroll = ctx.add(
-            ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarStyle::Overlay),
+            ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarMode::Overlay),
         );
 
         let menu_bar = ctx.add(
             MenuBar::new()
-                .leading_slot(IconWidget::chevron_right(16.0).color(c.primary))
+                .leading_slot(IconWidget::chevron_right(16.0).color(c.accent))
                 .menu("File", || {
                     Box::new(
                         MenuList::new()
@@ -453,7 +453,7 @@ impl Widget for Root {
                 })
                 .trailing_slot(
                     Button::new("Settings")
-                        .style(ButtonStyle::Flat)
+                        .style(ButtonVariant::Flat)
                         .on_activate(Cmd::ToggleDarkMode),
                 ),
         );
@@ -466,8 +466,8 @@ impl Widget for Root {
                 .child(
                     StatusBar::new().child(
                         TextWidget::new("Milestone 4 -- Menus & Dropdowns")
-                            .style(t.caption.clone())
-                            .color(c.on_surface),
+                            .style(t.tiny.clone())
+                            .color(c.text_primary),
                     ),
                 ),
         );

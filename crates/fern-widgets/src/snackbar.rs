@@ -10,12 +10,9 @@ use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
-use crate::button::{Button, ButtonStyle};
+use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
 
-const SNACKBAR_PADDING_X: f32 = 18.0;
-const SNACKBAR_PADDING_Y: f32 = 14.0;
-const SNACKBAR_MIN_WIDTH: f32 = 260.0;
 const DEFAULT_AUTO_DISMISS: Duration = Duration::from_secs(4);
 
 fn present_snackbar(
@@ -71,8 +68,9 @@ impl Widget for SnackbarSurface {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        let inset_x = SNACKBAR_PADDING_X * 2.0;
-        let inset_y = SNACKBAR_PADDING_Y * 2.0;
+        let style = ctx.theme.components.notification;
+        let inset_x = style.padding_horizontal * 2.0;
+        let inset_y = style.padding_vertical * 2.0;
         let content = self
             .content_id
             .and_then(|id| {
@@ -86,10 +84,7 @@ impl Widget for SnackbarSurface {
             })
             .unwrap_or_else(|| proposal.resolve(220.0, 44.0));
 
-        Size::new(
-            (content.width + inset_x).max(SNACKBAR_MIN_WIDTH),
-            content.height + inset_y,
-        )
+        Size::new(content.width + inset_x, content.height + inset_y)
     }
 
     fn place_children(
@@ -97,28 +92,30 @@ impl Widget for SnackbarSurface {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        let style = ctx.theme.components.notification;
         for child in children.iter_mut() {
             child.origin = fern_canvas::Point::new(
-                bounds.x + SNACKBAR_PADDING_X,
-                bounds.y + SNACKBAR_PADDING_Y,
+                bounds.x + style.padding_horizontal,
+                bounds.y + style.padding_vertical,
             );
             child.size = Size::new(
-                (bounds.width - SNACKBAR_PADDING_X * 2.0).max(0.0),
-                (bounds.height - SNACKBAR_PADDING_Y * 2.0).max(0.0),
+                (bounds.width - style.padding_horizontal * 2.0).max(0.0),
+                (bounds.height - style.padding_vertical * 2.0).max(0.0),
             );
         }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius =
-            CornerRadius::uniform(ctx.theme.shape.radius_full.max(ctx.theme.shape.radius_md));
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_surface);
+        let style = ctx.theme.components.notification;
+        let radius = CornerRadius::uniform(style.corner_radius);
+        // Notifications use the (dark) tooltip surface for high-contrast popups.
+        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         canvas.stroke_rounded_rect(
             bounds,
             radius,
-            ctx.theme.colors.primary,
+            ctx.theme.colors.tooltip_border,
             ctx.theme.shape.border_width,
         );
     }
@@ -135,7 +132,7 @@ impl Widget for SnackbarSurface {
 
 pub struct Snackbar {
     label: String,
-    style: ButtonStyle,
+    style: ButtonVariant,
     enabled: bool,
     dismiss: DismissBehavior,
     auto_dismiss_after: Option<Duration>,
@@ -148,7 +145,7 @@ impl Snackbar {
     pub fn new(label: impl Into<String>, content: impl Widget + 'static) -> Self {
         Self {
             label: label.into(),
-            style: ButtonStyle::Tonal,
+            style: ButtonVariant::Regular,
             enabled: true,
             dismiss: DismissBehavior::ClickOutside,
             auto_dismiss_after: Some(DEFAULT_AUTO_DISMISS),
@@ -158,7 +155,7 @@ impl Snackbar {
         }
     }
 
-    pub fn style(mut self, style: ButtonStyle) -> Self {
+    pub fn style(mut self, style: ButtonVariant) -> Self {
         self.style = style;
         self
     }

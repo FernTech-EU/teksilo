@@ -31,15 +31,15 @@ impl Widget for SplitViewDemo {
                     .spacing(24.0)
                     .child(
                         TextWidget::new("SplitView")
-                            .style(t.heading_1.clone())
-                            .color(c.on_surface),
+                            .style(t.body_bold.clone())
+                            .color(c.text_primary),
                     )
                     .child(
                         TextWidget::new(
                             "Drag the divider or focus it and use arrow keys to resize the panes.",
                         )
                         .style(t.body.clone())
-                        .color(c.on_surface_secondary),
+                        .color(c.text_secondary),
                     )
                     .child(
                         Panel::new()

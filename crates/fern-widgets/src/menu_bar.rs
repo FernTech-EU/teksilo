@@ -127,7 +127,7 @@ impl Widget for MenuBarTrigger {
         // Background and text color derived from the shared open_index signal.
         // Single signal source → binding registry handles repaints automatically.
         let bg_color = menu_ctx.open_index.map({
-            let primary = theme.colors.primary;
+            let primary = theme.colors.accent;
             move |open| {
                 if *open == Some(index) {
                     primary.with_alpha(0.12)
@@ -138,7 +138,7 @@ impl Widget for MenuBarTrigger {
         });
 
         let text_color = menu_ctx.open_index.map({
-            let on_surface = theme.colors.on_surface;
+            let on_surface = theme.colors.text_primary;
             move |open| {
                 if *open == Some(index) {
                     on_surface
@@ -149,20 +149,21 @@ impl Widget for MenuBarTrigger {
         });
 
         let label = TextWidget::new(&self.label)
-            .style(theme.typography.label.clone())
+            .style(theme.typography.small.clone())
             .bind_color(text_color);
         let label_id = ctx.add(label);
 
+        let menu_style = theme.components.menu;
         let padding = Padding::symmetric(
-            theme.spacing.widget_padding * 0.5,
-            theme.spacing.widget_padding,
+            4.0,
+            menu_style.item_padding_horizontal,
         )
         .set_child(label_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
             .bind_background(bg_color)
-            .corner_radius(fern_tokens::CornerRadius::uniform(theme.shape.radius_sm));
+            .corner_radius(fern_tokens::CornerRadius::uniform(theme.shape.radius_control));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
@@ -438,12 +439,12 @@ impl Widget for MenuBar {
         let row_id = ctx.add(row);
 
         let bg = RectWidget::new()
-            .background(theme.colors.surface)
+            .background(theme.colors.surface_main)
             .border_color(theme.colors.border.with_alpha(0.2))
             .border_width(0.0);
         let bg_id = ctx.add(bg);
 
-        let padding = Padding::symmetric(0.0, theme.spacing.xs).set_child(row_id);
+        let padding = Padding::symmetric(0.0, 2.0).set_child(row_id);
         let padding_id = ctx.add(padding);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);

@@ -27,32 +27,35 @@ impl TooltipWidget {
 
 impl Widget for TooltipWidget {
     fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        let pad = 8.0;
+        let style = ctx.theme.components.tooltip;
+        let pad_h = style.padding_horizontal;
+        let pad_v = style.padding_vertical;
         if let Some(backend) = ctx.text_backend {
             let mut backend = backend.borrow_mut();
             let layout =
-                backend.layout_single_line(&self.text, &ctx.theme.typography.body_small, None);
-            Size::new(layout.width + pad * 2.0, layout.height + pad * 2.0)
+                backend.layout_single_line(&self.text, &ctx.theme.typography.small, None);
+            Size::new(layout.width + pad_h * 2.0, layout.height + pad_v * 2.0)
         } else {
             let text_width = self.text.len() as f32 * 7.0;
-            let text_height = ctx.theme.typography.body_small.size;
-            Size::new(text_width + pad * 2.0, text_height + pad * 2.0)
+            let text_height = ctx.theme.typography.small.size;
+            Size::new(text_width + pad_h * 2.0, text_height + pad_v * 2.0)
         }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(ctx.theme.shape.radius_sm);
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_surface);
+        let style = ctx.theme.components.tooltip;
+        let radius = CornerRadius::uniform(style.corner_radius);
+        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.tooltip_bg);
         let text_bounds = Rect::new(
-            bounds.x + 8.0,
-            bounds.y + 8.0,
-            bounds.width - 16.0,
-            bounds.height - 16.0,
+            bounds.x + style.padding_horizontal,
+            bounds.y + style.padding_vertical,
+            bounds.width - style.padding_horizontal * 2.0,
+            bounds.height - style.padding_vertical * 2.0,
         );
         canvas.draw_text(
             &self.text,
             text_bounds,
-            &ctx.theme.typography.body_small,
+            &ctx.theme.typography.small,
             ctx.theme.colors.tooltip_text,
         );
     }

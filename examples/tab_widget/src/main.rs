@@ -5,7 +5,7 @@
 use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Badge, Breadcrumb, BreadcrumbItem, Button, ButtonStyle, Card, HStack, Panel, TabItem,
+    Badge, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Card, HStack, Panel, TabItem,
     TabWidget, TextWidget, VStack,
 };
 
@@ -46,11 +46,11 @@ impl Widget for Root {
             .child(
                 TextWidget::new("")
                     .bind_text(selected_label)
-                    .style(theme.typography.label.clone()),
+                    .style(theme.typography.small.clone()),
             )
             .child(
                 Button::new("Toggle Theme")
-                    .style(ButtonStyle::Flat)
+                    .style(ButtonVariant::Flat)
                     .on_activate(Cmd::ToggleTheme),
             );
 
@@ -61,8 +61,8 @@ impl Widget for Root {
                     Card::new()
                         .header(
                             TextWidget::new("Overview")
-                                .style(theme.typography.heading_2.clone())
-                                .color(theme.colors.on_surface),
+                                .style(theme.typography.body_bold.clone())
+                                .color(theme.colors.text_primary),
                         )
                         .content(
                             VStack::new()
@@ -72,7 +72,7 @@ impl Widget for Root {
                                         "This first Milestone 6 slice ships a real TabWidget with dormant panes, keyboard navigation, and a trailing action slot.",
                                     )
                                     .style(theme.typography.body.clone())
-                                    .color(theme.colors.on_surface),
+                                    .color(theme.colors.text_primary),
                                 )
                                 .child(
                                     HStack::new()
@@ -90,15 +90,15 @@ impl Widget for Root {
                             .spacing(10.0)
                             .child(
                                 TextWidget::new("Inspector")
-                                    .style(theme.typography.heading_2.clone())
-                                    .color(theme.colors.on_surface),
+                                    .style(theme.typography.body_bold.clone())
+                                    .color(theme.colors.text_primary),
                             )
                             .child(
                                 TextWidget::new(
                                     "Use Tab to move focus into the tab strip, then Arrow Left and Arrow Right to switch tabs from the keyboard.",
                                 )
                                 .style(theme.typography.body.clone())
-                                .color(theme.colors.on_surface),
+                                .color(theme.colors.text_primary),
                             ),
                     ),
                 )
@@ -109,15 +109,15 @@ impl Widget for Root {
                             .spacing(10.0)
                             .child(
                                 TextWidget::new("Activity")
-                                    .style(theme.typography.heading_2.clone())
-                                    .color(theme.colors.on_surface),
+                                    .style(theme.typography.body_bold.clone())
+                                    .color(theme.colors.text_primary),
                             )
                             .child(
                                 TextWidget::new(
                                     "This example will grow into the broader Milestone 6 showcase as SplitView, Dialog, Popover, and Snackbar land.",
                                 )
                                 .style(theme.typography.body.clone())
-                                .color(theme.colors.on_surface),
+                                .color(theme.colors.text_primary),
                             ),
                     ),
                 )
@@ -127,7 +127,7 @@ impl Widget for Root {
                         Panel::new().padding(20.0).child(
                             TextWidget::new("Disabled tabs are visible but cannot be activated.")
                                 .style(theme.typography.body.clone())
-                                .color(theme.colors.on_surface),
+                                .color(theme.colors.text_primary),
                         ),
                     )
                     .enabled(false),
@@ -149,15 +149,15 @@ impl Widget for Root {
                     .add_child(breadcrumb)
                     .child(
                         TextWidget::new("TabWidget")
-                            .style(theme.typography.heading_1.clone())
-                            .color(theme.colors.on_surface),
+                            .style(theme.typography.body_bold.clone())
+                            .color(theme.colors.text_primary),
                     )
                     .child(
                         TextWidget::new(
                             "A focused Milestone 6 example for the first implementation slice.",
                         )
                         .style(theme.typography.body.clone())
-                        .color(theme.colors.on_surface),
+                        .color(theme.colors.text_primary),
                     )
                     .add_child(tabs),
             ),
@@ -198,7 +198,7 @@ fn main() {
         .window_size(960, 640)
         .on_command(|cmd: &Cmd, ctx| match cmd {
             Cmd::ToggleTheme => {
-                let next = if ctx.theme().colors.surface == Theme::light_default().colors.surface {
+                let next = if ctx.theme().colors.surface_main == Theme::light_default().colors.surface_main {
                     Theme::dark_default()
                 } else {
                     Theme::light_default()

@@ -14,9 +14,6 @@ use fern_tokens::{Color, CornerRadius};
 
 use crate::primitives::{HStack, IconWidget, Spacer};
 
-const SEGMENT_PADDING_H: f32 = 10.0;
-const SEGMENT_PADDING_V: f32 = 6.0;
-const SEGMENT_MIN_HEIGHT: f32 = 32.0;
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
 const FALLBACK_LINE_HEIGHT: f32 = 16.0;
 
@@ -124,15 +121,17 @@ impl BreadcrumbSegment {
     }
 
     fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
+        let pad_h = ctx.theme.components.breadcrumb.item_padding_horizontal;
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let text_width = if let Some(backend) = ctx.text_backend {
             backend
                 .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.label, None)
+                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
                 .width
         } else {
             self.label.len() as f32 * FALLBACK_CHAR_WIDTH
         };
-        text_width + SEGMENT_PADDING_H * 2.0
+        text_width + pad_h * 2.0 + envelope * 2.0
     }
 }
 
@@ -238,71 +237,92 @@ impl Widget for BreadcrumbSegment {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let style = ctx.theme.components.breadcrumb;
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let width = proposal.width.unwrap_or_else(|| self.estimate_width(ctx));
         let text_height = if let Some(backend) = ctx.text_backend {
             backend
                 .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.label, None)
+                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
                 .height
         } else {
             FALLBACK_LINE_HEIGHT
         };
-        Size::new(
-            width,
-            (text_height + SEGMENT_PADDING_V * 2.0).max(SEGMENT_MIN_HEIGHT),
-        )
+        let visual_h = text_height.max(style.item_height);
+        Size::new(width, visual_h + envelope * 2.0)
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
+        let style = ctx.theme.components.breadcrumb;
+        let shape = &ctx.theme.shape;
+        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
         let interaction = self.interaction.get();
         let interactive = self.is_interactive();
 
+        // Visual bounds — inset by the focus-ring envelope.
+        let visual = Rect::new(
+            bounds.x + envelope,
+            bounds.y + envelope,
+            (bounds.width - envelope * 2.0).max(0.0),
+            (bounds.height - envelope * 2.0).max(0.0),
+        );
+
         if interactive {
             let background = if interaction == SegmentInteraction::Hovered {
-                colors.primary.with_alpha(0.08)
+                colors.accent.with_alpha(0.08)
             } else if interaction == SegmentInteraction::Focused {
-                colors.primary.with_alpha(0.12)
+                colors.accent.with_alpha(0.12)
             } else {
                 Color::TRANSPARENT
             };
             if background.a() > 0.0 {
                 canvas.fill_rounded_rect(
-                    bounds,
-                    CornerRadius::uniform(ctx.theme.shape.radius_sm),
+                    visual,
+                    CornerRadius::uniform(style.corner_radius),
                     background,
                 );
             }
+            // Focus ring — drawn outside the visual, inside the reserved envelope.
             if interaction == SegmentInteraction::Focused {
+                let half_stroke = shape.focus_ring_width * 0.5;
+                let ring_rect = Rect::new(
+                    bounds.x + half_stroke,
+                    bounds.y + half_stroke,
+                    (bounds.width - half_stroke * 2.0).max(0.0),
+                    (bounds.height - half_stroke * 2.0).max(0.0),
+                );
+                let ring_radius = style.corner_radius + shape.focus_ring_offset + half_stroke;
                 canvas.stroke_rounded_rect(
-                    bounds,
-                    CornerRadius::uniform(ctx.theme.shape.radius_sm),
+                    ring_rect,
+                    CornerRadius::uniform(ring_radius),
                     colors.focus_ring,
-                    2.0,
+                    shape.focus_ring_width,
                 );
             }
         }
 
         let text_color = if self.current {
-            colors.on_surface
+            colors.text_primary
         } else if interactive && interaction == SegmentInteraction::Hovered {
-            colors.primary_hover
+            colors.accent_hover
         } else if interactive {
-            colors.primary
+            colors.accent
         } else {
-            colors.on_surface_secondary
+            colors.text_secondary
         };
 
+        let pad_h = style.item_padding_horizontal;
         let text_bounds = Rect::new(
-            bounds.x + SEGMENT_PADDING_H,
-            bounds.y + SEGMENT_PADDING_V,
-            (bounds.width - SEGMENT_PADDING_H * 2.0).max(0.0),
-            (bounds.height - SEGMENT_PADDING_V * 2.0).max(0.0),
+            visual.x + pad_h,
+            visual.y,
+            (visual.width - pad_h * 2.0).max(0.0),
+            visual.height,
         );
         canvas.draw_text(
             &self.label,
             text_bounds,
-            &ctx.theme.typography.label,
+            &ctx.theme.typography.small,
             text_color,
         );
     }
@@ -327,8 +347,9 @@ impl Widget for BreadcrumbSegment {
 struct BreadcrumbSeparator;
 
 impl Widget for BreadcrumbSeparator {
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        Size::new(12.0, SEGMENT_MIN_HEIGHT)
+    fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let style = ctx.theme.components.breadcrumb;
+        Size::new(style.separator_gap * 3.0, style.item_height)
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -339,7 +360,7 @@ impl Widget for BreadcrumbSeparator {
             size,
             size,
         );
-        let icon = IconWidget::chevron_right(size).color(ctx.theme.colors.on_surface_secondary);
+        let icon = IconWidget::chevron_right(size).color(ctx.theme.colors.text_secondary);
         icon.paint(icon_bounds, canvas, ctx);
     }
 

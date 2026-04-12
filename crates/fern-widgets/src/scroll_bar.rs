@@ -88,6 +88,8 @@ impl ScrollBar {
         max_scroll: Signal<f32>,
         viewport_ratio: Signal<f32>,
     ) -> Self {
+        // Defaults sourced from `ScrollBarStyle` (Int UI: 8 dp on hover,
+        // 4 dp at idle, 24 dp minimum thumb length).
         Self {
             orientation,
             scroll_position,
@@ -98,12 +100,12 @@ impl ScrollBar {
             drag_start_pointer: Rc::new(Cell::new(0.0)),
             drag_start_scroll: Rc::new(Cell::new(0.0)),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
-            thickness: 12.0,
+            thickness: 8.0,
             min_thumb_length: 24.0,
             step_size: 40.0,
             show_track: true,
             overlay_mode: false,
-            resting_thickness: 3.0,
+            resting_thickness: 4.0,
         }
     }
 
@@ -494,31 +496,32 @@ impl Widget for ScrollBar {
                     Rect::new(thin_bounds.x + offset, thin_bounds.y, thumb_len, thin)
                 }
             };
-            let thumb_color = ctx.theme.colors.on_surface.with_alpha(0.2);
+            // Thin resting indicator uses the idle thumb color.
+            let thumb_color = ctx.theme.colors.scrollbar_thumb;
             canvas.fill_rounded_rect(thumb_rect, radius, thumb_color);
         } else {
             // --- Full-size state (Permanent, or Overlay when hovered/dragging) ---
             let radius = CornerRadius::uniform(self.thickness / 2.0);
+            let colors = &ctx.theme.colors;
 
-            // Track background
-            if self.show_track || (self.overlay_mode && active) {
-                let track_color =
-                    ctx.theme
-                        .colors
-                        .on_surface
-                        .with_alpha(if active { 0.08 } else { 0.04 });
-                canvas.fill_rounded_rect(bounds, radius, track_color);
+            // Track background — Int UI scrollbar track is transparent at idle
+            // and a faint tint on hover. `show_track: true` (Permanent mode)
+            // forces it visible.
+            if self.show_track {
+                canvas.fill_rounded_rect(bounds, radius, colors.scrollbar_track_hover);
+            } else if self.overlay_mode && active {
+                canvas.fill_rounded_rect(bounds, radius, colors.scrollbar_track_hover);
             }
 
-            // Thumb
+            // Thumb — switch color by pressed/hover/idle state.
             let thumb = self.thumb_rect();
-            let thumb_color = ctx.theme.colors.on_surface.with_alpha(if dragging {
-                0.6
+            let thumb_color = if dragging {
+                colors.scrollbar_thumb_pressed
             } else if hovered {
-                0.4
+                colors.scrollbar_thumb_hover
             } else {
-                0.25
-            });
+                colors.scrollbar_thumb
+            };
             canvas.fill_rounded_rect(thumb, radius, thumb_color);
         }
     }
@@ -581,8 +584,8 @@ mod tests {
         });
 
         let bounds = tree.bounds(id);
-        // Vertical: width = thickness (12), height = proposed (400)
-        assert!((bounds.width - 12.0).abs() < 0.01);
+        // Vertical: width = thickness (8), height = proposed (400)
+        assert!((bounds.width - 8.0).abs() < 0.01);
         assert!((bounds.height - 400.0).abs() < 0.01);
     }
 
@@ -606,9 +609,9 @@ mod tests {
         });
 
         let bounds = tree.bounds(id);
-        // Horizontal: width = proposed (400), height = thickness (12)
+        // Horizontal: width = proposed (400), height = thickness (8)
         assert!((bounds.width - 400.0).abs() < 0.01);
-        assert!((bounds.height - 12.0).abs() < 0.01);
+        assert!((bounds.height - 8.0).abs() < 0.01);
     }
 
     #[test]

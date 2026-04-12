@@ -30,7 +30,7 @@ impl CornerRadius {
 
     /// Clamp all corner radii so they don't exceed half the rect dimension.
     /// Without this, the SDF shader produces incorrect results for large radii
-    /// (e.g. `radius_full = 9999`) on small rectangles.
+    /// (e.g. `radius_pill = 9999`) on small rectangles.
     pub fn clamped(self, width: f32, height: f32) -> Self {
         let max_r = (width.min(height) * 0.5).max(0.0);
         Self {
@@ -74,46 +74,91 @@ impl Default for Shadow {
             offset_y: 2.0,
             blur: 4.0,
             spread: 0.0,
-            color: Color::new(0.0, 0.0, 0.0, 0.15),
+            color: Color::new(0.0, 0.0, 0.0, 0.16),
         }
     }
 }
 
-/// Shape tokens: corner radii, border widths, and shadows.
+/// Shape tokens — Int UI corner radii, border widths, focus ring, and shadows.
+///
+/// Int UI uses 1 dp borders universally; emphasis is color-only, never
+/// thickness. Focus rings are drawn **outside** the control with a 2 dp gap.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShapeTokens {
-    pub radius_sm: f32,
-    pub radius_md: f32,
-    pub radius_lg: f32,
-    pub radius_full: f32,
+    /// 4 dp — buttons, fields, combo boxes, checkbox visual, menu items.
+    pub radius_control: f32,
+    /// 8 dp — tooltips, notification balloons, large popups, dialogs, panels.
+    pub radius_popup: f32,
+    /// 9999 — fully rounded (tags, chips, badges).
+    pub radius_pill: f32,
+    /// 1 dp — universal border width. Int UI has no thicker variant.
     pub border_width: f32,
-    pub border_width_strong: f32,
+    /// 2 dp — focus ring outline width, drawn outside the control.
+    pub focus_ring_width: f32,
+    /// 2 dp — gap between control edge and focus ring.
+    pub focus_ring_offset: f32,
+    /// Tooltips.
+    pub shadow_xs: Shadow,
+    /// Menus, dropdowns.
     pub shadow_sm: Shadow,
+    /// Notification balloons.
     pub shadow_md: Shadow,
+    /// Modal dialogs.
     pub shadow_lg: Shadow,
+}
+
+impl ShapeTokens {
+    /// Light-theme shadows. Alphas: xs 10%, sm 12%, md 16%, lg 20%.
+    pub fn light_default() -> Self {
+        Self::with_shadow_alphas(0.10, 0.12, 0.16, 0.20)
+    }
+
+    /// Dark-theme shadows — alphas roughly 4× stronger than light to remain
+    /// visible against dark surfaces, per the Int UI v2 reference (Section 3).
+    /// Alphas: xs 40%, sm 50%, md 60%, lg 70%.
+    pub fn dark_default() -> Self {
+        Self::with_shadow_alphas(0.40, 0.50, 0.60, 0.70)
+    }
+
+    fn with_shadow_alphas(a_xs: f32, a_sm: f32, a_md: f32, a_lg: f32) -> Self {
+        Self {
+            radius_control: 4.0,
+            radius_popup: 8.0,
+            radius_pill: 9999.0,
+            border_width: 1.0,
+            focus_ring_width: 2.0,
+            focus_ring_offset: 2.0,
+            shadow_xs: Shadow {
+                offset_y: 1.0,
+                blur: 2.0,
+                color: Color::new(0.0, 0.0, 0.0, a_xs),
+                ..Shadow::default()
+            },
+            shadow_sm: Shadow {
+                offset_y: 2.0,
+                blur: 6.0,
+                color: Color::new(0.0, 0.0, 0.0, a_sm),
+                ..Shadow::default()
+            },
+            shadow_md: Shadow {
+                offset_y: 4.0,
+                blur: 12.0,
+                color: Color::new(0.0, 0.0, 0.0, a_md),
+                ..Shadow::default()
+            },
+            shadow_lg: Shadow {
+                offset_y: 8.0,
+                blur: 24.0,
+                color: Color::new(0.0, 0.0, 0.0, a_lg),
+                ..Shadow::default()
+            },
+        }
+    }
 }
 
 impl Default for ShapeTokens {
     fn default() -> Self {
-        Self {
-            radius_sm: 4.0,
-            radius_md: 8.0,
-            radius_lg: 16.0,
-            radius_full: 9999.0,
-            border_width: 1.0,
-            border_width_strong: 2.0,
-            shadow_sm: Shadow {
-                offset_y: 1.0,
-                blur: 2.0,
-                ..Shadow::default()
-            },
-            shadow_md: Shadow::default(),
-            shadow_lg: Shadow {
-                offset_y: 4.0,
-                blur: 8.0,
-                ..Shadow::default()
-            },
-        }
+        Self::light_default()
     }
 }
 
@@ -144,7 +189,14 @@ mod tests {
     #[test]
     fn shape_tokens_radius_scale() {
         let s = ShapeTokens::default();
-        assert!(s.radius_sm < s.radius_md);
-        assert!(s.radius_md < s.radius_lg);
+        assert!(s.radius_control < s.radius_popup);
+        assert!(s.radius_popup < s.radius_pill);
+    }
+
+    #[test]
+    fn focus_ring_offset_present() {
+        let s = ShapeTokens::default();
+        assert!(s.focus_ring_offset > 0.0);
+        assert!(s.focus_ring_width > 0.0);
     }
 }

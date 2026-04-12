@@ -31,10 +31,10 @@ use std::rc::Rc;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
-    Accordion, Badge, Button, ButtonStyle, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
-    Grid, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel, ProgressBar,
-    RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget, Toggle,
-    Toolbar, TrackSize, VStack, Wrap,
+    Accordion, Badge, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
+    FixedSize, Grid, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel,
+    ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TextWidget,
+    Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,9 @@ enum Cmd {
     Cut,
     Copy,
     Paste,
+    Save,
+    Cancel,
+    LearnMore,
 }
 
 impl AppCommand for Cmd {}
@@ -89,6 +92,412 @@ impl Widget for WidgetCatalog {
         let accordion2_expanded = ctx.signal(true);
 
         // =====================================================================
+        // Section 0: Theme Palette
+        //
+        // A visual reference for every surface and text role in the theme.
+        // Side-by-side swatches make it obvious when a widget is using the
+        // wrong color role for a given surface (e.g. text_primary on a
+        // caption label, or surface_main where surface_content is expected).
+        // =====================================================================
+
+        // Helper: one surface swatch — a colored box containing the surface
+        // token name rendered in the text role that normally pairs with it,
+        // with the role name as a caption below. This makes it immediately
+        // visible whether the semantically-correct combination actually
+        // reads cleanly (e.g. `text_primary` on `surface_main`, or
+        // `selection_text_active` on `surface_selected`).
+        let surface_swatch = |bg: Color,
+                              name: &str,
+                              text_role: &str,
+                              text_color: Color|
+         -> VStack {
+            VStack::new()
+                .spacing(4.0)
+                .child(
+                    Panel::new()
+                        .background(bg)
+                        .border_color(c.border_strong)
+                        .border_width(1.0)
+                        .corner_radius(4.0)
+                        .padding(10.0)
+                        .child(MaxSize::new(f32::INFINITY, 44.0).child(
+                            TextWidget::new(name)
+                                .style(t.small.clone())
+                                .color(text_color),
+                        )),
+                )
+                .child(
+                    TextWidget::new(text_role)
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
+                )
+        };
+
+        let surfaces_grid = ctx.add(
+            Grid::new()
+                .columns(vec![
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                ])
+                .column_gap(12.0)
+                .row_gap(12.0)
+                .rows(vec![TrackSize::Auto, TrackSize::Auto])
+                .child(surface_swatch(
+                    c.surface_main,
+                    "surface_main",
+                    "text_primary",
+                    c.text_primary,
+                ))
+                .child(surface_swatch(
+                    c.surface_content,
+                    "surface_content",
+                    "text_primary",
+                    c.text_primary,
+                ))
+                .child(surface_swatch(
+                    c.surface_raised,
+                    "surface_raised",
+                    "text_primary",
+                    c.text_primary,
+                ))
+                .child(surface_swatch(
+                    c.surface_sunken,
+                    "surface_sunken",
+                    "text_secondary",
+                    c.text_secondary,
+                ))
+                .child(surface_swatch(
+                    c.surface_hover,
+                    "surface_hover",
+                    "text_primary",
+                    c.text_primary,
+                ))
+                .child(surface_swatch(
+                    c.surface_pressed,
+                    "surface_pressed",
+                    "text_primary",
+                    c.text_primary,
+                ))
+                .child(surface_swatch(
+                    c.surface_selected,
+                    "surface_selected",
+                    "selection_text_active",
+                    c.selection_text_active,
+                ))
+                .child(surface_swatch(
+                    c.surface_selected_inactive,
+                    "surface_selected_inactive",
+                    "selection_text_inactive",
+                    c.selection_text_inactive,
+                )),
+        );
+
+        // Text samples: rendered on surface_main so contrast matches real
+        // usage. Each row shows the label in its actual color + the role
+        // name in text_secondary on the right.
+        let text_sample = |name: &str, color: Color, description: &str| -> HStack {
+            HStack::new()
+                .spacing(12.0)
+                .child(
+                    TextWidget::new("The quick brown fox jumps over the lazy dog")
+                        .style(t.body.clone())
+                        .color(color),
+                )
+                .child(Spacer::new())
+                .child(
+                    TextWidget::new(name)
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    TextWidget::new(description)
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
+                )
+        };
+
+        let text_samples = ctx.add(
+            Panel::new()
+                .background(c.surface_main)
+                .border_color(c.border)
+                .border_width(1.0)
+                .corner_radius(8.0)
+                .padding(16.0)
+                .child(
+                    VStack::new()
+                        .spacing(6.0)
+                        .child(text_sample("text_primary", c.text_primary, "body, main labels"))
+                        .child(text_sample(
+                            "text_secondary",
+                            c.text_secondary,
+                            "hints, captions, placeholders",
+                        ))
+                        .child(text_sample(
+                            "text_disabled",
+                            c.text_disabled,
+                            "disabled labels",
+                        ))
+                        .child(text_sample("text_link", c.text_link, "hyperlinks"))
+                        .child(text_sample(
+                            "text_error",
+                            c.text_error,
+                            "validation errors",
+                        ))
+                        .child(text_sample(
+                            "text_warning",
+                            c.text_warning,
+                            "validation warnings",
+                        ))
+                        .child(text_sample(
+                            "text_success",
+                            c.text_success,
+                            "success messages",
+                        )),
+                ),
+        );
+
+        // text_on_accent needs its own row because it's drawn on an accent
+        // background, not on surface_main. Show it inline on an accent fill.
+        let text_on_accent_row = ctx.add(
+            Panel::new()
+                .background(c.accent)
+                .corner_radius(4.0)
+                .padding(12.0)
+                .child(
+                    HStack::new()
+                        .spacing(12.0)
+                        .child(
+                            TextWidget::new("Default button label")
+                                .style(t.body.clone())
+                                .color(c.text_on_accent),
+                        )
+                        .child(Spacer::new())
+                        .child(
+                            TextWidget::new("text_on_accent on accent")
+                                .style(t.tiny.clone())
+                                .color(c.text_on_accent),
+                        ),
+                ),
+        );
+
+        // =====================================================================
+        // Editor palette
+        //
+        // The editor is architecturally a separate color scheme layered on
+        // top of the UI theme — IntelliJ / CLion treat it the same way. The
+        // foreground is intentionally dimmer than `text_primary`, the
+        // selection is more saturated than the list-row selection, and
+        // `editor_current_line_bg` has no UI equivalent.
+        //
+        // This section renders a small mock editor using the real
+        // `theme.colors.editor_*` tokens, plus a row of named swatches.
+        // =====================================================================
+
+        // Mock editor — a Panel filled with `editor_bg`, containing a
+        // faux gutter (line numbers in `editor_gutter_fg`) and four code
+        // lines drawn in `editor_fg`. Line 2 is wrapped in a full-width
+        // ZStack of `editor_current_line_bg` to stand in for the caret-row
+        // highlight. A small `editor_selection_bg` rectangle after "let" on
+        // line 2 hints at what a text selection looks like, and a thin
+        // `editor_caret` rectangle stands in for the blinking caret.
+        let mono = t.mono.clone();
+        let editor_line = |line_no: &str, code: &str| -> HStack {
+            HStack::new()
+                .spacing(12.0)
+                .child(
+                    FixedSize::new()
+                        .bind_width(24.0_f32)
+                        .child(
+                            TextWidget::new(line_no)
+                                .style(mono.clone())
+                                .color(c.editor_gutter_fg),
+                        ),
+                )
+                .child(
+                    TextWidget::new(code)
+                        .style(mono.clone())
+                        .color(c.editor_fg),
+                )
+        };
+
+        // Line 2 is the "current" (caret) line — it gets the full-width
+        // background highlight and carries a selection marker + caret.
+        let current_line_content = ctx.add(
+            HStack::new()
+                .spacing(12.0)
+                .child(
+                    FixedSize::new()
+                        .bind_width(24.0_f32)
+                        .child(
+                            TextWidget::new("2")
+                                .style(mono.clone())
+                                .color(c.editor_gutter_fg),
+                        ),
+                )
+                .child(
+                    TextWidget::new("    let ")
+                        .style(mono.clone())
+                        .color(c.editor_fg),
+                )
+                // `selection_bg` stand-in: a soft rectangle under a word.
+                .child(
+                    Panel::new()
+                        .background(c.editor_selection_bg)
+                        .corner_radius(2.0)
+                        .padding(0.0)
+                        .border_width(0.0)
+                        .child(
+                            Padding::symmetric(1.0, 2.0).child(
+                                TextWidget::new("x")
+                                    .style(mono.clone())
+                                    .color(c.editor_fg),
+                            ),
+                        ),
+                )
+                .child(
+                    TextWidget::new(" = 42;")
+                        .style(mono.clone())
+                        .color(c.editor_fg),
+                )
+                // Caret — a 1 dp tall vertical rectangle in editor_caret.
+                .child(
+                    FixedSize::new()
+                        .bind_width(1.5_f32)
+                        .bind_height(16.0_f32)
+                        .child(
+                            Panel::new()
+                                .background(c.editor_caret)
+                                .corner_radius(0.0)
+                                .border_width(0.0)
+                                .padding(0.0)
+                                .child(Spacer::new()),
+                        ),
+                ),
+        );
+        let current_line_bg = ctx.add(
+            Panel::new()
+                .background(c.editor_current_line_bg)
+                .corner_radius(0.0)
+                .border_width(0.0)
+                .padding(4.0)
+                .set_child(current_line_content),
+        );
+
+        let mock_editor = ctx.add(
+            Panel::new()
+                .background(c.editor_bg)
+                .border_color(c.border_strong)
+                .border_width(1.0)
+                .corner_radius(6.0)
+                .padding(8.0)
+                .child(
+                    VStack::new()
+                        .spacing(2.0)
+                        .child(editor_line("1", "fn main() {"))
+                        .add_child(current_line_bg)
+                        .child(editor_line("3", "    println!(\"{}\", x);"))
+                        .child(editor_line("4", "}")),
+                ),
+        );
+
+        // Individual editor swatches, same format as the surface grid.
+        // Each swatch's interior text uses the text role that semantically
+        // belongs on it (editor_fg for the backgrounds, editor_bg for the
+        // foregrounds).
+        let editor_swatch = |bg: Color,
+                             name: &str,
+                             sample_color: Color|
+         -> VStack {
+            VStack::new()
+                .spacing(4.0)
+                .child(
+                    Panel::new()
+                        .background(bg)
+                        .border_color(c.border_strong)
+                        .border_width(1.0)
+                        .corner_radius(4.0)
+                        .padding(10.0)
+                        .child(MaxSize::new(f32::INFINITY, 44.0).child(
+                            TextWidget::new("Aa Bb 123")
+                                .style(t.mono.clone())
+                                .color(sample_color),
+                        )),
+                )
+                .child(
+                    TextWidget::new(name)
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
+                )
+        };
+
+        let editor_swatches = ctx.add(
+            Grid::new()
+                .columns(vec![
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                    TrackSize::Fractional(1.0),
+                ])
+                .column_gap(12.0)
+                .row_gap(12.0)
+                .rows(vec![TrackSize::Auto, TrackSize::Auto])
+                .child(editor_swatch(c.editor_bg, "editor_bg", c.editor_fg))
+                .child(editor_swatch(c.editor_fg, "editor_fg", c.editor_bg))
+                .child(editor_swatch(
+                    c.editor_caret,
+                    "editor_caret",
+                    c.editor_bg,
+                ))
+                .child(editor_swatch(
+                    c.editor_current_line_bg,
+                    "editor_current_line_bg",
+                    c.editor_fg,
+                ))
+                .child(editor_swatch(
+                    c.editor_gutter_fg,
+                    "editor_gutter_fg",
+                    c.editor_bg,
+                ))
+                .child(editor_swatch(
+                    c.editor_selection_bg,
+                    "editor_selection_bg",
+                    c.editor_fg,
+                )),
+        );
+
+        let palette_section = ctx.add(
+            VStack::new()
+                .spacing(12.0)
+                .child(
+                    TextWidget::new("Theme Palette")
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
+                )
+                .child(
+                    TextWidget::new("Surfaces")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .add_child(surfaces_grid)
+                .child(
+                    TextWidget::new("Text")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .add_child(text_samples)
+                .add_child(text_on_accent_row)
+                .child(
+                    TextWidget::new("Editor")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .add_child(mock_editor)
+                .add_child(editor_swatches),
+        );
+
+        // =====================================================================
         // Section 1: Primitives
         // =====================================================================
 
@@ -101,8 +510,8 @@ impl Widget for WidgetCatalog {
                         .spacing(4.0)
                         .child(
                             TextWidget::new("H")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(Divider::new()),
                 )
@@ -111,20 +520,20 @@ impl Widget for WidgetCatalog {
                         .spacing(4.0)
                         .child(
                             TextWidget::new("V")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
-                        .child(Divider::vertical().thickness(2.0).color(c.primary)),
+                        .child(Divider::vertical().thickness(2.0).color(c.accent)),
                 )
                 .child(
                     VStack::new()
                         .spacing(4.0)
                         .child(
                             TextWidget::new("Thick")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
-                        .child(Divider::new().thickness(4.0).color(c.error)),
+                        .child(Divider::new().thickness(4.0).color(c.text_error)),
                 ),
         );
 
@@ -132,9 +541,9 @@ impl Widget for WidgetCatalog {
         let icon_row = ctx.add(
             HStack::new()
                 .spacing(12.0)
-                .child(IconWidget::checkmark(24.0).color(c.primary))
-                .child(IconWidget::chevron_down(24.0).color(c.secondary))
-                .child(IconWidget::chevron_right(24.0).color(c.error)),
+                .child(IconWidget::checkmark(24.0).color(c.accent))
+                .child(IconWidget::chevron_down(24.0).color(c.accent_subtle_bg))
+                .child(IconWidget::chevron_right(24.0).color(c.text_error)),
         );
 
         let primitives_section = ctx.add(
@@ -142,19 +551,19 @@ impl Widget for WidgetCatalog {
                 .spacing(8.0)
                 .child(
                     TextWidget::new("Primitives")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new("Divider (horizontal, vertical, thick, colored)")
-                        .style(t.caption.clone())
-                        .color(c.on_surface),
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
                 )
                 .add_child(div_row)
                 .child(
                     TextWidget::new("IconWidget (checkmark, chevrons)")
-                        .style(t.caption.clone())
-                        .color(c.on_surface),
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
                 )
                 .add_child(icon_row),
         );
@@ -168,13 +577,13 @@ impl Widget for WidgetCatalog {
                 .spacing(8.0)
                 .child(
                     TextWidget::new("Layout Primitives")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)")
-                        .style(t.caption.clone())
-                        .color(c.on_surface),
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     Grid::new()
@@ -186,17 +595,17 @@ impl Widget for WidgetCatalog {
                         .rows(vec![TrackSize::Auto, TrackSize::Auto])
                         .column_gap(8.0)
                         .row_gap(8.0)
-                        .child(build_color_cell(c.primary, "A1"))
-                        .child(build_color_cell(c.secondary, "B1"))
-                        .child(build_color_cell(c.error, "C1"))
-                        .child(build_color_cell(c.info, "A2"))
-                        .child(build_color_cell(c.success, "B2"))
-                        .child(build_color_cell(c.warning, "C2")),
+                        .child(build_color_cell(c.accent, "A1"))
+                        .child(build_color_cell(c.accent_subtle_bg, "B1"))
+                        .child(build_color_cell(c.text_error, "C1"))
+                        .child(build_color_cell(c.status_info_fg, "A2"))
+                        .child(build_color_cell(c.text_success, "B2"))
+                        .child(build_color_cell(c.text_warning, "C2")),
                 )
                 .child(
                     TextWidget::new("Wrap (flow layout, 8px spacing)")
-                        .style(t.caption.clone())
-                        .color(c.on_surface),
+                        .style(t.tiny.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     Wrap::new()
@@ -216,6 +625,56 @@ impl Widget for WidgetCatalog {
         // =====================================================================
         // Section 3: Form Controls
         // =====================================================================
+
+        // --- Button variants (Int UI: Default, Regular, Flat) ---
+        //
+        // One row of enabled buttons followed by one row of disabled
+        // buttons, so the three silhouettes and their disabled-state
+        // rendering can be compared side-by-side.
+        let buttons_row = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .child(
+                    Button::new("Save")
+                        .style(ButtonVariant::Default)
+                        .on_activate(Cmd::Save),
+                )
+                .child(
+                    Button::new("Cancel")
+                        .style(ButtonVariant::Regular)
+                        .on_activate(Cmd::Cancel),
+                )
+                .child(
+                    Button::new("Learn more")
+                        .style(ButtonVariant::Flat)
+                        .on_activate(Cmd::LearnMore),
+                ),
+        );
+        let buttons_row_disabled = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .child(
+                    Button::new("Save")
+                        .style(ButtonVariant::Default)
+                        .enabled(false),
+                )
+                .child(
+                    Button::new("Cancel")
+                        .style(ButtonVariant::Regular)
+                        .enabled(false),
+                )
+                .child(
+                    Button::new("Learn more")
+                        .style(ButtonVariant::Flat)
+                        .enabled(false),
+                ),
+        );
+        let buttons_group = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .add_child(buttons_row)
+                .add_child(buttons_row_disabled),
+        );
 
         // --- Checkbox ---
         let cb_disabled_state = ctx.signal(true);
@@ -274,20 +733,20 @@ impl Widget for WidgetCatalog {
                         .spacing(8.0)
                         .child(
                             TextWidget::new("Horizontal")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(Slider::new(slider_value.clone(), 0.0, 100.0))
                         .child(
                             TextWidget::new("Stepped (25)")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(Slider::new(slider_stepped.clone(), 0.0, 100.0).step(25.0))
                         .child(
                             TextWidget::new("Disabled")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(Slider::new(slider_disabled_state, 0.0, 100.0).enabled(false)),
                 )
@@ -296,8 +755,8 @@ impl Widget for WidgetCatalog {
                         .spacing(4.0)
                         .child(
                             TextWidget::new("Vertical")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(MaxSize::new(f32::MAX, 120.0).set_child(slider_vert)),
                 ),
@@ -318,8 +777,8 @@ impl Widget for WidgetCatalog {
                         .spacing(4.0)
                         .child(
                             TextWidget::new("Checkbox")
-                                .style(t.label.clone())
-                                .color(c.on_surface),
+                                .style(t.small.clone())
+                                .color(c.text_secondary),
                         )
                         .add_child(checkbox_group),
                 )
@@ -328,8 +787,8 @@ impl Widget for WidgetCatalog {
                         .spacing(4.0)
                         .child(
                             TextWidget::new("RadioButton")
-                                .style(t.label.clone())
-                                .color(c.on_surface),
+                                .style(t.small.clone())
+                                .color(c.text_secondary),
                         )
                         .add_child(radio_group),
                 )
@@ -338,8 +797,8 @@ impl Widget for WidgetCatalog {
                         .spacing(4.0)
                         .child(
                             TextWidget::new("Toggle")
-                                .style(t.label.clone())
-                                .color(c.on_surface),
+                                .style(t.small.clone())
+                                .color(c.text_secondary),
                         )
                         .add_child(toggle_group),
                 ),
@@ -350,22 +809,29 @@ impl Widget for WidgetCatalog {
                 .spacing(12.0)
                 .child(
                     TextWidget::new("Form Controls")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
+                .child(
+                    TextWidget::new("Button")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .add_child(buttons_group)
+                .child(Divider::new())
                 .add_child(form_row)
                 .child(Divider::new())
                 .child(
                     TextWidget::new("Slider")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .add_child(slider_section)
                 .child(Divider::new())
                 .child(
                     TextWidget::new("SegmentedControl")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .child(SegmentedControl::new(
                     vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()],
@@ -391,26 +857,26 @@ impl Widget for WidgetCatalog {
                         .spacing(8.0)
                         .child(
                             TextWidget::new("Determinate (65%)")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(ProgressBar::new(0.65))
                         .child(
                             TextWidget::new("Indeterminate")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(ProgressBar::indeterminate())
                         .child(
                             TextWidget::new("Custom colors + thick")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(
                             ProgressBar::new(0.4)
                                 .thickness(8.0)
-                                .fill_color(c.success)
-                                .track_color(c.surface_tertiary),
+                                .fill_color(c.text_success)
+                                .track_color(c.surface_sunken),
                         ),
                 )
                 .child(
@@ -418,8 +884,8 @@ impl Widget for WidgetCatalog {
                         .spacing(4.0)
                         .child(
                             TextWidget::new("Vertical")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         )
                         .child(MaxSize::new(f32::MAX, 80.0).set_child(pb_vert)),
                 ),
@@ -430,28 +896,28 @@ impl Widget for WidgetCatalog {
                 .spacing(8.0)
                 .child(
                     TextWidget::new("Display Widgets")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new("ProgressBar")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .add_child(progress_section)
                 .child(Divider::new())
                 .child(
                     TextWidget::new("Badge")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     HStack::new()
                         .spacing(8.0)
                         .child(Badge::new("Default"))
-                        .child(Badge::new("3").color(c.error).text_color(Color::WHITE))
-                        .child(Badge::new("New").color(c.success).text_color(Color::WHITE))
-                        .child(Badge::new("Beta").color(c.warning)),
+                        .child(Badge::new("3").color(c.text_error).text_color(Color::WHITE))
+                        .child(Badge::new("New").color(c.text_success).text_color(Color::WHITE))
+                        .child(Badge::new("Beta").color(c.text_warning)),
                 ),
         );
 
@@ -463,12 +929,12 @@ impl Widget for WidgetCatalog {
         let acc_content1 = ctx.add(
             TextWidget::new("This content is revealed with an animated expand.")
                 .style(t.body.clone())
-                .color(c.on_surface),
+                .color(c.text_primary),
         );
         let acc_content2 = ctx.add(
             TextWidget::new("This section starts expanded and can be collapsed.")
                 .style(t.body.clone())
-                .color(c.on_surface),
+                .color(c.text_primary),
         );
 
         let containers_section = ctx.add(
@@ -476,37 +942,37 @@ impl Widget for WidgetCatalog {
                 .spacing(8.0)
                 .child(
                     TextWidget::new("Containers")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new("Card")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     Card::new()
                         .header(
                             TextWidget::new("Card Header")
-                                .style(t.label.clone())
-                                .color(c.on_surface),
+                                .style(t.small.clone())
+                                .color(c.text_secondary),
                         )
                         .content(
                             TextWidget::new("Card content with shadow and themed background.")
                                 .style(t.body.clone())
-                                .color(c.on_surface),
+                                .color(c.text_primary),
                         )
                         .footer(
                             TextWidget::new("Footer text")
-                                .style(t.caption.clone())
-                                .color(c.on_surface),
+                                .style(t.tiny.clone())
+                                .color(c.text_secondary),
                         ),
                 )
                 .child(Divider::new())
                 .child(
                     TextWidget::new("Accordion")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     Accordion::new("Click to expand", accordion_expanded.clone())
@@ -527,13 +993,13 @@ impl Widget for WidgetCatalog {
                 .spacing(8.0)
                 .child(
                     TextWidget::new("Navigation")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new("Link")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     HStack::new()
@@ -560,13 +1026,13 @@ impl Widget for WidgetCatalog {
                 .spacing(8.0)
                 .child(
                     TextWidget::new("Menus & Dropdowns")
-                        .style(t.heading_2.clone())
-                        .color(c.on_surface),
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
                 )
                 .child(
                     TextWidget::new("ComboBox")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     HStack::new().spacing(16.0).child(
@@ -579,18 +1045,18 @@ impl Widget for WidgetCatalog {
                 )
                 .child(
                     TextWidget::new("Context Menu (right-click the panel below)")
-                        .style(t.label.clone())
-                        .color(c.on_surface),
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
                 )
                 .child(
                     Panel::new()
-                        .background(c.surface_secondary)
+                        .background(c.surface_main)
                         .corner_radius(8.0)
                         .padding(16.0)
                         .child(
                             TextWidget::new("Right-click here for a context menu")
                                 .style(t.body.clone())
-                                .color(c.on_surface),
+                                .color(c.text_primary),
                         )
                         .context_menu(|| {
                             Box::new(
@@ -627,34 +1093,39 @@ impl Widget for WidgetCatalog {
                 HStack::new()
                     .child(
                         TextWidget::new("Widget Catalog")
-                            .style(t.heading_1.clone())
-                            .color(c.on_surface),
+                            .style(t.body_bold.clone())
+                            .color(c.text_primary),
                     )
                     .child(Spacer::new())
                     .child(
                         Button::new("Toggle Dark Mode")
-                            .style(ButtonStyle::Outlined)
+                            .style(ButtonVariant::Regular)
                             .on_activate(Cmd::ToggleDarkMode),
                     ),
             ),
         );
 
-        // Main content
+        // Main content. Section dividers use the Int UI default 1 dp
+        // (no thickness override) — the 24 dp VStack spacing above carries
+        // the visual separation; the divider is a single hairline, as in
+        // IntelliJ's Settings / Preferences panels.
         let content_col = ctx.add(
             VStack::new()
                 .spacing(24.0)
+                .add_child(palette_section)
+                .child(Divider::new())
                 .add_child(primitives_section)
-                .child(Divider::new().thickness(2.0))
+                .child(Divider::new())
                 .add_child(layout_section)
-                .child(Divider::new().thickness(2.0))
+                .child(Divider::new())
                 .add_child(controls_section)
-                .child(Divider::new().thickness(2.0))
+                .child(Divider::new())
                 .add_child(display_section)
-                .child(Divider::new().thickness(2.0))
+                .child(Divider::new())
                 .add_child(containers_section)
-                .child(Divider::new().thickness(2.0))
+                .child(Divider::new())
                 .add_child(nav_section)
-                .child(Divider::new().thickness(2.0))
+                .child(Divider::new())
                 .add_child(menus_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
@@ -668,8 +1139,8 @@ impl Widget for WidgetCatalog {
                 .child(
                     StatusBar::new().child(
                         TextWidget::new("Milestone 4 -- All widgets demonstrated")
-                            .style(t.caption.clone())
-                            .color(c.on_surface),
+                            .style(t.tiny.clone())
+                            .color(c.text_secondary),
                     ),
                 ),
         );
@@ -737,6 +1208,9 @@ fn main() {
             Cmd::Cut => println!("Cut"),
             Cmd::Copy => println!("Copy"),
             Cmd::Paste => println!("Paste"),
+            Cmd::Save => println!("Save"),
+            Cmd::Cancel => println!("Cancel"),
+            Cmd::LearnMore => println!("Learn more"),
         })
         .root(|tree| tree.add(WidgetCatalog::new()))
         .run();
@@ -921,7 +1395,18 @@ mod tests {
 
     #[test]
     fn catalog_missing_text_candidates_produce_bright_pixels_offscreen() {
-        fn pixel_extrema(pixels: &[u8], width: u32, bounds: Rect) -> ([u8; 3], [u8; 3]) {
+        // Render at the max 2 K texture size (2048 rows) instead of 700 so
+        // the labels this test probes ("Rust", "A1", "Option A") still fit
+        // in the captured viewport regardless of how many sections are
+        // stacked above them. wgpu's default max texture dimension is 2048.
+        const TEST_HEIGHT: u32 = 2048;
+
+        fn pixel_extrema(
+            pixels: &[u8],
+            width: u32,
+            height: u32,
+            bounds: Rect,
+        ) -> ([u8; 3], [u8; 3]) {
             let x0 = bounds.x.floor().max(0.0) as u32;
             let y0 = bounds.y.floor().max(0.0) as u32;
             let x1 = (bounds.x + bounds.width).ceil().max(0.0) as u32;
@@ -930,7 +1415,7 @@ mod tests {
             let mut best = [0u8; 3];
             let mut darkest = [255u8; 3];
 
-            for y in y0.min(700)..y1.min(700) {
+            for y in y0.min(height)..y1.min(height) {
                 for x in x0.min(width)..x1.min(width) {
                     let offset = ((y * width + x) * 4) as usize;
                     let r = pixels.get(offset).copied().unwrap_or(0);
@@ -980,7 +1465,7 @@ mod tests {
 
         let (mut tree, typesetter) = tree_and_typesetter();
         tree.add(WidgetCatalog::new());
-        tree.layout(SizeProposal::exact(900.0, 700.0));
+        tree.layout(SizeProposal::exact(900.0, TEST_HEIGHT as f32));
         let mut frame = tree.render();
         let atlas = typesetter.bridge().borrow_mut().atlas_info();
         renderer.upload_atlas(atlas.width, atlas.height, &atlas.pixels);
@@ -995,7 +1480,7 @@ mod tests {
             label: Some("widget_catalog_test_target"),
             size: wgpu::Extent3d {
                 width: 900,
-                height: 700,
+                height: TEST_HEIGHT,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -1011,10 +1496,11 @@ mod tests {
             &view,
             1.0,
             900,
-            700,
-            tree.theme().colors.surface.to_array(),
+            TEST_HEIGHT,
+            tree.theme().colors.surface_main.to_array(),
         );
-        let pixels = test_support::read_texture_rgba(&device, &queue, &texture, 900, 700);
+        let pixels =
+            test_support::read_texture_rgba(&device, &queue, &texture, 900, TEST_HEIGHT);
 
         for label in ["Rust", "A1", "Option A"] {
             let id = tree
@@ -1035,7 +1521,7 @@ mod tests {
                 })
                 .map(|glyph| (glyph.screen, glyph.atlas, glyph.color))
                 .collect();
-            let (brightest, darkest) = pixel_extrema(&pixels, 900, bounds);
+            let (brightest, darkest) = pixel_extrema(&pixels, 900, TEST_HEIGHT, bounds);
             let atlas_alpha: Vec<_> = matching_glyphs
                 .iter()
                 .map(|(_, atlas_rect, _)| {

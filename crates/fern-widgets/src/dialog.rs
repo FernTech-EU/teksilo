@@ -8,20 +8,20 @@ use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
 
-use crate::button::{Button, ButtonStyle};
+use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
 use crate::primitives::{Divider, TextWidget, VStack};
 
-const DEFAULT_MODAL_PADDING: f32 = 24.0;
-const DEFAULT_MODAL_MIN_WIDTH: f32 = 320.0;
-
 type DialogFactory = std::rc::Rc<dyn Fn() -> Box<dyn Widget>>;
 
+/// Modal container surface — pulls all dimensions from `DialogStyle` by
+/// default. Per-instance overrides are still possible via `padding()` and
+/// `min_width()`; `None` means "use the theme value".
 pub struct ModalContainer {
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
-    padding: f32,
-    min_width: f32,
+    padding_override: Option<f32>,
+    min_width_override: Option<f32>,
 }
 
 impl ModalContainer {
@@ -33,27 +33,37 @@ impl ModalContainer {
         Self {
             content_id: None,
             pending_content: Some(content),
-            padding: DEFAULT_MODAL_PADDING,
-            min_width: DEFAULT_MODAL_MIN_WIDTH,
+            padding_override: None,
+            min_width_override: None,
         }
     }
 
     pub fn padding(mut self, padding: f32) -> Self {
-        self.padding = padding.max(0.0);
+        self.padding_override = Some(padding.max(0.0));
         self
     }
 
     pub fn min_width(mut self, min_width: f32) -> Self {
-        self.min_width = min_width.max(0.0);
+        self.min_width_override = Some(min_width.max(0.0));
         self
+    }
+
+    fn resolved_padding(&self, theme: &fern_tokens::Theme) -> f32 {
+        self.padding_override
+            .unwrap_or(theme.components.dialog.content_padding)
+    }
+
+    fn resolved_min_width(&self, theme: &fern_tokens::Theme) -> f32 {
+        self.min_width_override
+            .unwrap_or(theme.components.dialog.min_width)
     }
 }
 
 impl std::fmt::Debug for ModalContainer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ModalContainer")
-            .field("padding", &self.padding)
-            .field("min_width", &self.min_width)
+            .field("padding_override", &self.padding_override)
+            .field("min_width_override", &self.min_width_override)
             .finish()
     }
 }
@@ -67,7 +77,9 @@ impl Widget for ModalContainer {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        let inset = self.padding * 2.0;
+        let pad = self.resolved_padding(ctx.theme);
+        let min_w = self.resolved_min_width(ctx.theme);
+        let inset = pad * 2.0;
         let content = self
             .content_id
             .and_then(|id| {
@@ -81,10 +93,7 @@ impl Widget for ModalContainer {
             })
             .unwrap_or_else(|| proposal.resolve(240.0, 120.0));
 
-        Size::new(
-            (content.width + inset).max(self.min_width),
-            content.height + inset,
-        )
+        Size::new((content.width + inset).max(min_w), content.height + inset)
     }
 
     fn place_children(
@@ -92,21 +101,21 @@ impl Widget for ModalContainer {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
+        let pad = self.resolved_padding(ctx.theme);
         for child in children.iter_mut() {
-            child.origin =
-                fern_canvas::Point::new(bounds.x + self.padding, bounds.y + self.padding);
+            child.origin = fern_canvas::Point::new(bounds.x + pad, bounds.y + pad);
             child.size = Size::new(
-                (bounds.width - self.padding * 2.0).max(0.0),
-                (bounds.height - self.padding * 2.0).max(0.0),
+                (bounds.width - pad * 2.0).max(0.0),
+                (bounds.height - pad * 2.0).max(0.0),
             );
         }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = CornerRadius::uniform(ctx.theme.shape.radius_md);
-        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.surface);
+        let radius = CornerRadius::uniform(ctx.theme.components.dialog.corner_radius);
+        canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.surface_main);
         canvas.stroke_rounded_rect(
             bounds,
             radius,
@@ -210,15 +219,15 @@ impl Widget for DialogContent {
             if let Some(title) = self.title.clone() {
                 header = header.child(
                     TextWidget::new(title)
-                        .style(theme.typography.heading_3.clone())
-                        .color(theme.colors.on_surface),
+                        .style(theme.typography.body_bold.clone())
+                        .color(theme.colors.text_primary),
                 );
             }
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
                     TextWidget::new(text)
                         .style(theme.typography.body.clone())
-                        .color(theme.colors.on_surface_secondary),
+                        .color(theme.colors.text_secondary),
                 );
             }
             let header_id = ctx.add(header);
@@ -271,7 +280,7 @@ impl Widget for DialogContent {
 
 pub struct Dialog {
     label: String,
-    style: ButtonStyle,
+    style: ButtonVariant,
     enabled: bool,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
@@ -288,7 +297,7 @@ impl Dialog {
     {
         Self {
             label: label.into(),
-            style: ButtonStyle::Filled,
+            style: ButtonVariant::Default,
             enabled: true,
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::EscapeOrClickOutside,
@@ -300,7 +309,7 @@ impl Dialog {
         }
     }
 
-    pub fn style(mut self, style: ButtonStyle) -> Self {
+    pub fn style(mut self, style: ButtonVariant) -> Self {
         self.style = style;
         self
     }
@@ -577,8 +586,10 @@ mod tests {
             height: None,
         });
 
+        // DialogStyle defaults: 24 dp content_padding, 280 dp min_width.
+        // Content 220×120 + 48 padding = 268×168, clamped to 280×168.
         let bounds = tree.bounds(container);
-        assert!((bounds.width - 320.0).abs() < 0.01);
+        assert!((bounds.width - 280.0).abs() < 0.01);
         assert!((bounds.height - 168.0).abs() < 0.01);
     }
 

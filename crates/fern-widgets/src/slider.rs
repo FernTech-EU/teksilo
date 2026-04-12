@@ -15,9 +15,9 @@ use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetP
 use fern_core::widget_builder::HandlerSet;
 use fern_tokens::{CornerRadius, Orientation};
 
-const TRACK_HEIGHT: f32 = 4.0;
-const THUMB_RADIUS: f32 = 10.0;
-const MIN_SIZE: f32 = 48.0;
+/// Minimum cross-axis size of the slider row, in dp. Sized to accommodate
+/// the thumb plus the focus-ring envelope.
+const MIN_CROSS_SIZE: f32 = 24.0;
 
 /// A slider that drives a `Signal<f32>` between min and max.
 pub struct Slider {
@@ -89,9 +89,9 @@ impl Slider {
     }
 
     /// Thumb center position on the primary axis.
-    fn thumb_center(&self, bounds: Rect) -> f32 {
-        let usable = self.primary_length(bounds) - THUMB_RADIUS * 2.0;
-        self.primary_start(bounds) + THUMB_RADIUS + usable * self.normalized()
+    fn thumb_center(&self, bounds: Rect, thumb_radius: f32) -> f32 {
+        let usable = self.primary_length(bounds) - thumb_radius * 2.0;
+        self.primary_start(bounds) + thumb_radius + usable * self.normalized()
     }
 }
 
@@ -117,6 +117,11 @@ impl Widget for Slider {
             registry,
             fern_core::state::BindingLevel::RepaintOnly,
         );
+
+        // Capture the thumb radius at build time. The event handlers need
+        // it for hit-testing, but they only receive `EventContext` and can't
+        // reach the theme at event time.
+        let thumb_radius = ctx.theme().components.slider.thumb_diameter * 0.5;
 
         let value = self.value.clone();
         let min = self.min;
@@ -151,7 +156,7 @@ impl Widget for Slider {
                 let usable = match orientation {
                     Orientation::Horizontal => bounds.width,
                     Orientation::Vertical => bounds.height,
-                } - THUMB_RADIUS * 2.0;
+                } - thumb_radius * 2.0;
                 if usable <= 0.0 {
                     return;
                 }
@@ -159,7 +164,7 @@ impl Widget for Slider {
                     Orientation::Horizontal => bounds.x,
                     Orientation::Vertical => bounds.y,
                 };
-                let t = ((pos - start - THUMB_RADIUS) / usable).clamp(0.0, 1.0);
+                let t = ((pos - start - thumb_radius) / usable).clamp(0.0, 1.0);
                 let mut val = min + t * (max - min);
                 if let Some(s) = step {
                     if s > 0.0 {
@@ -198,7 +203,7 @@ impl Widget for Slider {
                             let usable = match orientation {
                                 Orientation::Horizontal => bounds.width,
                                 Orientation::Vertical => bounds.height,
-                            } - THUMB_RADIUS * 2.0;
+                            } - thumb_radius * 2.0;
                             let start = match orientation {
                                 Orientation::Horizontal => bounds.x,
                                 Orientation::Vertical => bounds.y,
@@ -209,8 +214,8 @@ impl Widget for Slider {
                             } else {
                                 0.0
                             };
-                            let thumb_center = start + THUMB_RADIUS + usable * normalized;
-                            let on_thumb = (pos - thumb_center).abs() <= THUMB_RADIUS;
+                            let thumb_center = start + thumb_radius + usable * normalized;
+                            let on_thumb = (pos - thumb_center).abs() <= thumb_radius;
                             if !on_thumb {
                                 set_value(position.x, position.y);
                             }
@@ -315,15 +320,21 @@ impl Widget for Slider {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let style = ctx.theme.components.slider;
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        // Reserve the focus-ring envelope around the thumb plus a dp of slack
+        // so the row has a comfortable hit area (matches the 24 dp Int UI
+        // control-row height).
+        let cross = (style.thumb_diameter + envelope * 2.0).max(MIN_CROSS_SIZE);
         match self.orientation {
             Orientation::Horizontal => {
                 let width = proposal.width.unwrap_or(200.0);
-                Size::new(width, MIN_SIZE)
+                Size::new(width, cross)
             }
             Orientation::Vertical => {
                 let height = proposal.height.unwrap_or(200.0);
-                Size::new(MIN_SIZE, height)
+                Size::new(cross, height)
             }
         }
     }
@@ -341,44 +352,50 @@ impl Widget for Slider {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let colors = &ctx.theme.colors;
+        let shape = &ctx.theme.shape;
+        let style = ctx.theme.components.slider;
+        let track_height = style.track_height;
+        let thumb_diameter = style.thumb_diameter;
+        let thumb_radius = thumb_diameter * 0.5;
         self.cached_bounds.set(bounds);
-        let radius = CornerRadius::uniform(TRACK_HEIGHT / 2.0);
+
+        let radius = CornerRadius::uniform(track_height * 0.5);
         let track_color = if self.enabled {
-            colors.surface_tertiary
+            colors.surface_sunken
         } else {
-            colors.disabled_fill
+            colors.accent_disabled
         };
         let fill_color = if self.enabled {
-            colors.primary
+            colors.accent
         } else {
-            colors.disabled_text
+            colors.text_disabled
         };
-        let thumb_pos = self.thumb_center(bounds);
+        let thumb_pos = self.thumb_center(bounds, thumb_radius);
 
         let (track_rect, fill_rect, thumb_cx, thumb_cy) = match self.orientation {
             Orientation::Horizontal => {
-                let ty = bounds.y + (bounds.height - TRACK_HEIGHT) / 2.0;
+                let ty = bounds.y + (bounds.height - track_height) * 0.5;
                 let track = Rect::new(
-                    bounds.x + THUMB_RADIUS,
+                    bounds.x + thumb_radius,
                     ty,
-                    bounds.width - THUMB_RADIUS * 2.0,
-                    TRACK_HEIGHT,
+                    bounds.width - thumb_radius * 2.0,
+                    track_height,
                 );
                 let fill_w = thumb_pos - track.x;
-                let fill = Rect::new(track.x, ty, fill_w.max(0.0), TRACK_HEIGHT);
-                (track, fill, thumb_pos, bounds.y + bounds.height / 2.0)
+                let fill = Rect::new(track.x, ty, fill_w.max(0.0), track_height);
+                (track, fill, thumb_pos, bounds.y + bounds.height * 0.5)
             }
             Orientation::Vertical => {
-                let tx = bounds.x + (bounds.width - TRACK_HEIGHT) / 2.0;
+                let tx = bounds.x + (bounds.width - track_height) * 0.5;
                 let track = Rect::new(
                     tx,
-                    bounds.y + THUMB_RADIUS,
-                    TRACK_HEIGHT,
-                    bounds.height - THUMB_RADIUS * 2.0,
+                    bounds.y + thumb_radius,
+                    track_height,
+                    bounds.height - thumb_radius * 2.0,
                 );
                 let fill_h = thumb_pos - track.y;
-                let fill = Rect::new(tx, track.y, TRACK_HEIGHT, fill_h.max(0.0));
-                (track, fill, bounds.x + bounds.width / 2.0, thumb_pos)
+                let fill = Rect::new(tx, track.y, track_height, fill_h.max(0.0));
+                (track, fill, bounds.x + bounds.width * 0.5, thumb_pos)
             }
         };
 
@@ -389,36 +406,42 @@ impl Widget for Slider {
 
         // Thumb
         let thumb_color = if !self.enabled {
-            colors.disabled_text
+            colors.text_disabled
         } else if self.dragging.get() {
-            colors.primary_pressed
+            colors.accent_pressed
         } else if self.hovered.get() {
-            colors.primary_hover
+            colors.accent_hover
         } else {
-            colors.primary
+            colors.accent
         };
         let thumb_rect = Rect::new(
-            thumb_cx - THUMB_RADIUS,
-            thumb_cy - THUMB_RADIUS,
-            THUMB_RADIUS * 2.0,
-            THUMB_RADIUS * 2.0,
+            thumb_cx - thumb_radius,
+            thumb_cy - thumb_radius,
+            thumb_diameter,
+            thumb_diameter,
         );
-        canvas.fill_rounded_rect(thumb_rect, CornerRadius::uniform(THUMB_RADIUS), thumb_color);
+        canvas.fill_rounded_rect(thumb_rect, CornerRadius::uniform(thumb_radius), thumb_color);
 
-        // Focus ring with offset so it's visible over the primary-colored thumb
+        // Focus ring — drawn outside the thumb using theme offset/width.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
-            let offset = 3.0;
+            let offset = shape.focus_ring_offset;
+            let half_stroke = shape.focus_ring_width * 0.5;
+            // Ring rect: outer edge at `thumb + offset + half_stroke`, drawn
+            // with stroke width `focus_ring_width` centered on that rect
+            // boundary. The stroke's outer edge lands at
+            // `thumb + offset + focus_ring_width`.
+            let ring_inset = offset + half_stroke;
             let ring_rect = Rect::new(
-                thumb_rect.x - offset,
-                thumb_rect.y - offset,
-                thumb_rect.width + offset * 2.0,
-                thumb_rect.height + offset * 2.0,
+                thumb_rect.x - ring_inset,
+                thumb_rect.y - ring_inset,
+                thumb_rect.width + ring_inset * 2.0,
+                thumb_rect.height + ring_inset * 2.0,
             );
             canvas.stroke_rounded_rect(
                 ring_rect,
-                CornerRadius::uniform(THUMB_RADIUS + offset),
+                CornerRadius::uniform(thumb_radius + ring_inset),
                 colors.focus_ring,
-                2.0,
+                shape.focus_ring_width,
             );
         }
     }
@@ -521,22 +544,24 @@ mod tests {
 
     #[test]
     fn thumb_drag_updates_value() {
+        let theme = fern_tokens::Theme::light_default();
+        let thumb_radius = theme.components.slider.thumb_diameter * 0.5;
         let value = Signal::new(50.0_f32);
-        let mut tree = WidgetTree::new().with_theme(fern_tokens::Theme::light_default());
+        let mut tree = WidgetTree::new().with_theme(theme);
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
         tree.render(); // cache bounds for event handling
 
         let bounds = tree.bounds(s);
-        // Thumb center for value=50: bounds.x + THUMB_RADIUS + (bounds.width - 2*THUMB_RADIUS) * 0.5
-        let thumb_cx = bounds.x + THUMB_RADIUS + (bounds.width - THUMB_RADIUS * 2.0) * 0.5;
+        // Thumb center for value=50: bounds.x + r + (width - 2r) * 0.5
+        let thumb_cx = bounds.x + thumb_radius + (bounds.width - thumb_radius * 2.0) * 0.5;
         let center_y = bounds.y + bounds.height / 2.0;
 
         // Pointer down on thumb
         tree.pointer_down_button(Point::new(thumb_cx, center_y), PointerButton::Primary);
 
         // Drag to 75% position
-        let target_x = bounds.x + THUMB_RADIUS + (bounds.width - THUMB_RADIUS * 2.0) * 0.75;
+        let target_x = bounds.x + thumb_radius + (bounds.width - thumb_radius * 2.0) * 0.75;
         tree.pointer_move(Point::new(target_x, center_y));
 
         let val = value.get();

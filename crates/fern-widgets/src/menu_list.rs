@@ -28,13 +28,13 @@ enum MenuEntry {
 pub struct MenuSeparator;
 
 impl Widget for MenuSeparator {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let width = proposal.width.unwrap_or(0.0);
-        Size::new(width, 9.0) // 1px line + 4px padding top + 4px padding bottom
+        Size::new(width, ctx.theme.components.menu.separator_height)
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
-        let color = ctx.theme.colors.border.with_alpha(0.3);
+        let color = ctx.theme.colors.divider;
         let y = bounds.y + bounds.height / 2.0;
         canvas.fill_rect(
             Rect::new(bounds.x + 8.0, y, bounds.width - 16.0, 1.0),
@@ -71,7 +71,7 @@ impl Widget for KeyboardHighlightWrapper {
         // Background highlight driven by focused_index signal.
         // Registered via bind_background → Prop::Bound → binding registry.
         let bg_color = self.focused_index.map({
-            let primary = theme.colors.primary;
+            let primary = theme.colors.accent;
             move |focused| {
                 if *focused == Some(index) {
                     primary.with_alpha(0.10)
@@ -215,15 +215,17 @@ impl Widget for MenuList {
 
         let vstack_id = ctx.add(vstack);
 
+        let menu_style = theme.components.menu;
         let padding = Padding::uniform(4.0).set_child(vstack_id);
         let padding_id = ctx.add(padding);
 
-        // Themed surface background
+        // Themed surface background — Int UI menus use the popup radius (8 dp)
+        // and a 1 dp border on the raised surface.
         let bg = RectWidget::new()
-            .background(theme.colors.surface)
-            .border_color(theme.colors.border.with_alpha(0.3))
-            .border_width(1.0)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_sm));
+            .background(theme.colors.surface_raised)
+            .border_color(theme.colors.border)
+            .border_width(menu_style.popup_border_width)
+            .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);

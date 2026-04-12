@@ -39,7 +39,7 @@ pub use tooltip::TooltipWidget;
 pub use accordion::Accordion;
 pub use badge::Badge;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
-pub use button::{Button, ButtonStyle};
+pub use button::{Button, ButtonVariant};
 pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
 pub use combo_box::ComboBox;
@@ -58,7 +58,7 @@ pub use primitives::{
 pub use progress_bar::ProgressBar;
 pub use radio_button::RadioButton;
 pub use repeater::Repeater;
-pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarStyle};
+pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarMode};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
 pub use segmented_control::SegmentedControl;
 pub use slider::Slider;
