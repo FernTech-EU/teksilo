@@ -31,11 +31,14 @@ enum MenuItemState {
     Disabled,
 }
 
-/// Default delay before a submenu opens on hover (200ms).
+/// Default delay before a submenu opens on hover (400 ms — IntelliJ's value).
 /// This delay also provides diagonal movement tolerance: when the pointer
 /// crosses other menu items while moving toward a submenu, those items
-/// don't open their submenus because the delay hasn't elapsed yet.
-const DEFAULT_SUBMENU_OPEN_DELAY: Duration = Duration::from_millis(200);
+/// don't open their submenus because the delay hasn't elapsed yet. 400 ms
+/// is long enough that a casual sweep past a submenu trigger doesn't
+/// accidentally open it, but short enough that a deliberate hover feels
+/// responsive.
+const DEFAULT_SUBMENU_OPEN_DELAY: Duration = Duration::from_millis(400);
 const DEFAULT_SUBMENU_CLOSE_DELAY: Duration = Duration::from_millis(150);
 
 /// A single menu item: icon + label + shortcut label + optional submenu chevron.
@@ -153,12 +156,11 @@ impl std::fmt::Debug for MenuItem {
     }
 }
 
-fn resolve_bg(state: MenuItemState, on_surface: Color) -> Color {
+fn resolve_bg(state: MenuItemState, hover: Color, pressed: Color) -> Color {
     match state {
-        MenuItemState::Idle => Color::TRANSPARENT,
-        MenuItemState::Hovered => on_surface.with_alpha(0.08),
-        MenuItemState::Pressed => on_surface.with_alpha(0.12),
-        MenuItemState::Disabled => Color::TRANSPARENT,
+        MenuItemState::Idle | MenuItemState::Disabled => Color::TRANSPARENT,
+        MenuItemState::Hovered => hover,
+        MenuItemState::Pressed => pressed,
     }
 }
 
@@ -169,9 +171,21 @@ fn resolve_text(state: MenuItemState, text_color: Color, disabled_color: Color) 
     }
 }
 
+fn resolve_shortcut(
+    state: MenuItemState,
+    shortcut_color: Color,
+    disabled_color: Color,
+) -> Color {
+    match state {
+        MenuItemState::Disabled => disabled_color,
+        _ => shortcut_color,
+    }
+}
+
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
+        let menu_style = theme.components.menu;
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -181,10 +195,12 @@ impl Widget for MenuItem {
         });
         self.interaction = interaction.clone();
 
-        let on_surface = theme.colors.text_primary;
+        // Background: use the Int UI surface_hover / surface_pressed tokens
+        // directly instead of a hand-mixed alpha wash. Tracks theme changes.
         let bg_color = {
-            let on_surface = on_surface;
-            interaction.map(move |s| resolve_bg(*s, on_surface))
+            let hover = theme.colors.surface_hover;
+            let pressed = theme.colors.surface_pressed;
+            interaction.map(move |s| resolve_bg(*s, hover, pressed))
         };
 
         let text_color = {
@@ -193,14 +209,56 @@ impl Widget for MenuItem {
             interaction.map(move |s| resolve_text(*s, text, disabled))
         };
 
-        // Build the row: [icon | label | Spacer | shortcut | chevron]
-        let mut row = HStack::new().spacing(8.0);
+        // Row layout:
+        //   [icon column][gap][label][Spacer][shortcut?][chevron column]
+        //
+        // HStack spacing is 0 — we insert an explicit `icon_label_gap`
+        // only between the icon column and the label. Nothing else in the
+        // row should have inter-child gaps: the Spacer handles stretch,
+        // the chevron column handles the trailing padding, and the
+        // shortcut (when present) sits directly adjacent to the chevron
+        // column. Using HStack::spacing here would inject extra gaps
+        // around the Spacer and shortcut, pushing the shortcut visibly
+        // away from the trailing edge — which is why "Ctrl+X" used to
+        // land short of where regular items had their right padding.
+        //
+        // * `icon column` is always reserved at `icon_column_width`, even
+        //   when the item has no icon, so labels line up vertically
+        //   between icon'd and icon-less items.
+        //
+        // * `chevron column` is always reserved at `item_padding_horizontal`
+        //   width. For submenu items it contains the chevron; for regular
+        //   items it's empty. Because the outer wrapper sets right
+        //   padding = 0, the chevron column visually IS the right
+        //   padding — regular items and submenu items share the same
+        //   trailing edge.
+        let mut row = HStack::new().spacing(0.0);
 
-        // Leading icon (fixed 16px)
-        if let Some(icon) = self.icon.take() {
-            let icon = icon.bind_color(text_color.clone());
-            row = row.child(icon);
-        }
+        // Icon column — fixed width, optional IconWidget inside.
+        let icon_child_id = if let Some(icon) = self.icon.take() {
+            ctx.add(icon.bind_color(text_color.clone()))
+        } else {
+            ctx.add(Spacer::new())
+        };
+        let icon_column = ctx.add(
+            crate::primitives::FixedSize::new()
+                .bind_width(menu_style.icon_column_width)
+                .bind_height(menu_style.icon_column_width)
+                .set_child(icon_child_id),
+        );
+        row = row.add_child(icon_column);
+
+        // Explicit icon-to-label gap (rendered as a fixed-width Spacer
+        // rather than HStack::spacing to avoid injecting gaps around the
+        // other children).
+        let icon_label_spacer = ctx.add(Spacer::new());
+        let icon_label_gap = ctx.add(
+            crate::primitives::FixedSize::new()
+                .bind_width(menu_style.icon_label_gap)
+                .bind_height(1.0_f32)
+                .set_child(icon_label_spacer),
+        );
+        row = row.add_child(icon_label_gap);
 
         // Label
         let label = TextWidget::new(&self.label)
@@ -208,45 +266,87 @@ impl Widget for MenuItem {
             .bind_color(text_color.clone());
         row = row.child(label);
 
-        // Spacer between label and trailing content
+        // Stretch spacer — pushes trailing content to the right edge.
         row = row.child(Spacer::new());
 
-        // Shortcut label (dimmed) — manual label takes precedence, then auto-lookup from ShortcutMap
+        // Shortcut label — manual label takes precedence, then auto-lookup
+        // from ShortcutMap. Uses the dedicated `tooltip_shortcut` color
+        // token at the same size as the body label.
+        //
+        // A fixed-width gap (`shortcut_left_gap`, 24 dp) is inserted
+        // between the stretch Spacer and the shortcut label so that even
+        // when the row is packed tight (Spacer stretch = 0), there is
+        // always a visible gap between label and shortcut. This mirrors
+        // the `icon_label_gap` pattern: a FixedSize-wrapped Spacer acts
+        // as a fixed non-spacer child so HStack can't collapse it.
         let resolved_shortcut = self.shortcut_label.clone().or_else(|| {
             self.command_any
                 .as_ref()
                 .and_then(|cmd| ctx.shortcut_label_for_any(cmd.as_ref()))
         });
         if let Some(ref shortcut_text) = resolved_shortcut {
+            // Fixed minimum gap, always present.
+            let shortcut_gap_spacer = ctx.add(Spacer::new());
+            let shortcut_gap = ctx.add(
+                crate::primitives::FixedSize::new()
+                    .bind_width(menu_style.shortcut_left_gap)
+                    .bind_height(1.0_f32)
+                    .set_child(shortcut_gap_spacer),
+            );
+            row = row.add_child(shortcut_gap);
+
             let shortcut_color = {
-                let text = theme.colors.text_primary.with_alpha(0.5);
+                let shortcut = theme.colors.tooltip_shortcut;
                 let disabled = theme.colors.text_disabled;
-                interaction.map(move |s| resolve_text(*s, text, disabled))
+                interaction.map(move |s| resolve_shortcut(*s, shortcut, disabled))
             };
             let shortcut = TextWidget::new(shortcut_text)
-                .style(theme.typography.small.clone())
+                .style(theme.typography.body.clone())
                 .bind_color(shortcut_color);
             row = row.child(shortcut);
         }
 
-        // Pre-create submenu content if this is a submenu trigger
+        // Pre-create submenu content if this is a submenu trigger. Kept
+        // dormant until hover opens the overlay.
         let submenu_content_id = if let Some(factory) = self.submenu_factory.take() {
             let submenu_widget = factory();
             let id = ctx.add_boxed(submenu_widget);
             ctx.set_dormant(id);
             self.submenu_content_id = Some(id);
-            let chevron = IconWidget::chevron_right(12.0).bind_color(text_color);
-            row = row.child(chevron);
             Some(id)
         } else {
             None
         };
 
+        // Chevron column — always reserved at `item_padding_horizontal`
+        // width so submenu and regular items share the same trailing edge.
+        let chevron_child_id = if submenu_content_id.is_some() {
+            ctx.add(IconWidget::chevron_right(12.0).bind_color(text_color.clone()))
+        } else {
+            ctx.add(Spacer::new())
+        };
+        let chevron_column = ctx.add(
+            crate::primitives::FixedSize::new()
+                .bind_width(menu_style.item_padding_horizontal)
+                .bind_height(menu_style.icon_column_width)
+                .set_child(chevron_child_id),
+        );
+        row = row.add_child(chevron_column);
+
         let row_id = ctx.add(row);
 
-        let menu_style = theme.components.menu;
-        let pad_v = (menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5;
-        let padding = Padding::symmetric(pad_v, menu_style.item_padding_horizontal).set_child(row_id);
+        // Padding: vertical derived so the row has the full `item_height`
+        // (24 dp); left padding uses `item_padding_horizontal`; RIGHT
+        // padding is zero because the chevron column occupies that space.
+        // Body text is 13 dp so that's ~5.5 dp top + 5.5 dp bottom.
+        let pad_v = ((menu_style.item_height - theme.typography.body.size) * 0.5).max(0.0);
+        let padding = Padding::new(
+            pad_v,                              // top
+            0.0,                                // right — chevron column fills this
+            pad_v,                              // bottom
+            menu_style.item_padding_horizontal, // left
+        )
+        .set_child(row_id);
         let padding_id = ctx.add(padding);
 
         // Background rect
@@ -425,9 +525,11 @@ impl Widget for MenuItem {
             }
         });
 
-        if enabled {
-            handler_set = handler_set.cursor(CursorIcon::Pointer);
-        }
+        handler_set = handler_set.cursor(if enabled {
+            CursorIcon::Pointer
+        } else {
+            CursorIcon::NotAllowed
+        });
 
         ctx.apply_self_handlers(handler_set);
 
@@ -440,8 +542,17 @@ impl Widget for MenuItem {
                 let size = ctx
                     .child_size(id, proposal)
                     .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
+                // Claim the full proposed width when the parent offers one.
+                // This is what makes menu items stretch to the popup width:
+                // MenuList sizes its VStack to the widest item, then the
+                // VStack proposes that width to each child. Without this
+                // line, each MenuItem would report only its own content
+                // width and the row's internal Spacer would have no room
+                // to stretch — so the shortcut would sit flush against
+                // the label instead of pushing to the trailing edge.
+                let width = proposal.width.unwrap_or(size.width);
                 // Enforce minimum height of 32px for touch targets
-                Size::new(size.width, size.height.max(32.0))
+                Size::new(width, size.height.max(32.0))
             }
             None => proposal.resolve(120.0, 32.0),
         }
@@ -693,6 +804,242 @@ mod tests {
     }
 
     #[test]
+    fn menu_item_stretches_to_proposed_width() {
+        // Regression: the MenuItem row internally holds a Spacer between
+        // label and shortcut which needs room to stretch so the shortcut
+        // pushes to the trailing edge. Per-row stretching works only if
+        // each MenuItem claims the full width proposed by the parent
+        // (VStack inside MenuList), not just its content's intrinsic width.
+        //
+        // Without the `proposal.width.unwrap_or(...)` fix in
+        // MenuItem::size_that_fits, this test fails because the item
+        // collapses to its content width.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(
+            MenuItem::new("Cut")
+                .on_activate(TestCmd::Cut)
+                .shortcut_label("Ctrl+X"),
+        );
+        // Propose a wide container (300 dp) — well beyond the intrinsic
+        // width of the "Cut" row (~100 dp with shortcut + columns).
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let bounds = tree.bounds(item);
+        assert!(
+            (bounds.width - 300.0).abs() < 0.01,
+            "MenuItem should claim the full proposed width (expected 300, got {})",
+            bounds.width,
+        );
+    }
+
+    #[test]
+    fn shortcut_pushes_right_inside_menu_list() {
+        // Reproduces actual usage: a MenuList containing multiple items
+        // with different label lengths. The widest item determines the
+        // popup width; narrower items should have their shortcut pushed
+        // to the trailing edge with a visible gap between label and
+        // shortcut.
+        //
+        // This catches the case that bare MenuItem tests miss: the extra
+        // VStack / Padding / RectWidget layers between MenuList and the
+        // individual items, which might break the width propagation.
+        use crate::menu_list::MenuList;
+
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let menu = tree.add(
+            MenuList::new()
+                .item(
+                    MenuItem::new("Cut")
+                        .on_activate(TestCmd::Cut)
+                        .shortcut_label("Ctrl+X"),
+                )
+                .item(
+                    MenuItem::new("Paste With A Longer Label")
+                        .on_activate(TestCmd::Paste)
+                        .shortcut_label("Ctrl+V"),
+                ),
+        );
+        tree.layout(SizeProposal::unspecified());
+
+        // Walk MenuList's tree to find the MenuItem list:
+        //   MenuList → ZStack → [RectWidget, Padding → VStack → [item1, item2, ...]]
+        let menu_zstack = tree.child_widget(menu, 0);
+        let menu_padding = tree.child_widget(menu_zstack, 1);
+        let menu_vstack = tree.child_widget(menu_padding, 0);
+        let items = tree.children(menu_vstack);
+        assert_eq!(items.len(), 2, "expected 2 menu items");
+
+        let menu_style = Theme::light_default().components.menu;
+
+        // The first item ("Cut") is the narrow one. It should stretch to
+        // the full popup width and its shortcut should be at the trailing
+        // edge with a gap between "Cut" and "Ctrl+X".
+        //
+        // MenuList wraps each item in a KeyboardHighlightWrapper whose
+        // structure is:  wrapper → ZStack → [bg_rect, MenuItem]
+        // So we dive two levels to reach the MenuItem.
+        let wrapper = items[0];
+        let wrapper_zstack = tree.child_widget(wrapper, 0);
+        let cut_item = tree.child_widget(wrapper_zstack, 1);
+        let cut_bounds = tree.bounds(cut_item);
+
+        let zstack = tree.child_widget(cut_item, 0);
+        let padding = tree.child_widget(zstack, 1);
+        let hstack = tree.child_widget(padding, 0);
+        let row_children = tree.children(hstack);
+        // Expected: [icon_col, icon_label_gap, label, Spacer,
+        //            shortcut_gap, shortcut, chevron_col]
+        assert_eq!(
+            row_children.len(),
+            7,
+            "Cut row should have 7 children, got {}",
+            row_children.len()
+        );
+        let label_tw = row_children[2];
+        let shortcut_tw = row_children[5];
+        let label_bounds = tree.bounds(label_tw);
+        let shortcut_bounds = tree.bounds(shortcut_tw);
+
+        // Shortcut right edge must reach the trailing edge (minus chevron col).
+        let expected_right =
+            cut_bounds.x + cut_bounds.width - menu_style.item_padding_horizontal;
+        let shortcut_right = shortcut_bounds.x + shortcut_bounds.width;
+        assert!(
+            (shortcut_right - expected_right).abs() < 1.5,
+            "shortcut right edge should be near {} (popup trailing - chevron_col), \
+             got {}; Cut item bounds = {:?}, shortcut bounds = {:?}",
+            expected_right,
+            shortcut_right,
+            cut_bounds,
+            shortcut_bounds,
+        );
+
+        // Gap between label and shortcut — this is the critical check that
+        // "no space at all between name and shortcut" bug would fail.
+        let label_right = label_bounds.x + label_bounds.width;
+        let gap = shortcut_bounds.x - label_right;
+        assert!(
+            gap > 40.0,
+            "expected gap > 40 dp between 'Cut' and 'Ctrl+X', got {} dp \
+             (label_right = {}, shortcut_left = {}, cut_bounds = {:?})",
+            gap,
+            label_right,
+            shortcut_bounds.x,
+            cut_bounds,
+        );
+    }
+
+    #[test]
+    fn shortcut_has_minimum_gap_even_when_row_is_tight() {
+        // When the popup is only slightly wider than the content, the
+        // stretch Spacer contributes ~0 dp. The fixed `shortcut_left_gap`
+        // (24 dp) must guarantee a visible minimum gap between label and
+        // shortcut regardless.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(
+            MenuItem::new("Cut")
+                .on_activate(TestCmd::Cut)
+                .shortcut_label("Ctrl+X"),
+        );
+        // Narrow popup: ~20 dp more than content + shortcut_left_gap.
+        // Without the fixed gap, label and shortcut would touch.
+        tree.layout(SizeProposal::exact(140.0, 40.0));
+        let menu_style = Theme::light_default().components.menu;
+
+        let zstack = tree.child_widget(item, 0);
+        let padding = tree.child_widget(zstack, 1);
+        let hstack = tree.child_widget(padding, 0);
+        let row_children = tree.children(hstack);
+        // Expected:
+        //   [icon_col, icon_label_gap, label, Spacer,
+        //    shortcut_gap, shortcut, chevron_col]
+        assert_eq!(
+            row_children.len(),
+            7,
+            "row with shortcut should have 7 children, got {}",
+            row_children.len()
+        );
+        let label_tw = row_children[2];
+        let shortcut_tw = row_children[5];
+        let label_right = tree.bounds(label_tw).x + tree.bounds(label_tw).width;
+        let shortcut_left = tree.bounds(shortcut_tw).x;
+        let gap = shortcut_left - label_right;
+        assert!(
+            gap >= menu_style.shortcut_left_gap - 0.5,
+            "gap between label and shortcut should be >= shortcut_left_gap \
+             ({} dp), got {} dp",
+            menu_style.shortcut_left_gap,
+            gap,
+        );
+    }
+
+    #[test]
+    fn menu_item_shortcut_pushes_to_trailing_edge() {
+        // In a menu wider than the row's content, the shortcut label must
+        // land near the trailing edge AND there must be a large empty
+        // gap between the label and the shortcut (that's what the Spacer
+        // stretches into).
+        //
+        // This test walks the tree to find the *inner* TextWidgets rather
+        // than using find_by_label, because both the MenuItem and its
+        // inner label TextWidget expose the same accessibility name —
+        // find_by_label("Cut") would return the MenuItem (300 dp wide),
+        // not the inner 20-dp label TextWidget.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(
+            MenuItem::new("Cut")
+                .on_activate(TestCmd::Cut)
+                .shortcut_label("Ctrl+X"),
+        );
+        let popup_width = 300.0_f32;
+        tree.layout(SizeProposal::exact(popup_width, 40.0));
+        let menu_style = Theme::light_default().components.menu;
+
+        // Walk the tree: MenuItem → ZStack → (RectWidget, Padding → HStack)
+        let zstack = tree.child_widget(item, 0);
+        // ZStack children: [RectWidget (bg), Padding (with row inside)]
+        let padding = tree.child_widget(zstack, 1);
+        let hstack = tree.child_widget(padding, 0);
+        // HStack children in order:
+        //   [icon_col, icon_label_gap, label_TextWidget, Spacer,
+        //    shortcut_gap, shortcut_TextWidget, chevron_col]
+        let label_tw = tree.child_widget(hstack, 2);
+        let shortcut_tw = tree.child_widget(hstack, 5);
+
+        let label_bounds = tree.bounds(label_tw);
+        let shortcut_bounds = tree.bounds(shortcut_tw);
+
+        // Shortcut's right edge must reach the trailing edge of the visible
+        // row (popup_width minus the chevron column which IS the right
+        // padding).
+        let expected_right = popup_width - menu_style.item_padding_horizontal;
+        let actual_right = shortcut_bounds.x + shortcut_bounds.width;
+        assert!(
+            (actual_right - expected_right).abs() < 1.5,
+            "shortcut right edge should be near {} (popup_width - chevron_col), got {} \
+             (shortcut bounds: x={}, w={})",
+            expected_right,
+            actual_right,
+            shortcut_bounds.x,
+            shortcut_bounds.width,
+        );
+
+        // And there must be a generous gap between the label's right
+        // edge and the shortcut's left edge. Without this assertion the
+        // "trailing edge" check above can pass even when the label is
+        // pushed all the way right to hug the shortcut.
+        let label_right = label_bounds.x + label_bounds.width;
+        let gap = shortcut_bounds.x - label_right;
+        assert!(
+            gap > 80.0,
+            "Spacer should stretch: expected gap > 80 dp between label and \
+             shortcut, got {} dp (label right = {}, shortcut left = {})",
+            gap,
+            label_right,
+            shortcut_bounds.x,
+        );
+    }
+
+    #[test]
     fn submenu_does_not_open_immediately_on_hover() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(MenuItem::submenu("More", || {
@@ -834,7 +1181,7 @@ mod tests {
         let regular_item = find_menu_item(&tree, menu, "Paste");
 
         tree.pointer_move(tree.bounds(submenu_item).center());
-        tree.advance_time(std::time::Duration::from_millis(250));
+        tree.advance_time(std::time::Duration::from_millis(450));
         assert_eq!(tree.active_overlays().len(), 1);
         assert!(overlay_contains_label(&tree, "Sub"));
 
@@ -867,14 +1214,14 @@ mod tests {
         let second = find_menu_item(&tree, menu, "Recent");
 
         tree.pointer_move(tree.bounds(first).center());
-        tree.advance_time(std::time::Duration::from_millis(250));
+        tree.advance_time(std::time::Duration::from_millis(450));
         assert_eq!(tree.active_overlays().len(), 1);
         assert!(overlay_contains_label(&tree, "Sub A"));
 
         tree.pointer_move(tree.bounds(second).center());
         assert!(tree.active_overlays().is_empty());
 
-        tree.advance_time(std::time::Duration::from_millis(250));
+        tree.advance_time(std::time::Duration::from_millis(450));
         assert_eq!(tree.active_overlays().len(), 1);
         assert!(overlay_contains_label(&tree, "Sub B"));
         assert!(!overlay_contains_label(&tree, "Sub A"));
@@ -896,7 +1243,7 @@ mod tests {
 
         let submenu_item = find_menu_item(&tree, menu, "More");
         tree.pointer_move(tree.bounds(submenu_item).center());
-        tree.advance_time(std::time::Duration::from_millis(250));
+        tree.advance_time(std::time::Duration::from_millis(450));
         assert_eq!(tree.active_overlays().len(), 1);
 
         tree.pointer_move(Point::new(1000.0, 1000.0));

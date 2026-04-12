@@ -34,12 +34,13 @@ impl Widget for MenuSeparator {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
+        // Int UI menu separator: a flush-edge 1 dp line in `divider` color,
+        // vertically centered in the `separator_height` (9 dp) slot — that
+        // slot provides 4 dp top/bottom breathing room around the line.
         let color = ctx.theme.colors.divider;
-        let y = bounds.y + bounds.height / 2.0;
-        canvas.fill_rect(
-            Rect::new(bounds.x + 8.0, y, bounds.width - 16.0, 1.0),
-            color,
-        );
+        let thickness = ctx.theme.shape.border_width;
+        let y = bounds.y + (bounds.height - thickness) * 0.5;
+        canvas.fill_rect(Rect::new(bounds.x, y, bounds.width, thickness), color);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -68,13 +69,16 @@ impl Widget for KeyboardHighlightWrapper {
         let theme = ctx.theme().clone();
         let index = self.index;
 
-        // Background highlight driven by focused_index signal.
-        // Registered via bind_background → Prop::Bound → binding registry.
+        // Keyboard focus highlight uses the dedicated `surface_selected`
+        // token (not an alpha wash over `accent`) so it tracks theme
+        // changes and stays distinct from mouse hover (`surface_hover`).
+        // When the keyboard focus moves to a row, this wrapper paints a
+        // solid `surface_selected` fill behind the MenuItem.
         let bg_color = self.focused_index.map({
-            let primary = theme.colors.accent;
+            let selected = theme.colors.surface_selected;
             move |focused| {
                 if *focused == Some(index) {
-                    primary.with_alpha(0.10)
+                    selected
                 } else {
                     Color::TRANSPARENT
                 }
@@ -92,9 +96,21 @@ impl Widget for KeyboardHighlightWrapper {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 32.0))
+        // Forward the proposal to the wrapped MenuItem directly rather than
+        // going through the internal ZStack. ZStack::size_that_fits always
+        // queries its children with `unspecified` (correct for most uses,
+        // since ZStack layers typically have independent natural sizes),
+        // which would strip the parent's width proposal. But for this
+        // wrapper the whole point is that the MenuItem fills the VStack's
+        // cross-axis width — bypass the ZStack in the sizing path so the
+        // width propagates to the MenuItem → HStack → spacer chain.
+        let item_size = ctx
+            .child_size(self.item_id, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 32.0));
+        // Respect the proposed width when offered, so VStack::place_children
+        // places this wrapper at the full popup width.
+        let width = proposal.width.unwrap_or(item_size.width);
+        Size::new(width, item_size.height)
     }
 
     fn place_children(
