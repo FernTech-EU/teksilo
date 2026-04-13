@@ -14,9 +14,52 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{CornerRadius, Orientation};
 
-const DEFAULT_DIVIDER_THICKNESS: f32 = 12.0;
-const DEFAULT_MIN_PANE_SIZE: f32 = 96.0;
-const KEYBOARD_STEP_PX: f32 = 24.0;
+#[derive(Debug, Clone, Copy)]
+struct SplitBounds {
+    start: f32,
+    available: f32,
+    min: f32,
+    max: f32,
+    keyboard_step_px: f32,
+}
+
+impl SplitBounds {
+    fn compute(
+        bounds: Rect,
+        orientation: Orientation,
+        divider_thickness: f32,
+        min_first_size: f32,
+        min_second_size: f32,
+        keyboard_step_px: f32,
+    ) -> Option<Self> {
+        let (start, total) = match orientation {
+            Orientation::Horizontal => (bounds.x, bounds.width),
+            Orientation::Vertical => (bounds.y, bounds.height),
+        };
+        let available = total - divider_thickness;
+        if available <= 0.0 {
+            return None;
+        }
+        let min = (min_first_size / available).clamp(0.0, 1.0);
+        let max = 1.0 - (min_second_size / available).clamp(0.0, 1.0);
+        let (min, max) = if min <= max { (min, max) } else { (0.5, 0.5) };
+        Some(Self {
+            start,
+            available,
+            min,
+            max,
+            keyboard_step_px,
+        })
+    }
+
+    fn clamp(&self, fraction: f32) -> f32 {
+        fraction.clamp(self.min, self.max)
+    }
+
+    fn keyboard_step(&self) -> f32 {
+        (self.keyboard_step_px / self.available.max(1.0)).clamp(0.01, 0.2)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitHandleState {
@@ -32,18 +75,21 @@ struct SplitHandle {
     min_first_size: f32,
     min_second_size: f32,
     divider_thickness: f32,
+    keyboard_step_px: f32,
     enabled: bool,
     container_bounds: Rc<Cell<Rect>>,
     interaction: Signal<SplitHandleState>,
 }
 
 impl SplitHandle {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         split: Signal<f32>,
         orientation: Orientation,
         min_first_size: f32,
         min_second_size: f32,
         divider_thickness: f32,
+        keyboard_step_px: f32,
         enabled: bool,
         container_bounds: Rc<Cell<Rect>>,
     ) -> Self {
@@ -53,6 +99,7 @@ impl SplitHandle {
             min_first_size,
             min_second_size,
             divider_thickness,
+            keyboard_step_px,
             enabled,
             container_bounds,
             interaction: Signal::new(SplitHandleState::Idle),
@@ -73,52 +120,56 @@ impl std::fmt::Debug for SplitHandle {
 impl Widget for SplitHandle {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        let interaction = ctx.signal(SplitHandleState::Idle);
         let registry = ctx.binding_registry();
-        interaction.bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        self.interaction = interaction.clone();
+        self.interaction
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        let interaction = self.interaction.clone();
 
         let enabled = self.enabled;
         let orientation = self.orientation;
         let divider_thickness = self.divider_thickness;
-        let split = self.split.clone();
-        let container_bounds = self.container_bounds.clone();
         let min_first_size = self.min_first_size;
         let min_second_size = self.min_second_size;
+        let keyboard_step_px = self.keyboard_step_px;
         let resize_cursor = match orientation {
             Orientation::Horizontal => CursorIcon::ColResize,
             Orientation::Vertical => CursorIcon::RowResize,
         };
 
-        let set_from_position = move |position: Point| {
-            let bounds = container_bounds.get();
-            let available = match orientation {
-                Orientation::Horizontal => bounds.width,
-                Orientation::Vertical => bounds.height,
-            } - divider_thickness;
-            if available <= 0.0 {
-                return;
-            }
+        let drag_offset = Rc::new(Cell::new(0.0_f32));
 
-            let start = match orientation {
-                Orientation::Horizontal => bounds.x,
-                Orientation::Vertical => bounds.y,
-            };
-            let coordinate = match orientation {
-                Orientation::Horizontal => position.x,
-                Orientation::Vertical => position.y,
-            };
-            let min = (min_first_size / available).clamp(0.0, 1.0);
-            let max = 1.0 - (min_second_size / available).clamp(0.0, 1.0);
-            let (min, max) = if min <= max { (min, max) } else { (0.5, 0.5) };
-            let fraction =
-                ((coordinate - start - divider_thickness / 2.0) / available).clamp(min, max);
-            split.set(fraction);
+        let set_from_position = {
+            let split = self.split.clone();
+            let container_bounds = self.container_bounds.clone();
+            let drag_offset = drag_offset.clone();
+            move |position: Point| {
+                let Some(sb) = SplitBounds::compute(
+                    container_bounds.get(),
+                    orientation,
+                    divider_thickness,
+                    min_first_size,
+                    min_second_size,
+                    keyboard_step_px,
+                ) else {
+                    return;
+                };
+                let coordinate = match orientation {
+                    Orientation::Horizontal => position.x,
+                    Orientation::Vertical => position.y,
+                };
+                let divider_center = coordinate - drag_offset.get();
+                let fraction =
+                    (divider_center - sb.start - divider_thickness / 2.0) / sb.available;
+                split.set(sb.clamp(fraction));
+            }
         };
 
         let handler_set = HandlerSet::new()
             .on_pointer_event({
                 let interaction = interaction.clone();
+                let split = self.split.clone();
+                let container_bounds = self.container_bounds.clone();
+                let drag_offset = drag_offset.clone();
                 move |event, ctx: &mut EventContext| {
                     if !enabled {
                         return EventResponse::Ignored;
@@ -131,8 +182,28 @@ impl Widget for SplitHandle {
                             if *button != PointerButton::Primary {
                                 return EventResponse::Ignored;
                             }
+                            // Record pointer offset relative to the divider's center so the
+                            // splitter doesn't jump when the user grabs it near an edge.
+                            if let Some(sb) = SplitBounds::compute(
+                                container_bounds.get(),
+                                orientation,
+                                divider_thickness,
+                                min_first_size,
+                                min_second_size,
+                                keyboard_step_px,
+                            ) {
+                                let coordinate = match orientation {
+                                    Orientation::Horizontal => position.x,
+                                    Orientation::Vertical => position.y,
+                                };
+                                let divider_center = sb.start
+                                    + sb.available * sb.clamp(split.get())
+                                    + divider_thickness / 2.0;
+                                drag_offset.set(coordinate - divider_center);
+                            } else {
+                                drag_offset.set(0.0);
+                            }
                             interaction.set(SplitHandleState::Dragging);
-                            set_from_position(*position);
                             ctx.capture_pointer();
                             ctx.request_focus(self_id);
                             EventResponse::Handled
@@ -147,7 +218,9 @@ impl Widget for SplitHandle {
                         }
                         WidgetEvent::PointerUp { .. } => {
                             if interaction.get() == SplitHandleState::Dragging {
-                                interaction.set(SplitHandleState::Focused);
+                                // Drop back to Hovered — focus ring is reserved for
+                                // keyboard-initiated focus, not pointer interaction.
+                                interaction.set(SplitHandleState::Hovered);
                                 ctx.release_pointer();
                                 EventResponse::Handled
                             } else {
@@ -193,7 +266,7 @@ impl Widget for SplitHandle {
                 }
             })
             .on_key({
-                let handle = self.split.clone();
+                let split = self.split.clone();
                 let container_bounds = self.container_bounds.clone();
                 let interaction = interaction.clone();
                 move |event, _ctx| {
@@ -201,19 +274,21 @@ impl Widget for SplitHandle {
                         return EventResponse::Ignored;
                     }
 
-                    let bounds = container_bounds.get();
-                    let available = match orientation {
-                        Orientation::Horizontal => bounds.width,
-                        Orientation::Vertical => bounds.height,
-                    } - divider_thickness;
-                    let step = (KEYBOARD_STEP_PX / available.max(1.0)).clamp(0.01, 0.2);
-                    let min = (min_first_size / available.max(1.0)).clamp(0.0, 1.0);
-                    let max = 1.0 - (min_second_size / available.max(1.0)).clamp(0.0, 1.0);
-                    let (min, max) = if min <= max { (min, max) } else { (0.5, 0.5) };
+                    let Some(sb) = SplitBounds::compute(
+                        container_bounds.get(),
+                        orientation,
+                        divider_thickness,
+                        min_first_size,
+                        min_second_size,
+                        keyboard_step_px,
+                    ) else {
+                        return EventResponse::Ignored;
+                    };
+                    let step = sb.keyboard_step();
 
                     match event {
                         WidgetEvent::KeyDown { key, .. } => {
-                            let mut next = handle.get();
+                            let mut next = split.get();
                             let handled = match (orientation, key) {
                                 (Orientation::Horizontal, Key::ArrowLeft) => {
                                     next -= step;
@@ -232,18 +307,18 @@ impl Widget for SplitHandle {
                                     true
                                 }
                                 (_, Key::Home) => {
-                                    next = min;
+                                    next = sb.min;
                                     true
                                 }
                                 (_, Key::End) => {
-                                    next = max;
+                                    next = sb.max;
                                     true
                                 }
                                 _ => false,
                             };
 
                             if handled {
-                                handle.set(next.clamp(min, max));
+                                split.set(sb.clamp(next));
                                 interaction.set(SplitHandleState::Focused);
                                 EventResponse::Handled
                             } else {
@@ -263,15 +338,17 @@ impl Widget for SplitHandle {
                         return EventResponse::Ignored;
                     }
 
-                    let bounds = container_bounds.get();
-                    let available = match orientation {
-                        Orientation::Horizontal => bounds.width,
-                        Orientation::Vertical => bounds.height,
-                    } - divider_thickness;
-                    let step = (KEYBOARD_STEP_PX / available.max(1.0)).clamp(0.01, 0.2);
-                    let min = (min_first_size / available.max(1.0)).clamp(0.0, 1.0);
-                    let max = 1.0 - (min_second_size / available.max(1.0)).clamp(0.0, 1.0);
-                    let (min, max) = if min <= max { (min, max) } else { (0.5, 0.5) };
+                    let Some(sb) = SplitBounds::compute(
+                        container_bounds.get(),
+                        orientation,
+                        divider_thickness,
+                        min_first_size,
+                        min_second_size,
+                        keyboard_step_px,
+                    ) else {
+                        return EventResponse::Ignored;
+                    };
+                    let step = sb.keyboard_step();
 
                     let delta = match action {
                         fern_core::accesskit::Action::Increment => Some(step),
@@ -280,7 +357,7 @@ impl Widget for SplitHandle {
                     };
 
                     if let Some(delta) = delta {
-                        split.set((split.get() + delta).clamp(min, max));
+                        split.set(sb.clamp(split.get() + delta));
                         interaction.set(SplitHandleState::Focused);
                         EventResponse::Handled
                     } else {
@@ -329,7 +406,7 @@ impl Widget for SplitHandle {
         };
         canvas.fill_rounded_rect(
             bounds,
-            CornerRadius::uniform(ctx.theme.shape.radius_control),
+            CornerRadius::uniform(ctx.theme.components.split_view.corner_radius),
             background,
         );
 
@@ -371,7 +448,7 @@ impl Widget for SplitHandle {
         if interaction == SplitHandleState::Focused {
             canvas.stroke_rounded_rect(
                 bounds,
-                CornerRadius::uniform(ctx.theme.shape.radius_control),
+                CornerRadius::uniform(ctx.theme.components.split_view.corner_radius),
                 colors.focus_ring,
                 2.0,
             );
@@ -401,6 +478,10 @@ pub struct SplitView {
     min_first_size: f32,
     min_second_size: f32,
     divider_thickness: f32,
+    keyboard_step_px: f32,
+    min_first_override: Option<f32>,
+    min_second_override: Option<f32>,
+    divider_thickness_override: Option<f32>,
     enabled: bool,
     first_pending: Option<PendingChild>,
     second_pending: Option<PendingChild>,
@@ -412,12 +493,17 @@ pub struct SplitView {
 
 impl SplitView {
     pub fn new(split: Signal<f32>) -> Self {
+        let defaults = fern_tokens::SplitViewStyle::default();
         Self {
             split,
             orientation: Orientation::Horizontal,
-            min_first_size: DEFAULT_MIN_PANE_SIZE,
-            min_second_size: DEFAULT_MIN_PANE_SIZE,
-            divider_thickness: DEFAULT_DIVIDER_THICKNESS,
+            min_first_size: defaults.min_pane_size,
+            min_second_size: defaults.min_pane_size,
+            divider_thickness: defaults.gutter_thickness,
+            keyboard_step_px: defaults.keyboard_step,
+            min_first_override: None,
+            min_second_override: None,
+            divider_thickness_override: None,
             enabled: true,
             first_pending: None,
             second_pending: None,
@@ -434,17 +520,17 @@ impl SplitView {
     }
 
     pub fn min_first_size(mut self, size: f32) -> Self {
-        self.min_first_size = size.max(0.0);
+        self.min_first_override = Some(size.max(0.0));
         self
     }
 
     pub fn min_second_size(mut self, size: f32) -> Self {
-        self.min_second_size = size.max(0.0);
+        self.min_second_override = Some(size.max(0.0));
         self
     }
 
     pub fn divider_thickness(mut self, thickness: f32) -> Self {
-        self.divider_thickness = thickness.max(1.0);
+        self.divider_thickness_override = Some(thickness.max(1.0));
         self
     }
 
@@ -474,19 +560,16 @@ impl SplitView {
     }
 
     fn clamp_fraction(&self, bounds: Rect) -> f32 {
-        let available = match self.orientation {
-            Orientation::Horizontal => bounds.width,
-            Orientation::Vertical => bounds.height,
-        } - self.divider_thickness;
-
-        if available <= 0.0 {
-            return 0.5;
-        }
-
-        let min = (self.min_first_size / available).clamp(0.0, 1.0);
-        let max = 1.0 - (self.min_second_size / available).clamp(0.0, 1.0);
-        let (min, max) = if min <= max { (min, max) } else { (0.5, 0.5) };
-        self.split.get().clamp(min, max)
+        SplitBounds::compute(
+            bounds,
+            self.orientation,
+            self.divider_thickness,
+            self.min_first_size,
+            self.min_second_size,
+            self.keyboard_step_px,
+        )
+        .map(|sb| sb.clamp(self.split.get()))
+        .unwrap_or(0.5)
     }
 }
 
@@ -503,6 +586,14 @@ impl std::fmt::Debug for SplitView {
 impl Widget for SplitView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        let style = ctx.theme().components.split_view;
+        self.divider_thickness = self
+            .divider_thickness_override
+            .unwrap_or(style.gutter_thickness);
+        self.min_first_size = self.min_first_override.unwrap_or(style.min_pane_size);
+        self.min_second_size = self.min_second_override.unwrap_or(style.min_pane_size);
+        self.keyboard_step_px = style.keyboard_step;
+
         let registry = ctx.binding_registry();
         self.split
             .bind_to(self_id, registry, BindingLevel::Relayout);
@@ -527,6 +618,7 @@ impl Widget for SplitView {
             self.min_first_size,
             self.min_second_size,
             self.divider_thickness,
+            self.keyboard_step_px,
             self.enabled,
             self.container_bounds.clone(),
         )));
@@ -535,24 +627,51 @@ impl Widget for SplitView {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        // Query children with an unbounded primary axis to get their intrinsic
+        // size — used only as a fallback when the parent doesn't constrain us.
+        let child_proposal = match self.orientation {
+            Orientation::Horizontal => SizeProposal {
+                width: None,
+                height: proposal.height,
+            },
+            Orientation::Vertical => SizeProposal {
+                width: proposal.width,
+                height: None,
+            },
+        };
         let first_size = self
             .first_id
-            .and_then(|id| ctx.child_size(id, proposal))
+            .and_then(|id| ctx.child_size(id, child_proposal))
             .unwrap_or(Size::ZERO);
         let second_size = self
             .second_id
-            .and_then(|id| ctx.child_size(id, proposal))
+            .and_then(|id| ctx.child_size(id, child_proposal))
             .unwrap_or(Size::ZERO);
 
         match self.orientation {
-            Orientation::Horizontal => Size::new(
-                first_size.width + self.divider_thickness + second_size.width,
-                first_size.height.max(second_size.height),
-            ),
-            Orientation::Vertical => Size::new(
-                first_size.width.max(second_size.width),
-                first_size.height + self.divider_thickness + second_size.height,
-            ),
+            Orientation::Horizontal => {
+                let intrinsic_width =
+                    first_size.width + self.divider_thickness + second_size.width;
+                let min_width = self.min_first_size + self.divider_thickness + self.min_second_size;
+                Size::new(
+                    proposal.width.unwrap_or(intrinsic_width).max(min_width),
+                    proposal
+                        .height
+                        .unwrap_or_else(|| first_size.height.max(second_size.height)),
+                )
+            }
+            Orientation::Vertical => {
+                let intrinsic_height =
+                    first_size.height + self.divider_thickness + second_size.height;
+                let min_height =
+                    self.min_first_size + self.divider_thickness + self.min_second_size;
+                Size::new(
+                    proposal
+                        .width
+                        .unwrap_or_else(|| first_size.width.max(second_size.width)),
+                    proposal.height.unwrap_or(intrinsic_height).max(min_height),
+                )
+            }
         }
     }
 
@@ -647,7 +766,8 @@ mod tests {
         let second = tree.child_widget(root, 2);
 
         assert!((tree.bounds(first).width - 97.0).abs() < 0.01);
-        assert!((tree.bounds(handle).width - DEFAULT_DIVIDER_THICKNESS).abs() < 0.01);
+        let default_thickness = fern_tokens::SplitViewStyle::default().gutter_thickness;
+        assert!((tree.bounds(handle).width - default_thickness).abs() < 0.01);
         assert!((tree.bounds(second).width - 291.0).abs() < 0.01);
     }
 

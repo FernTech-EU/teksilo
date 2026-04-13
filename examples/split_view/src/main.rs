@@ -1,16 +1,20 @@
-use fern_ui::core::WidgetPlacement;
+use fern_ui::core::{Signal, WidgetPlacement};
 use fern_ui::prelude::*;
 use fern_ui::tokens::Orientation;
-use fern_ui::widgets::{Badge, Panel, ScrollArea, SplitView, TextWidget, VStack};
+use fern_ui::widgets::{Badge, FixedSize, Panel, ScrollArea, SplitView, TextWidget, VStack};
 
 #[derive(Debug)]
 struct SplitViewDemo {
+    horizontal_split: Signal<f32>,
+    vertical_split: Signal<f32>,
     root_child_id: Option<WidgetId>,
 }
 
 impl SplitViewDemo {
     fn new() -> Self {
         Self {
+            horizontal_split: Signal::new(0.32_f32),
+            vertical_split: Signal::new(0.55_f32),
             root_child_id: None,
         }
     }
@@ -21,9 +25,6 @@ impl Widget for SplitViewDemo {
         let theme = ctx.theme().clone();
         let t = &theme.typography;
         let c = &theme.colors;
-
-        let horizontal_split = ctx.signal(0.32_f32);
-        let vertical_split = ctx.signal(0.55_f32);
 
         let root = ctx.add(
             ScrollArea::new(
@@ -41,28 +42,40 @@ impl Widget for SplitViewDemo {
                         .style(t.body.clone())
                         .color(c.text_secondary),
                     )
+                    .child(Panel::new().padding(16.0).child(
+                        SplitView::new(self.horizontal_split.clone())
+                            .min_first_size(180.0)
+                            .min_second_size(220.0)
+                            .first(build_editor_pane(
+                                "Project",
+                                &["src", "crates", "examples", "README.md"],
+                                &theme,
+                            ))
+                            .second(build_preview_pane(
+                                "Preview",
+                                "Wide horizontal split for project navigation and live preview.",
+                                &theme,
+                            )),
+                    ))
                     .child(
-                        Panel::new()
-                            .padding(16.0)
-                            .child(
-                                SplitView::new(horizontal_split)
-                                    .min_first_size(180.0)
-                                    .min_second_size(220.0)
-                                    .first(build_editor_pane("Project", &["src", "crates", "examples", "README.md"]))
-                                    .second(build_preview_pane("Preview", "Wide horizontal split for project navigation and live preview.")),
-                            ),
-                    )
-                    .child(
-                        Panel::new()
-                            .padding(16.0)
-                            .child(
-                                SplitView::new(vertical_split)
+                        Panel::new().padding(16.0).child(
+                            FixedSize::new().bind_height(360.0_f32).child(
+                                SplitView::new(self.vertical_split.clone())
                                     .orientation(Orientation::Vertical)
                                     .min_first_size(120.0)
                                     .min_second_size(140.0)
-                                    .first(build_preview_pane("Console", "A vertical split is useful for logs above an inspector or terminal."))
-                                    .second(build_editor_pane("Inspector", &["Selection", "Layout", "Accessibility", "Animations"])),
+                                    .first(build_preview_pane(
+                                        "Console",
+                                        "A vertical split is useful for logs above an inspector or terminal.",
+                                        &theme,
+                                    ))
+                                    .second(build_editor_pane(
+                                        "Inspector",
+                                        &["Selection", "Layout", "Accessibility", "Animations"],
+                                        &theme,
+                                    )),
                             ),
+                        ),
                     ),
             )
             .widget_resizable(true),
@@ -85,6 +98,7 @@ impl Widget for SplitViewDemo {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
+        debug_assert_eq!(children.len(), 1);
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
@@ -96,20 +110,32 @@ impl Widget for SplitViewDemo {
     }
 }
 
-fn build_editor_pane(title: &str, items: &[&str]) -> impl Widget {
-    let mut stack = VStack::new().spacing(10.0).child(TextWidget::new(title));
+fn build_editor_pane(title: &str, items: &[&str], theme: &Theme) -> impl Widget {
+    let mut stack = VStack::new().spacing(10.0).child(
+        TextWidget::new(title)
+            .style(theme.typography.body_bold.clone())
+            .color(theme.colors.text_primary),
+    );
     for item in items {
         stack = stack.child(Badge::new(*item));
     }
     Panel::new().padding(16.0).child(stack)
 }
 
-fn build_preview_pane(title: &str, text: &str) -> impl Widget {
+fn build_preview_pane(title: &str, text: &str, theme: &Theme) -> impl Widget {
     Panel::new().padding(20.0).child(
         VStack::new()
             .spacing(12.0)
-            .child(TextWidget::new(title))
-            .child(TextWidget::new(text)),
+            .child(
+                TextWidget::new(title)
+                    .style(theme.typography.body_bold.clone())
+                    .color(theme.colors.text_primary),
+            )
+            .child(
+                TextWidget::new(text)
+                    .style(theme.typography.body.clone())
+                    .color(theme.colors.text_secondary),
+            ),
     )
 }
 

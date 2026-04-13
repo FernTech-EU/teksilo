@@ -609,14 +609,20 @@ pub struct SplitViewStyle {
     pub gutter_thickness: f32,
     pub gutter_handle_size: f32,
     pub corner_radius: f32,
+    /// Default minimum size of either pane, in logical pixels.
+    pub min_pane_size: f32,
+    /// Step size in logical pixels for arrow-key and a11y increment/decrement.
+    pub keyboard_step: f32,
 }
 
 impl Default for SplitViewStyle {
     fn default() -> Self {
         Self {
-            gutter_thickness: 6.0,
+            gutter_thickness: 12.0,
             gutter_handle_size: 4.0,
             corner_radius: 2.0,
+            min_pane_size: 96.0,
+            keyboard_step: 24.0,
         }
     }
 }
