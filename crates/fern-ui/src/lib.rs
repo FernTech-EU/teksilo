@@ -17,10 +17,10 @@ pub use fern_i18n as i18n;
 pub mod prelude {
     // Core widget types
     pub use fern_core::{
-        AccessNodeBuilder, AppCommand, BuildContext, CursorIcon, DerivedState, EventContext,
-        EventResponse, FocusPolicy, Key, LayoutContext, ModalCloseBehavior, ModalPresentation,
-        Modifiers, PaintContext, Shortcut, ShortcutMap, State, Widget, WidgetBuilder,
-        WidgetEvent, WidgetId,
+        AccessNodeBuilder, AppCommand, BuildContext, CursorIcon, EventContext, EventResponse,
+        FocusPolicy, Key, LayoutContext, ModalCloseBehavior, ModalPresentation, Modifiers,
+        PaintContext, Prop, Shortcut, ShortcutMap, Signal, Widget, WidgetBuilder, WidgetEvent,
+        WidgetId,
     };
 
     // Geometry (lives in fern-canvas)
