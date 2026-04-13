@@ -115,7 +115,7 @@ impl Widget for Slider {
         self.value.bind_to(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
 
         // Capture the thumb radius at build time. The event handlers need

@@ -5,7 +5,7 @@
 
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
 use crate::signal::{ObserverHandle, Signal};
-use crate::state::BindingRegistry;
+use crate::binding::BindingRegistry;
 use crate::widget_id::WidgetId;
 
 /// Context available during Widget::build().

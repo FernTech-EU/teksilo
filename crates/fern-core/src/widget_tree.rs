@@ -70,7 +70,7 @@ pub struct WidgetTree {
     pending_modal_dismissal: bool,
     shortcut_lookup: Option<ShortcutLookup>,
     shortcut_reverse_lookup: Option<ShortcutReverseLookup>,
-    binding_registry: crate::state::BindingRegistry,
+    binding_registry: crate::binding::BindingRegistry,
     idle_queue: crate::idle::IdleQueue,
     /// Simulated clock for deterministic time-dependent testing.
     sim_clock: std::time::Instant,
@@ -160,7 +160,7 @@ impl WidgetTree {
             pending_modal_dismissal: false,
             shortcut_lookup: None,
             shortcut_reverse_lookup: None,
-            binding_registry: crate::state::BindingRegistry::new(),
+            binding_registry: crate::binding::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
             sim_clock: std::time::Instant::now(),
             focus_origin: None,
@@ -684,7 +684,7 @@ impl WidgetTree {
     }
 
     /// Get the binding registry for registering State→Widget bindings.
-    pub fn binding_registry(&self) -> &crate::state::BindingRegistry {
+    pub fn binding_registry(&self) -> &crate::binding::BindingRegistry {
         &self.binding_registry
     }
 
@@ -931,7 +931,7 @@ impl WidgetTree {
         prop.register_if_bound(
             id,
             &self.binding_registry,
-            crate::state::BindingLevel::Relayout,
+            crate::binding::BindingLevel::Relayout,
         );
         if let Some(node) = self.arena.get_mut(id) {
             node.visible_state = Some(prop);
@@ -946,7 +946,7 @@ impl WidgetTree {
         prop.register_if_bound(
             id,
             &self.binding_registry,
-            crate::state::BindingLevel::Relayout,
+            crate::binding::BindingLevel::Relayout,
         );
         if let Some(node) = self.arena.get_mut(id) {
             node.enabled_state = Some(prop);

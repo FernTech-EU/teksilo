@@ -16,7 +16,7 @@ use fern_core::DropFeedback;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::drag_payload::DragPayload;
 use fern_core::signal::Signal;
-use fern_core::state::BindingLevel;
+use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;

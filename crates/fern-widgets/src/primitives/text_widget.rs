@@ -74,11 +74,11 @@ impl Widget for TextWidget {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
         self.text
-            .register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
+            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         self.color.register_if_bound(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         Vec::new()
     }
@@ -128,7 +128,7 @@ mod tests {
         text.bind_to(
             w,
             tree.binding_registry(),
-            fern_core::state::BindingLevel::Relayout,
+            fern_core::binding::BindingLevel::Relayout,
         );
         tree.layout(SizeProposal::exact(200.0, 40.0));
 
@@ -143,7 +143,7 @@ mod tests {
         text.bind_to(
             w,
             tree.binding_registry(),
-            fern_core::state::BindingLevel::Relayout,
+            fern_core::binding::BindingLevel::Relayout,
         );
 
         tree.layout(SizeProposal::exact(200.0, 40.0));

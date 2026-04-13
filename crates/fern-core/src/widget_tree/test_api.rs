@@ -264,7 +264,7 @@ mod tests {
         signal.bind_to(
             widget,
             tree.binding_registry(),
-            crate::state::BindingLevel::Relayout,
+            crate::binding::BindingLevel::Relayout,
         );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));

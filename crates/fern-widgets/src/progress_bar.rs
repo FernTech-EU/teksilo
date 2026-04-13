@@ -10,7 +10,7 @@
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::signal::{Prop, Signal};
-use fern_core::state::BindingLevel;
+use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Easing, Orientation};

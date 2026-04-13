@@ -77,10 +77,10 @@ impl Widget for MinSize {
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
         if let Some(ref w) = self.min_width {
-            w.register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
+            w.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         }
         if let Some(ref h) = self.min_height {
-            h.register_if_bound(self_id, registry, fern_core::state::BindingLevel::Relayout);
+            h.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         }
         self.child_id.into_iter().collect()
     }

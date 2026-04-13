@@ -17,7 +17,7 @@ pub mod modal;
 pub mod overlay;
 pub mod shortcut;
 pub mod signal;
-pub mod state;
+pub mod binding;
 pub mod widget;
 pub mod widget_builder;
 pub mod widget_id;
@@ -57,7 +57,7 @@ pub use overlay::{
 pub use shortcut::{Shortcut, ShortcutMap, ShortcutScope};
 pub use animation::AnimationRequest;
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
-pub use state::{BindingLevel, BindingRegistry};
+pub use binding::{BindingLevel, BindingRegistry};
 pub use widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };

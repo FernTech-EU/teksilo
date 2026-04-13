@@ -173,7 +173,7 @@ impl Widget for IconWidget {
         self.color.register_if_bound(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         Vec::new()
     }

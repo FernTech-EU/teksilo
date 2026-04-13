@@ -7,14 +7,14 @@ impl WidgetTree {
         let dirty_widgets = self.binding_registry.flush_dirty();
         for (id, level) in &dirty_widgets {
             match level {
-                crate::state::BindingLevel::RepaintOnly => {
+                crate::binding::BindingLevel::RepaintOnly => {
                     self.arena.mark_needs_paint(*id);
                 }
-                crate::state::BindingLevel::Relayout => {
+                crate::binding::BindingLevel::Relayout => {
                     self.arena.mark_needs_layout(*id);
                     self.arena.mark_ancestors_need_layout(*id);
                 }
-                crate::state::BindingLevel::Rebuild => {
+                crate::binding::BindingLevel::Rebuild => {
                     self.arena.mark_needs_rebuild(*id);
                     self.arena.mark_ancestors_need_layout(*id);
                 }
@@ -379,7 +379,7 @@ mod tests {
         visible.bind_to(
             widget,
             tree.binding_registry(),
-            crate::state::BindingLevel::RepaintOnly,
+            crate::binding::BindingLevel::RepaintOnly,
         );
 
         visible.set(false);

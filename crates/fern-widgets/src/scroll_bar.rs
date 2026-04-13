@@ -206,17 +206,17 @@ impl Widget for ScrollBar {
         self.scroll_position.bind_to(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         self.max_scroll.bind_to(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         self.viewport_ratio.bind_to(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
 
         let scroll_position = self.scroll_position.clone();

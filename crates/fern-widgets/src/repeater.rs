@@ -13,7 +13,7 @@ use std::rc::Rc;
 use fern_canvas::{Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::state::BindingLevel;
+use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 

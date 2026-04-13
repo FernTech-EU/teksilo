@@ -4,7 +4,7 @@ use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::state::BindingLevel;
+use fern_core::binding::BindingLevel;
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };

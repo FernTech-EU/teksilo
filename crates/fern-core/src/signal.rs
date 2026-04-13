@@ -7,7 +7,7 @@
 use std::cell::{Ref, RefCell};
 use std::rc::{Rc, Weak};
 
-use crate::state::{Binding, BindingLevel, BindingRegistry};
+use crate::binding::{Binding, BindingLevel, BindingRegistry};
 use crate::widget_id::WidgetId;
 
 // ---------------------------------------------------------------------------

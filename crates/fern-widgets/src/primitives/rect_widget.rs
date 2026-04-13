@@ -91,22 +91,22 @@ impl Widget for RectWidget {
         self.background.register_if_bound(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         self.border_color.register_if_bound(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         self.border_width.register_if_bound(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         self.corner_radius.register_if_bound(
             self_id,
             registry,
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         Vec::new()
     }
@@ -165,7 +165,7 @@ mod tests {
         color.bind_to(
             w,
             tree.binding_registry(),
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
         tree.layout(SizeProposal::exact(100.0, 40.0));
         let frame = tree.render();
@@ -184,7 +184,7 @@ mod tests {
         color.bind_to(
             w,
             tree.binding_registry(),
-            fern_core::state::BindingLevel::RepaintOnly,
+            fern_core::binding::BindingLevel::RepaintOnly,
         );
 
         tree.layout(SizeProposal::exact(100.0, 40.0));
