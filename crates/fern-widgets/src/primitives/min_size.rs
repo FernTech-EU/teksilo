@@ -125,7 +125,7 @@ impl Widget for MinSize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::state::State;
+    use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
 
     #[derive(Debug)]
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn bind_min_width_dynamic() {
-        let min_w = State::new(48.0_f32);
+        let min_w = Signal::new(48.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
         let min = tree.add(

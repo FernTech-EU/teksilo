@@ -119,7 +119,7 @@ impl Widget for FixedSize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::state::State;
+    use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
 
     #[derive(Debug)]
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn bind_width_constrains_size() {
-        let width = State::new(150.0_f32);
+        let width = Signal::new(150.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let fixed = tree.add(FixedSize::new().bind_width(width.clone()).set_child(child));
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn bind_width_triggers_relayout_on_change() {
-        let width = State::new(200.0_f32);
+        let width = Signal::new(200.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
         let fixed = tree.add(FixedSize::new().bind_width(width.clone()).set_child(child));

@@ -463,7 +463,7 @@ impl WidgetTree {
         self.animation_scheduler.has_active()
     }
 
-    /// Pick up pending `set_animated` requests from registered states
+    /// Pick up pending `animate_to` requests from registered signals
     /// and start them on the animation scheduler.
     fn process_pending_animations(&mut self) {
         let now = std::time::Instant::now();
@@ -495,7 +495,7 @@ impl WidgetTree {
     }
 
     /// Advance animations by simulated time (for deterministic testing).
-    /// Pending `set_animated` requests are started at the current sim_clock,
+    /// Pending `animate_to` requests are started at the current sim_clock,
     /// then time advances by `duration`, and the scheduler ticks at the new time.
     pub fn tick_animations(&mut self, duration: std::time::Duration) {
         self.process_pending_animations_at(self.sim_clock);

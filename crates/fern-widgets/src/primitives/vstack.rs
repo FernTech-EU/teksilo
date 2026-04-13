@@ -513,9 +513,9 @@ mod tests {
 
     #[test]
     fn dormant_child_via_visible_when_does_not_take_layout_space() {
-        use fern_core::state::State;
+        use fern_core::signal::Signal;
 
-        let show_b = State::new(true);
+        let show_b = Signal::new(true);
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 30.0));
         let b = tree.add(FixedLeaf(80.0, 40.0));

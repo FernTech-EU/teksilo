@@ -117,12 +117,12 @@ impl Widget for TextWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::state::State;
+    use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
 
     #[test]
     fn bind_text_renders_state_value() {
-        let text = State::new("Hello".to_string());
+        let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
         let w = tree.add(TextWidget::new("").bind_text(text.clone()));
         text.bind_to(
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn bind_text_updates_on_state_change() {
-        let text = State::new("Hello".to_string());
+        let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
         let w = tree.add(TextWidget::new("").bind_text(text.clone()));
         text.bind_to(

@@ -136,7 +136,7 @@ impl Widget for RectWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::state::State;
+    use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
 
     #[test]
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn bind_background_reads_from_state() {
-        let color = State::new(Color::BLUE);
+        let color = Signal::new(Color::BLUE);
         let mut tree = WidgetTree::new();
         let w = tree.add(
             RectWidget::new()
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn bind_background_updates_on_state_change() {
-        let color = State::new(Color::RED);
+        let color = Signal::new(Color::RED);
         let mut tree = WidgetTree::new();
         let w = tree.add(
             RectWidget::new()

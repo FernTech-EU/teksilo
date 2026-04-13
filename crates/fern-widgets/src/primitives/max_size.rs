@@ -145,7 +145,7 @@ impl Widget for MaxSize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fern_core::state::State;
+    use fern_core::signal::Signal;
     use fern_core::widget_tree::WidgetTree;
 
     #[derive(Debug)]
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn bind_max_width_dynamic() {
-        let max_w = State::new(400.0_f32);
+        let max_w = Signal::new(400.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
         let max = tree.add(
