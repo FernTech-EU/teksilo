@@ -164,6 +164,9 @@ pub struct TreeAppContext {
     #[allow(clippy::type_complexity)]
     pub(crate) subscription_callbacks: RefCell<HashMap<SubscriptionId, Box<dyn Fn(&dyn Any)>>>,
     pub(crate) next_subscription_id: Cell<u64>,
+    /// Application-scoped values keyed by `TypeId` (architecture §9.5).
+    /// Populated at builder time, read-only after the tree starts running.
+    pub(crate) app_state: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl TreeAppContext {
@@ -175,6 +178,7 @@ impl TreeAppContext {
             event_source: None,
             subscription_callbacks: RefCell::new(HashMap::new()),
             next_subscription_id: Cell::new(1),
+            app_state: HashMap::new(),
         }
     }
 
@@ -190,7 +194,25 @@ impl TreeAppContext {
             event_source: Some(event_source),
             subscription_callbacks: RefCell::new(HashMap::new()),
             next_subscription_id: Cell::new(1),
+            app_state: HashMap::new(),
         }
+    }
+
+    /// Install an app-state registry (architecture §9.5). Consumes `self`
+    /// and returns a new context with the registry attached; the builder
+    /// calls this after constructing the context and before wrapping it
+    /// in `Rc`.
+    pub fn with_app_state(mut self, registry: HashMap<TypeId, Box<dyn Any>>) -> Self {
+        self.app_state = registry;
+        self
+    }
+
+    /// Look up an app-state value of type `T` previously registered via
+    /// `FernAppBuilder::app_state` (architecture §9.5).
+    pub fn app_state<T: 'static>(&self) -> Option<&T> {
+        self.app_state
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref::<T>())
     }
 
     pub(crate) fn allocate_subscription_id(&self) -> SubscriptionId {
@@ -491,5 +513,97 @@ mod tests {
             origin: TestOrigin::Created,
             last_message: signal,
         });
+    }
+
+    // --- app_state tests (architecture §9.5) ---
+
+    use std::rc::Rc;
+
+    struct TestGlobals {
+        greeting: Signal<String>,
+    }
+
+    /// Widget that reads `Rc<TestGlobals>` from app_state in `build()` and
+    /// records what it observed into an out-of-band signal.
+    #[derive(Debug)]
+    struct AppStateReader {
+        observed: Signal<String>,
+        saw_none: Signal<bool>,
+    }
+
+    impl Widget for AppStateReader {
+        fn build(
+            &mut self,
+            ctx: &mut crate::build_context::BuildContext,
+        ) -> Vec<WidgetId> {
+            match ctx.app_state::<Rc<TestGlobals>>() {
+                Some(globals) => self.observed.set(globals.greeting.get()),
+                None => self.saw_none.set(true),
+            }
+            Vec::new()
+        }
+
+        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+            proposal.resolve(0.0, 0.0)
+        }
+    }
+
+    #[test]
+    fn app_state_roundtrip_in_build_context() {
+        let globals = Rc::new(TestGlobals {
+            greeting: Signal::new("hello from registry".to_string()),
+        });
+
+        let mut registry: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        registry.insert(TypeId::of::<Rc<TestGlobals>>(), Box::new(globals.clone()));
+
+        let mut tree = WidgetTree::new();
+        tree.set_app_context(Rc::new(
+            TreeAppContext::empty().with_app_state(registry),
+        ));
+
+        let observed = Signal::new(String::new());
+        let saw_none = Signal::new(false);
+        tree.add(AppStateReader {
+            observed: observed.clone(),
+            saw_none: saw_none.clone(),
+        });
+
+        assert_eq!(observed.get(), "hello from registry");
+        assert!(!saw_none.get());
+    }
+
+    #[test]
+    fn app_state_missing_returns_none() {
+        let mut tree = WidgetTree::new();
+        // No app_state installed — tree has the empty default app context.
+
+        let observed = Signal::new(String::new());
+        let saw_none = Signal::new(false);
+        tree.add(AppStateReader {
+            observed: observed.clone(),
+            saw_none: saw_none.clone(),
+        });
+
+        assert_eq!(observed.get(), "");
+        assert!(saw_none.get());
+    }
+
+    #[test]
+    fn app_state_distinct_types_coexist() {
+        struct Alpha(u32);
+        struct Beta(String);
+
+        let mut registry: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        registry.insert(TypeId::of::<Rc<Alpha>>(), Box::new(Rc::new(Alpha(42))));
+        registry.insert(
+            TypeId::of::<Rc<Beta>>(),
+            Box::new(Rc::new(Beta("beta!".to_string()))),
+        );
+
+        let ctx = TreeAppContext::empty().with_app_state(registry);
+        assert_eq!(ctx.app_state::<Rc<Alpha>>().unwrap().0, 42);
+        assert_eq!(ctx.app_state::<Rc<Beta>>().unwrap().0, "beta!");
+        assert!(ctx.app_state::<Rc<u64>>().is_none());
     }
 }

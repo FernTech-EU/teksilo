@@ -10,6 +10,8 @@ use fern_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest}
 use fern_core::{WidgetId, WidgetTree};
 use fern_platform::event_translation;
 use fern_tokens::{ColorTokens, Theme};
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
@@ -872,6 +874,10 @@ pub struct FernAppBuilder {
     /// Type-erased adapter for the application's backend event source
     /// (architecture §9.4). Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
+    /// Application-scoped values keyed by `TypeId` (architecture §9.5).
+    /// Installed via `app_state::<T>(value)` and reachable from any
+    /// `BuildContext` via `ctx.app_state::<T>()`.
+    app_state_registry: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl FernAppBuilder {
@@ -891,6 +897,7 @@ impl FernAppBuilder {
             root_builder: None,
             custom_chrome: false,
             event_source: None,
+            app_state_registry: HashMap::new(),
         }
     }
 
@@ -902,6 +909,18 @@ impl FernAppBuilder {
     /// replace the previously registered source.
     pub fn event_source<S: EventSource>(mut self, source: S) -> Self {
         self.event_source = Some(EventSourceAdapter::new(source));
+        self
+    }
+
+    /// Register an application-defined value of type `T` that any widget
+    /// can retrieve via `BuildContext::app_state::<T>()` (architecture §9.5).
+    ///
+    /// Each type `T` may be registered at most once; a subsequent call
+    /// with the same type replaces the previous value. To share multiple
+    /// values of the same logical kind, wrap each in a distinct newtype.
+    pub fn app_state<T: 'static>(mut self, value: T) -> Self {
+        self.app_state_registry
+            .insert(TypeId::of::<T>(), Box::new(value));
         self
     }
 
@@ -1003,6 +1022,14 @@ impl FernAppBuilder {
             tree = tree.with_text_backend(typesetter.as_text_backend());
         }
 
+        // Install the app-state registry (if any) before running the root
+        // builder so that widgets' `build()` methods can call
+        // `ctx.app_state::<T>()`.
+        if !self.app_state_registry.is_empty() {
+            let ctx = TreeAppContext::empty().with_app_state(self.app_state_registry);
+            tree.set_app_context(std::rc::Rc::new(ctx));
+        }
+
         if let Some(root_builder) = self.root_builder {
             root_builder(&mut tree);
         }
@@ -1027,17 +1054,27 @@ impl FernAppBuilder {
             inner: event_loop.create_proxy(),
         };
 
-        // If an event source was registered, build the per-tree app
-        // context that carries the type-erased source adapter and the
-        // proxy poster. This single context is shared with every window
-        // the WindowManager creates.
-        let app_context_template = self.event_source.map(|adapter| {
-            let poster: std::sync::Arc<dyn AppEventPoster> =
-                std::sync::Arc::new(WinitAppEventPoster {
-                    proxy: proxy.clone(),
-                });
-            std::rc::Rc::new(TreeAppContext::with_source_and_poster(adapter, poster))
-        });
+        // If an event source OR an app-state registry is present, build
+        // the per-tree app context that carries them. This single context
+        // is shared with every window the WindowManager creates.
+        let has_app_state = !self.app_state_registry.is_empty();
+        let app_context_template = if self.event_source.is_some() || has_app_state {
+            let base = match self.event_source {
+                Some(adapter) => {
+                    let poster: std::sync::Arc<dyn AppEventPoster> =
+                        std::sync::Arc::new(WinitAppEventPoster {
+                            proxy: proxy.clone(),
+                        });
+                    TreeAppContext::with_source_and_poster(adapter, poster)
+                }
+                None => TreeAppContext::empty(),
+            };
+            Some(std::rc::Rc::new(
+                base.with_app_state(self.app_state_registry),
+            ))
+        } else {
+            None
+        };
 
         if let Some(on_ready) = self.on_ready {
             on_ready(proxy.clone());
@@ -1119,6 +1156,56 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();
         assert!(!frame.is_empty());
+    }
+
+    #[test]
+    fn app_state_flows_through_headless_builder() {
+        use fern_canvas::Size;
+        use fern_core::build_context::BuildContext;
+        use fern_core::signal::Signal;
+        use fern_core::widget::{LayoutContext, Widget};
+        use std::rc::Rc;
+
+        struct AppGlobals {
+            label: Signal<String>,
+        }
+
+        #[derive(Debug)]
+        struct GlobalsReader {
+            observed: Signal<String>,
+        }
+
+        impl Widget for GlobalsReader {
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                let globals = ctx
+                    .app_state::<Rc<AppGlobals>>()
+                    .expect("AppGlobals not registered");
+                self.observed.set(globals.label.get());
+                Vec::new()
+            }
+
+            fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+                proposal.resolve(0.0, 0.0)
+            }
+        }
+
+        let globals = Rc::new(AppGlobals {
+            label: Signal::new("headless works".to_string()),
+        });
+
+        let observed = Signal::new(String::new());
+        let observed_for_root = observed.clone();
+
+        let _app = FernAppBuilder::new()
+            .app_state(globals.clone())
+            .root(move |tree| {
+                tree.add(GlobalsReader {
+                    observed: observed_for_root.clone(),
+                })
+            })
+            .build_headless();
+
+        assert_eq!(observed.get(), "headless works");
     }
 
     #[test]

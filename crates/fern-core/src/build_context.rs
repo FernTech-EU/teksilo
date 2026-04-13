@@ -109,6 +109,14 @@ impl<'a> BuildContext<'a> {
         self.tree.theme()
     }
 
+    /// Retrieve an application-scoped value of type `T` registered via
+    /// `FernAppBuilder::app_state` (architecture §9.5). Returns `None` if
+    /// no value of that type was registered. The returned reference
+    /// borrows from the framework for the duration of the build pass.
+    pub fn app_state<T: 'static>(&self) -> Option<&T> {
+        self.tree.app_context().app_state::<T>()
+    }
+
     /// Bind a widget's visibility to a boolean prop or compatibility state binding.
     pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.visible_when(id, state);
