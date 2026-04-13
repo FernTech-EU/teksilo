@@ -399,56 +399,146 @@ impl WidgetTree {
             WidgetEvent::PointerDown {
                 position, button, ..
             } => {
-                if node.handlers.on_tap.is_some() {
-                    let arena = node.handlers.gesture_arena.get_or_insert_with(|| {
-                        let mut arena = GestureArena::new();
-                        arena.add(crate::gesture::TapRecognizer::new());
-                        arena
-                    });
-                    arena.process(&RawPointerEvent::Down {
+                // Raw pointer handler runs first so widgets can intercept
+                // events that the gesture recognizers won't catch (e.g.
+                // right-click → context menu). If it returns Handled the
+                // gesture arena is skipped; otherwise we fall through.
+                if let Some(handler) = node.handlers.on_pointer_event.as_mut()
+                    && handler(event, ctx) == EventResponse::Handled
+                {
+                    return Some(EventResponse::Handled);
+                }
+                Self::ensure_gesture_arena(node);
+                if let Some(arena) = node.handlers.gesture_arena.as_mut() {
+                    let result = arena.process(&RawPointerEvent::Down {
                         position: *position,
                         button: *button,
                     });
+                    if let Some(gesture) = result {
+                        Self::dispatch_recognized_gesture(node, gesture, ctx);
+                    }
                     return Some(EventResponse::Handled);
                 }
-                node.handlers
-                    .on_pointer_event
-                    .as_mut()
-                    .map(|handler| handler(event, ctx))
+                None
             }
             WidgetEvent::PointerUp {
                 position, button, ..
             } => {
-                if let Some(ref mut arena) = node.handlers.gesture_arena {
+                if let Some(handler) = node.handlers.on_pointer_event.as_mut()
+                    && handler(event, ctx) == EventResponse::Handled
+                {
+                    return Some(EventResponse::Handled);
+                }
+                if let Some(arena) = node.handlers.gesture_arena.as_mut() {
                     let result = arena.process(&RawPointerEvent::Up {
                         position: *position,
                         button: *button,
                     });
-                    if matches!(result, Some(GestureEvent::Tap { .. })) {
-                        if let Some(ref mut handler) = node.handlers.on_tap {
-                            handler(ctx);
-                        }
+                    if let Some(gesture) = result {
+                        Self::dispatch_recognized_gesture(node, gesture, ctx);
                     }
                     return Some(EventResponse::Handled);
                 }
-                node.handlers
-                    .on_pointer_event
-                    .as_mut()
-                    .map(|handler| handler(event, ctx))
+                None
             }
             WidgetEvent::PointerMove { position } => {
-                if let Some(ref mut arena) = node.handlers.gesture_arena {
-                    arena.process(&RawPointerEvent::Move {
+                if let Some(handler) = node.handlers.on_pointer_event.as_mut()
+                    && handler(event, ctx) == EventResponse::Handled
+                {
+                    return Some(EventResponse::Handled);
+                }
+                if let Some(arena) = node.handlers.gesture_arena.as_mut() {
+                    let result = arena.process(&RawPointerEvent::Move {
                         position: *position,
                     });
+                    if let Some(gesture) = result {
+                        Self::dispatch_recognized_gesture(node, gesture, ctx);
+                    }
                     return Some(EventResponse::Ignored);
                 }
-                node.handlers
-                    .on_pointer_event
-                    .as_mut()
-                    .map(|handler| handler(event, ctx))
+                None
             }
             _ => None,
+        }
+    }
+
+    /// Lazily install a gesture arena populated with whichever recognizers
+    /// the widget's handler set actually needs. Without this, a widget
+    /// that wires `on_drag` or `on_double_tap` (but not `on_tap`) would
+    /// never get a gesture arena and the handlers would never fire.
+    fn ensure_gesture_arena(node: &mut crate::arena::WidgetNode) {
+        if node.handlers.gesture_arena.is_some() {
+            return;
+        }
+        let has_tap = node.handlers.on_tap.is_some();
+        let has_double_tap = node.handlers.on_double_tap.is_some();
+        let has_drag = node.handlers.on_drag.is_some();
+        let has_long_press = node.handlers.on_long_press.is_some();
+
+        if !(has_tap || has_double_tap || has_drag || has_long_press) {
+            return;
+        }
+
+        let mut arena = GestureArena::new();
+        // Important: install `TapRecognizer` ONLY when the widget actually
+        // wired `on_tap`. `DoubleTapRecognizer` is self-contained — it
+        // tracks its own Down/Up sequence — and adding a parallel
+        // `TapRecognizer` would let `Tap` win on the first up (it returns
+        // `Recognized` while `DoubleTap` returns `Pending`), and the
+        // arena's "reset all non-winners" rule would then wipe the
+        // double-tap state before the second tap arrives.
+        if has_tap {
+            arena.add(crate::gesture::TapRecognizer::new());
+        }
+        if has_double_tap {
+            arena.add(crate::gesture::DoubleTapRecognizer::new());
+        }
+        if has_drag {
+            arena.add(crate::gesture::DragRecognizer::new().threshold(5.0));
+        }
+        if has_long_press {
+            arena.add(crate::gesture::LongPressRecognizer::new());
+        }
+        node.handlers.gesture_arena = Some(arena);
+    }
+
+    /// Route a gesture recognized by the arena to the matching handler.
+    fn dispatch_recognized_gesture(
+        node: &mut crate::arena::WidgetNode,
+        gesture: GestureEvent,
+        ctx: &mut EventContext,
+    ) {
+        match gesture {
+            GestureEvent::Tap { .. } => {
+                if let Some(handler) = node.handlers.on_tap.as_mut() {
+                    handler(ctx);
+                }
+            }
+            GestureEvent::DoubleTap { .. } => {
+                if let Some(handler) = node.handlers.on_double_tap.as_mut() {
+                    handler(ctx);
+                }
+            }
+            GestureEvent::LongPress { position } => {
+                if let Some(handler) = node.handlers.on_long_press.as_mut() {
+                    handler(position, ctx);
+                }
+            }
+            GestureEvent::DragStarted { .. }
+            | GestureEvent::DragMoved { .. }
+            | GestureEvent::DragEnded { .. } => {
+                if let Some(handler) = node.handlers.on_drag.as_mut() {
+                    handler(gesture, ctx);
+                }
+            }
+            GestureEvent::PinchStarted { .. }
+            | GestureEvent::PinchChanged { .. }
+            | GestureEvent::PinchEnded
+            | GestureEvent::Swipe { .. } => {
+                // Pinch / swipe recognizers are not auto-installed by the
+                // V2 attached-handler API; they're only reachable via the
+                // explicit `attach_gesture` route.
+            }
         }
     }
 

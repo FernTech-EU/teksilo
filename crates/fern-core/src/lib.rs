@@ -22,6 +22,7 @@ pub mod widget;
 pub mod widget_builder;
 pub mod widget_id;
 pub mod widget_tree;
+pub mod window_chrome;
 
 #[cfg(test)]
 pub(crate) mod test_widgets;
@@ -62,5 +63,8 @@ pub use widget::{
 pub use widget_builder::{HandlerSet, WidgetBuilder, WidgetWithHandlers};
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
+pub use window_chrome::{
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,
+};
 
 pub use accesskit;

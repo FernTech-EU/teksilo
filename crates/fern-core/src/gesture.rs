@@ -644,11 +644,17 @@ impl GestureArena {
     /// Returns the recognized gesture from the highest-priority recognizer,
     /// or `None` if no gesture was recognized yet.
     pub fn process(&mut self, event: &RawPointerEvent) -> Option<GestureEvent> {
-        // On pointer down, reset all failure states for a fresh sequence
+        // On pointer down, give every recognizer a fresh chance — clear
+        // the per-arena `failed` flag so a recognizer that failed on the
+        // previous sequence can compete again. We deliberately do NOT call
+        // `recognizer.reset()` here: the recognizers all overwrite their
+        // per-sequence state on `RawPointerEvent::Down` themselves, and
+        // calling `reset()` would wipe legitimate cross-sequence state
+        // (notably `DoubleTapRecognizer::first_tap_time`, which must
+        // survive the second `Down` for the double-tap to be recognized).
         if matches!(event, RawPointerEvent::Down { .. }) {
             for entry in &mut self.entries {
                 entry.failed = false;
-                entry.recognizer.reset();
             }
         }
 

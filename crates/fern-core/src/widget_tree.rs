@@ -133,6 +133,12 @@ pub struct WidgetTree {
     text_scale_factor: f64,
     /// Active drag-and-drop session, if any.
     pub(crate) active_drag: Option<crate::drag_state::DragSession>,
+    /// Optional platform host for custom window chrome (set when the
+    /// application opts in via `WindowConfig::custom_chrome(true)`). Stored
+    /// here so that the root-builder closure has access during widget
+    /// construction; the same `Rc` is also held by `WindowManager` so it
+    /// outlives the widget tree if needed.
+    title_bar_host: Option<Rc<dyn crate::PlatformTitleBarHost>>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -192,6 +198,7 @@ impl WidgetTree {
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
             active_drag: None,
+            title_bar_host: None,
         }
     }
 
@@ -381,6 +388,26 @@ impl WidgetTree {
     pub fn with_text_backend(mut self, backend: Rc<RefCell<dyn fern_canvas::TextBackend>>) -> Self {
         self.text_backend = Some(backend);
         self
+    }
+
+    /// Attach a platform host for custom window chrome. Set by the
+    /// `WindowManager` when the application opts in via
+    /// `WindowConfig::custom_chrome(true)`. Widgets like `TitleBar` retrieve
+    /// it from inside the root-builder closure via [`Self::title_bar_host`].
+    pub fn with_title_bar_host(mut self, host: Rc<dyn crate::PlatformTitleBarHost>) -> Self {
+        self.title_bar_host = Some(host);
+        self
+    }
+
+    pub fn set_title_bar_host(&mut self, host: Rc<dyn crate::PlatformTitleBarHost>) {
+        self.title_bar_host = Some(host);
+    }
+
+    /// Get the platform title bar host, if one was attached. Returns `None`
+    /// when the application did not opt into custom chrome, or when the
+    /// platform does not support it (e.g. X11).
+    pub fn title_bar_host(&self) -> Option<Rc<dyn crate::PlatformTitleBarHost>> {
+        self.title_bar_host.clone()
     }
 
     pub fn theme(&self) -> &Theme {

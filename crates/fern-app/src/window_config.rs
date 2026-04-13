@@ -32,6 +32,7 @@ pub struct WindowConfig {
     pub(crate) modal: bool,
     pub(crate) parent: Option<FernWindowId>,
     pub(crate) root_builder: Option<Box<dyn FnOnce(&mut WidgetTree) -> WidgetId>>,
+    pub(crate) custom_chrome: bool,
 }
 
 impl WindowConfig {
@@ -44,6 +45,7 @@ impl WindowConfig {
             modal: false,
             parent: None,
             root_builder: None,
+            custom_chrome: false,
         }
     }
 
@@ -82,6 +84,23 @@ impl WindowConfig {
     /// Set the root widget builder for this window.
     pub fn root(mut self, builder: impl FnOnce(&mut WidgetTree) -> WidgetId + 'static) -> Self {
         self.root_builder = Some(Box::new(builder));
+        self
+    }
+
+    /// Opt into custom window chrome (no native title bar / decorations).
+    /// When enabled, `WindowManager::create_window` will:
+    /// - Pass `with_decorations(false)` to winit on platforms where the
+    ///   decorations are entirely client-side (Wayland).
+    /// - Construct a `PlatformTitleBarHost` and attach it to the
+    ///   `WidgetTree`, where the root-builder closure can fetch it via
+    ///   [`fern_core::WidgetTree::title_bar_host`].
+    ///
+    /// On platforms or window systems that cannot support custom chrome
+    /// (currently X11), the host construction fails silently and the window
+    /// continues with native decorations; the widget tree's host slot will
+    /// be `None`.
+    pub fn custom_chrome(mut self, enabled: bool) -> Self {
+        self.custom_chrome = enabled;
         self
     }
 }

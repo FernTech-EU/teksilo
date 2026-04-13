@@ -111,6 +111,12 @@ pub enum CursorIcon {
     Grabbing,
     ColResize,
     RowResize,
+    /// NE/SW diagonal resize — used on the top-right and bottom-left
+    /// corners of a resize frame. Maps to winit's `NeswResize`.
+    NeswResize,
+    /// NW/SE diagonal resize — used on the top-left and bottom-right
+    /// corners of a resize frame. Maps to winit's `NwseResize`.
+    NwseResize,
 }
 
 /// The full Widget trait for Level 2 (custom rendering) widgets.

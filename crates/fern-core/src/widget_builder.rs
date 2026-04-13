@@ -52,6 +52,21 @@ impl HandlerSet {
         self
     }
 
+    /// Set the on_double_tap handler.
+    pub fn on_double_tap(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+        self.handlers.on_double_tap = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_long_press handler.
+    pub fn on_long_press(
+        mut self,
+        f: impl FnMut(Point, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handlers.on_long_press = Some(Box::new(f));
+        self
+    }
+
     /// Set the on_hover handler.
     pub fn on_hover(mut self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self {
         self.handlers.on_hover = Some(Box::new(f));

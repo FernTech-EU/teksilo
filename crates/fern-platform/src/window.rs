@@ -177,6 +177,13 @@ impl PlatformWindow {
         &self.window
     }
 
+    /// Get a clonable `Arc` reference to the underlying winit window.
+    /// Used by `fern_platform::create_title_bar_host` and other components
+    /// that need shared ownership of the window.
+    pub fn window_arc(&self) -> Arc<Window> {
+        self.window.clone()
+    }
+
     pub fn renderer(&self) -> &Renderer {
         &self.renderer
     }

@@ -122,6 +122,8 @@ fn apply_cursor_to_window(
         fern_core::CursorIcon::Grabbing => winit::window::CursorIcon::Grabbing,
         fern_core::CursorIcon::ColResize => winit::window::CursorIcon::ColResize,
         fern_core::CursorIcon::RowResize => winit::window::CursorIcon::RowResize,
+        fern_core::CursorIcon::NeswResize => winit::window::CursorIcon::NeswResize,
+        fern_core::CursorIcon::NwseResize => winit::window::CursorIcon::NwseResize,
     };
     platform_window.window().set_cursor(winit_cursor);
 }
@@ -817,6 +819,7 @@ pub struct FernAppBuilder {
     window_width: u32,
     window_height: u32,
     root_builder: Option<Box<dyn FnOnce(&mut WidgetTree) -> WidgetId>>,
+    custom_chrome: bool,
 }
 
 impl FernAppBuilder {
@@ -834,6 +837,7 @@ impl FernAppBuilder {
             window_width: 800,
             window_height: 600,
             root_builder: None,
+            custom_chrome: false,
         }
     }
 
@@ -912,6 +916,17 @@ impl FernAppBuilder {
         self
     }
 
+    /// Opt the initial window into custom window chrome (no native title
+    /// bar). The widget tree will be given a `PlatformTitleBarHost` that
+    /// can be retrieved from inside the `root` closure via
+    /// `tree.title_bar_host()`. Has no effect when using
+    /// `initial_window(WindowConfig)` — set `WindowConfig::custom_chrome`
+    /// directly in that case.
+    pub fn custom_chrome(mut self, enabled: bool) -> Self {
+        self.custom_chrome = enabled;
+        self
+    }
+
     /// Build a headless app for testing (no window, no GPU).
     pub fn build_headless(self) -> HeadlessApp {
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
@@ -959,7 +974,8 @@ impl FernAppBuilder {
         } else {
             let mut config = WindowConfig::new()
                 .title(self.window_title)
-                .size(self.window_width, self.window_height);
+                .size(self.window_width, self.window_height)
+                .custom_chrome(self.custom_chrome);
             if let Some(root_builder) = self.root_builder {
                 config = config.root(root_builder);
             }

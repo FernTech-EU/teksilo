@@ -6,10 +6,12 @@
 //! handles modal dialog blocking.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use fern_core::WidgetTree;
+use fern_core::{PlatformTitleBarHost, WidgetTree};
 use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
+use fern_platform::create_title_bar_host;
 use fern_platform::event_translation::TranslationState;
 use fern_tokens::{ColorTokens, Theme};
 use winit::raw_window_handle::HasWindowHandle;
@@ -30,6 +32,11 @@ pub(crate) struct ManagedWindow {
     pub current_modifiers: winit::keyboard::ModifiersState,
     pub modal: bool,
     pub parent: Option<FernWindowId>,
+    /// Custom-chrome host, if the window opted in via
+    /// `WindowConfig::custom_chrome(true)` and the platform supports it.
+    /// The same `Rc` is also stored on the `WidgetTree` so the root-builder
+    /// closure can hand it to a `TitleBar` widget.
+    pub title_bar_host: Option<Rc<dyn PlatformTitleBarHost>>,
 }
 
 /// Manages multiple application windows.
@@ -108,6 +115,20 @@ impl WindowManager {
             .with_inner_size(winit::dpi::LogicalSize::new(config.width, config.height))
             .with_visible(false); // Must be invisible for AccessKit adapter creation
 
+        // When the application opts into custom chrome, suppress the
+        // server-side decorations on platforms where they're entirely
+        // client-drawn (Wayland). On Windows we keep `with_decorations(true)`
+        // because the M4 recipe relies on the native frame still being present
+        // (DwmExtendFrameIntoClientArea + WM_NCCALCSIZE), and on macOS the
+        // M3 recipe sets the relevant attributes via `WindowAttributesExtMacOS`
+        // — neither needs the toggle here.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if config.custom_chrome
+            && fern_platform::active_window_system() == fern_platform::WindowSystem::Wayland
+        {
+            window_attrs = window_attrs.with_decorations(false);
+        }
+
         if config.modal {
             window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
 
@@ -163,7 +184,23 @@ impl WindowManager {
             pw.window().focus_window();
         }
 
+        // Construct the platform title bar host if custom chrome was
+        // requested. On unsupported platforms (X11, no host backend) the
+        // factory logs a warning and returns `Unsupported`; we silently
+        // continue with native decorations and leave the host slot empty.
+        let title_bar_host: Option<Rc<dyn PlatformTitleBarHost>> = if config.custom_chrome {
+            match create_title_bar_host(pw.window_arc()) {
+                Ok(host) => Some(host),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
         let mut tree = WidgetTree::new().with_theme(initial_theme);
+        if let Some(ref host) = title_bar_host {
+            tree.set_title_bar_host(host.clone());
+        }
         tree.set_accessibility_preferences(
             self.a11y_prefs.high_contrast,
             self.a11y_prefs.reduced_motion,
@@ -203,6 +240,7 @@ impl WindowManager {
             current_modifiers: winit::keyboard::ModifiersState::empty(),
             modal: config.modal,
             parent: config.parent,
+            title_bar_host,
         };
 
         self.windows.insert(winit_id, managed);
@@ -353,6 +391,21 @@ impl WindowManager {
     /// Get the winit WindowId for a FernWindowId.
     pub fn winit_id_for_fern(&self, fern_id: FernWindowId) -> Option<winit::window::WindowId> {
         self.fern_to_winit.get(&fern_id).copied()
+    }
+
+    /// Get the platform title bar host for a window, if the window opted
+    /// into custom chrome via `WindowConfig::custom_chrome(true)` and the
+    /// platform supports it. Returns `None` for windows that use native
+    /// decorations or run on a window system without custom chrome support
+    /// (currently X11).
+    pub fn title_bar_host(
+        &self,
+        fern_id: FernWindowId,
+    ) -> Option<Rc<dyn PlatformTitleBarHost>> {
+        let winit_id = self.fern_to_winit.get(&fern_id).copied()?;
+        self.windows
+            .get(&winit_id)
+            .and_then(|w| w.title_bar_host.clone())
     }
 
     /// Request redraw on all windows.
