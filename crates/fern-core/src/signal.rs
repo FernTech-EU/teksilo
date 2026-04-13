@@ -1,8 +1,8 @@
 //! Unified reactivity primitives for FernUI.
 //!
-//! `Signal<T>` replaces `State<T>` + `DerivedState<T>` with a single type.
-//! `Prop<T>` is the widget property type for static values and signal bindings.
-//! `ObserverHandle` is an RAII guard — dropping it removes the observer callback.
+//! `Signal<T>` is the single reactive type. `Prop<T>` is the widget
+//! property type for static values and signal bindings. `ObserverHandle`
+//! is an RAII guard — dropping it removes the observer callback.
 
 use std::cell::{Ref, RefCell};
 use std::rc::{Rc, Weak};
@@ -76,7 +76,7 @@ struct MutableInner<T> {
 
 /// Animation-specific state, only for `Signal<f32>`.
 struct AnimationState {
-    pending: Option<crate::state::AnimationRequest>,
+    pending: Option<crate::animation::AnimationRequest>,
     target: Option<f32>,
 }
 
@@ -434,7 +434,7 @@ impl Signal<f32> {
                 animation: Some(animation),
             } => {
                 let mut anim = animation.borrow_mut();
-                anim.pending = Some(crate::state::AnimationRequest {
+                anim.pending = Some(crate::animation::AnimationRequest {
                     target,
                     duration,
                     easing,
@@ -473,7 +473,7 @@ impl Signal<f32> {
     }
 
     /// Take a pending animation request, if any.
-    pub fn take_pending_animation(&self) -> Option<crate::state::AnimationRequest> {
+    pub fn take_pending_animation(&self) -> Option<crate::animation::AnimationRequest> {
         match &self.kind {
             SignalKind::Mutable { animation, .. } => animation
                 .as_ref()
@@ -528,42 +528,6 @@ impl<T: std::fmt::Debug + 'static> std::fmt::Debug for Signal<T> {
                 .field("dirty", &inner.borrow().dirty)
                 .finish(),
             SignalKind::Derived { .. } => f.write_str("Signal::Derived(..)"),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Bridge conversions: State<T> → Signal<T>
-// ---------------------------------------------------------------------------
-
-impl<T: Clone + 'static> From<crate::state::State<T>> for Signal<T> {
-    fn from(state: crate::state::State<T>) -> Self {
-        // Wrap the State's internals: Signal reads/writes go through the State.
-        // This is a thin adapter — both point to the same underlying data.
-        let state_get = state.clone();
-        let state_dirty = state.clone();
-        let state_clear = state.clone();
-        Signal {
-            kind: SignalKind::Derived {
-                compute: Rc::new(move || state_get.get().clone()),
-                source_dirty: Rc::new(move || state_dirty.is_dirty()),
-                source_clear: Rc::new(move || state_clear.clear_dirty()),
-            },
-        }
-    }
-}
-
-impl<T: Clone + 'static> From<crate::state::DerivedState<T>> for Signal<T> {
-    fn from(derived: crate::state::DerivedState<T>) -> Self {
-        let derived_get = derived.clone();
-        let derived_dirty = derived.clone();
-        let derived_clear = derived.clone();
-        Signal {
-            kind: SignalKind::Derived {
-                compute: Rc::new(move || derived_get.get()),
-                source_dirty: Rc::new(move || derived_dirty.is_dirty()),
-                source_clear: Rc::new(move || derived_clear.clear_dirty()),
-            },
         }
     }
 }
@@ -842,22 +806,4 @@ mod tests {
         assert!(!s.has_pending_animation());
     }
 
-    #[test]
-    fn from_state_to_signal() {
-        let state = crate::state::State::new(42);
-        let signal: Signal<i32> = state.clone().into();
-        assert_eq!(signal.get(), 42);
-        state.set(99);
-        assert_eq!(signal.get(), 99);
-    }
-
-    #[test]
-    fn from_derived_state_to_signal() {
-        let state = crate::state::State::new(5);
-        let derived = state.map(|v| v * 2);
-        let signal: Signal<i32> = derived.into();
-        assert_eq!(signal.get(), 10);
-        state.set(7);
-        assert_eq!(signal.get(), 14);
-    }
 }
