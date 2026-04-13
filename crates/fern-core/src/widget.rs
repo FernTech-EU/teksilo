@@ -220,6 +220,12 @@ pub struct EventContext {
     )>,
     /// Cancel any active drag session.
     pub(crate) cancel_drag: bool,
+    /// Replace the tree-level theme. Drained after dispatch; triggers a
+    /// composite-widget rebuild and full repaint.
+    pub(crate) theme_request: Option<fern_tokens::Theme>,
+    /// Replace the tree-level locale identifier. Drained after dispatch;
+    /// triggers a composite-widget rebuild and full repaint.
+    pub(crate) locale_request: Option<String>,
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -253,6 +259,8 @@ impl EventContext {
             focus_requests: Vec::new(),
             drag_start_request: None,
             cancel_drag: false,
+            theme_request: None,
+            locale_request: None,
         }
     }
 
@@ -441,5 +449,19 @@ impl EventContext {
     /// Cancel the active drag-and-drop session (if any).
     pub fn cancel_drag(&mut self) {
         self.cancel_drag = true;
+    }
+
+    /// Replace the tree-level theme. Composite widgets are rebuilt so any
+    /// derived values they captured at build time pick up the new tokens,
+    /// and all widgets are marked dirty for repaint.
+    pub fn set_theme(&mut self, theme: fern_tokens::Theme) {
+        self.theme_request = Some(theme);
+    }
+
+    /// Replace the tree-level locale identifier. Composite widgets are
+    /// rebuilt so any tr! lookups picked up at build time are re-evaluated
+    /// against the new locale.
+    pub fn set_locale(&mut self, locale: impl Into<String>) {
+        self.locale_request = Some(locale.into());
     }
 }

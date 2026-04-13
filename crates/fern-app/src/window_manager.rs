@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use fern_core::event_source::TreeAppContext;
 use fern_core::{PlatformTitleBarHost, WidgetTree};
 use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
@@ -61,6 +62,11 @@ pub struct WindowManager {
     a11y_prefs: AccessibilityPreferences,
     /// How the app resolves its theme (Manual, FollowSystem, Native).
     theme_mode: ThemeMode,
+    /// Per-tree app context shared with every window's WidgetTree when an
+    /// event source is registered on the FernAppBuilder. Each window
+    /// receives a clone of this Rc so subscriptions land in a single
+    /// shared `subscription_callbacks` map.
+    app_context_template: Option<Rc<TreeAppContext>>,
 }
 
 impl WindowManager {
@@ -78,12 +84,27 @@ impl WindowManager {
             pending_closes: Vec::new(),
             a11y_prefs,
             theme_mode: ThemeMode::Manual,
+            app_context_template: None,
         }
     }
 
     /// Set the theme mode (called by FernAppHandler during initialization).
     pub fn set_theme_mode(&mut self, mode: ThemeMode) {
         self.theme_mode = mode;
+    }
+
+    /// Install the per-tree app context template that every newly created
+    /// window's WidgetTree should adopt. Called by FernAppHandler when the
+    /// application registered an event source on the builder.
+    pub fn set_app_context_template(&mut self, template: Rc<TreeAppContext>) {
+        self.app_context_template = Some(template);
+    }
+
+    /// The shared per-tree app context, if any, used by FernAppHandler to
+    /// look up subscription callbacks when delivering
+    /// `AppEvent::SubscriptionEvent` to the UI thread.
+    pub(crate) fn app_context_template(&self) -> Option<&Rc<TreeAppContext>> {
+        self.app_context_template.as_ref()
     }
 
     /// Get the current theme mode.
@@ -198,6 +219,9 @@ impl WindowManager {
         };
 
         let mut tree = WidgetTree::new().with_theme(initial_theme);
+        if let Some(template) = self.app_context_template.as_ref() {
+            tree.set_app_context(template.clone());
+        }
         if let Some(ref host) = title_bar_host {
             tree.set_title_bar_host(host.clone());
         }

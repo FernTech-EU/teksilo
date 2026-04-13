@@ -2,6 +2,9 @@ use fern_canvas::SizeProposal;
 use fern_core::app_command::{AppCommand, ErasedCommand};
 use fern_core::app_event::AppEvent;
 use fern_core::event::WidgetEvent;
+use fern_core::event_source::{
+    AppEventPoster, EventSource, EventSourceAdapter, SubscriptionId, TreeAppContext,
+};
 use fern_core::modal::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
 use fern_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use fern_core::{WidgetId, WidgetTree};
@@ -288,10 +291,14 @@ impl FernAppHandler {
         command_handler: Option<WindowCommandHandler>,
         app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
         initial_window: WindowConfig,
+        app_context_template: Option<std::rc::Rc<TreeAppContext>>,
         #[cfg(feature = "text")] typesetter: SharedTypesetter,
     ) -> Self {
         let mut wm = WindowManager::new(theme);
         wm.set_theme_mode(theme_mode);
+        if let Some(template) = app_context_template {
+            wm.set_app_context_template(template);
+        }
 
         #[cfg(feature = "text")]
         {
@@ -720,25 +727,38 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
         if let Some(handler) = &mut self.app_event_handler {
             handler(&event);
         }
-        // Route AppEvent::Command through the normal command pipeline so
-        // background-thread commands reach the on_command handler.
-        if let AppEvent::Command(erased) = event {
-            if let Some(h) = self.command_handler.as_mut() {
-                let mut ctx = crate::command_context::CommandContext::new(
-                    self.wm.primary_window_id(),
-                    self.wm.theme().clone(),
-                );
-                h(&erased, &mut ctx);
-                if let Some(new_theme) = ctx.take_theme() {
-                    self.wm.set_theme(new_theme);
-                }
-                for config in ctx.take_creates() {
-                    self.wm.queue_create(config);
-                }
-                for close_id in ctx.take_closes() {
-                    self.wm.queue_close(close_id);
+        match event {
+            // Route AppEvent::Command through the normal command pipeline so
+            // background-thread commands reach the on_command handler.
+            AppEvent::Command(erased) => {
+                if let Some(h) = self.command_handler.as_mut() {
+                    let mut ctx = crate::command_context::CommandContext::new(
+                        self.wm.primary_window_id(),
+                        self.wm.theme().clone(),
+                    );
+                    h(&erased, &mut ctx);
+                    if let Some(new_theme) = ctx.take_theme() {
+                        self.wm.set_theme(new_theme);
+                    }
+                    for config in ctx.take_creates() {
+                        self.wm.queue_create(config);
+                    }
+                    for close_id in ctx.take_closes() {
+                        self.wm.queue_close(close_id);
+                    }
                 }
             }
+            // Backend-event subscription delivery (architecture §9.4): look
+            // up the UI-side callback in the shared app context and invoke
+            // it with the downcast event payload. The shared template is
+            // the same Rc held by every window's tree, so we don't need to
+            // route by window.
+            AppEvent::SubscriptionEvent { sub_id, event } => {
+                if let Some(template) = self.wm.app_context_template() {
+                    template.dispatch_subscription_event(sub_id, &*event);
+                }
+            }
+            _ => {}
         }
         if let Some(trace) = &mut self.idle_trace {
             trace.note_request_redraw_all();
@@ -800,6 +820,35 @@ impl AppEventProxy {
     pub fn send_external(&self, payload: impl std::any::Any + Send + 'static) {
         let _ = self.inner.send_event(AppEvent::External(Box::new(payload)));
     }
+
+    /// Post a backend-event delivery for the given subscription id. Called
+    /// by the framework's event-source wrapper from the publisher thread.
+    pub fn post_subscription_event(
+        &self,
+        sub_id: SubscriptionId,
+        event: Box<dyn std::any::Any + Send>,
+    ) {
+        let _ = self
+            .inner
+            .send_event(AppEvent::SubscriptionEvent { sub_id, event });
+    }
+}
+
+/// Bridges fern-core's `AppEventPoster` trait to the winit-backed
+/// `AppEventProxy`. fern-core cannot import winit, so this trait
+/// implementation lives in fern-app.
+struct WinitAppEventPoster {
+    proxy: AppEventProxy,
+}
+
+impl AppEventPoster for WinitAppEventPoster {
+    fn post_subscription_event(
+        &self,
+        sub_id: SubscriptionId,
+        event: Box<dyn std::any::Any + Send>,
+    ) {
+        self.proxy.post_subscription_event(sub_id, event);
+    }
 }
 
 /// Type for the window-aware command handler.
@@ -820,6 +869,9 @@ pub struct FernAppBuilder {
     window_height: u32,
     root_builder: Option<Box<dyn FnOnce(&mut WidgetTree) -> WidgetId>>,
     custom_chrome: bool,
+    /// Type-erased adapter for the application's backend event source
+    /// (architecture §9.4). Installed via `event_source<S>(source)`.
+    event_source: Option<EventSourceAdapter>,
 }
 
 impl FernAppBuilder {
@@ -838,7 +890,19 @@ impl FernAppBuilder {
             window_height: 600,
             root_builder: None,
             custom_chrome: false,
+            event_source: None,
         }
+    }
+
+    /// Register a backend event source (architecture §9.4). Widgets can
+    /// then call `BuildContext::subscribe_event(origin, callback)` from
+    /// inside their `build()` method to receive events on the UI thread.
+    ///
+    /// Only one source per application is supported. Subsequent calls
+    /// replace the previously registered source.
+    pub fn event_source<S: EventSource>(mut self, source: S) -> Self {
+        self.event_source = Some(EventSourceAdapter::new(source));
+        self
     }
 
     /// Set a fixed theme (implies `ThemeMode::Manual`).
@@ -956,11 +1020,27 @@ impl FernAppBuilder {
             .unwrap();
         event_loop.set_control_flow(ControlFlow::Wait);
 
+        // Always create a proxy: it's needed by both `on_ready` (if set)
+        // and by the event-source poster (if a source is registered). The
+        // proxy is cheap to clone.
+        let proxy = AppEventProxy {
+            inner: event_loop.create_proxy(),
+        };
+
+        // If an event source was registered, build the per-tree app
+        // context that carries the type-erased source adapter and the
+        // proxy poster. This single context is shared with every window
+        // the WindowManager creates.
+        let app_context_template = self.event_source.map(|adapter| {
+            let poster: std::sync::Arc<dyn AppEventPoster> =
+                std::sync::Arc::new(WinitAppEventPoster {
+                    proxy: proxy.clone(),
+                });
+            std::rc::Rc::new(TreeAppContext::with_source_and_poster(adapter, poster))
+        });
+
         if let Some(on_ready) = self.on_ready {
-            let proxy = AppEventProxy {
-                inner: event_loop.create_proxy(),
-            };
-            on_ready(proxy);
+            on_ready(proxy.clone());
         }
 
         #[cfg(feature = "text")]
@@ -988,6 +1068,7 @@ impl FernAppBuilder {
             self.command_handler,
             self.app_event_handler,
             initial_config,
+            app_context_template,
             #[cfg(feature = "text")]
             typesetter,
         );

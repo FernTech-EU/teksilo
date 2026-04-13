@@ -3,6 +3,7 @@
 //! Provides Signal-based APIs for creating reactive state, registering
 //! effects, and adding child widgets during the build lifecycle.
 
+use crate::event_source::{SubscriptionHandle, SubscriptionId};
 use crate::signal::{ObserverHandle, Signal};
 use crate::state::{BindingRegistry, State};
 use crate::widget_id::WidgetId;
@@ -14,6 +15,10 @@ pub struct BuildContext<'a> {
     /// RAII handles for effects registered during this build cycle.
     /// Transferred to the arena node's `effect_handles` after build returns.
     pub(crate) effect_handles: Vec<ObserverHandle>,
+    /// Backend-event subscription handles registered during this build
+    /// cycle via `subscribe_event`. Transferred to the arena node's
+    /// `subscription_handles` after build returns.
+    pub(crate) subscription_handles: Vec<(SubscriptionId, SubscriptionHandle)>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -154,5 +159,92 @@ impl<'a> BuildContext<'a> {
         handler_set: crate::widget_builder::HandlerSet,
     ) {
         self.tree.apply_handler_set(id, handler_set);
+    }
+
+    /// Subscribe to events from the registered application event source
+    /// (architecture §9.4). The callback runs on the UI thread when the
+    /// source publishes an event with a matching origin.
+    ///
+    /// The subscription is scoped to the current widget's lifetime: when
+    /// the widget is rebuilt or destroyed, the framework drops the source
+    /// handle (unregistering from the source) and removes the UI-side
+    /// callback.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no event source has been registered on the
+    /// `FernAppBuilder`. In debug builds, also asserts that the `Origin`
+    /// and `Event` types match the registered source.
+    pub fn subscribe_event<O, E, F>(&mut self, origin: O, callback: F)
+    where
+        O: 'static,
+        E: 'static,
+        F: Fn(&E) + 'static,
+    {
+        use std::any::{Any, TypeId};
+        use std::sync::Arc;
+
+        let app_context = self.tree.app_context.clone();
+
+        let adapter = app_context.event_source.as_ref().expect(
+            "BuildContext::subscribe_event called but no event source was registered \
+             on FernAppBuilder. Call .event_source(source) on the builder first.",
+        );
+
+        debug_assert_eq!(
+            adapter.origin_type,
+            TypeId::of::<O>(),
+            "subscribe_event origin type mismatch: source uses {}, subscribe call used {}",
+            adapter.origin_type_name,
+            std::any::type_name::<O>(),
+        );
+        debug_assert_eq!(
+            adapter.event_type,
+            TypeId::of::<E>(),
+            "subscribe_event event type mismatch: source uses {}, subscribe call used {}",
+            adapter.event_type_name,
+            std::any::type_name::<E>(),
+        );
+
+        let sub_id = app_context.allocate_subscription_id();
+
+        // The UI-side callback that runs after an event posted from the
+        // source thread is delivered back to the UI thread. It downcasts
+        // the type-erased payload back to `&E` and invokes the user's `F`.
+        let stored_callback: Box<dyn Fn(&dyn Any)> = Box::new(move |event_any| {
+            let event = event_any
+                .downcast_ref::<E>()
+                .expect("subscription event downcast failed — framework bug");
+            callback(event);
+        });
+        app_context
+            .subscription_callbacks
+            .borrow_mut()
+            .insert(sub_id, stored_callback);
+
+        // Build the wrapper that the source will invoke from its
+        // publisher thread. It carries only the sub_id (Copy) and an
+        // Arc-clone of the poster (Send + Sync), boxes the typed event
+        // as Any+Send, and posts an AppEvent::SubscriptionEvent through
+        // the proxy. Tests that run without a registered poster post
+        // events into a test queue and dispatch them back into the tree
+        // via `tree.app_context().dispatch_subscription_event`.
+        let poster = app_context
+            .poster
+            .as_ref()
+            .expect(
+                "BuildContext::subscribe_event called but no AppEventPoster \
+                 is installed on the tree. fern-app installs one when an \
+                 event source is registered on the builder; tests must \
+                 supply a TestPoster via TreeAppContext::with_source_and_poster.",
+            )
+            .clone();
+        let wrapper: Arc<dyn Fn(Box<dyn Any + Send>) + Send + Sync> =
+            Arc::new(move |erased_event| {
+                poster.post_subscription_event(sub_id, erased_event);
+            });
+
+        let handle = (adapter.subscribe_fn)(Box::new(origin), wrapper);
+        self.subscription_handles.push((sub_id, handle));
     }
 }

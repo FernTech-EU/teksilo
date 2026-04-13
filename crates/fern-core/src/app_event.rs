@@ -6,9 +6,9 @@
 use std::any::Any;
 
 use crate::app_command::ErasedCommand;
+use crate::event_source::SubscriptionId;
 
 /// Events posted to the UI thread from background threads or timers.
-#[derive(Debug)]
 pub enum AppEvent {
     /// A typed application command (same as widget-emitted commands).
     Command(ErasedCommand),
@@ -25,6 +25,43 @@ pub enum AppEvent {
 
     /// An external event from any source (type-erased for extensibility).
     External(Box<dyn Any + Send>),
+
+    /// A backend event delivered to a widget that subscribed via
+    /// `BuildContext::subscribe_event`. The `sub_id` keys the UI-side
+    /// callback in the tree's `TreeAppContext::subscription_callbacks` map;
+    /// the `event` is downcast back to the subscriber's expected type.
+    SubscriptionEvent {
+        sub_id: SubscriptionId,
+        event: Box<dyn Any + Send>,
+    },
+}
+
+impl std::fmt::Debug for AppEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Command(cmd) => f.debug_tuple("Command").field(cmd).finish(),
+            Self::BackgroundComplete { operation_id } => f
+                .debug_struct("BackgroundComplete")
+                .field("operation_id", operation_id)
+                .finish(),
+            Self::BackgroundProgress {
+                operation_id,
+                percent,
+                message,
+            } => f
+                .debug_struct("BackgroundProgress")
+                .field("operation_id", operation_id)
+                .field("percent", percent)
+                .field("message", message)
+                .finish(),
+            Self::External(_) => f.debug_tuple("External").field(&"..").finish(),
+            Self::SubscriptionEvent { sub_id, .. } => f
+                .debug_struct("SubscriptionEvent")
+                .field("sub_id", sub_id)
+                .field("event", &"..")
+                .finish(),
+        }
+    }
 }
 
 #[cfg(test)]

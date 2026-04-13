@@ -2,6 +2,7 @@ use slotmap::SlotMap;
 
 use crate::environment::ThemeOverride;
 use crate::event_handlers::EventHandlers;
+use crate::event_source::{SubscriptionHandle, SubscriptionId};
 use crate::gesture::{GestureArena, GestureEvent};
 use crate::signal::{ObserverHandle, Prop};
 use crate::widget::{CursorIcon, Widget};
@@ -83,6 +84,12 @@ pub struct WidgetNode {
     /// RAII observer handles for effects registered during build().
     /// Dropped on rebuild or widget destruction.
     pub(crate) effect_handles: Vec<ObserverHandle>,
+    /// Backend-event subscriptions registered during build() via
+    /// `BuildContext::subscribe_event`. Each entry pairs a subscription id
+    /// (used to remove the UI-side callback from `TreeAppContext`) with the
+    /// opaque source-side handle whose `Drop` removes the subscriber from
+    /// the source's internal registry. See architecture §9.4.5.
+    pub(crate) subscription_handles: Vec<(SubscriptionId, SubscriptionHandle)>,
     /// Context menu factory — invoked on right-click to produce overlay content.
     pub(crate) context_menu_factory: Option<crate::widget_builder::ContextMenuFactory>,
 }
@@ -154,6 +161,7 @@ impl WidgetArena {
             node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),
+            subscription_handles: Vec::new(),
             context_menu_factory: None,
         });
         // Set up parent-child for declared children
@@ -201,6 +209,7 @@ impl WidgetArena {
             node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),
+            subscription_handles: Vec::new(),
             context_menu_factory: None,
         });
         // Set up parent-child for declared children

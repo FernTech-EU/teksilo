@@ -10,6 +10,7 @@ pub(crate) mod drag_state;
 pub mod environment;
 pub mod event;
 pub(crate) mod event_handlers;
+pub mod event_source;
 pub mod focus;
 pub mod gesture;
 pub mod idle;
@@ -37,6 +38,9 @@ pub use drag_payload::{DragData, DragPayload};
 pub use drag_state::DropFeedback;
 pub use environment::{Environment, LayoutDirection};
 pub use event::{EventResponse, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent};
+pub use event_source::{
+    AppEventPoster, EventSource, EventSourceAdapter, SubscriptionHandle, SubscriptionId,
+};
 pub use focus::{FocusOrigin, FocusPolicy};
 pub use gesture::{
     DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,

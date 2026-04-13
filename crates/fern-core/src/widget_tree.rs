@@ -139,6 +139,15 @@ pub struct WidgetTree {
     /// construction; the same `Rc` is also held by `WindowManager` so it
     /// outlives the widget tree if needed.
     title_bar_host: Option<Rc<dyn crate::PlatformTitleBarHost>>,
+    /// App-level subscription state: registered event source adapter,
+    /// proxy poster, UI-side subscription callbacks. Default is empty;
+    /// fern-app installs a populated context when an event source is
+    /// registered on the builder. See architecture §9.4.
+    pub(crate) app_context: Rc<crate::event_source::TreeAppContext>,
+    /// Active locale identifier. fern-i18n is still a stub, so the tree
+    /// only stores the value and rebuilds composite widgets on change —
+    /// translation lookup happens entirely in user code today.
+    pub(crate) locale: Option<String>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -199,7 +208,41 @@ impl WidgetTree {
             text_scale_factor: 1.0,
             active_drag: None,
             title_bar_host: None,
+            app_context: Rc::new(crate::event_source::TreeAppContext::empty()),
+            locale: None,
         }
+    }
+
+    /// Replace the per-tree app context. Called by `fern-app` when
+    /// constructing a window so the widget tree can reach the registered
+    /// event source adapter and post subscription events through the
+    /// event-loop proxy. See architecture §9.4.
+    pub fn set_app_context(&mut self, app_context: Rc<crate::event_source::TreeAppContext>) {
+        self.app_context = app_context;
+    }
+
+    /// Get the per-tree app context. Used by `BuildContext::subscribe_event`
+    /// and by the event-loop handler when dispatching incoming
+    /// `AppEvent::SubscriptionEvent`.
+    pub fn app_context(&self) -> &Rc<crate::event_source::TreeAppContext> {
+        &self.app_context
+    }
+
+    /// Switch the tree-level locale at runtime. Rebuilds all composite
+    /// widgets so that any tr! lookups picked up at build time are
+    /// re-evaluated against the new locale, and marks all widgets dirty.
+    pub fn set_locale(&mut self, locale: String) {
+        if self.locale.as_deref() == Some(locale.as_str()) {
+            return;
+        }
+        self.locale = Some(locale);
+        self.rebuild_built_widgets();
+        self.arena.mark_all_dirty();
+    }
+
+    /// Currently active locale identifier, if any.
+    pub fn locale(&self) -> Option<&str> {
+        self.locale.as_deref()
     }
 
     fn pointer_inside_overlay_region(
@@ -552,14 +595,30 @@ impl WidgetTree {
     /// and wire up new children. Used by both `rebuild_built_widgets()` (environment
     /// changes) and `process_state_changes()` (data-driven rebuild).
     pub(crate) fn rebuild_single_widget(&mut self, widget_id: WidgetId) {
-        if let Some(node) = self.arena.get_mut(widget_id) {
+        // Per §9.4.5, drop the source handle first (stops further source-side
+        // dispatch) and then remove the UI-side callback. Either order gives
+        // the same user-visible outcome for events that get posted between
+        // the two steps (they are silently dropped once the callback is
+        // gone), but dropping the source handle first stops the publisher
+        // thread's work sooner.
+        let drained_subs = if let Some(node) = self.arena.get_mut(widget_id) {
             node.effect_handles.clear();
             node.dirty.needs_rebuild = false;
+            std::mem::take(&mut node.subscription_handles)
+        } else {
+            Vec::new()
+        };
+        for (sub_id, handle) in drained_subs {
+            drop(handle);
+            self.app_context
+                .subscription_callbacks
+                .borrow_mut()
+                .remove(&sub_id);
         }
 
         let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         for child_id in old_children {
-            self.arena.destroy(child_id);
+            self.destroy_subtree(child_id);
         }
 
         let mut widget_box = match self.arena.take_widget(widget_id) {
@@ -571,9 +630,11 @@ impl WidgetTree {
             tree: self,
             composite_id: Some(widget_id),
             effect_handles: Vec::new(),
+            subscription_handles: Vec::new(),
         };
         let new_children = widget_box.build(&mut build_ctx);
         let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
+        let subscription_handles = std::mem::take(&mut build_ctx.subscription_handles);
 
         self.arena.restore_widget(widget_id, widget_box);
 
@@ -585,7 +646,32 @@ impl WidgetTree {
         if let Some(node) = self.arena.get_mut(widget_id) {
             node.children = new_children;
             node.effect_handles = effect_handles;
+            node.subscription_handles = subscription_handles;
         }
+    }
+
+    /// Recursively destroy a subtree, dropping per-widget subscription
+    /// handles and removing their UI-side callbacks. Use this in place of
+    /// `arena.destroy()` whenever a widget that may have subscribed to
+    /// events is being torn down.
+    pub(crate) fn destroy_subtree(&mut self, widget_id: WidgetId) {
+        let children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
+        for child in children {
+            self.destroy_subtree(child);
+        }
+        let drained_subs = self
+            .arena
+            .get_mut(widget_id)
+            .map(|node| std::mem::take(&mut node.subscription_handles))
+            .unwrap_or_default();
+        for (sub_id, handle) in drained_subs {
+            drop(handle);
+            self.app_context
+                .subscription_callbacks
+                .borrow_mut()
+                .remove(&sub_id);
+        }
+        self.arena.destroy(widget_id);
     }
 
     /// Set the layout direction (LTR/RTL). Marks all widgets as needing layout.
@@ -766,11 +852,17 @@ impl WidgetTree {
                 tree: self,
                 composite_id: Some(id),
                 effect_handles: Vec::new(),
+                subscription_handles: Vec::new(),
             };
             let built_children = widget_box.build(&mut build_ctx);
             let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
+            let subscription_handles = std::mem::take(&mut build_ctx.subscription_handles);
 
             self.arena.restore_widget(id, widget_box);
+
+            if let Some(node) = self.arena.get_mut(id) {
+                node.subscription_handles = subscription_handles;
+            }
 
             if !built_children.is_empty() {
                 for &child_id in &built_children {
@@ -838,11 +930,17 @@ impl WidgetTree {
                     tree: self,
                     composite_id: Some(id),
                     effect_handles: Vec::new(),
+                    subscription_handles: Vec::new(),
                 };
                 let built_children = widget_box.build(&mut build_ctx);
                 let effect_handles = std::mem::take(&mut build_ctx.effect_handles);
+                let subscription_handles = std::mem::take(&mut build_ctx.subscription_handles);
 
                 self.arena.restore_widget(id, widget_box);
+
+                if let Some(node) = self.arena.get_mut(id) {
+                    node.subscription_handles = subscription_handles;
+                }
 
                 if !built_children.is_empty() {
                     for &child_id in &built_children {

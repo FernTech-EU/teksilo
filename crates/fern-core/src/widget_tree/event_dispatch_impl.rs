@@ -696,6 +696,14 @@ impl WidgetTree {
             self.active_drag = None;
             self.pointer_captured_by = None;
         }
+
+        // --- Environment changes (architecture §9.5) ---
+        if let Some(theme) = ctx.theme_request {
+            self.set_theme(theme);
+        }
+        if let Some(locale) = ctx.locale_request {
+            self.set_locale(locale);
+        }
     }
 
     // --- Drag and drop helpers ---
