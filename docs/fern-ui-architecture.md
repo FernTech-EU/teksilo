@@ -614,7 +614,331 @@ The tree maintains a `focused_widget: Option<WidgetId>`. Tab/Shift-Tab cycles fo
 
 When dormant subtrees reactivate, focus is restored to the previously focused widget within that subtree.
 
-### 9.4 Deferred Operations via EventContext
+### 9.4 Backend Events: Direct Subscription via the EventSource Trait
+
+A persistent confusion in early drafts of this document treated backend events (database changes, network responses, file watcher notifications, message bus events) as if they were the same kind of thing as typed application commands. They are not. Section 9.2 argues for typed commands as a discipline for *user intent*: a button click says "I want to save," and the application interprets that intent in its current context. A backend event is the opposite shape — a fact that has happened, observed by the application, that one or more widgets need to react to. There is no decision to make, no routing to perform, no command palette vocabulary, no undo participation. The widget just needs to know the fact and update itself.
+
+Forcing backend events through the typed-command layer means writing a `Cmd::ItemCreated { ids }` variant whose only call site is a forwarder, whose only handler arm is a signal setter, and whose only purpose is to cross the typed-command boundary that did not need to be crossed. The integration with Qleany's event hub made this concrete: every backend event would have required a command variant, a forwarding closure, a match arm, and a shared signal reachable from the handler. Six steps for "when an item is created, show its title." Slint's globals-and-callbacks pattern reaches the same destination in three. The mismatch was a sign that typed commands were the wrong layer for this case, not that the typed-command discipline was wrong overall.
+
+The right separation is: typed commands for user intent (Section 9.2), direct subscription for backend events (this section). The two layers compose. A button click emits `Cmd::AddItem`. The command handler calls a controller. The controller mutates the database and emits a backend event. A widget that subscribes to that event reacts and updates its display. Each layer does what it is best at.
+
+#### 9.4.1 The EventSource Trait
+
+FernUI does not depend on any specific backend event source. The framework defines a trait that any event source (Qleany's `EventHubClient`, a Tokio broadcast channel, a custom message bus, a file watcher) can implement:
+
+```rust
+use std::any::Any;
+use std::hash::Hash;
+
+/// An external source of events that widgets can subscribe to.
+///
+/// Implementations include backend message buses, database change notifiers,
+/// file watchers, network response channels — any source that publishes events
+/// asynchronously and that widgets need to react to.
+pub trait EventSource: 'static {
+    /// The key by which subscribers identify which events they care about.
+    /// Typically an enum (Qleany's Origin) or a topic string.
+    type Origin: Clone + Eq + Hash + Send + 'static;
+
+    /// The event payload delivered to subscriber callbacks.
+    /// Must be Clone because multiple subscribers may receive the same event,
+    /// and must be Send because events cross from the publisher's thread to
+    /// the UI thread via the framework's proxy bridge.
+    type Event: Clone + Send + 'static;
+
+    /// Subscribe a callback to events of a given origin. The callback is
+    /// invoked on whatever thread the source publishes from (typically a
+    /// background thread). The returned handle, when dropped, removes the
+    /// subscription from the source's internal registry.
+    fn subscribe(
+        &self,
+        origin: Self::Origin,
+        callback: std::sync::Arc<dyn Fn(Self::Event) + Send + Sync + 'static>,
+    ) -> SubscriptionHandle;
+}
+
+/// An opaque handle returned by `EventSource::subscribe`.
+/// The source defines what it contains; the framework treats it as a token
+/// whose `Drop` impl performs the unsubscription.
+pub struct SubscriptionHandle {
+    inner: Box<dyn std::any::Any + Send>,
+}
+```
+
+Two associated types and one method. `Origin` is the subscription key; `Event` is the payload. The single method takes an `Arc<dyn Fn(Event)>` (rather than `Box`) so that the source's internal dispatch can clone the callback cheaply when invoking it for multiple subscribers, and so that the framework's wrapper closure can be `Fn` (called many times) without needing to clone the boxed contents on each call. `SubscriptionHandle` is opaque at the framework level — its `Drop` impl, defined by the source implementation, removes the subscriber entry from whatever internal registry the source maintains.
+
+For Qleany's `EventHubClient`, the implementation is mechanical:
+
+```rust
+// Application code, not in fern-core:
+impl fern_core::EventSource for EventHubClient {
+    type Origin = common::event::Origin;
+    type Event = common::event::Event;
+
+    fn subscribe(
+        &self,
+        origin: Self::Origin,
+        callback: Arc<dyn Fn(Self::Event) + Send + Sync + 'static>,
+    ) -> SubscriptionHandle {
+        let token = self.subscribe_internal(origin, callback);
+        SubscriptionHandle::new(token)
+    }
+}
+```
+
+The `subscribe_internal` returns a removal token whose `Drop` impl removes the entry from the EventHubClient's subscriber HashMap. This is a small change to the existing EventHubClient (currently `subscribe` returns `()`); the change is application-side, not framework-side.
+
+#### 9.4.2 Registering a Source with the Builder
+
+The application registers its event source on the `FernAppBuilder` at startup:
+
+```rust
+let app_context = Arc::new(AppContext::new());
+let event_hub = EventHubClient::new(&app_context.event_hub);
+event_hub.start(app_context.quit_signal.clone());
+
+FernAppBuilder::new()
+    .theme(Theme::light_default())
+    .event_source(event_hub)
+    .root({
+        let app_context = app_context.clone();
+        move |tree| tree.add(App::new(app_context))
+    })
+    .run();
+```
+
+The builder's `event_source<S: EventSource>(source: S)` method takes ownership of the source, wraps it in an internal `EventSourceAdapter` that erases the associated types into stored closures, and stores the adapter as a single non-generic value. The framework itself does not become generic over `S` — the type parameter is consumed at the call site and the stored adapter is a concrete type.
+
+This is the sole point at which the framework learns about the event source's types. The TypeIds of `S::Origin` and `S::Event` are recorded in the adapter for later validation. Type names are recorded as static strings via `std::any::type_name` so error messages are human-readable.
+
+The builder accepts at most one event source per application. Two sources of different types would require either two adapters (a future extension; see §9.4.7) or a single source that internally multiplexes multiple backends. For all current FernUI use cases, one source is sufficient.
+
+#### 9.4.3 Subscribing from Widgets
+
+A widget subscribes to events during its `build()` method via `BuildContext::subscribe_event`:
+
+```rust
+impl Widget for App {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let item_label = self.item_label.clone();
+        let app_context = self.app_context.clone();
+
+        ctx.subscribe_event(
+            Origin::DirectAccess(DirectAccessEntity::Item(EntityEvent::Created)),
+            move |event: &Event| {
+                if let Some(id) = event.ids.first() {
+                    if let Ok(Some(dto)) = item_commands::get_item(&app_context, id) {
+                        item_label.set(format!("Created: {} (id={})", dto.title, dto.id));
+                    }
+                }
+            },
+        );
+
+        let root = ctx.add(
+            VStack::new()
+                .child(TextWidget::new("").bind_text(self.item_label.map(|s| s.clone())))
+                // ...
+        );
+        vec![root]
+    }
+}
+```
+
+Read this `build()` top to bottom and the data flow for the item-label is local. The signal is owned by the widget. The subscription is registered next to the signal, with a closure that updates the signal when an event arrives. The TextWidget binds to the signal. Three things, all in one method, all readable in order. There is no `Cmd::ItemCreated` variant defined elsewhere, no match arm in the application's command handler, no global state, no setup closure in `main()` that wires the subscription — the subscription lives where the consumer lives.
+
+The `BuildContext::subscribe_event` signature is generic but does not propagate generics into stored state:
+
+```rust
+impl BuildContext<'_> {
+    pub fn subscribe_event<O, E, F>(&mut self, origin: O, callback: F)
+    where
+        O: 'static,
+        E: 'static,
+        F: Fn(&E) + 'static,
+    {
+        // Validate that the configured event source uses these types.
+        let adapter = self.app_state.event_source.as_ref()
+            .expect("subscribe_event called but no event source configured");
+
+        debug_assert_eq!(
+            adapter.origin_type, TypeId::of::<O>(),
+            "origin type mismatch: source uses {}, subscribe call used {}",
+            adapter.origin_type_name, std::any::type_name::<O>(),
+        );
+        debug_assert_eq!(
+            adapter.event_type, TypeId::of::<E>(),
+            "event type mismatch: source uses {}, subscribe call used {}",
+            adapter.event_type_name, std::any::type_name::<E>(),
+        );
+
+        // Allocate a subscription id and store the user's callback on the
+        // UI side, indexed by id. The stored closure downcasts &dyn Any
+        // back to &E and invokes the user's F.
+        let sub_id = self.app_state.allocate_subscription_id();
+        let stored_callback: Box<dyn Fn(&dyn Any)> = Box::new(move |event_any| {
+            let event = event_any.downcast_ref::<E>()
+                .expect("event type mismatch — framework bug");
+            callback(event);
+        });
+        self.app_state.subscription_callbacks.insert(sub_id, stored_callback);
+
+        // Build a Send wrapper that the source will invoke from its publisher
+        // thread. The wrapper carries only the sub_id (Copy) and the proxy
+        // (Send), boxes the event as Any+Send, and posts to the UI thread.
+        let proxy = self.app_state.proxy.clone();
+        let wrapper: Arc<dyn Fn(Box<dyn Any + Send>) + Send + Sync> =
+            Arc::new(move |erased_event| {
+                proxy.post_subscription_event(sub_id, erased_event);
+            });
+
+        let handle = (adapter.subscribe_fn)(Box::new(origin), wrapper);
+
+        // Register the subscription with the current widget's cleanup scope.
+        self.current_widget_scope().add_subscription(sub_id, handle);
+    }
+}
+```
+
+The user's callback `F: Fn(&E)` is **not** required to be `Send`. It runs on the UI thread, where it is free to touch `Signal<T>`, `Rc<T>`, and any other UI-thread-only state. The `Send` boundary is crossed inside the framework's wrapper, which carries only `(SubscriptionId, Box<dyn Any + Send>)` across threads — nothing else.
+
+#### 9.4.4 Runtime Flow
+
+What happens when a backend event arrives, end to end:
+
+1. A backend operation (controller call, transaction commit, file watcher tick) publishes an event. For Qleany, this is `event_hub.send(Event { origin, ids, data })`.
+
+2. The hub's internal dispatch finds matching subscribers and invokes their callbacks. For Qleany, this happens on the EventHubClient's background thread that drains the flume channel.
+
+3. One of those callbacks is the framework's wrapper, registered by `BuildContext::subscribe_event`. The wrapper boxes the event as `Box<dyn Any + Send>` and calls `proxy.post_subscription_event(sub_id, erased_event)`.
+
+4. The proxy sends `AppEvent::SubscriptionEvent { sub_id, event }` through the winit event loop's user-event channel. winit wakes the UI thread.
+
+5. `FernAppHandler::user_event` receives the AppEvent, looks up the subscription's UI-side callback in `subscription_callbacks` by `sub_id`, downcasts the boxed event to `&E`, and invokes the user's closure.
+
+6. The user's closure runs on the UI thread. It can mutate signals, call other UI-thread methods, anything a normal widget callback can do. The mutated signals trigger the binding system, marking dependent widgets dirty.
+
+7. The framework requests a redraw. The next frame paints the updated widgets.
+
+The only thing crossing the thread boundary is the boxed event plus the subscription id. The user's callback never crosses threads. The widget's signals never cross threads. The `Send` constraints in the trait are not constraints on application code — they are constraints on the framework's internal plumbing, and they are satisfied automatically by the wrapping that `subscribe_event` performs.
+
+#### 9.4.5 Lifecycle and Cleanup
+
+Subscriptions are scoped to widget lifetime. When a widget is destroyed (removed from the arena, replaced by a different widget at the same id, or the entire window closes), the framework iterates that widget's subscription scope and tears down each subscription in a specific order:
+
+1. **Drop the `SubscriptionHandle` first.** The handle's `Drop` impl, defined by the event source implementation, removes the subscriber entry from the source's internal registry. After this point, the source will not invoke this subscription's wrapper for any newly-published events.
+
+2. **Remove the UI-side callback second.** The framework removes the entry from `subscription_callbacks` keyed by the subscription id. After this point, even in-flight events that were already in the proxy queue (delivered between steps 1 and 2) will fail their lookup in `user_event` and be silently dropped.
+
+The ordering matters because of in-flight events. An event published just before the widget is destroyed might already be sitting in the winit event queue when the framework starts cleanup. With the ordering above, that in-flight event is delivered to `user_event`, the lookup succeeds (the callback is still in the map), the user's closure runs one last time. This is correct: the widget existed when the event was published, and the closure executes against the still-valid widget state. Reversing the order would mean the in-flight event finds no callback and is silently dropped, even though the event predates the destruction. The correct ordering preserves causality.
+
+If an event arrives after both steps (e.g., the source publishes from another thread between cleanup and the next event-loop tick), the lookup in `user_event` returns `None` and the event is silently dropped. This is also correct: the widget no longer exists, so there is no one to deliver to.
+
+The cleanup integration uses the same per-widget cleanup scope mechanism that already handles signal observers, animation effects, timers, focus registrations, and accessibility nodes. Subscriptions add one more list to the scope; they do not introduce a new lifecycle concept.
+
+#### 9.4.6 Multiple Instances
+
+The pattern that defeats global-property approaches is multiple simultaneous instances of the same conceptual widget — three open entity editors, four document viewers, a dozen inspector panels, each editing a different thing and each needing its own subscription state. Direct subscription handles this without any coordination:
+
+```rust
+struct EntityEditor {
+    entity_id: EntityId,
+    name: Signal<String>,
+    only_for_heritage: Signal<bool>,
+    // ... other per-instance state
+    app_context: Arc<AppContext>,
+}
+
+impl Widget for EntityEditor {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let entity_id = self.entity_id;
+        let name = self.name.clone();
+        let app_context = self.app_context.clone();
+
+        ctx.subscribe_event(
+            Origin::DirectAccess(DirectAccessEntity::Entity(EntityEvent::Updated)),
+            move |event: &Event| {
+                // Only react if the updated entity is this editor's entity.
+                if event.ids.contains(&entity_id) {
+                    if let Ok(Some(dto)) = entity_commands::get_entity(&app_context, &entity_id) {
+                        name.set(dto.name);
+                    }
+                }
+            },
+        );
+        // ... rest of build
+    }
+}
+```
+
+Three open editors construct three `EntityEditor` widgets, each with its own `entity_id`. Each calls `subscribe_event` once during its `build()`, registering a closure that captures *its own* entity_id and *its own* name signal. When an `Entity Updated` event arrives with `ids: [7]`, all three subscriptions fire (the source dispatches to all subscribers of that origin); the editor whose captured `entity_id == 7` updates its signal, the other two return early. Each editor's state is independent, no "current editor" indirection exists, and no global state mediates between them.
+
+The filtering happens inside the callback. For small numbers of subscribers (a typical application has dozens, not thousands), this is efficient enough — the cost of an early-return check against a captured `EntityId` is negligible. Applications with very high subscription density could benefit from a richer dispatch with origin-plus-key filtering, but that is a future optimization, not a current requirement.
+
+#### 9.4.7 Comparison with Typed Commands
+
+The two layers serve different purposes and should not be confused:
+
+| | Typed commands (§9.2) | Event subscription (§9.4) |
+|---|---|---|
+| Direction | Widget → application | External source → widget |
+| Semantic | "I want X to happen" | "X has happened" |
+| Routing | Central handler interprets | Local callback reacts |
+| Discoverability | Command palette enumerates | Subscription is in `build()` |
+| Recordability | Yes (the command is a value) | No (event is a fact) |
+| Undo participation | Yes | No |
+| Best for | Save, Open, format, navigate | DB changes, file watchers, network responses, hub events |
+
+A typical interaction uses both layers. The user clicks Save. The button emits `Cmd::SaveDocument` (typed command, recordable, scriptable). The application's command handler calls a controller. The controller writes to disk and publishes a `DocumentSaved` event on the event source. A status bar widget subscribed to `DocumentSaved` updates a "Saved at HH:MM" label. The typed command captured the user's intent; the subscription captured the resulting fact. Each layer handled what it was designed for.
+
+The wrong pattern is to define `Cmd::DocumentSaved` and route the backend event through the command handler. This treats the event as if it were intent — but no user intended for "DocumentSaved" to happen as a separate decision; it is a consequence of the SaveDocument intent that has already been processed. Routing it through the command layer adds a forwarder, a match arm, and removes nothing.
+
+#### 9.4.8 Testing Subscriptions
+
+A widget that subscribes to an event source can be tested without running the real source. The test provides a mock implementation of `EventSource` that lets the test inject events directly:
+
+```rust
+struct MockEventSource {
+    subscribers: Mutex<Vec<(MockOrigin, Arc<dyn Fn(MockEvent) + Send + Sync>)>>,
+}
+
+impl EventSource for MockEventSource {
+    type Origin = MockOrigin;
+    type Event = MockEvent;
+
+    fn subscribe(&self, origin: Self::Origin, callback: Arc<dyn Fn(Self::Event) + Send + Sync>)
+        -> SubscriptionHandle
+    {
+        self.subscribers.lock().unwrap().push((origin, callback));
+        SubscriptionHandle::new(())  // no real cleanup needed in tests
+    }
+}
+
+impl MockEventSource {
+    fn publish(&self, origin: MockOrigin, event: MockEvent) {
+        for (sub_origin, cb) in self.subscribers.lock().unwrap().iter() {
+            if *sub_origin == origin {
+                cb(event.clone());
+            }
+        }
+    }
+}
+```
+
+The test constructs a `MockEventSource`, registers it with a headless `FernApp`, instantiates the widget, calls `publish` to inject an event, and asserts that the widget's signals updated as expected. The test runs in milliseconds, has no threads, no winit, no database — just the widget logic and the event source contract.
+
+This is the same mockability that the V2 widget model gives to widget unit testing in general (Section 28). The `EventSource` trait is no different from any other trait that the application can substitute for tests.
+
+#### 9.4.9 Constraints and Future Extensions
+
+**One source per application.** The current design supports a single registered event source per `FernAppBuilder`. For the cases FernUI targets (one Qleany backend, one custom message bus, one Tokio channel — never more than one of these in the same app), this is sufficient. If a future application needs multiple sources of distinct types, the framework can grow `event_source_named("primary", source_a)` and `subscribe_event_on::<S>("primary", origin, callback)` as a forward-compatible extension. The single-source API would remain as the default.
+
+**Send + Clone on Event.** The event payload must be `Clone` (multiple subscribers, plus the wrapper boxes the event into `Any`) and `Send` (crosses the thread boundary to the UI thread). For event types that are expensive to clone, the source can publish `Arc<RealEvent>` as its `Event` type — the trait's bound is satisfied by `Arc`, and the per-subscriber clone is just an Arc refcount bump. This is a per-source decision, not a framework concern.
+
+**Backpressure.** Events published faster than the UI thread can drain them will accumulate in winit's user-event queue. There is no flow control in the framework. For low-rate sources (Qleany emits events on user-driven operations, hundreds per minute at most), this is fine. For high-rate sources (telemetry streams, log tailers), the source should debounce or batch on its own side before publishing. Worth noting in source-specific documentation, not a framework problem.
+
+**Re-entrancy.** A subscription callback is free to mutate signals, emit typed commands, or call methods that publish further events on the source. The chain runs to completion within `user_event`, then a redraw is requested. There is no deadlock risk because everything goes through the event-loop queue, but deeply chained subscriptions can be hard to reason about. Standard advice: keep callbacks short, do the work, return.
+
+### 9.5 Deferred Operations via EventContext
 
 Event handlers run while the widget tree is mid-dispatch. Mutating the tree, changing focus, or showing an overlay synchronously during a handler would invalidate iterators, borrow guards, or the dispatch state. Instead, handlers enqueue operations on `EventContext` that are applied after dispatch completes, before the next frame.
 
