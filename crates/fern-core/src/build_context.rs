@@ -256,3 +256,71 @@ impl<'a> BuildContext<'a> {
         self.subscription_handles.push((sub_id, handle));
     }
 }
+
+#[cfg(test)]
+mod effect_tests {
+    use super::*;
+    use crate::widget::{LayoutContext, Widget};
+    use crate::widget_id::WidgetId;
+    use crate::widget_tree::WidgetTree;
+    use fern_canvas::{Size, SizeProposal};
+
+    /// A leaf widget that registers an effect on one signal to mirror its
+    /// value into another. Produces no children.
+    #[derive(Debug)]
+    struct LeafWithEffect {
+        source: Signal<i32>,
+        mirror: Signal<i32>,
+    }
+
+    impl Widget for LeafWithEffect {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let mirror = self.mirror.clone();
+            ctx.effect(&self.source, move |v| mirror.set(*v));
+            Vec::new()
+        }
+
+        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+            proposal.resolve(0.0, 0.0)
+        }
+    }
+
+    #[test]
+    fn leaf_widget_effect_fires_and_is_cleaned_up_on_destroy() {
+        // Regression guard: before the insert_widget / add_child fix,
+        // effect_handles for a leaf widget (Vec::new() from build()) were
+        // dropped the moment BuildContext went out of scope, silently
+        // unregistering the observer. After the fix, the handle is
+        // transferred to the arena node and the effect fires on signal
+        // changes until the widget is destroyed.
+        let mut tree = WidgetTree::new();
+        let source = Signal::new(0_i32);
+        let mirror = Signal::new(0_i32);
+
+        let id = tree.add(LeafWithEffect {
+            source: source.clone(),
+            mirror: mirror.clone(),
+        });
+
+        // The effect should be live after insertion.
+        source.set(42);
+        assert_eq!(
+            mirror.get(),
+            42,
+            "leaf widget effect must survive build() and fire on signal change"
+        );
+
+        source.set(7);
+        assert_eq!(mirror.get(), 7);
+
+        // Destroying the widget drops its effect_handles, which in turn
+        // drops each ObserverHandle and unregisters the observer.
+        tree.destroy_subtree(id);
+        source.set(100);
+        assert_eq!(
+            mirror.get(),
+            7,
+            "effect must be unregistered after widget destruction"
+        );
+    }
+}

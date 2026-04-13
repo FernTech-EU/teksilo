@@ -860,8 +860,14 @@ impl WidgetTree {
 
             self.arena.restore_widget(id, widget_box);
 
+            // Transfer per-widget handles to the node. Both lists are
+            // stored unconditionally — a leaf widget that registers an
+            // effect in its build() still needs its ObserverHandle to
+            // persist (otherwise the effect unregisters the moment
+            // BuildContext drops).
             if let Some(node) = self.arena.get_mut(id) {
                 node.subscription_handles = subscription_handles;
+                node.effect_handles = effect_handles;
             }
 
             if !built_children.is_empty() {
@@ -873,7 +879,6 @@ impl WidgetTree {
                 if let Some(node) = self.arena.get_mut(id) {
                     node.children = built_children;
                     node.has_built_children = true;
-                    node.effect_handles = effect_handles;
                 }
             }
         }
@@ -938,8 +943,13 @@ impl WidgetTree {
 
                 self.arena.restore_widget(id, widget_box);
 
+                // Transfer per-widget handles to the node. See the
+                // matching block in `insert_widget` — effect and
+                // subscription handles must persist for leaf widgets
+                // too, not only composite ones.
                 if let Some(node) = self.arena.get_mut(id) {
                     node.subscription_handles = subscription_handles;
+                    node.effect_handles = effect_handles;
                 }
 
                 if !built_children.is_empty() {
@@ -951,7 +961,6 @@ impl WidgetTree {
                     if let Some(node) = self.arena.get_mut(id) {
                         node.children = built_children;
                         node.has_built_children = true;
-                        node.effect_handles = effect_handles;
                     }
                 }
             }
