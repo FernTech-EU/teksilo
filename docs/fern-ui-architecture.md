@@ -938,7 +938,215 @@ This is the same mockability that the V2 widget model gives to widget unit testi
 
 **Re-entrancy.** A subscription callback is free to mutate signals, emit typed commands, or call methods that publish further events on the source. The chain runs to completion within `user_event`, then a redraw is requested. There is no deadlock risk because everything goes through the event-loop queue, but deeply chained subscriptions can be hard to reason about. Standard advice: keep callbacks short, do the work, return.
 
-### 9.5 Deferred Operations via EventContext
+### 9.5 Application State and `BuildContext::app_state`
+
+Many applications have state that does not belong to any particular widget but that many widgets need to read: the current theme, the active locale, the current workspace identifier, the current document handle, an online/offline status flag, a global loading indicator. The defining property is "there is exactly one of these, and many things observe it." A handful of places mutate it; many places read it.
+
+The natural place to put such state is a struct constructed at application startup and shared with all widgets that need it. The naive approach — pass the struct as a constructor argument to the root widget, which passes it to its children, which pass it to theirs — is the React "prop drilling" problem: every intermediate widget must accept and forward state it does not itself use, just so distant descendants can reach it. For a widget tree five or ten levels deep, this is unworkable.
+
+FernUI's solution is `BuildContext::app_state<T>()`: a typed, depth-independent way for any widget to retrieve a value the application registered at startup. The framework provides the lookup mechanism; the application defines the shape of the value.
+
+#### 9.5.1 The API
+
+The framework adds two methods, one on the builder and one on `BuildContext`:
+
+```rust
+impl FernAppBuilder {
+    /// Register an application-defined state value of type T.
+    /// The value will be available to every widget via `BuildContext::app_state::<T>()`.
+    /// Multiple values of distinct types can be registered; each type T may
+    /// be registered at most once.
+    pub fn app_state<T: 'static>(mut self, value: T) -> Self {
+        self.app_state_registry.insert(TypeId::of::<T>(), Box::new(value));
+        self
+    }
+}
+
+impl BuildContext<'_> {
+    /// Retrieve the application state of type T, or None if no value of that
+    /// type was registered. The returned reference borrows from the framework
+    /// for the duration of the build pass.
+    pub fn app_state<T: 'static>(&self) -> Option<&T> {
+        self.app_state_registry
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref::<T>())
+    }
+}
+```
+
+Internally the registry is a `HashMap<TypeId, Box<dyn Any>>` populated at builder time and propagated to every `BuildContext` constructed during widget building. There is no per-widget state, no lifecycle, no notification — the registry is read-only after `FernAppBuilder::run` is called. The TypeId lookup ensures type safety: a request for `app_state::<Foo>()` can only return a `Foo` that was registered, and the compiler enforces the type at the call site.
+
+The "at most one per type" constraint is the discipline that makes the API safe. If two distinct values of the same type were registered, lookups would be ambiguous and one would silently win. Forcing distinct types means each registered value has a clear identity. Applications that want to register multiple values of the same logical kind (two separate workspace handles, say) can wrap each in a newtype: `struct PrimaryWorkspace(WorkspaceHandle)` and `struct SecondaryWorkspace(WorkspaceHandle)` are distinct types from the registry's perspective.
+
+#### 9.5.2 The Canonical Pattern
+
+The application defines a struct that holds whatever app-wide state it needs. Reactive state goes in `Signal<T>` fields; immutable services go in plain fields:
+
+```rust
+struct AppGlobals {
+    // Reactive state — widgets bind to these signals.
+    current_workspace: Signal<Option<WorkspaceId>>,
+    current_document: Signal<Option<DocumentId>>,
+    is_loading: Signal<bool>,
+    online_status: Signal<OnlineStatus>,
+
+    // Services — accessed but not observed.
+    app_context: Arc<AppContext>,
+    config: Rc<AppConfig>,
+}
+
+impl AppGlobals {
+    fn new(app_context: Arc<AppContext>, config: AppConfig) -> Rc<Self> {
+        Rc::new(Self {
+            current_workspace: Signal::new(None),
+            current_document: Signal::new(None),
+            is_loading: Signal::new(false),
+            online_status: Signal::new(OnlineStatus::Unknown),
+            app_context,
+            config: Rc::new(config),
+        })
+    }
+}
+```
+
+The struct is wrapped in `Rc` so that widgets can hold cheap clones, and registered at startup:
+
+```rust
+fn main() {
+    let app_context = Arc::new(AppContext::new());
+    let config = AppConfig::load();
+    let globals = AppGlobals::new(app_context.clone(), config);
+
+    FernAppBuilder::new()
+        .theme(Theme::light_default())
+        .event_source(event_hub_client)
+        .app_state(globals.clone())
+        .root(|tree| tree.add(App::new()))
+        .run();
+}
+```
+
+Any widget at any depth can read it without receiving it as a constructor argument:
+
+```rust
+struct WorkspaceLabel;
+
+impl Widget for WorkspaceLabel {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let globals = ctx.app_state::<Rc<AppGlobals>>()
+            .expect("AppGlobals not registered");
+
+        let label = globals.current_workspace.map(|opt| match opt {
+            Some(id) => format!("Workspace #{}", id),
+            None => "No workspace".to_string(),
+        });
+
+        vec![ctx.add(TextWidget::new("").bind_text(label))]
+    }
+}
+```
+
+`WorkspaceLabel` could be ten levels deep in the tree. Its parent does not need to know that it reads workspace state. Its grandparent does not need to forward an `AppGlobals` reference. The widget reaches into `BuildContext::app_state` directly, retrieves the typed reference, and binds to the relevant signal. The chain of intermediate widgets is unaffected.
+
+#### 9.5.3 Mutation Patterns
+
+App state mutations come from three places, each with a clear pattern:
+
+**Direct mutation from the UI thread.** A command handler, an `on_activate_fn` closure, or any other UI-thread code that holds a reference to the globals struct mutates the signal directly:
+
+```rust
+.on_command(move |cmd: &Cmd, _ctx| match cmd {
+    Cmd::SetLoading(loading) => {
+        globals.is_loading.set(*loading);
+    }
+    // ...
+})
+```
+
+The closure captures `Rc<AppGlobals>` from the enclosing scope. The signal mutation propagates through the binding system as usual; widgets that observe `is_loading` repaint on the next frame.
+
+**From an `EventSource` subscription.** A widget subscribes to a backend event and updates a global signal in the callback (which runs on the UI thread per Section 9.4):
+
+```rust
+impl Widget for ConnectionMonitor {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let globals = ctx.app_state::<Rc<AppGlobals>>().unwrap().clone();
+
+        ctx.subscribe_event(
+            Origin::Network(NetworkEvent::StatusChanged),
+            move |event: &NetworkEvent| {
+                globals.online_status.set(event.new_status);
+            },
+        );
+
+        vec![]  // ConnectionMonitor has no visual; it just bridges events to globals.
+    }
+}
+```
+
+This is the canonical pattern for "background source updates app-wide state." The widget that owns the subscription captures the globals Rc, the callback runs on the UI thread, the signal mutation is direct.
+
+**Lower-level cross-thread updates.** If a global needs to be written from a background thread without going through an event source — for example, a network throughput counter updated by a background task at high frequency — the application stores an `Arc<AtomicU64>` in the globals struct alongside the `Signal<T>` fields and uses a frame-tick effect to copy the atomic value into the signal on each frame. This is application-level engineering, not a framework concern. For the vast majority of cases, the EventSource path is the right answer.
+
+#### 9.5.4 Multiple State Structs
+
+The "one value per type" rule means an application can register multiple state structs as long as their types are distinct:
+
+```rust
+FernAppBuilder::new()
+    .app_state(Rc::new(AppGlobals::new(...)))
+    .app_state(Rc::new(EditorGlobals::new(...)))
+    .app_state(Rc::new(NetworkGlobals::new(...)))
+    .app_state(Arc::new(MetricsCollector::new()))
+    .root(...)
+    .run();
+```
+
+Each struct has a clear scope: app-wide state in `AppGlobals`, editor-specific state in `EditorGlobals`, network state in `NetworkGlobals`, metrics in `MetricsCollector`. Widgets retrieve whichever they need:
+
+```rust
+let editor = ctx.app_state::<Rc<EditorGlobals>>().unwrap();
+let metrics = ctx.app_state::<Arc<MetricsCollector>>().unwrap();
+```
+
+This is more disciplined than a single monolithic globals struct, because it forces the application to think about which state is genuinely app-wide versus subsystem-scoped, and the type system enforces the separation. A widget that asks for `EditorGlobals` but the application registered only `AppGlobals` gets a clear `None` at the lookup site, not an obscure runtime error.
+
+#### 9.5.5 Testing
+
+Headless tests construct the same state structs and register them with a headless app:
+
+```rust
+#[test]
+fn workspace_label_displays_current_workspace() {
+    let test_globals = Rc::new(AppGlobals::new_for_test());
+    test_globals.current_workspace.set(Some(WorkspaceId(42)));
+
+    let mut headless = FernAppBuilder::new()
+        .app_state(test_globals.clone())
+        .build_headless();
+
+    let widget_id = headless.tree.add(WorkspaceLabel);
+    headless.tree.layout(SizeProposal::exact(200.0, 50.0));
+
+    let frame = headless.tree.render();
+    assert!(frame.contains_text("Workspace #42"));
+}
+```
+
+The test controls the app state directly, the widget reads from the same registry the framework would provide in a real run, and the rendered output reflects the test-injected values. No widget code needs to change between production and test — both paths read from `BuildContext::app_state`, the only difference is what was registered at builder time.
+
+#### 9.5.6 What `app_state` Is Not
+
+`app_state` is a depth-independent value lookup. It is not:
+
+- **A reactive primitive.** The registry itself is not reactive — registered values cannot be replaced after `run()` is called, and there is no notification when the registry changes (it doesn't). Reactivity comes from the `Signal<T>` fields *inside* the registered struct, not from the registry.
+- **A message bus.** Widgets do not communicate through `app_state`. They communicate through the signals they share via `app_state`. The registry holds the values; the values hold the signals; the signals do the propagation.
+- **A dependency injection container.** It does not resolve construction order, manage lifetimes, or inject services into constructors. It just lets a widget retrieve a value the application chose to share.
+- **Cross-thread storage.** The registry is read-only at runtime and accessed only on the UI thread. Background threads cannot read or write `app_state`. To share state across threads, the application uses `Arc<T>` as the registered value (so the Arc can be cloned into widget closures that capture it for use by background-spawned tasks they trigger), and synchronizes the underlying state via the EventSource path or atomic primitives.
+
+The framework provides exactly one thing: a typed bag of values reachable from any `BuildContext`. Everything else — the shape of the values, how they are mutated, how they propagate, how they are tested — is the application's responsibility. This is the right level of abstraction. The framework provides the mechanism, the application chooses the policy.
+
+### 9.6 Deferred Operations via EventContext
 
 Event handlers run while the widget tree is mid-dispatch. Mutating the tree, changing focus, or showing an overlay synchronously during a handler would invalidate iterators, borrow guards, or the dispatch state. Instead, handlers enqueue operations on `EventContext` that are applied after dispatch completes, before the next frame.
 
