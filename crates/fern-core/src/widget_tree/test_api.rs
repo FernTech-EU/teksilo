@@ -139,7 +139,7 @@ impl WidgetTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::State;
+    use crate::signal::Signal;
     use crate::test_widgets::{FillWidget, InsetWidget};
 
     #[test]
@@ -153,8 +153,8 @@ mod tests {
     }
 
     #[test]
-    fn state_get_set_and_derived() {
-        let text = State::new(String::new());
+    fn signal_get_set_and_derived() {
+        let text = Signal::new(String::new());
         let is_empty = text.map(|value| value.is_empty());
         assert!(is_empty.get());
         text.set("hello".to_string());
@@ -176,41 +176,37 @@ mod tests {
     }
 
     #[test]
-    fn set_animated_interpolates_over_time() {
+    fn animate_to_interpolates_over_time() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new_animated(0.0_f32);
-        tree.register_animated_state(&state);
+        let signal = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&signal);
 
-        state.set_animated(
+        signal.animate_to(
             100.0,
             std::time::Duration::from_millis(200),
             fern_tokens::Easing::Linear,
         );
 
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!(
-            (*state.get() - 50.0).abs() < 2.0,
-            "at 50%: {}",
-            *state.get()
-        );
+        assert!((signal.get() - 50.0).abs() < 2.0, "at 50%: {}", signal.get());
 
         tree.tick_animations(std::time::Duration::from_millis(100));
         assert!(
-            (*state.get() - 100.0).abs() < 0.1,
+            (signal.get() - 100.0).abs() < 0.1,
             "at 100%: {}",
-            *state.get()
+            signal.get()
         );
 
         assert!(!tree.has_active_animations());
     }
 
     #[test]
-    fn set_animated_with_easing() {
+    fn animate_to_with_easing() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new_animated(0.0_f32);
-        tree.register_animated_state(&state);
+        let signal = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&signal);
 
-        state.set_animated(
+        signal.animate_to(
             100.0,
             std::time::Duration::from_millis(200),
             fern_tokens::Easing::EaseIn,
@@ -218,54 +214,54 @@ mod tests {
 
         tree.tick_animations(std::time::Duration::from_millis(100));
         assert!(
-            (*state.get() - 25.0).abs() < 2.0,
+            (signal.get() - 25.0).abs() < 2.0,
             "ease-in at 50%: {}",
-            *state.get()
+            signal.get()
         );
     }
 
     #[test]
-    fn set_animated_replaces_in_flight() {
+    fn animate_to_replaces_in_flight() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new_animated(0.0_f32);
-        tree.register_animated_state(&state);
+        let signal = Signal::<f32>::new_animated(0.0);
+        tree.register_animated_signal(&signal);
 
-        state.set_animated(
+        signal.animate_to(
             100.0,
             std::time::Duration::from_millis(200),
             fern_tokens::Easing::Linear,
         );
         tree.tick_animations(std::time::Duration::from_millis(100));
-        assert!((*state.get() - 50.0).abs() < 2.0);
+        assert!((signal.get() - 50.0).abs() < 2.0);
 
-        state.set_animated(
+        signal.animate_to(
             0.0,
             std::time::Duration::from_millis(100),
             fern_tokens::Easing::Linear,
         );
         tree.tick_animations(std::time::Duration::from_millis(50));
         assert!(
-            (*state.get() - 25.0).abs() < 3.0,
+            (signal.get() - 25.0).abs() < 3.0,
             "mid-replace: {}",
-            *state.get()
+            signal.get()
         );
 
         tree.tick_animations(std::time::Duration::from_millis(50));
         assert!(
-            (*state.get() - 0.0).abs() < 0.5,
+            (signal.get() - 0.0).abs() < 0.5,
             "end-replace: {}",
-            *state.get()
+            signal.get()
         );
     }
 
     #[test]
     fn animation_marks_widgets_dirty() {
         let mut tree = WidgetTree::new();
-        let state = crate::state::State::new_animated(100.0_f32);
-        tree.register_animated_state(&state);
+        let signal = Signal::<f32>::new_animated(100.0);
+        tree.register_animated_signal(&signal);
 
         let widget = tree.add(FillWidget::new());
-        state.bind_to(
+        signal.bind_to(
             widget,
             tree.binding_registry(),
             crate::state::BindingLevel::Relayout,
@@ -273,7 +269,7 @@ mod tests {
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
-        state.set_animated(
+        signal.animate_to(
             0.0,
             std::time::Duration::from_millis(100),
             fern_tokens::Easing::Linear,

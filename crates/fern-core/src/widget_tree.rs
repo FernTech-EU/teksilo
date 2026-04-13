@@ -36,51 +36,23 @@ type ShortcutLookup = Box<
 /// Type-erased reverse lookup: given a command (as `&dyn Any`), find its shortcut.
 type ShortcutReverseLookup = Box<dyn Fn(&dyn std::any::Any) -> Option<crate::shortcut::Shortcut>>;
 
-enum AnimatedRegistration {
-    State(crate::state::WeakAnimatedState),
-    Signal(crate::signal::WeakAnimatedSignal),
-}
-
-enum PendingAnimationRegistration {
-    State(crate::state::State<f32>, crate::state::AnimationRequest),
-    Signal(crate::signal::Signal<f32>, crate::state::AnimationRequest),
-}
+struct AnimatedRegistration(crate::signal::WeakAnimatedSignal);
 
 impl AnimatedRegistration {
-    fn same_state(&self, state: &crate::state::State<f32>) -> bool {
-        match self {
-            Self::State(weak_state) => weak_state.same_state(state),
-            Self::Signal(_) => false,
-        }
-    }
-
     fn same_signal(&self, signal: &crate::signal::Signal<f32>) -> bool {
-        match self {
-            Self::State(_) => false,
-            Self::Signal(weak_signal) => weak_signal.same_signal(signal),
-        }
+        self.0.same_signal(signal)
     }
 
     fn is_alive(&self) -> bool {
-        match self {
-            Self::State(weak_state) => weak_state.upgrade().is_some(),
-            Self::Signal(weak_signal) => weak_signal.upgrade().is_some(),
-        }
+        self.0.upgrade().is_some()
     }
 
-    fn take_pending_animation(&self) -> Option<PendingAnimationRegistration> {
-        match self {
-            Self::State(weak_state) => {
-                let state = weak_state.upgrade()?;
-                let request = state.take_pending_animation()?;
-                Some(PendingAnimationRegistration::State(state, request))
-            }
-            Self::Signal(weak_signal) => {
-                let signal = weak_signal.upgrade()?;
-                let request = signal.take_pending_animation()?;
-                Some(PendingAnimationRegistration::Signal(signal, request))
-            }
-        }
+    fn take_pending_animation(
+        &self,
+    ) -> Option<(crate::signal::Signal<f32>, crate::animation::AnimationRequest)> {
+        let signal = self.0.upgrade()?;
+        let request = signal.take_pending_animation()?;
+        Some((signal, request))
     }
 }
 
@@ -469,24 +441,9 @@ impl WidgetTree {
         self.arena.any_needs_layout() || self.arena.any_needs_paint()
     }
 
-    /// Register a `State<f32>` for animation support. The framework checks
-    /// registered values each frame for pending `set_animated` requests.
-    /// Called automatically by `BuildContext::animated_state()`.
-    pub fn register_animated_state(&mut self, state: &crate::state::State<f32>) {
-        self.animated_values
-            .retain(|registration| registration.is_alive());
-        if !self
-            .animated_values
-            .iter()
-            .any(|registration| registration.same_state(state))
-            && let Some(weak_state) = state.weak_handle()
-        {
-            self.animated_values
-                .push(AnimatedRegistration::State(weak_state));
-        }
-    }
-
-    /// Register a `Signal<f32>` for animation support.
+    /// Register a `Signal<f32>` for animation support. The framework
+    /// checks registered signals each frame for pending `animate_to`
+    /// requests. Called automatically by `BuildContext::animated_signal()`.
     pub fn register_animated_signal(&mut self, signal: &crate::signal::Signal<f32>) {
         self.animated_values
             .retain(|registration| registration.is_alive());
@@ -497,7 +454,7 @@ impl WidgetTree {
             && let Some(weak_signal) = signal.weak_handle()
         {
             self.animated_values
-                .push(AnimatedRegistration::Signal(weak_signal));
+                .push(AnimatedRegistration(weak_signal));
         }
     }
 
@@ -525,28 +482,15 @@ impl WidgetTree {
             }
         });
 
-        for animation in pending {
-            match animation {
-                PendingAnimationRegistration::State(state, req) => {
-                    self.animation_scheduler.animate(
-                        &state,
-                        req.target,
-                        req.duration,
-                        req.easing,
-                        now,
-                    );
-                }
-                PendingAnimationRegistration::Signal(signal, req) => {
-                    self.animation_scheduler.animate_signal_with_frame_interval(
-                        &signal,
-                        req.target,
-                        req.duration,
-                        req.easing,
-                        req.frame_interval,
-                        now,
-                    );
-                }
-            }
+        for (signal, req) in pending {
+            self.animation_scheduler.animate_with_frame_interval(
+                &signal,
+                req.target,
+                req.duration,
+                req.easing,
+                req.frame_interval,
+                now,
+            );
         }
     }
 

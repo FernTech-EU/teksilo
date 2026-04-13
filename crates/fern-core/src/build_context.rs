@@ -5,7 +5,7 @@
 
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
 use crate::signal::{ObserverHandle, Signal};
-use crate::state::{BindingRegistry, State};
+use crate::state::BindingRegistry;
 use crate::widget_id::WidgetId;
 
 /// Context available during Widget::build().
@@ -82,21 +82,6 @@ impl<'a> BuildContext<'a> {
     /// or widget destruction.
     pub fn own_handle(&mut self, handle: ObserverHandle) {
         self.effect_handles.push(handle);
-    }
-
-    // --- Compatibility State APIs ---
-
-    /// Create a new reactive state value. Prefer `signal()` for new code.
-    pub fn state<T: 'static>(&mut self, value: T) -> State<T> {
-        State::new(value)
-    }
-
-    /// Create a new `State<f32>` that supports `set_animated()`.
-    /// Prefer `animated_signal()` for new code.
-    pub fn animated_state(&mut self, value: f32) -> State<f32> {
-        let state = State::new_animated(value);
-        self.tree.register_animated_state(&state);
-        state
     }
 
     /// Get the binding registry.

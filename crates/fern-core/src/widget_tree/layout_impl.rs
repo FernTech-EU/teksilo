@@ -365,8 +365,8 @@ mod tests {
     }
 
     #[test]
-    fn state_binding_marks_widget_dirty_on_layout() {
-        use crate::state::State;
+    fn signal_binding_marks_widget_dirty_on_layout() {
+        use crate::signal::Signal;
 
         let mut tree = WidgetTree::new();
         let widget = tree.add(FillWidget::new().background(Color::RED));
@@ -375,7 +375,7 @@ mod tests {
 
         assert!(!tree.needs_paint());
 
-        let visible = State::new(true);
+        let visible = Signal::new(true);
         visible.bind_to(
             widget,
             tree.binding_registry(),
