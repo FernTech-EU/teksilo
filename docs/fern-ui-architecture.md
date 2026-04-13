@@ -1198,36 +1198,657 @@ Shortcuts bind to logical keys (the character the key produces), not physical ke
 
 ## 12. Internationalization
 
-### 12.1 Architecture
+Internationalization is a Milestone 7 deliverable, scheduled before Milestone 8 (rich text editor) so that editor UI labels are translatable from the start. The design is opinionated: FernUI commits to Fluent as the translation format, to compile-time key checking via a custom procedural macro, and to RTL support via direction-aware layout. The framework owns the translation lookup mechanism — there is no abstract `Translator` trait — because Fluent is good enough that pluggability would be cost without benefit. The application provides .ftl files, the framework provides the `tr!` macro, the `LocalizedString` type, the bundle management, and the layout direction signal.
 
-Translation is a UI concern, structurally parallel to the palette — both are environment data that flows down the widget tree. The domain layer (Qleany use cases) does not handle translation. If localized data is needed in a use case, it arrives through the input DTO.
+### 12.1 Foundation: fluent-rs Plus a Custom Validating Macro
 
-FernUI provides translation through the fern-i18n crate, which wraps Mozilla's Fluent via fluent-rs. The `tr!` macro resolves translation keys against the active locale bundle:
+FernUI's i18n is built on two pieces:
 
-```rust
-Button::new(tr!("btn-save"))
-let status = tr!("word-count", count = word_count);
+1. **`fluent-bundle` and `fluent-syntax`** (the runtime crates from the `fluent-rs` project) — used directly for runtime translation lookup. Bundles are constructed from `.ftl` resource strings at startup, store the parsed AST, support adding more resources at runtime, and resolve message keys with arguments via `format_pattern`. This is the standard fluent-rs usage pattern, with no wrapper layer.
+
+2. **A custom procedural macro `tr!`** — defined in `fern-i18n-macros`, it provides compile-time key checking by reading the application's source-language `.ftl` file at macro expansion time, parsing it via `fluent-syntax`, and validating that every `tr!(...)` call references a key that exists with arguments that match. The macro emits code that calls into the runtime FluentBundle at execution time. The compile-time validation and the runtime lookup are two separate paths: the macro's job is to catch bugs at build time, the runtime's job is to actually resolve translated strings.
+
+This design is deliberately different from the `fluent-static` crate (which generates pure Rust functions inlining the translation logic at build time, bypassing FluentBundle entirely at runtime). `fluent-static` would give us compile-time checking but would make runtime override and hot-reload structurally impossible — there is no FluentBundle to swap. The custom macro keeps compile-time checking while leaving the runtime path open for hot-reload, partial translations, and per-key fallback. The trade-off is that FernUI maintains its own proc macro (~500–1000 lines of Rust) instead of leveraging `fluent-static`'s code generator. The trade-off is acceptable because the macro's scope is well-bounded and the alternative loses essential features.
+
+#### 12.1.1 Compile-Time Key Validation
+
+The application designates one `.ftl` file as the *source language* (typically `en-US.ftl`). The `tr!` proc macro reads this file at every compilation, parses it via `fluent-syntax`, and builds a key/argument-signature map. When the macro encounters `tr!(welcome_title())` in source code, it checks the map: does a message named `welcome-title` exist? Does it take zero arguments? If yes, the call expands to runtime resolution code. If no, the macro fails with a compile error pointing at the `tr!` invocation:
+
+```
+error: translation key `welcome-title` not found in en-US.ftl
+  --> src/widgets/welcome.rs:42:31
+   |
+42 |     TextWidget::new(tr!(welcome_title()))
+   |                         ^^^^^^^^^^^^^
+   |
+   = help: did you mean `welcome-greeting`?
+   = note: looked in /home/cyril/atelier/locales/en-US.ftl
 ```
 
-### 12.2 Source Format
+The macro also validates argument counts and names. `tr!(welcome_greeting())` when `welcome-greeting = Hello, { $name }!` is defined fails with a clear error about the missing `name` argument. `tr!(welcome_greeting(name = "Alice", extra = "ignored"))` fails because `extra` is not a variable in the message.
 
-Translation sources use Fluent's `.ftl` format, which handles plurals, gender, and complex grammar naturally:
+The macro reads the .ftl file via standard filesystem I/O during expansion, with `proc_macro::tracked_path::path` (stable since Rust 1.83) to inform `cargo` that the macro depends on the file so the crate is rebuilt when the .ftl changes. The path defaults to `$CARGO_MANIFEST_DIR/locales/en-US.ftl`; applications can override it via a crate-level attribute (see §12.2).
 
-```ftl
-btn-save = Save document
-word-count = { $count ->
-    [one] {$count} word
-   *[other] {$count} words
+The map is built once per crate per compilation by parsing the .ftl file once and caching the result in a thread-local for the duration of the compilation. Subsequent `tr!` invocations in the same crate use the cached map. Build-time cost is negligible — parsing a typical .ftl file takes single-digit milliseconds.
+
+#### 12.1.2 Only the Source Language Is Required at Build Time
+
+Because the proc macro validates against one `.ftl` file (the source language), and because the runtime path uses real FluentBundle lookup with per-key fallback, **only the source language must be present at build time**. Other locales are runtime data, may be missing or partially translated, and fall back per-key to the source language when a key is absent.
+
+Adding a new translatable string is a one-step operation: add it to `en-US.ftl`. Code compiles immediately because the proc macro now sees the new key. The application runs in any locale immediately, with the new string rendering in the source language wherever it has not been translated yet. There is no broken state where a French build fails because someone added a key the translator has not reached, and no requirement for translators to keep every locale's .ftl in lockstep with code changes.
+
+The implication for development workflow: **modifying an existing message is a breaking change; adding a new message is not.** Changing `welcome-greeting = Hello, { $name }!` to `welcome-greeting = Hello, { $name } from { $city }!` adds a `city` parameter to the validated signature, breaking every `tr!(welcome_greeting(...))` call site at compile time. This is correct behavior — the message now needs a city — but contributors should understand that message signatures are semi-stable and changes propagate through the codebase. Adding `welcome-farewell = Goodbye!` is a pure addition and breaks nothing.
+
+### 12.2 The `tr!` Macro
+
+The widget-facing API is the `tr!` macro, which produces a reactive `LocalizedString`:
+
+```rust
+TextWidget::new(tr!(welcome_title()))
+TextWidget::new(tr!(welcome_greeting(name = user.name.clone())))
+TextWidget::new(tr!(unread_count(count = unread)))
+
+// Nested message modules for feature-organized applications:
+TextWidget::new(tr!(auth::login_title()))
+Button::new(tr!(editor::save_button()))
+TextWidget::new(tr!(settings::display::resolution_label(width = w, height = h)))
+```
+
+The macro accepts a path-and-arguments expression: a function-call-like syntax with an identifier (or path of identifiers separated by `::`) followed by named arguments in parentheses. The path determines which message key to look up; the named arguments correspond to Fluent message variables.
+
+#### 12.2.1 What the Macro Expands To
+
+`tr!(welcome_title())` expands to roughly:
+
+```rust
+fern_i18n::localized(move || {
+    fern_i18n::resolve_message("welcome-title", &[])
+})
+```
+
+`tr!(welcome_greeting(name = user.name.clone()))` expands to roughly:
+
+```rust
+fern_i18n::localized({
+    let name = user.name.clone();
+    move || {
+        fern_i18n::resolve_message(
+            "welcome-greeting",
+            &[("name", fern_i18n::FluentValue::from(name.clone()))],
+        )
+    }
+})
+```
+
+`fern_i18n::resolve_message` is the runtime entry point. It looks up the active FluentBundle (per the locale resolution from §12.5), calls `bundle.get_message("welcome-greeting")`, calls `bundle.format_pattern(...)` with the arguments, and returns the formatted String. If the message is missing in the active locale, the bundle's per-key fallback to the source language takes over. If it is missing in both, the framework returns the literal key as a placeholder and logs a warning (this should be impossible because the macro validated the key at compile time — if it happens, the source .ftl was modified between build and run).
+
+The arguments are captured by `let` binding before the closure, then cloned inside the closure on each invocation. This is the same `.clone()` pattern that the original macro design used: the closure may be called many times over the LocalizedString's lifetime (once on initial resolution, then on every locale change and hot-reload), and the captured arguments must survive multiple invocations. Fluent's argument types (strings, numbers, booleans) are all cheap to clone.
+
+The macro's compile-time validation happens *before* expansion. If the validation fails, the macro produces a `compile_error!` instead of the expanded code, and the user sees an error at the `tr!` invocation site rather than a misleading error at the runtime resolution site.
+
+#### 12.2.2 Configuring the Source File Path
+
+By default, the macro reads `$CARGO_MANIFEST_DIR/locales/en-US.ftl`. Applications that organize translations differently can override the path via a crate-level attribute placed at the root of the crate (lib.rs or main.rs):
+
+```rust
+#![fern_i18n::source_locale(path = "i18n/source.ftl")]
+```
+
+The macro picks up the attribute during expansion and uses the configured path instead of the default. The path is interpreted relative to `CARGO_MANIFEST_DIR`. For applications with the standard layout (`locales/en-US.ftl`), no attribute is needed.
+
+For nested module layouts (per §12.2.3), the attribute can specify a directory instead of a single file:
+
+```rust
+#![fern_i18n::source_locale(dir = "locales/en-US/")]
+```
+
+The macro then walks the directory recursively, parses every `.ftl` file, and merges them into a single key/argument-signature map, with the file's relative path determining the module nesting. `locales/en-US/auth.ftl` populates the `auth::*` namespace, `locales/en-US/settings/display.ftl` populates `settings::display::*`, and so on.
+
+#### 12.2.3 Nested Message Modules
+
+Larger applications organize their .ftl files by feature rather than dumping everything into one file. The proc macro handles this through a directory hierarchy:
+
+```
+locales/en-US/
+  main.ftl           → tr!(welcome_title())
+  auth.ftl           → tr!(auth::login_title())
+  editor.ftl         → tr!(editor::save_button())
+  settings/
+    display.ftl      → tr!(settings::display::resolution_label())
+    keyboard.ftl     → tr!(settings::keyboard::shortcut_label())
+```
+
+Each file's contents are parsed as a separate Fluent resource. Keys in `main.ftl` populate the root namespace. Keys in `auth.ftl` populate `auth::*`. Keys in `settings/display.ftl` populate `settings::display::*`. The proc macro walks the directory at compile time, builds a single nested key/argument-signature map, and validates `tr!` calls against the appropriate path.
+
+At runtime, the FluentBundle for each locale is constructed by adding *multiple resources* — one per .ftl file in the locale's directory tree. FluentBundle natively supports multiple resources per bundle, and the framework's `resolve_message` function looks up keys with their full path (e.g., `auth.login-title`) so that nested modules don't collide with each other.
+
+The same nesting works on the runtime side: the application's `compile_in` slice (see §12.4) carries a list of resources per locale rather than a single concatenated blob, with each `.ftl` file becoming one entry.
+
+#### 12.2.4 Why the `.clone()` on Arguments
+
+The closure passed to `localized()` must be `Fn`, not `FnOnce`, because it may be called many times — once on initial resolution, then on every locale switch and every hot-reload. Capturing arguments by move and consuming them inside the closure body would make the closure `FnOnce`. The macro expands to a clone-on-call pattern: arguments are captured by `let` binding outside the closure (moving them once), then `.clone()`'d inside the closure body each time it runs.
+
+For Fluent's argument types — strings (`String`), numbers (`i64`, `f64`), booleans, dates — cloning is cheap. The `.clone()` is invisible in performance terms. For the rare case where an application wants to pass a non-cloneable argument, the escape hatch is to call `localized(move || fern_i18n::resolve_message("key", &[...]))` directly without the macro, accepting that the resulting closure may be `FnOnce` and the LocalizedString cannot be hot-reloaded for that specific instance. Most applications never hit this.
+
+### 12.3 The `LocalizedString` Type
+
+`LocalizedString` is the developer-facing handle that the `tr!` macro produces. It packages a closure (the resolver) with everything needed to produce a reactive `Signal<String>` when bound to a widget. Critically, `LocalizedString` is *not* itself reactive — it is a reactive *recipe* that becomes a live binding only when the widget consumes it.
+
+```rust
+pub struct LocalizedString {
+    resolver: Rc<dyn Fn() -> String + 'static>,
+}
+
+pub fn localized<F: Fn() -> String + 'static>(resolver: F) -> LocalizedString {
+    LocalizedString {
+        resolver: Rc::new(resolver),
+    }
+}
+
+impl LocalizedString {
+    /// Construct a non-translated literal. Used for debug labels, internal
+    /// names, and other strings that are intentionally not localized. The
+    /// resulting LocalizedString does not observe locale changes — its
+    /// content is fixed for the lifetime of the application.
+    pub fn literal(text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            resolver: Rc::new(move || text.clone()),
+        }
+    }
+
+    /// Convert this LocalizedString into a reactive `Signal<String>` that
+    /// observes the framework's translation version and re-resolves on
+    /// every locale change or hot-reload. Called by widget builder methods
+    /// internally when binding a LocalizedString to a text-displaying widget.
+    pub fn to_signal(&self) -> Signal<String> {
+        let initial = (self.resolver)();
+        let signal = Signal::new(initial);
+
+        // Observe the framework's translation version Signal and re-resolve
+        // on each increment. The version Signal is reached via a thread-local
+        // populated by FernAppBuilder at startup; calling `to_signal()`
+        // before the framework is initialized panics with a clear message.
+        let version = i18n::current_version_signal();
+        let resolver = self.resolver.clone();
+        let target = signal.clone();
+        version.observe(move |_| {
+            target.set((resolver)());
+        });
+
+        signal
+    }
 }
 ```
 
-### 12.3 Layout Direction
+The reactivity lives in `to_signal()`, not in the LocalizedString itself. Calling `to_signal()` reaches into a thread-local established by `FernAppBuilder` to find the current translation version Signal, registers an observer that re-runs the resolver on each version increment, and returns a `Signal<String>` that the binding system can consume normally. This is the same kind of thread-local pattern used by Rust's logger and panic hook — it is the standard way for a free function to reach a process-wide singleton without threading context through every call site. The architecture document calls this out explicitly so it is not mistaken for an oversight.
 
-RTL/LTR layout direction lives in fern-core (not fern-i18n, as it is not optional). A `LayoutDirection` environment value propagates down the tree. Layout containers like `HStack` automatically reverse child order in RTL mode. `Leading`/`Trailing` semantics replace Left/Right for directional properties.
+When the framework's i18n manager increments the translation version Signal (because the locale changed or a runtime override file was reloaded), every Signal produced by `to_signal()` re-runs its resolver and updates its cached String value. Any widget bound to that Signal repaints automatically through the existing binding system. The widget never knows the locale changed — it just sees its bound text update. This is the same reactive bridge pattern used elsewhere in the framework (Section 27.10's document version Signal for the rich text editor, Section 9.4's subscription event system): a non-reactive data source bridged into FernUI's reactive model via a version counter.
 
-### 12.4 Accessibility Strings
+`LocalizedString` is the type that widget builder methods accept anywhere a translatable string is appropriate:
 
-FernUI ships built-in translation files for its own accessibility strings (close button labels, scroll descriptions, etc.) via fern-i18n. The application can override these with custom translations.
+```rust
+TextWidget::new(tr!(welcome_title()))                  // direct construction
+Button::new(tr!(btn_save()))                           // button label
+TextInput::new().placeholder(tr!(search_hint()))       // placeholder
+ctx.tooltip(self_id, tr!(toolbar_save_tooltip()))      // tooltip text
+```
+
+Internally these constructors call `to_signal()` on the LocalizedString and bind the resulting Signal to the widget's text source. The developer never sees the conversion — they pass a `tr!(...)` and the widget displays a translated, reactive string.
+
+**Untranslated literals must be explicit.** Widget constructors accept `LocalizedString`, not `&str`. There is no `From<&str> for LocalizedString` impl, and this is intentional: an automatic conversion would let untranslated literals slip through to the user interface without the developer noticing. The strict version forces every literal to be wrapped in `LocalizedString::literal("Debug Tools")` (for genuinely non-translated strings) or in a `tr!(...)` call against a key in `en-US.ftl` (for everything user-facing). The cost is one extra method call per literal; the benefit is that grep-ing the codebase for `LocalizedString::literal` finds every untranslated string in one pass, and untranslated user-facing text cannot be shipped accidentally.
+
+For test code and prototype scaffolding where translation is overkill, `LocalizedString::literal` is the escape hatch. For production code, the linter can reject `LocalizedString::literal` outside of test modules if the team wants stricter enforcement.
+
+### 12.4 I18nConfig
+
+The application configures i18n at builder time. The compiled-in locales are loaded from `.ftl` files via `include_str!` and passed directly to the framework — no build script, no `OUT_DIR`, no generated files:
+
+```rust
+FernAppBuilder::new()
+    .i18n(I18nConfig::new()
+        .source_locale("en-US".parse().unwrap())
+        .supported_locales([
+            "en-US".parse().unwrap(),
+            "fr-FR".parse().unwrap(),
+            "es-ES".parse().unwrap(),
+            "ar-SA".parse().unwrap(),
+        ])
+        .compile_in(&[
+            ("en-US", &[include_str!("../locales/en-US.ftl")]),
+            ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]),
+            ("es-ES", &[include_str!("../locales/es-ES.ftl")]),
+            ("ar-SA", &[include_str!("../locales/ar-SA.ftl")]),
+        ])
+        .user_locale(settings.user_locale.clone())
+        .auto_detect_os_locale(true)
+        .fallback_locale("en-US".parse().unwrap()))
+    .root(...)
+    .run();
+```
+
+For nested .ftl directory layouts (per §12.2.3), each entry contains multiple resource strings:
+
+```rust
+.compile_in(&[
+    ("en-US", &[
+        include_str!("../locales/en-US/main.ftl"),
+        include_str!("../locales/en-US/auth.ftl"),
+        include_str!("../locales/en-US/editor.ftl"),
+        include_str!("../locales/en-US/settings/display.ftl"),
+    ]),
+    ("fr-FR", &[
+        include_str!("../locales/fr-FR/main.ftl"),
+        include_str!("../locales/fr-FR/auth.ftl"),
+        // editor.ftl missing — French translator hasn't gotten there yet.
+        // The keys defined in en-US/editor.ftl will fall back to English at runtime.
+    ]),
+    // ...
+])
+```
+
+For applications with many locales or many files per locale, a small declarative helper macro reduces repetition without introducing a build script:
+
+```rust
+.compile_in(compile_in_locales!(
+    base = "../locales/",
+    locales = ["en-US", "fr-FR", "es-ES", "ar-SA"],
+    files = ["main.ftl", "auth.ftl", "editor.ftl", "settings/display.ftl"],
+))
+```
+
+The `compile_in_locales!` macro expands at compile time to the same nested slice literal of `include_str!` calls. It is convenience sugar, not a different mechanism.
+
+The configuration methods:
+
+- **`source_locale(LanguageIdentifier)`** — the language the proc macro validates against. Defaults to `en-US`. This is the only locale that *must* be present at build time, and its `.ftl` file is the one the macro reads.
+- **`supported_locales(impl IntoIterator<Item=LanguageIdentifier>)`** — the set of locales the application will accept at runtime. Used to validate user_locale and auto-detection results; locales outside this set fall back.
+- **`compile_in(&'static [(&'static str, &'static [&'static str])])`** — the static slice of `(locale_tag, resource_contents_list)` pairs. Each entry is a locale paired with a list of one or more `&'static str` Fluent resources. A flat layout produces one resource per locale; a nested layout produces one resource per file. The slice is typically constructed inline with `include_str!` calls, requiring no build script.
+- **`user_locale(Option<LanguageIdentifier>)`** — the explicit user choice from application settings. Highest precedence in resolution. `None` means the user has not made a choice (or has chosen "Use System Default").
+- **`auto_detect_os_locale(bool)`** — defaults to `true`. When enabled, the framework reads the OS locale at startup via the `sys-locale` crate and matches it against `supported_locales`.
+- **`fallback_locale(LanguageIdentifier)`** — the locale used when neither `user_locale` nor auto-detection produces a supported result. Defaults to `source_locale`.
+- **`runtime_override(LanguageIdentifier, PathBuf)`** — replaces a compiled-in locale with a file from disk and watches the file for changes. Multiple overrides for multiple locales are supported by calling the method multiple times. See §12.6.
+
+`compile_in` and `runtime_override` compose: the application bakes in all supported locales for production, and the translator (using a development build of the same binary) overrides one or more of them via CLI flags. The override always wins for the duration of the run, and the file watcher provides hot-reload as the translator edits the file.
+
+### 12.5 Locale Resolution at Startup
+
+The framework resolves the active locale once at startup, in a clear precedence order:
+
+1. **User explicit choice.** If `user_locale` is `Some(loc)` and `loc` is in `supported_locales`, use it. The user's settings always win.
+
+2. **OS auto-detection.** If `auto_detect_os_locale` is enabled, read the OS locale via `sys-locale::get_locale()`. Parse it as a `LanguageIdentifier` (handles both `fr_FR.UTF-8` Linux form and `fr-FR` BCP-47 form via `unic-langid`). Match against `supported_locales` with partial matching: a detected `fr-CA` matches a supported `fr` if no exact match exists.
+
+3. **Fallback.** Use `fallback_locale`, which defaults to `source_locale`.
+
+The resolution function:
+
+```rust
+fn resolve_initial_locale(config: &I18nConfig) -> LanguageIdentifier {
+    if let Some(user) = &config.user_locale {
+        if config.supported_locales.contains(user) {
+            return user.clone();
+        }
+    }
+
+    if config.auto_detect_os {
+        if let Some(os_locale) = sys_locale::get_locale() {
+            if let Ok(parsed) = os_locale.parse::<LanguageIdentifier>() {
+                if config.supported_locales.contains(&parsed) {
+                    return parsed;
+                }
+                if let Some(matched) = config.supported_locales.iter()
+                    .find(|s| s.matches(&parsed, true, true)) {
+                    return matched.clone();
+                }
+            }
+        }
+    }
+
+    config.fallback_locale.clone()
+}
+```
+
+The result is stored in the framework's `Signal<LanguageIdentifier>`, exposed to widgets via `BuildContext::locale() -> Signal<LanguageIdentifier>`. Most widgets do not need to observe this directly — they bind to LocalizedStrings which observe the version Signal internally. The locale Signal is useful for widgets that need to know *which* language is active rather than just resolving translated text: a "Language" menu that highlights the current selection, a date formatter that picks a calendar based on the locale, or a flag icon that displays the country associated with the active language. The detection happens once and does not change while the application runs — even if the OS locale changes mid-session, the application keeps its initial choice. This matches the behavior of native applications on every platform.
+
+There are two distinct "no user choice" states the application might want to distinguish: "the user has never been asked" (first run, application might want to prompt "we detected French, is this correct?") and "the user explicitly chose Use System Default" (no prompt needed). This distinction lives in the application's settings layer, not the framework. The framework just sees `user_locale: Option<LanguageIdentifier>` and resolves accordingly.
+
+**Runtime locale switches.** The user changes language via a settings menu by calling `framework.set_locale(new_locale)`. The framework validates against `supported_locales`, updates the locale signal, increments the translation version Signal (so all LocalizedStrings re-resolve), and — if the layout direction changed (LTR ↔ RTL) — triggers a composite rebuild because layout direction is a build-time decision. For LTR-to-LTR or RTL-to-RTL transitions, the reactive update via the version Signal is sufficient and no rebuild happens.
+
+### 12.6 Runtime Override and Hot-Reload
+
+The translator development workflow is the reason `runtime_override` exists. A translator runs:
+
+```bash
+atelier --translation-dev fr-FR=/path/to/fr-FR.ftl
+```
+
+The application's CLI parser collects all `--translation-dev` occurrences into a `Vec<(LanguageIdentifier, PathBuf)>` and feeds each one through to the I18nConfig:
+
+```rust
+for (locale, path) in &cli_args.translation_dev {
+    config = config.runtime_override(locale.clone(), path.clone());
+}
+```
+
+`runtime_override` performs three setup steps in sequence at builder time:
+
+1. Records the path against the locale tag in the I18nConfig. The actual file load is deferred to `FernAppBuilder::run`, so a missing file at this stage is not an error.
+2. At `run`, loads the .ftl file from the given path, parses it via `FluentResource::try_new`, and adds it to the FluentBundle for that locale (replacing whatever was compiled in for that locale, or augmenting it if the bundle is empty). If the file is missing or malformed at load time, the framework logs an error and falls back to the compiled-in version (if any) or to the source locale.
+3. Starts a file watcher on the path using the `notify` crate. The watcher runs on a background thread and forwards file-changed events through the framework's EventSource mechanism (Section 9.4) so that they arrive on the UI thread as event subscriptions fire.
+
+When the translator saves the file, the watcher fires, the framework's i18n manager (a small internal component subscribed to the watcher events) re-reads the file, parses it via `FluentResource::try_new`, replaces the corresponding bundle's contents, increments the translation version Signal, and the binding system propagates the change to every LocalizedString currently in the widget tree. The translator sees their change reflected in the running application within ~100ms (file watcher latency plus event loop wake plus signal propagation). No restart, no rebuild, no command rerun.
+
+The hot-reload path works because the runtime side is plain `fluent-bundle` lookup. There is no compiled-in translation logic to bypass — the FluentBundle holds the parsed AST, and replacing its resources at runtime fully replaces the active translation. This is the property that motivated choosing `fluent-rs` directly over `fluent-static`: hot-reload requires a runtime-mutable bundle, and `fluent-bundle` provides exactly that.
+
+If the .ftl file is malformed (Fluent syntax error), the reload fails, the previous bundle stays in place, and the error is logged with the file path and the syntax error location. A development-mode UI overlay can surface these errors visibly — but the architecture document leaves that as an application concern, not a framework feature.
+
+Multiple `runtime_override` calls work for multiple locales simultaneously. A translator working on French and Spanish at the same time runs:
+
+```bash
+atelier --translation-dev fr-FR=/path/to/fr.ftl --translation-dev es-ES=/path/to/es.ftl
+```
+
+The framework sets up two file watchers, each producing reload events for its respective locale. Each save triggers a reload of just that locale's bundle. The version Signal increments globally, but the per-locale isolation means that switching between French and Spanish in the running app picks up the latest version of each.
+
+**`runtime_override` always implies hot-reload.** There is no separate "load this file once and don't watch" option. The use case for runtime overrides is the translator workflow, which always wants hot-reload. If a use case ever arises for static runtime loading (a plugin shipping its own translations? a memory-constrained embedded device?), it can be added later as a separate method without disturbing the existing API. For now, the API is minimal.
+
+### 12.7 RTL and the LayoutDirection Signal
+
+FernUI's layout primitives already use logical axis names — `leading` and `trailing` instead of `left` and `right`, the same convention Apple's frameworks use. This means the RTL migration is small: the framework adds a `LayoutDirection` enum and a `Signal<LayoutDirection>` derived from the current locale, and the layout pass consults this signal when resolving leading/trailing into physical coordinates.
+
+```rust
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutDirection {
+    Ltr,
+    Rtl,
+}
+```
+
+The direction is derived from the locale's script subtag. `unic-langid` parses the locale string and exposes the script tag (`Arab`, `Hebr`, `Latn`, `Cyrl`, etc.). The set of RTL scripts is small and stable — Arabic, Hebrew, Syriac, Thaana, N'Ko, Samaritan, Mandaic, and a few historical scripts — so `fern-i18n` maintains a hardcoded lookup table mapping script tags to LayoutDirection. This is more reliable than depending on a third-party crate that may not expose direction data, and the table is trivial to maintain (Unicode does not add new RTL scripts often).
+
+The framework computes the direction once when the locale is set and stores it in a `Signal<LayoutDirection>` exposed to widgets via `BuildContext::layout_direction()`. Layout containers, scroll bar placement code, and any custom widget that needs to do direction-aware layout observe this signal directly.
+
+**What changes in RTL mode:**
+
+- **`HStack`** lays out children in reverse order. Children that were leftmost in LTR are rightmost in RTL. The widget code that constructs the HStack does not change — the layout pass handles the flip.
+- **`Padding::leading(8)`** resolves to a left padding in LTR and a right padding in RTL. Same for `trailing`.
+- **Alignment** values like `Align::leading` and `Align::trailing` flip in the same way.
+- **Vertical scroll bar** placement: appears on the trailing edge of inline text. In LTR locales the trailing edge is the right side; in RTL locales it is the left side. ScrollArea and the standalone ScrollBar widget consult the LayoutDirection signal when computing their position.
+- **The rich text editor's caret** advances right-to-left when editing RTL text. This is per-paragraph (a French user editing an Arabic paragraph in a multilingual document still gets RTL caret movement in that paragraph), driven by the script of the text being edited, handled inside text-typeset via HarfBuzz's bidi support.
+
+**What does not change:**
+
+- **Top and bottom remain physical.** Vertical layout is consistent across all common writing systems. `Padding::top(8)` always means top.
+- **Widget geometry math** continues to use physical coordinates internally. The leading/trailing → left/right resolution happens at one well-defined boundary in the layout pass.
+- **Touch/pointer event coordinates** remain in physical screen space. RTL does not invert input coordinates.
+
+**Locale switches that change direction trigger composite rebuild.** Switching from English (LTR) to Arabic (RTL) cannot be handled by the reactive translation version Signal alone, because layout direction affects how children are placed during the build pass — child order is decided at build time, not paint time. The framework detects when `set_locale` produces a direction change and triggers a full composite rebuild after updating the locale and version signals. LTR-to-LTR and RTL-to-RTL switches do not rebuild.
+
+Hot-reloading the same locale via `runtime_override` never changes direction, so it never triggers a rebuild. Only explicit `set_locale` calls can.
+
+### 12.8 The Fluent Bundle Lifecycle
+
+The framework constructs and owns one `FluentBundle<FluentResource>` per supported locale. At startup:
+
+1. The proc macro has already validated all `tr!` calls against the source `.ftl` file at compile time. The runtime starts with confidence that every key referenced in code exists in the source language.
+2. For each entry in `compile_in`, the framework constructs a new `FluentBundle` for the locale, parses each resource string via `FluentResource::try_new`, and adds it to the bundle via `bundle.add_resource`. The source locale is included in this set.
+3. For each locale that has a `runtime_override`, the framework reads the file from disk, parses it the same way, and replaces the corresponding bundle (or creates a new one if no compile-in entry exists for that locale). It also starts the file watcher.
+4. The initial locale is resolved (per §12.5) and stored in `Signal<LanguageIdentifier>`.
+5. The translation version Signal is initialized to 0.
+
+At runtime, the bundles are mutable via reload. A reload (triggered by a `runtime_override` file change or by `set_locale` to a locale with a different runtime override) replaces the bundle's contents and increments the translation version. LocalizedStrings observing the version re-call their resolvers and update their cached strings.
+
+The bundles are stored in a `HashMap<LanguageIdentifier, FluentBundle<FluentResource>>` on the framework's i18n manager, behind a `RefCell` because it is single-threaded UI state. File watcher events from the background thread arrive on the UI thread via the EventSource bridge (Section 9.4), so the actual bundle reload happens on the UI thread inside the `RefCell::borrow_mut` — there is no cross-thread mutation and no need for a real lock. The only constraint is the standard single-threaded borrow rule, which is trivially satisfied because reload events are sequential.
+
+`resolve_message` (the runtime entry point that the `tr!` macro expands into) takes the active locale, looks up the bundle in the HashMap, calls `bundle.get_message(key)`, calls `bundle.format_pattern(...)` with the arguments, and returns the formatted String. If the key is missing in the active locale's bundle, the function falls back to the source locale's bundle. If it is missing there too (which should be impossible because the proc macro validated it at compile time), it returns the literal key as a placeholder and logs a warning.
+
+### 12.9 Translation Errors
+
+Three categories of error can occur at runtime, and each has a defined handling:
+
+**Missing key in the active locale, present in the source.** The bundle's lookup falls back to the source language automatically. The source-language text is returned. No error is raised. This is the normal flow for partial translations.
+
+**Missing key in both the active locale and the source.** This should be impossible because the source language is validated at build time by the proc macro — if a key is referenced in code, it must exist in the source `.ftl` file or the code does not compile. If somehow this state is reached (for example, the source file was modified between build and run, or an `include_str!` reference was stale), the framework returns the literal key as a placeholder string and logs a warning.
+
+**Malformed .ftl file at hot-reload.** The reload fails, the previous bundle stays in place, and the error is logged with the file path and the syntax error location. The application continues with the previous (working) translation. The translator sees no change in the running app and goes back to fix the file.
+
+**Argument type mismatch at runtime.** This should also be impossible because the proc macro validates argument names against the source `.ftl` at build time. If somehow it occurs (an edge case in a Fluent selector that the validation missed), `FluentBundle::format_pattern` returns the formatted result with default formatting and a `FluentError` in the errors vector, which the framework logs.
+
+### 12.10 Testing Translations
+
+Headless tests can exercise translation logic without spinning up a real bundle file by constructing a minimal `I18nConfig` programmatically:
+
+```rust
+#[test]
+fn welcome_widget_displays_french_greeting() {
+    let mut headless = FernAppBuilder::new()
+        .i18n(I18nConfig::test_only(
+            "en-US",
+            &[("welcome-greeting", "Hello, { $name }!")],
+        ).with_locale("fr-FR", &[
+            ("welcome-greeting", "Bonjour, { $name } !"),
+        ]))
+        .build_headless();
+
+    headless.set_locale("fr-FR".parse().unwrap());
+    let widget_id = headless.tree.add(WelcomeWidget { name: "Alice".into() });
+    headless.tree.layout(SizeProposal::exact(400.0, 100.0));
+
+    let frame = headless.tree.render();
+    assert!(frame.contains_text("Bonjour, Alice !"));
+}
+```
+
+`I18nConfig::test_only` is a separate constructor from the production `compile_in` path. It accepts inline `(key, value)` message pairs rather than the static resource slice that production uses, because tests want to specify messages individually rather than load whole .ftl files. The two paths converge inside the framework: both produce FluentBundles indexed by locale, and the rest of the i18n machinery (the version Signal, the LocalizedString resolution, the binding system) is identical. The widget under test does not change between production and test paths — it uses `tr!(...)` either way, and the test controls which bundles the framework finds when the macro resolves.
+
+**Headless apps support `set_locale`.** The `HeadlessApp` API exposed by `build_headless()` includes `set_locale(LanguageIdentifier)`, mirroring the windowed app's runtime locale switching. Tests can switch locales mid-test to verify that LocalizedStrings re-resolve correctly:
+
+```rust
+headless.set_locale("en-US".parse().unwrap());
+let frame_en = headless.tree.render();
+assert!(frame_en.contains_text("Hello, Alice!"));
+
+headless.set_locale("fr-FR".parse().unwrap());
+let frame_fr = headless.tree.render();
+assert!(frame_fr.contains_text("Bonjour, Alice !"));
+```
+
+The version Signal increments, observers re-resolve, the next render reflects the new locale. No widget reconstruction is needed.
+
+**Compile-time key checking is a separate test layer.** The proc macro's validation runs as part of every `cargo build` and `cargo test` — if a `tr!` call references a missing key, the test build fails with the same compile error as a production build. There is no separate "translation lint" step because the regular compiler is the lint.
+
+**Testing the proc macro itself.** The macro's own tests (in the `fern-i18n-macros` crate) use `trybuild` to verify both successful expansions (for valid inputs) and compile errors (for invalid inputs — missing keys, wrong argument names, malformed source files). These tests run at the framework's CI level and verify the macro's behavior independently of any application.
+
+### 12.11 Crate Structure
+
+The i18n implementation is split across two crates:
+
+- **`fern-i18n`** — the runtime API: `LocalizedString`, `localized()`, `I18nConfig`, the `LayoutDirection` enum, the locale resolution logic, the bundle manager, the file watcher integration, the `resolve_message` runtime entry point. Depends on `fluent-bundle`, `fluent-syntax`, `unic-langid`, `sys-locale`, `notify`. Used at runtime.
+
+- **`fern-i18n-macros`** — the procedural macro crate exporting `tr!` and `compile_in_locales!`. The `tr!` macro reads the application's source `.ftl` file at expansion time (via `proc_macro::tracked_path::path` so cargo rebuilds the crate when the file changes), parses it via `fluent-syntax`, and validates every invocation. Procedural macros must live in their own crate type; `fern-i18n` re-exports the macro through its prelude so application developers write `use fern_i18n::tr;` without needing to know about the macros crate.
+
+There is no separate `fern-i18n-build` crate. There is no build script. There is no generated file in `OUT_DIR`. The application's `Cargo.toml` declares one dependency:
+
+```toml
+[dependencies]
+fern-ui = "..."
+fern-i18n = "..."
+```
+
+The application's source layout looks like:
+
+```
+my-app/
+  Cargo.toml
+  src/
+    main.rs
+  locales/
+    en-US.ftl       # required: validated by the proc macro at compile time
+    fr-FR.ftl       # optional: loaded at runtime via include_str!
+    es-ES.ftl       # optional
+    ar-SA.ftl       # optional
+```
+
+The proc macro reads `locales/en-US.ftl` at compile time to validate `tr!` calls. The runtime FluentBundle for each locale is constructed from `include_str!` references in the `compile_in` slice (see §12.4). The two paths read the same files but at different times: the macro reads the source language at build time, the runtime reads all locales at startup via `include_str!`.
+
+The fern-widgets crate has its own copy of the same setup: a `locales/en-US.ftl` source file, framework-internal `tr_widget!` calls validated against it at compile time, and `compile_in` references baked into the framework's bundle registration. See §12.13 for the dual-bundle design.
+
+**Build-time cost.** The proc macro reads and parses the source `.ftl` file once per crate per compilation. For a typical application with a few hundred messages in `en-US.ftl`, the parse takes single-digit milliseconds. The map is cached in a thread-local for the duration of the compilation, so subsequent `tr!` invocations in the same crate use the cached map without re-parsing. The file is registered with `proc_macro::tracked_path::path` so cargo rebuilds the crate when the file changes, ensuring stale caches are never used.
+
+### 12.12 Constraints and Limitations
+
+**Source language must be present at build time.** This is the trade-off for compile-time key checking. There is no way to add or remove keys at runtime without recompiling, because the proc macro validates against a fixed `.ftl` file at compile time. Adding a key requires editing `en-US.ftl` and rebuilding. This is the right trade-off for an application framework — runtime-modifiable translation tables are a different feature (more like a CMS) and not what FernUI targets.
+
+**Argument types must be Clone.** The `tr!` macro inserts `.clone()` on each argument inside the closure. For Fluent's argument types (strings, numbers, dates) this is automatic and free. For non-cloneable types, the developer drops to `localized(move || resolve_message(...))` and accepts that the closure will be `FnOnce` (single-use, no hot-reload of *that specific instance*). Most cases never hit this.
+
+**Hot-reload is per-locale, not per-message.** When a `runtime_override` file changes, the entire bundle for that locale is reloaded and every LocalizedString observing it re-resolves. There is no way to reload only the single message the translator just edited. This is fine because reloads are rare and bundles are small (typical .ftl files are kilobytes, not megabytes).
+
+**OS locale changes mid-session are not honored.** The OS locale is read once at startup. If the user changes their system locale while the application is running, the application keeps its initial choice. To pick up the new OS locale, the user restarts the application. This matches every native application's behavior.
+
+**No translator-facing GUI.** The translator workflow assumes the translator uses a text editor (or a Fluent-aware tool like Pontoon) to edit .ftl files. FernUI does not ship a translation editing UI. The CLI override + hot-reload is the integration point, not a built-in editor.
+
+**The proc macro requires the source `.ftl` file to be reachable from `CARGO_MANIFEST_DIR`.** This is the standard Rust convention for crate-relative paths and is not a real limitation in practice. Workspaces with shared translation files can use the `#![fern_i18n::source_locale(path = "...")]` attribute to point at a relative path that resolves correctly.
+
+### 12.13 Framework Strings: fern-widgets Translations and Application Overrides
+
+A separate concern from application-level translation is the translation of strings *inside* fern-widgets itself — the accessibility labels, default error messages, tooltip text, and similar strings that built-in widgets expose to AccessKit and to the user. These strings live in the framework's source code, not the application's, so they cannot be translated through the application's source `.ftl` file the way application strings are. They need their own translation path.
+
+#### 12.13.1 The Two-Bundle Design
+
+FernUI maintains *two* sets of FluentBundles per locale: an **application bundle** populated from the application's `compile_in` slice, and a **framework bundle** populated automatically from fern-widgets' own .ftl files. Each bundle has its own namespace and its own resolver macro:
+
+- **`tr!`** — application-facing macro, validates against the application's source `.ftl` at compile time and resolves against the application bundle at runtime. Used by application code.
+- **`tr_widget!`** — framework-internal macro, validates against fern-widgets' own source `.ftl` at compile time and resolves against the framework bundle at runtime. Used inside fern-widgets and not exported to application code.
+
+Both macros produce `LocalizedString` values, both observe the same translation version Signal, and both re-resolve on locale change or hot-reload. The only difference is which `.ftl` file the macro validates against and which bundle the resulting resolver consults.
+
+The two-bundle separation is a hard wall: `tr!` never looks in the framework bundle, `tr_widget!` never looks in the application bundle (except for overrides — see §12.13.4). Application string keys and framework string keys live in separate namespaces and cannot collide. An application can have its own `a11y-scrollbar-name` key for some unrelated purpose without affecting the framework's `a11y-scrollbar-name` key.
+
+#### 12.13.2 fern-widgets as a Self-Contained Translatable Crate
+
+The fern-widgets crate ships its own `locales/` directory with a source language `.ftl` file and whatever additional locales the framework can commit to maintaining:
+
+```
+fern-widgets/
+  Cargo.toml
+  src/
+    lib.rs
+    scrollbar.rs
+    button.rs
+    ...
+  locales/
+    en-US.ftl          # source language, required, validated by tr_widget!
+    fr-FR.ftl          # framework-shipped translation (if available)
+    es-ES.ftl          # framework-shipped translation (if available)
+    de-DE.ftl          # framework-shipped translation (if available)
+```
+
+The `tr_widget!` macro is the framework-internal twin of `tr!`. It reads `fern-widgets/locales/en-US.ftl` at compile time (relative to the fern-widgets crate's `CARGO_MANIFEST_DIR`) and validates every `tr_widget!` invocation against it. Because each crate has its own `CARGO_MANIFEST_DIR` at compile time, the macro automatically reads the correct source file when expanding inside fern-widgets versus inside an application — no configuration needed.
+
+```rust
+// fern-widgets/src/scrollbar.rs
+use fern_i18n::tr_widget;
+
+impl Widget for ScrollBar {
+    fn accessibility(&self) -> AccessibilityNode {
+        AccessibilityNode::new()
+            .role(Role::ScrollBar)
+            .name(tr_widget!(a11y_scrollbar_name()))
+            .description(tr_widget!(a11y_scrollbar_description()))
+    }
+}
+```
+
+The runtime side mirrors the application's setup. fern-widgets exposes a public function returning its compile-in slice:
+
+```rust
+// fern-widgets/src/lib.rs
+pub fn framework_locales() -> &'static [(&'static str, &'static [&'static str])] {
+    &[
+        ("en-US", &[include_str!("../locales/en-US.ftl")]),
+        ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]),
+        ("es-ES", &[include_str!("../locales/es-ES.ftl")]),
+        ("de-DE", &[include_str!("../locales/de-DE.ftl")]),
+    ]
+}
+```
+
+`FernAppBuilder::run` calls `fern_widgets::framework_locales()` automatically at startup and registers the slice as the framework bundle alongside the application bundle. Application code does not need to do this explicitly — the registration is part of framework initialization.
+
+This means **fern-widgets compiles in isolation**. Its source code uses `tr_widget!` calls validated against its own `en-US.ftl`. Its runtime exposes its own resource slice. There is no dependency on any application-side `.ftl` file, and the crate works as a normal library that can be added to any application's `Cargo.toml` without configuration.
+
+#### 12.13.3 Automatic Framework Bundle Registration
+
+When `FernAppBuilder::run` is called, it automatically registers `fern_widgets::framework_locales()` with the i18n manager as the framework bundle. The framework bundle is constructed identically to the application bundle: one `FluentBundle` per locale found in the slice, with each `.ftl` file becoming a separate `FluentResource` per the multi-resource design from §12.4. The fern-widgets bundles are stored on the same i18n manager as the application bundles, in a separate `HashMap<LanguageIdentifier, FluentBundle>`. The version Signal increments apply to both maps simultaneously — a hot-reload of any locale (application or framework) increments the version, and every LocalizedString re-resolves regardless of which bundle its resolver consults.
+
+#### 12.13.4 Application Override
+
+Applications can override individual framework strings via an opt-in `I18nConfig` method:
+
+```rust
+.i18n(I18nConfig::new()
+    .compile_in(&[
+        ("en-US", &[include_str!("../locales/en-US.ftl")]),
+        ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]),
+    ])
+    .override_widget_strings(&[
+        ("en-US", &[include_str!("../locales-fern-widgets/en-US.ftl")]),
+        ("fr-FR", &[include_str!("../locales-fern-widgets/fr-FR.ftl")]),
+        ("ja-JP", &[include_str!("../locales-fern-widgets/ja-JP.ftl")]),
+    ])
+    // ...
+)
+```
+
+The override is a separate slice with the same `&[(&str, &[&str])]` shape as `compile_in`, pointing at .ftl files in a parallel `locales-fern-widgets/` directory in the application's source tree. The override files only need to define the keys the application wants to change. Keys not present in an override file fall back to the framework's default for that locale, and from there to the framework's source language.
+
+The override .ftl files are not validated by any compile-time macro — they only contain key/value definitions, no Rust code references them, and they are loaded purely as runtime resources. The framework checks them at startup: if an override file contains a key that does not exist in fern-widgets' source `.ftl`, the framework logs a warning at startup but does not fail (the unknown key is harmless, just unreachable). If an override file is malformed, the affected locale's override is discarded with an error log, and the framework's default for that locale takes over.
+
+#### 12.13.5 Lookup Precedence for Framework Strings
+
+When `tr_widget!(a11y_scrollbar_name())` resolves, the framework consults the bundles in this order:
+
+1. **Application override bundle for the active locale.** If the application called `override_widget_strings` and the active locale's override bundle defines the key, use that value.
+2. **Framework bundle for the active locale.** If the framework ships a translation of this locale and it defines the key, use that value.
+3. **Application override bundle for the source locale.** If the override bundle for the source locale (typically `en-US`) defines the key, use that value. This handles the case where the application overrides a key in English but the active locale has no override and no framework translation.
+4. **Framework bundle for the source locale.** The ultimate fallback — fern-widgets' own en-US text.
+
+All four steps are HashMap lookups against pre-loaded bundles. There is no file I/O, no parsing, no allocation beyond the resolved string itself. The lookup happens once when `to_signal()` is called on the LocalizedString and again on each version increment.
+
+For application strings (resolved via `tr!`), the precedence is unchanged from §12.5: application's bundle for the active locale, then application's bundle for the source locale. The framework bundle is never consulted for application strings; the application override bundle is never consulted for application strings.
+
+#### 12.13.6 Locale Coverage Asymmetry
+
+Because fern-widgets' locale coverage is independent of the application's locale coverage, mismatches are possible. An application supports `en-US`, `fr-FR`, `es-ES`, and `ja-JP`; fern-widgets ships translations for `en-US`, `fr-FR`, and `de-DE`. When the application runs in Spanish, the framework strings fall back to English (because fern-widgets has no Spanish bundle), while the application strings render in Spanish normally. When the application runs in Japanese, the same thing happens. When the application runs in German, the application strings fall back to English (because the application has no German bundle) — but the framework strings render in German.
+
+This asymmetry is acceptable. The framework is honest about which locales it can maintain translations for, and applications fill in the gaps via `override_widget_strings` for the locales they care about. An application targeting Japanese users would ship a `locales-fern-widgets/ja-JP.ftl` file with Japanese translations of the framework's strings, and that file takes precedence over the framework's fallback-to-English. The override mechanism is the application's tool for guaranteeing locale parity between application strings and framework strings.
+
+The hot-reload path applies to override bundles as well as production bundles. A translator running:
+
+```bash
+atelier --translation-dev fr-FR=/path/to/app-fr.ftl --translation-dev-widget fr-FR=/path/to/widget-fr.ftl
+```
+
+can iterate on both application strings and framework override strings simultaneously, with both saves triggering reloads of the appropriate bundles. The `--translation-dev-widget` CLI flag is the override-bundle equivalent of `--translation-dev`, mapping to `runtime_override_widget_strings(locale, path)` on `I18nConfig`. The semantics are identical: load the file, watch for changes, reload on save, increment the version Signal.
+
+#### 12.13.7 Application Accessibility Strings Are Not Special
+
+Accessibility labels written in **application** code are not special. They are regular translatable strings using the regular `tr!` macro, defined in the application's own .ftl files alongside every other application string:
+
+```rust
+// In application code:
+impl Widget for MyCustomWidget {
+    fn accessibility(&self) -> AccessibilityNode {
+        AccessibilityNode::new()
+            .role(Role::Button)
+            .name(tr!(my_custom_widget_label()))
+            .description(tr!(my_custom_widget_description()))
+    }
+}
+```
+
+The `accessibility()` method accepts `LocalizedString` parameters like any other widget builder method. There is no separate accessibility-specific translation system. The dual-bundle design exists only to handle the boundary between application-defined strings and framework-defined strings; once you are inside application code, all strings flow through the same `tr!` path regardless of whether they are user-visible labels, button text, tooltips, error messages, or accessibility names.
 
 ---
 
@@ -3041,9 +3662,7 @@ The V2 migration is complete. All widgets use the unified Widget trait and Signa
 
 **Handler attachment.** Two valid patterns: widgets attach handlers to child widgets via `.on_tap()` builder methods (Checkbox on MinSize, Accordion on its header), or attach handlers to themselves via `HandlerSet::new()` + `ctx.apply_self_handlers()` (Button, Toggle, Slider, SegmentedControl). The framework auto-wires gesture recognizers when handlers are attached.
 
-**Animation.** The `AnimationScheduler` supports both `State<f32>` (V1) and `Signal<f32>` (V2) for animation targets. Toggle, Accordion, ScrollArea, and ProgressBar use `Signal<f32>::animate_to()` for smooth animated transitions.
-
-**Remaining V1 internals.** `state.rs` (758 lines) is retained with `BindingRegistry`, `BindingLevel`, `State<T>`, `Reactive<T>`, `StateHandle<T>`. These serve as the internal binding infrastructure. Widget-facing usage is limited to `BindingLevel` (imported by 3 widget files for `signal.bind_to()` calls) and `Reactive<bool>` (accepted by `ctx.visible_when()` / `ctx.enabled_when()` via bridge conversions from Signal). `BuildContext` retains V1 legacy methods (`ctx.state()`, `ctx.observe()`, `ctx.animated_state()`) marked as deprecated. ScrollBar uses `Rc<Cell<>>` for drag interaction state (pointer position, drag-in-progress flag) — this is legitimate low-level interaction state that does not need reactivity.
+**Animation.** The `AnimationScheduler` supports `Signal<f32>` for animation targets. Toggle, Accordion, ScrollArea, and ProgressBar use `Signal<f32>::animate_to()` for smooth animated transitions.
 
 **Final line counts.** fern-core: 9,989 lines (was 8,554 in V1 — net increase from signal.rs, build_context.rs, event_handlers.rs, widget_builder.rs, animation.rs expansion, offset by composite deletions). fern-widgets: 11,641 lines (was 11,780 in V1 — slight net reduction despite adding more features, each widget simpler). Infrastructure crates (tokens, canvas, text, render, platform, app): 8,946 lines — untouched by V2 migration.
 
