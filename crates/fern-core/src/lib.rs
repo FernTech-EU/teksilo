@@ -4,7 +4,6 @@ pub mod app_command;
 pub mod app_event;
 pub mod arena;
 pub mod build_context;
-mod compat;
 pub mod drag_payload;
 pub(crate) mod drag_state;
 pub mod environment;
@@ -56,11 +55,9 @@ pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
 pub use shortcut::{Shortcut, ShortcutMap, ShortcutScope};
+pub use animation::AnimationRequest;
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
-pub use state::{
-    AnimationRequest, BindingLevel, BindingRegistry, DerivedState, ObserverId, ReadableState,
-    State, StateHandle,
-};
+pub use state::{BindingLevel, BindingRegistry};
 pub use widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
