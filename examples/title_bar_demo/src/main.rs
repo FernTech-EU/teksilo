@@ -115,7 +115,7 @@ fn main() {
             // backends, X11) the frame can't be created either; we just
             // return the inner content uncovered.
             match tree.title_bar_host() {
-                Some(host) => tree.add(WindowFrame::new(host).thickness(2.0).content_id(inner)),
+                Some(host) => tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner)),
                 None => inner,
             }
         })

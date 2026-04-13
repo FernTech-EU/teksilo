@@ -1,33 +1,32 @@
-//! A borderless-window frame: 4 invisible resize strips arranged around
-//! a single inner content widget, with absolute positioning.
+//! A borderless-window frame: an invisible overlay of resize strips and
+//! corner cells along the four edges of a single content widget.
 //!
 //! `WindowFrame` is the canonical way to wrap a `TitleBar` + body for an
-//! undecorated Wayland window. Composing the same shape with nested
-//! `HStack` / `VStack` only works if every wrapper between the strips
-//! and the content is a spacer — `HStack`/`VStack` only fill their main
-//! axis when they have spacer children, otherwise they collapse to the
-//! sum of their children's intrinsic sizes. That makes the nested
-//! approach fragile (one missing `Expand::fills_stack` and the frame
-//! collapses to ~12 pixels). Doing the layout ourselves with absolute
-//! coordinates sidesteps the whole issue.
+//! undecorated Wayland window. The content child fills the entire window
+//! bounds — there is *no* visible padding — and the resize strips +
+//! corners sit on top of the content along the edges. fern-core's
+//! `hit_test_recursive` walks children in reverse insertion order, so
+//! the strips and corners (added after content) get first crack at any
+//! click that lands within `thickness` pixels of an edge; clicks
+//! anywhere else fall through to the content.
 //!
-//! Layout:
+//! Layout (with `thickness = t`):
 //!
 //! ```text
-//! ┌────────────────────────────────┐
-//! │      top resize strip          │
-//! ├──┬──────────────────────────┬──┤
-//! │  │                          │  │
-//! │L │        content           │R │
-//! │  │                          │  │
-//! ├──┴──────────────────────────┴──┤
-//! │     bottom resize strip        │
-//! └────────────────────────────────┘
+//! ┌─top─edge───────────────────────┐  ← top strip overlays content (0, 0, w, t)
+//! │TL│                          │TR│  ← corners overlay the strip ends
+//! │──│                          │──│
+//! │L │       content (full)     │R │  ← content fills (0, 0, w, h)
+//! │──│                          │──│
+//! │BL│                          │BR│
+//! └─bottom─edge────────────────────┘
 //! ```
 //!
-//! The four strips are M2-final 4-edge resize: there are no diagonal
-//! corner widgets yet (fern-core's `CursorIcon` has no diagonal resize
-//! variant). Corners belong to the top and bottom strips.
+//! `t` defaults to 6 logical pixels but is configurable via
+//! [`WindowFrame::thickness`]. With a small thickness the frame is
+//! visually undetectable; the cursor only changes (and the resize
+//! gesture only triggers) when the pointer is within `t` pixels of the
+//! window boundary.
 
 use std::rc::Rc;
 
@@ -195,44 +194,48 @@ impl Widget for WindowFrame {
         _ctx: &LayoutContext,
     ) {
         let t = self.thickness;
-        let inner_w = (bounds.width - 2.0 * t).max(0.0);
-        let inner_h = (bounds.height - 2.0 * t).max(0.0);
 
-        // Children are in the same order they were added in build():
-        // index 0 (if content present) → content
-        // then [top, bottom, left, right] edges
-        // then [top_left, top_right, bottom_left, bottom_right] corners
+        // Children are in insertion order:
+        //   index 0 (if content present) → content
+        //   then [top, bottom, left, right] edges
+        //   then [top_left, top_right, bottom_left, bottom_right] corners
+        //
+        // Hit-test walks `.iter().rev()`, so corners are checked first,
+        // then edges, then content — exactly the priority we want.
         let mut i = 0;
 
         if self.content_id.is_some() {
-            children[i].origin = Point::new(bounds.x + t, bounds.y + t);
-            children[i].size = Size::new(inner_w, inner_h);
+            // Content fills the FULL window — no inset, no visible
+            // padding. The strips overlay it along the edges.
+            children[i].origin = bounds.origin();
+            children[i].size = bounds.size();
             i += 1;
         }
 
-        // Edges — shortened by `t` on both ends so the 4 corner cells
-        // own the corner squares.
-        // Top: between the two top corners.
-        children[i].origin = Point::new(bounds.x + t, bounds.y);
-        children[i].size = Size::new(inner_w, t);
+        // Edges — full-length strips overlaying the outer `t` pixels of
+        // the content. They overlap the corners by `t × t`, but the
+        // corner cells (added after) win the hit-test in those regions.
+        // Top.
+        children[i].origin = bounds.origin();
+        children[i].size = Size::new(bounds.width, t);
         i += 1;
 
-        // Bottom: between the two bottom corners.
-        children[i].origin = Point::new(bounds.x + t, bounds.bottom() - t);
-        children[i].size = Size::new(inner_w, t);
+        // Bottom.
+        children[i].origin = Point::new(bounds.x, bounds.bottom() - t);
+        children[i].size = Size::new(bounds.width, t);
         i += 1;
 
-        // Left: between the two left corners.
-        children[i].origin = Point::new(bounds.x, bounds.y + t);
-        children[i].size = Size::new(t, inner_h);
+        // Left.
+        children[i].origin = bounds.origin();
+        children[i].size = Size::new(t, bounds.height);
         i += 1;
 
-        // Right: between the two right corners.
-        children[i].origin = Point::new(bounds.right() - t, bounds.y + t);
-        children[i].size = Size::new(t, inner_h);
+        // Right.
+        children[i].origin = Point::new(bounds.right() - t, bounds.y);
+        children[i].size = Size::new(t, bounds.height);
         i += 1;
 
-        // Corners — square `t × t` cells at each window corner.
+        // Corners — `t × t` squares at the four window corners.
         // Top-left.
         children[i].origin = bounds.origin();
         children[i].size = Size::new(t, t);
@@ -330,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_inset_content_by_thickness_on_all_sides() {
+    fn frame_content_fills_full_window_no_visible_padding() {
         let host: Rc<dyn PlatformTitleBarHost> = Rc::new(TestHost::default());
         let mut tree = WidgetTree::new();
         let frame = tree.add(
@@ -345,15 +348,16 @@ mod tests {
         assert!((f.width - 900.0).abs() < 0.01);
         assert!((f.height - 600.0).abs() < 0.01);
 
-        // Walk to the content child (index 0, added before the strips).
+        // Content is the FULL window — the resize frame is a hit-test
+        // overlay only, no visible inset.
         let kids = tree.children(frame);
         let content = kids[0];
         let cb = tree.bounds(content);
-        assert!((cb.x - 6.0).abs() < 0.01, "content x = {}", cb.x);
-        assert!((cb.y - 6.0).abs() < 0.01, "content y = {}", cb.y);
-        assert!((cb.width - 888.0).abs() < 0.01, "content w = {}", cb.width);
+        assert!((cb.x - 0.0).abs() < 0.01, "content x = {}", cb.x);
+        assert!((cb.y - 0.0).abs() < 0.01, "content y = {}", cb.y);
+        assert!((cb.width - 900.0).abs() < 0.01, "content w = {}", cb.width);
         assert!(
-            (cb.height - 588.0).abs() < 0.01,
+            (cb.height - 600.0).abs() < 0.01,
             "content h = {}",
             cb.height
         );
