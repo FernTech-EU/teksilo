@@ -56,21 +56,40 @@ impl LocalizedString {
     /// version signal and re-resolves on every increment. If no manager
     /// is installed (typical in lower-level widget tests), the signal is
     /// a static snapshot of the current resolution.
+    ///
+    /// **Lifetime:** the observer registered on the version signal is
+    /// tied to the lifetime of the returned `Signal<String>` via
+    /// `attach_keepalive`. When the last clone of the returned signal
+    /// drops — e.g., when the widget that bound it is destroyed by a
+    /// composite rebuild — the stored `ObserverHandle` drops, which
+    /// unsubscribes the callback from the version signal. The observer
+    /// closure itself captures a `WeakSignal` rather than a strong
+    /// clone, so the closure cannot form a reference cycle that keeps
+    /// the target alive. Together these two properties make
+    /// `to_signal()` leak-free even across many composite rebuilds.
     pub fn to_signal(&self) -> Signal<String> {
         let initial = (self.resolver)();
         let signal = Signal::new(initial);
 
         if let Some(version) = current_version_signal() {
             let resolver = self.resolver.clone();
-            let target = signal.clone();
+            // `Signal::new` always returns a mutable signal, so
+            // downgrade can't fail here — but unwrap defensively.
+            let weak = signal
+                .downgrade()
+                .expect("Signal::new returns a mutable signal, downgrade cannot fail");
             let handle = version.observe(move |_| {
-                target.set((resolver)());
+                // `upgrade` returns `None` once every strong clone of
+                // the target signal has been dropped; at that point
+                // the handle is about to be dropped too (it lives in
+                // the target's `keepalive`), so this no-op branch
+                // only runs for at most one stray callback invocation
+                // between the last drop and the handle's own cleanup.
+                if let Some(target) = weak.upgrade() {
+                    target.set((resolver)());
+                }
             });
-            // Forget the handle so the observer lives for the lifetime
-            // of the returned Signal — the binding system / arena is the
-            // ultimate owner. Dropping this LocalizedString must not
-            // unsubscribe the signal from version updates.
-            std::mem::forget(handle);
+            signal.attach_keepalive(handle);
         }
 
         signal
@@ -155,6 +174,57 @@ mod tests {
 
         mgr.set_locale(lid("en-US"));
         assert_eq!(sig.get(), "Hello");
+
+        clear();
+    }
+
+    #[test]
+    fn to_signal_observer_unsubscribes_when_signal_drops() {
+        // Regression test for the C1 memory leak: before the
+        // `WeakSignal` + `attach_keepalive` fix, `to_signal()` called
+        // `mem::forget` on the observer handle, leaving the target
+        // signal alive forever and causing every subsequent locale
+        // change to invoke a stale observer. With the fix, dropping
+        // the returned signal releases the keepalive, which drops the
+        // handle, which detaches the callback from the version
+        // signal. We verify this by counting resolver invocations —
+        // after dropping the signal, the resolver must not run again.
+        clear();
+        let cfg = I18nConfig::test_only("en-US", &[("k", "v")])
+            .with_locale("fr-FR", &[("k", "w")]);
+        let mgr = I18nManager::from_config(&cfg);
+        install(mgr.clone());
+
+        let count = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let count_for_resolver = count.clone();
+        let ls = localized(move || {
+            count_for_resolver.set(count_for_resolver.get() + 1);
+            crate::resolve::resolve_message("k", &[])
+        });
+
+        let signal = ls.to_signal();
+        // Initial resolution runs once inside `to_signal()`.
+        assert_eq!(count.get(), 1);
+
+        // A locale change triggers the observer → resolver runs again.
+        mgr.set_locale(lid("fr-FR"));
+        assert_eq!(count.get(), 2);
+
+        // Drop the signal. The observer's `WeakSignal` can no longer
+        // upgrade, and the `ObserverHandle` stored in the signal's
+        // `keepalive` was freed when the inner dropped — the callback
+        // is removed from the version signal's observer list.
+        drop(signal);
+        drop(ls);
+
+        // Another locale change: the resolver should NOT run again
+        // because the observer has been detached.
+        mgr.set_locale(lid("en-US"));
+        assert_eq!(
+            count.get(),
+            2,
+            "resolver ran after the signal was dropped — observer was not detached"
+        );
 
         clear();
     }

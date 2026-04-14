@@ -159,7 +159,7 @@ impl Snackbar {
         }
     }
 
-    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(label), content)

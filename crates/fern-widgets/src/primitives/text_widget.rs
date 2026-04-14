@@ -39,13 +39,11 @@ impl TextWidget {
         }
     }
 
-    /// Shim accepting a raw string, for tests and scaffolding where
-    /// translation is overkill. Wraps the input in
-    /// `LocalizedString::literal(...)` and forwards to `new(...)`.
-    /// `#[doc(hidden)]` so production code reaches for `new(tr!(...))`
-    /// or `new(LocalizedString::literal(...))` instead, but the shim
-    /// is permanent — grep rule for untranslated strings is
-    /// `LocalizedString::literal` OR `*_literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in
+    /// `LocalizedString::literal` for tests and scaffolding where
+    /// translation is overkill. Production code uses
+    /// `new(tr!(...))`; the `*_literal` suffix is the grep marker for
+    /// untranslated strings alongside `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(text: impl Into<String>) -> Self {
         Self::new(LocalizedString::literal(text))

@@ -4,10 +4,12 @@
 //! through a manager installed on the thread-local, and reactivity when
 //! the active locale changes.
 //!
-//! Compile-failure cases (missing key, missing arg, unknown arg) are not
-//! exercised here — proving they are rejected requires trybuild UI tests,
-//! which are planned for a later landing. The code below demonstrates
-//! the *happy paths* those errors protect.
+//! Compile-failure cases (missing key, missing arg, unknown arg,
+//! `__` in a segment name) live in the separate trybuild harnesses:
+//! `tests/trybuild.rs` for flat-mode cases and `tests/trybuild_nested.rs`
+//! for directory-mode cases. The `#[test]` functions below exercise
+//! only the *happy paths* those errors protect, plus the dynamic
+//! fallback that runs when no `I18nManager` is installed.
 
 use fern_i18n::{
     I18nConfig, I18nManager, LanguageIdentifier, LocalizedString, tr,

@@ -76,7 +76,7 @@ impl MenuItem {
         }
     }
 
-    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(label: impl Into<String>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(label))
@@ -144,7 +144,7 @@ impl MenuItem {
         }
     }
 
-    /// Transitional shim for `submenu(...)` accepting a raw label.
+    /// Shim (permanent, `#[doc(hidden)]`) for `submenu(...)` accepting a raw label.
     #[doc(hidden)]
     pub fn submenu_literal(
         label: impl Into<String>,

@@ -17,7 +17,9 @@ use fern_widgets::{Snackbar, StatusBar};
 fn framework_locales_available_when_registered() {
     let app = FernAppBuilder::new()
         .i18n(
-            I18nConfig::test_only("en-US", &[("app-noop", "")])
+            // Empty app bundle — these tests only exercise the
+            // framework bundle, so we don't need any application keys.
+            I18nConfig::test_only("en-US", &[])
                 .framework_locales(fern_widgets::framework_locales()),
         )
         .build_headless();
@@ -36,7 +38,9 @@ fn status_bar_a11y_name_resolves_via_framework_bundle() {
 
     let mut app = FernAppBuilder::new()
         .i18n(
-            I18nConfig::test_only("en-US", &[("app-noop", "")])
+            // Empty app bundle — these tests only exercise the
+            // framework bundle, so we don't need any application keys.
+            I18nConfig::test_only("en-US", &[])
                 .framework_locales(fern_widgets::framework_locales()),
         )
         .build_headless();
@@ -68,7 +72,9 @@ fn snackbar_a11y_name_resolves_via_framework_bundle() {
 
     let mut app = FernAppBuilder::new()
         .i18n(
-            I18nConfig::test_only("en-US", &[("app-noop", "")])
+            // Empty app bundle — these tests only exercise the
+            // framework bundle, so we don't need any application keys.
+            I18nConfig::test_only("en-US", &[])
                 .framework_locales(fern_widgets::framework_locales()),
         )
         .build_headless();

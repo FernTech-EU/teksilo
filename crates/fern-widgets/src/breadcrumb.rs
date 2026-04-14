@@ -69,13 +69,13 @@ impl BreadcrumbItem {
         }
     }
 
-    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(label: impl Into<String>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(label))
     }
 
-    /// Transitional shim for `current(...)` accepting a raw label.
+    /// Shim (permanent, `#[doc(hidden)]`) for `current(...)` accepting a raw label.
     #[doc(hidden)]
     pub fn current_literal(label: impl Into<String>) -> Self {
         Self::current(fern_i18n::LocalizedString::literal(label))

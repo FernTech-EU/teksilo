@@ -219,6 +219,30 @@ impl WindowManager {
         };
 
         let mut tree = WidgetTree::new().with_theme(initial_theme);
+
+        // Seed the tree from the active i18n manager (if any). Without
+        // this, `WidgetTree::new()` defaults to `LayoutDirection::LeftToRight`
+        // and an empty locale — so a windowed app started in an RTL
+        // locale (via `FernAppBuilder::i18n(...)` with Arabic/Hebrew as
+        // initial) would lay out its first window as LTR until the
+        // user manually triggered a locale switch. New windows created
+        // mid-session also benefit: they inherit the active locale
+        // and direction instead of reverting to the default.
+        //
+        // The seeding must happen BEFORE `root_builder` runs so any
+        // `tr!` calls inside `build()` see the correct locale on
+        // first build, and BEFORE the first layout pass so the tree's
+        // `layout_direction` field already matches `m.direction_signal()`.
+        if let Some((loc, dir)) = fern_i18n::thread_local::with_active(|m| {
+            (
+                m.locale_signal().get().to_string(),
+                m.direction_signal().get(),
+            )
+        }) {
+            tree.set_layout_direction(dir);
+            tree.set_locale(loc);
+        }
+
         if let Some(template) = self.app_context_template.as_ref() {
             tree.set_app_context(template.clone());
         }

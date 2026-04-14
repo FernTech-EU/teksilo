@@ -52,7 +52,7 @@ impl WizardStep {
         }
     }
 
-    /// Transitional shim — wraps a raw title in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal<W, F>(title: impl Into<String>, factory: F) -> Self
     where
@@ -68,7 +68,7 @@ impl WizardStep {
         self
     }
 
-    /// Transitional shim for `supporting_text(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `supporting_text(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn supporting_text_literal(mut self, text: impl Into<String>) -> Self {
         self.supporting_text = Some(text.into());
@@ -575,7 +575,7 @@ impl Wizard {
         }
     }
 
-    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(label: impl Into<String>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(label))
@@ -622,7 +622,7 @@ impl Wizard {
         self
     }
 
-    /// Transitional shim for `back_label(...)`.
+    /// Shim (permanent, `#[doc(hidden)]`) for `back_label(...)`.
     #[doc(hidden)]
     pub fn back_label_literal(mut self, label: impl Into<String>) -> Self {
         self.back_label = label.into();
@@ -635,7 +635,7 @@ impl Wizard {
         self
     }
 
-    /// Transitional shim for `cancel_label(...)`.
+    /// Shim (permanent, `#[doc(hidden)]`) for `cancel_label(...)`.
     #[doc(hidden)]
     pub fn cancel_label_literal(mut self, label: impl Into<String>) -> Self {
         self.cancel_label = label.into();
@@ -648,7 +648,7 @@ impl Wizard {
         self
     }
 
-    /// Transitional shim for `next_label(...)`.
+    /// Shim (permanent, `#[doc(hidden)]`) for `next_label(...)`.
     #[doc(hidden)]
     pub fn next_label_literal(mut self, label: impl Into<String>) -> Self {
         self.next_label = label.into();
@@ -661,7 +661,7 @@ impl Wizard {
         self
     }
 
-    /// Transitional shim for `finish_label(...)`.
+    /// Shim (permanent, `#[doc(hidden)]`) for `finish_label(...)`.
     #[doc(hidden)]
     pub fn finish_label_literal(mut self, label: impl Into<String>) -> Self {
         self.finish_label = label.into();

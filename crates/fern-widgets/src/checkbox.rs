@@ -149,7 +149,7 @@ impl Checkbox {
         self
     }
 
-    /// Transitional shim for `label(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
@@ -167,7 +167,7 @@ impl Checkbox {
         self
     }
 
-    /// Transitional shim for `tooltip(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());

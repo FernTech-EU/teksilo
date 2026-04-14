@@ -42,7 +42,7 @@ impl Link {
         }
     }
 
-    /// Transitional shim — wraps a raw string in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(text: impl Into<String>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(text))
@@ -74,7 +74,7 @@ impl Link {
         self
     }
 
-    /// Transitional shim for `tooltip(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());

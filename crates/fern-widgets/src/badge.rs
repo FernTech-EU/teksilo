@@ -28,7 +28,7 @@ impl Badge {
         }
     }
 
-    /// Transitional shim — wraps a raw string in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw string in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(label: impl Into<String>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(label))

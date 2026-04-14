@@ -80,7 +80,7 @@ impl MenuBar {
         self
     }
 
-    /// Transitional shim for `menu(...)` accepting a raw label.
+    /// Shim (permanent, `#[doc(hidden)]`) for `menu(...)` accepting a raw label.
     #[doc(hidden)]
     pub fn menu_literal(
         self,

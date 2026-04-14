@@ -72,6 +72,16 @@ struct MutableInner<T> {
     dirty: bool,
     observers: Vec<ObserverEntry<T>>,
     next_observer_id: u64,
+    /// Drop guards attached to this signal via `attach_keepalive`. Used
+    /// by adapters (e.g., `LocalizedString::to_signal`) that observe an
+    /// external source and need their `ObserverHandle` to live exactly
+    /// as long as the signal it updates — when the last `Signal<T>`
+    /// clone drops, this `Vec` drops, which drops every stored handle,
+    /// which detaches their callbacks from the source. Without this,
+    /// such adapters would have to `mem::forget` their handles and
+    /// leak both the observer entry on the source and the target
+    /// signal it kept alive through a strong `Rc` clone.
+    keepalive: Vec<Box<dyn std::any::Any>>,
 }
 
 /// Animation-specific state, only for `Signal<f32>`.
@@ -84,6 +94,43 @@ struct AnimationState {
 pub enum SignalAccessError {
     ReadOnly,
     AnimationUnsupported,
+}
+
+/// Weak reference to a mutable signal. Produced by `Signal::downgrade`.
+///
+/// Unlike a `Signal<T>` clone (which is an `Rc`), a `WeakSignal<T>`
+/// does not extend the lifetime of the underlying `MutableInner<T>`.
+/// Use this inside observer callbacks that should not keep the
+/// observed-target signal alive — otherwise the strong `Rc` captured
+/// by the closure forms a reference cycle with the inner that holds
+/// the observer, and neither gets freed.
+pub struct WeakSignal<T> {
+    inner: Weak<RefCell<MutableInner<T>>>,
+    animation: Option<Weak<RefCell<AnimationState>>>,
+}
+
+impl<T> Clone for WeakSignal<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            animation: self.animation.clone(),
+        }
+    }
+}
+
+impl<T: 'static> WeakSignal<T> {
+    /// Try to upgrade the weak reference into a live `Signal<T>`.
+    /// Returns `None` if the target signal has already been dropped.
+    pub fn upgrade(&self) -> Option<Signal<T>> {
+        let inner = self.inner.upgrade()?;
+        // If the original was animated, preserve that — but if the
+        // animation state was freed independently we degrade to a
+        // non-animated signal rather than failing the upgrade.
+        let animation = self.animation.as_ref().and_then(|weak| weak.upgrade());
+        Some(Signal {
+            kind: SignalKind::Mutable { inner, animation },
+        })
+    }
 }
 
 pub(crate) struct WeakAnimatedSignal {
@@ -141,9 +188,42 @@ impl<T: 'static> Signal<T> {
                     dirty: false,
                     observers: Vec::new(),
                     next_observer_id: 1,
+                    keepalive: Vec::new(),
                 })),
                 animation: None,
             },
+        }
+    }
+
+    /// Attach an arbitrary drop guard that lives exactly as long as the
+    /// signal does — the guard is dropped when the last `Signal<T>`
+    /// clone is freed (i.e., when `MutableInner<T>` is freed). Intended
+    /// for adapters that observe an external source and want their
+    /// `ObserverHandle` to auto-unsubscribe when the signal they're
+    /// driving becomes unreachable.
+    ///
+    /// On a derived (read-only) signal this is a no-op; the adapter
+    /// pattern only makes sense for mutable signals.
+    pub fn attach_keepalive<G: 'static>(&self, guard: G) {
+        if let SignalKind::Mutable { inner, .. } = &self.kind {
+            inner.borrow_mut().keepalive.push(Box::new(guard));
+        }
+    }
+
+    /// Get a weak reference to this signal. Callbacks registered on an
+    /// external source should capture the `WeakSignal` instead of a
+    /// strong `Signal<T>` clone — otherwise the callback's strong `Rc`
+    /// keeps the inner alive indefinitely, creating a reference cycle.
+    ///
+    /// Returns `None` for derived (read-only) signals, which have no
+    /// shared inner to downgrade.
+    pub fn downgrade(&self) -> Option<WeakSignal<T>> {
+        match &self.kind {
+            SignalKind::Mutable { inner, animation } => Some(WeakSignal {
+                inner: Rc::downgrade(inner),
+                animation: animation.as_ref().map(Rc::downgrade),
+            }),
+            SignalKind::Derived { .. } => None,
         }
     }
 
@@ -350,6 +430,7 @@ impl Signal<f32> {
                     dirty: false,
                     observers: Vec::new(),
                     next_observer_id: 1,
+                    keepalive: Vec::new(),
                 })),
                 animation: Some(Rc::new(RefCell::new(AnimationState {
                     pending: None,

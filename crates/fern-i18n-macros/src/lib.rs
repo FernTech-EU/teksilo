@@ -281,21 +281,36 @@ fn parse_ftl_file(
     for entry in &resource.body {
         if let ast::Entry::Message(msg) = entry {
             let id = msg.id.name.to_string();
-            let mut vars: Vec<String> = Vec::new();
-            let mut fallback: Option<Vec<FallbackPart>> = None;
-            if let Some(pattern) = &msg.value {
-                collect_variables(pattern, &mut vars);
-                fallback = build_fallback(pattern);
-            }
+            // Single walk of the pattern: `build_fallback` already
+            // descends every element and branch, so we piggy-back a
+            // var-collection side effect onto it rather than running
+            // a second full walk via `collect_variables`. For
+            // patterns that bail out of fallback (selectors, plural
+            // rules, term/message refs) we do still need to enumerate
+            // `$var`s, so the walker continues through those paths
+            // and only reports `fallback = None` at the end.
+            let mut vars_buf: Vec<String> = Vec::new();
+            let fallback = if let Some(pattern) = &msg.value {
+                build_fallback_and_collect_vars(pattern, &mut vars_buf)
+            } else {
+                None
+            };
+            // Dedupe while preserving first-seen order.
             let mut seen = std::collections::HashSet::new();
-            vars.retain(|v| seen.insert(v.clone()));
+            vars_buf.retain(|v| seen.insert(v.clone()));
             if messages.contains_key(&id) {
                 return Err(format!(
                     "duplicate message key `{id}` (second definition in `{}`)",
                     path.display()
                 ));
             }
-            messages.insert(id, MessageInfo { vars, fallback });
+            messages.insert(
+                id,
+                MessageInfo {
+                    vars: vars_buf,
+                    fallback,
+                },
+            );
         }
     }
 
@@ -399,75 +414,86 @@ fn collect_ftl_files(
     Ok(())
 }
 
-/// If `pattern` is composed entirely of literal text and simple
-/// `{ $var }` variable references, return a template that can be
-/// reassembled at runtime into a source-language fallback string.
-/// Returns `None` if the pattern uses selectors, plural rules,
-/// function calls, message references, or anything else that would
-/// need the real Fluent formatter to produce meaningful output — in
-/// which case the macro expansion leaves the no-manager path
-/// returning the literal key as a placeholder.
-fn build_fallback(pattern: &ast::Pattern<&str>) -> Option<Vec<FallbackPart>> {
-    let mut parts = Vec::new();
+/// Walk a Fluent pattern once, building the fallback template and
+/// collecting every `$var` reference in a single pass. Returns
+/// `Some(parts)` iff the pattern is composed entirely of literal text
+/// and simple `{ $var }` references (safe to reassemble without a
+/// Fluent formatter); otherwise returns `None` to disable the
+/// fallback, but still pushes any discovered variable references to
+/// `vars_out` so that argument validation has complete information.
+///
+/// Patterns that disable fallback include: selectors, plural rules,
+/// function calls, message/term references, and nested placeables.
+/// Argument-validation only cares about the set of `$var`s, which
+/// this walker collects from every branch of every select.
+fn build_fallback_and_collect_vars(
+    pattern: &ast::Pattern<&str>,
+    vars_out: &mut Vec<String>,
+) -> Option<Vec<FallbackPart>> {
+    let mut parts: Vec<FallbackPart> = Vec::new();
+    let mut fallback_ok = true;
     for element in &pattern.elements {
         match element {
             ast::PatternElement::TextElement { value } => {
-                parts.push(FallbackPart::Text((*value).to_string()));
+                if fallback_ok {
+                    parts.push(FallbackPart::Text((*value).to_string()));
+                }
             }
             ast::PatternElement::Placeable { expression } => {
-                // Only simple `{ $name }` references are safe to
-                // reconstruct. Everything else (selectors, function
-                // calls, message/term refs, literals inside
-                // placeables) requires the Fluent formatter.
-                match expression {
+                let simple_var = match expression {
                     ast::Expression::Inline(
                         ast::InlineExpression::VariableReference { id },
-                    ) => {
-                        parts.push(FallbackPart::Var(id.name.to_string()));
+                    ) => Some(id.name.to_string()),
+                    _ => None,
+                };
+                if let Some(var) = simple_var {
+                    vars_out.push(var.clone());
+                    if fallback_ok {
+                        parts.push(FallbackPart::Var(var));
                     }
-                    _ => return None,
+                } else {
+                    // Non-trivial placeable: disable fallback, but
+                    // continue walking to collect any `$var`s inside
+                    // selectors/function calls/etc. so the arg
+                    // validator has the full set.
+                    fallback_ok = false;
+                    walk_expr_for_vars(expression, vars_out);
                 }
             }
         }
     }
-    Some(parts)
+    if fallback_ok { Some(parts) } else { None }
 }
 
-/// Walk a Fluent pattern collecting `$var` placeable references.
-fn collect_variables(pattern: &ast::Pattern<&str>, out: &mut Vec<String>) {
-    for element in &pattern.elements {
-        if let ast::PatternElement::Placeable { expression } = element {
-            collect_expr_vars(expression, out);
-        }
-    }
-}
-
-fn collect_expr_vars(expr: &ast::Expression<&str>, out: &mut Vec<String>) {
+fn walk_expr_for_vars(expr: &ast::Expression<&str>, out: &mut Vec<String>) {
     match expr {
-        ast::Expression::Inline(inline) => collect_inline_vars(inline, out),
+        ast::Expression::Inline(inline) => walk_inline_for_vars(inline, out),
         ast::Expression::Select { selector, variants } => {
-            collect_inline_vars(selector, out);
+            walk_inline_for_vars(selector, out);
             for variant in variants {
-                collect_variables(&variant.value, out);
+                // Recurse into each variant's pattern; we discard the
+                // returned `Option<Vec<FallbackPart>>` because the
+                // outer walk has already marked fallback disabled.
+                let _ = build_fallback_and_collect_vars(&variant.value, out);
             }
         }
     }
 }
 
-fn collect_inline_vars(inline: &ast::InlineExpression<&str>, out: &mut Vec<String>) {
+fn walk_inline_for_vars(inline: &ast::InlineExpression<&str>, out: &mut Vec<String>) {
     match inline {
         ast::InlineExpression::VariableReference { id } => {
             out.push(id.name.to_string());
         }
         ast::InlineExpression::Placeable { expression } => {
-            collect_expr_vars(expression, out);
+            walk_expr_for_vars(expression, out);
         }
         ast::InlineExpression::FunctionReference { arguments, .. } => {
             for positional in &arguments.positional {
-                collect_inline_vars(positional, out);
+                walk_inline_for_vars(positional, out);
             }
             for named in &arguments.named {
-                collect_inline_vars(&named.value, out);
+                walk_inline_for_vars(&named.value, out);
             }
         }
         ast::InlineExpression::MessageReference { .. }
@@ -521,6 +547,26 @@ fn path_to_fluent_key(
                     "fern-i18n: path segment `{s}` contains `__`, \
                      which is reserved as the nested-module separator. \
                      Use `::` for nesting, or single `_` within a segment."
+                ),
+            ));
+        }
+        // Fluent message-id grammar is `[a-zA-Z][a-zA-Z0-9_-]*`. Rust
+        // allows Unicode identifiers (e.g., `tr!(héllo())`), which
+        // would silently produce a non-Fluent-id string that would
+        // fail lookup with a confusing "key not found" error instead
+        // of pointing at the real cause. Reject non-ASCII segments
+        // upfront with a clearer message.
+        let mut chars = s.chars();
+        let first = chars.next().expect("syn::Ident is non-empty");
+        let first_ok = first.is_ascii_alphabetic();
+        let rest_ok = chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !first_ok || !rest_ok {
+            return Err(syn::Error::new(
+                seg.span(),
+                format!(
+                    "fern-i18n: path segment `{s}` is not a valid Fluent \
+                     message id — must match `[a-zA-Z][a-zA-Z0-9_]*` (ASCII \
+                     letters, digits, and underscores only)."
                 ),
             ));
         }

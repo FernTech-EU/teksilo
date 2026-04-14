@@ -47,7 +47,7 @@ impl Accordion {
         }
     }
 
-    /// Transitional shim — wraps a raw title in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(title: impl Into<String>, expanded: Signal<bool>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(title), expanded)

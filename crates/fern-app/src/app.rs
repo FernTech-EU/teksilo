@@ -741,6 +741,10 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
         match event {
             // Route AppEvent::Command through the normal command pipeline so
             // background-thread commands reach the on_command handler.
+            // Drain the same pending-operation slots as
+            // `WindowManager::flush_commands_through` — theme, locale,
+            // creates, and closes — so a background-thread-initiated
+            // `ctx.set_locale(...)` propagates just like a widget one.
             AppEvent::Command(erased) => {
                 if let Some(h) = self.command_handler.as_mut() {
                     let mut ctx = crate::command_context::CommandContext::new(
@@ -750,6 +754,9 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                     h(&erased, &mut ctx);
                     if let Some(new_theme) = ctx.take_theme() {
                         self.wm.set_theme(new_theme);
+                    }
+                    if let Some(new_locale) = ctx.take_locale() {
+                        self.wm.set_locale(new_locale);
                     }
                     for config in ctx.take_creates() {
                         self.wm.queue_create(config);
@@ -1104,14 +1111,17 @@ impl FernAppBuilder {
 
     /// Build and run the application with windowed rendering.
     pub fn run(self) {
-        // Construct the i18n manager (if configured) and install it on the
-        // thread-local before any window or widget tree is created. The
-        // `WindowManager` will seed each new tree with the resolved locale
-        // and direction at window-creation time.
+        // Construct the i18n manager (if configured) and install it on
+        // the thread-local before any window or widget tree is created.
+        // `WindowManager::create_window` seeds every new tree from the
+        // thread-local, so each window inherits the manager's active
+        // locale and layout direction on construction — no separate
+        // post-create seeding step needed here.
         //
-        // `runtime_override` entries are collected here so the hot-reload
-        // watcher can be spun up after the winit event loop exists (we
-        // need the `EventLoopProxy` as the sink target).
+        // `runtime_override` entries are collected before the install
+        // so the hot-reload watcher can be spun up after the winit
+        // event loop exists (we need the `EventLoopProxy` as the sink
+        // target) without a second borrow of `self.i18n`.
         let runtime_overrides: Vec<(LanguageIdentifier, std::path::PathBuf)> =
             self.i18n
                 .as_ref()
@@ -1119,10 +1129,7 @@ impl FernAppBuilder {
                 .unwrap_or_default();
 
         if let Some(cfg) = self.i18n.as_ref() {
-            let mgr = I18nManager::from_config(cfg);
-            let initial_loc = I18nManager::resolve_initial_locale(cfg);
-            mgr.set_locale(initial_loc);
-            fern_i18n::thread_local::install(mgr);
+            install_i18n_manager(cfg);
         }
 
         let event_loop = winit::event_loop::EventLoop::<AppEvent>::with_user_event()
@@ -1230,19 +1237,28 @@ impl Default for FernAppBuilder {
     }
 }
 
-/// Build an `I18nManager` from `cfg`, install it on the thread-local, and
-/// seed `tree` with the resolved initial locale and layout direction.
-/// Returns the manager so the caller can hand it to `HeadlessApp` (or, in
-/// `run()`, drop it because the thread-local owns it for the process).
-fn install_i18n(tree: &mut WidgetTree, cfg: &I18nConfig) -> Rc<I18nManager> {
+/// Build an `I18nManager` from `cfg`, pre-resolve its initial locale,
+/// and install it on the thread-local. Shared by `build_headless` and
+/// `run` so both paths use identical setup. Returns the manager so the
+/// headless caller can hand it to `HeadlessApp`; in the windowed `run`
+/// path the thread-local owns it for the process lifetime.
+fn install_i18n_manager(cfg: &I18nConfig) -> Rc<I18nManager> {
     let mgr = I18nManager::from_config(cfg);
     let initial_loc = I18nManager::resolve_initial_locale(cfg);
-    mgr.set_locale(initial_loc.clone());
+    mgr.set_locale(initial_loc);
     fern_i18n::thread_local::install(mgr.clone());
+    mgr
+}
 
-    tree.set_locale(initial_loc.to_string());
+/// Headless-only helper: install the i18n manager AND seed the single
+/// `WidgetTree` with the resolved locale and direction. The windowed
+/// path doesn't need this because `WindowManager::create_window` reads
+/// the thread-local and seeds each new tree at construction time; the
+/// headless path has no WindowManager so it seeds its one tree here.
+fn install_i18n(tree: &mut WidgetTree, cfg: &I18nConfig) -> Rc<I18nManager> {
+    let mgr = install_i18n_manager(cfg);
+    tree.set_locale(mgr.locale_signal().get().to_string());
     tree.set_layout_direction(mgr.direction_signal().get());
-
     mgr
 }
 

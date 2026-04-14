@@ -179,7 +179,7 @@ impl DialogContent {
         self
     }
 
-    /// Transitional shim for `title(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `title(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn title_literal(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
@@ -192,7 +192,7 @@ impl DialogContent {
         self
     }
 
-    /// Transitional shim for `supporting_text(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `supporting_text(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn supporting_text_literal(mut self, text: impl Into<String>) -> Self {
         self.supporting_text = Some(text.into());
@@ -326,7 +326,7 @@ impl Dialog {
         }
     }
 
-    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal<W, F>(label: impl Into<String>, factory: F) -> Self
     where

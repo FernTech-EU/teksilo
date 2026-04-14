@@ -7,13 +7,22 @@
 #
 # The proc macro `tr_widget!` (exported from `fern-i18n-macros` and
 # re-exported via `fern-i18n::tr_widget`) validates every invocation in
-# fern-widgets source against this file at compile time. At runtime, the
-# framework bundle is registered automatically by `FernAppBuilder` (see
-# architecture §12.13).
+# fern-widgets source against this file at compile time.
 #
-# Applications can override individual keys via
-# `I18nConfig::override_widget_strings(...)` (deferred — slot reserved but
-# not yet wired).
+# At runtime, applications opt into the framework bundle via
+# `I18nConfig::framework_locales(fern_widgets::framework_locales())`
+# on the builder chain. This is **not** automatic — fern-app is
+# deliberately widget-agnostic, so each application that uses
+# fern-widgets must register the bundle explicitly. Applications that
+# don't register the bundle still see the correct English text via the
+# macro's compile-time fallback (see architecture §12.13.3 for the
+# deviation from the spec's auto-registration).
+#
+# Applications can also override individual keys via
+# `I18nConfig::override_widget_strings(...)` — those overrides win over
+# the framework bundle in the §12.13.5 lookup precedence. Use this to
+# ship a Japanese translation of the a11y labels when fern-widgets
+# itself only ships English and French.
 
 a11y-status-bar-name = Status
 a11y-dialog-name = Dialog

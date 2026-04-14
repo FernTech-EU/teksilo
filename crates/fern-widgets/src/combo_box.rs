@@ -77,7 +77,7 @@ impl ComboBox {
         }
     }
 
-    /// Transitional shim — wraps each raw item in `LocalizedString::literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps each raw item in `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(
         items: impl IntoIterator<Item = impl Into<String>>,
@@ -98,7 +98,7 @@ impl ComboBox {
         self
     }
 
-    /// Transitional shim for `placeholder(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `placeholder(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
         self.placeholder = text.into();

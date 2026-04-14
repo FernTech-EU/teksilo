@@ -105,13 +105,11 @@ impl Button {
         }
     }
 
-    /// Shim accepting a raw string, for tests and scaffolding where
-    /// translation is overkill. Wraps the input in
-    /// `LocalizedString::literal(...)` and forwards to `new(...)`.
-    /// `#[doc(hidden)]` so production code reaches for `new(tr!(...))`
-    /// or `new(LocalizedString::literal(...))` instead, but the shim
-    /// is permanent — grep rule for untranslated strings is
-    /// `LocalizedString::literal` OR `*_literal`.
+    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in
+    /// `LocalizedString::literal` for tests and scaffolding where
+    /// translation is overkill. Production code uses
+    /// `new(tr!(...))`; the `*_literal` suffix is the grep marker for
+    /// untranslated strings alongside `LocalizedString::literal`.
     #[doc(hidden)]
     pub fn new_literal(label: impl Into<String>) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(label))
@@ -148,7 +146,7 @@ impl Button {
         self
     }
 
-    /// Transitional shim for `tooltip(...)` accepting a raw string.
+    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());

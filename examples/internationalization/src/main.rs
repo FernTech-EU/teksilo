@@ -72,25 +72,16 @@ impl Widget for Root {
         // i18n thread-local, so this is `None` only when the
         // application did not register an `I18nConfig` — in which
         // case the demo still shows the English compile-time fallback
-        // text. Map the enum to the translated label via `tr!`.
+        // text. Map the enum to the translated label via `tr!` so the
+        // keys are validated at compile time (renaming the key in
+        // `en-US.ftl` would then produce a compile error instead of a
+        // silent runtime placeholder).
         let direction_signal = fern_ui::i18n::current_direction();
-        let direction_label = ctx.signal(direction_label_for(direction_signal.as_ref()));
+        let direction_label = ctx.signal(direction_note_label_for(direction_signal.as_ref()));
         if let Some(sig) = direction_signal.as_ref() {
             let target = direction_label.clone();
             ctx.effect(sig, move |dir| {
-                target.set(match dir {
-                    fern_ui::i18n::LayoutDirection::LeftToRight => {
-                        // Re-resolve against the active locale each time
-                        // via the i18n free function so the string
-                        // follows locale changes — we cannot keep a
-                        // stale `tr!` closure here because the macro
-                        // produces a `LocalizedString`, not a `Signal`.
-                        fern_ui::i18n::resolve_message("direction-note-ltr", &[])
-                    }
-                    fern_ui::i18n::LayoutDirection::RightToLeft => {
-                        fern_ui::i18n::resolve_message("direction-note-rtl", &[])
-                    }
-                });
+                target.set(direction_note_label(*dir));
             });
         }
 
@@ -208,18 +199,33 @@ impl Widget for Root {
     }
 }
 
+/// Resolve the direction-note label for the given layout direction.
+/// Uses `tr!(...)` so the keys are validated at compile time against
+/// `locales/en-US.ftl` — a rename or typo would produce a compile
+/// error instead of a silent runtime placeholder.
+fn direction_note_label(direction: fern_ui::i18n::LayoutDirection) -> String {
+    match direction {
+        fern_ui::i18n::LayoutDirection::LeftToRight => {
+            tr!(direction_note_ltr()).resolve_now()
+        }
+        fern_ui::i18n::LayoutDirection::RightToLeft => {
+            tr!(direction_note_rtl()).resolve_now()
+        }
+    }
+}
+
 /// Initial direction label, used to seed the reactive `Signal<String>`
 /// before the first `set_locale` fires an effect. Matches what the
 /// `ctx.effect(...)` body will compute on its next run.
-fn direction_label_for(
+fn direction_note_label_for(
     direction: Option<&Signal<fern_ui::i18n::LayoutDirection>>,
 ) -> String {
-    match direction.map(|s| s.get()) {
-        Some(fern_ui::i18n::LayoutDirection::RightToLeft) => {
-            fern_ui::i18n::resolve_message("direction-note-rtl", &[])
-        }
-        _ => fern_ui::i18n::resolve_message("direction-note-ltr", &[]),
-    }
+    direction
+        .map(|s| s.get())
+        .map(direction_note_label)
+        .unwrap_or_else(|| {
+            direction_note_label(fern_ui::i18n::LayoutDirection::LeftToRight)
+        })
 }
 
 // ---------------------------------------------------------------------------
