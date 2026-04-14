@@ -1,7 +1,7 @@
 # FernUI Milestones
 
 **Companion to:** fern-ui-architecture.md, fern-ui-code-examples.md  
-**Date:** April 11, 2026  
+**Date:** April 14, 2026  
 **Status:** Living document — reflects actual codebase state and remaining work
 
 ---
@@ -16,43 +16,55 @@ Each milestone produces a demonstrable application that exercises progressively 
 
 The following capabilities are implemented and tested in the codebase.
 
-**Crate infrastructure.** All crates compile and are wired through the `fern-ui` umbrella crate: fern-tokens, fern-canvas, fern-core, fern-text, fern-render, fern-platform, fern-app, fern-widgets. The fern-i18n crate exists as a stub.
+**Crate infrastructure.** All crates compile and are wired through the `fern-ui` umbrella crate: fern-tokens, fern-canvas, fern-core, fern-text, fern-render, fern-platform, fern-app, fern-widgets, plus the data and i18n crates added during Milestones 6 and 7.
 
-**V2 widget authoring model (Section 28 of architecture).** The V1 Widget/CompositeWidget split is removed. One unified `Widget` trait with six methods: `build(&mut self)`, `size_that_fits`, `place_children`, `paint`, `accessibility`, `children`. The `build(&mut self)` lifecycle uses take_widget/restore_widget extraction from the arena for borrow safety. `Signal<T>` replaces State/DerivedState/Reactive as the primary reactivity type (V1 types retained in state.rs for internal binding infrastructure). `Prop<T>` replaces `Reactive<T>` for widget properties. `ObserverHandle` provides RAII cleanup for observers. Attached event handlers (`on_tap`, `on_hover`, `on_key`, `on_focus`, `on_access_action`, `on_pointer_event`, `on_scroll`) replace the monolithic `event()` method. `HandlerSet` with `ctx.apply_self_handlers()` for handler attachment during `build()`. `BuildContext` provides `ctx.signal()`, `ctx.effect()`, `ctx.animated_signal()`, `ctx.self_id()`, `ctx.apply_self_handlers()`. The framework auto-wires gesture recognizers when handlers are attached. A separate `compat.rs` file isolates the V1<->V2 bridge conversions.
+- **fern-data** — the reactive data-model crate. `ListModel<T>`, `TreeModel<T>`, `TreeSlice<T>`, `ListDataSource` trait, `SelectionModel`, `DataChange` / `TreeChange` notifications. Not part of fern-core because collections are a higher layer than the widget tree.
+- **fern-i18n** — the i18n runtime. ~1500 lines. `LocalizedString`, `localized()`, `I18nConfig`, `I18nManager`, `LayoutDirection`, file watcher, locale resolution, `resolve_message` / `resolve_message_widget` runtime entry points. Re-exports `tr!` / `tr_widget!` from fern-i18n-macros.
+- **fern-i18n-macros** — the compile-time-validating proc macro crate. ~800 lines. `tr!` and `tr_widget!` read the consuming crate's source `.ftl` file at expansion time, parse it via `fluent-syntax`, validate every call against the parsed key map, and emit runtime resolution code with a compile-time fallback for missing bundles.
 
-**Tokens and theming.** Theme struct with ColorTokens, SpacingTokens, TypographyTokens, ShapeTokens, MotionTokens. Light and dark defaults. Subtree theme overrides with environment propagation. Runtime theme switching via `CommandContext::set_theme()` triggering composite rebuild across all windows. Easing curves (Linear, EaseIn, EaseOut, EaseInOut) with `lerp()`.
+**V2 widget authoring model (Section 28 of architecture).** The V1 Widget/CompositeWidget split is gone. One unified `Widget` trait with six methods: `build(&mut self)`, `size_that_fits`, `place_children`, `paint`, `accessibility`, `children`. The `build(&mut self)` lifecycle uses take_widget/restore_widget extraction from the arena for borrow safety. `Signal<T>` is the only reactive primitive — the old `State<T>` / `DerivedState<T>` / `Reactive<T>` types are removed, and the `binding.rs` module (renamed from `state.rs` in commit 851fff2) now contains only the dirty-tracking infrastructure (`Binding`, `BindingRegistry`, `BindingLevel`) shared between signals and the widget tree. `Prop<T>` replaces `Reactive<T>` for widget properties. `ObserverHandle` provides RAII cleanup for observers. Attached event handlers (`on_tap`, `on_hover`, `on_key`, `on_focus`, `on_access_action`, `on_pointer_event`, `on_scroll`, `on_drag_start`, `on_drag_hover`, `on_drop`) replace the monolithic `event()` method. `HandlerSet` with `ctx.apply_self_handlers()` for handler attachment during `build()`. `BuildContext` provides `ctx.signal()`, `ctx.effect()`, `ctx.animated_signal()`, `ctx.self_id()`, `ctx.apply_self_handlers()`, `ctx.app_state::<T>()`, `ctx.subscribe_event()`. The framework auto-wires gesture recognizers when handlers are attached.
 
-**Canvas and rendering.** Three-tier Canvas API: axis-aligned rects (DecorationRect), SDF shapes (ShapeQuad with rounded rect, circle, ellipse), and CPU-rasterized paths (PathAtlas with tiny-skia, LRU eviction). Image rendering pipeline (Canvas::draw_image, ImageManager in fern-render). Text rendering via text-typeset integration (SharedTypesetter, layout_single_line). Gradient support (linear, radial). Scissor rect stack for viewport clipping (SetClip/ClearClip with intersection). wgpu rendering pipeline with glyph atlas, shape atlas, and per-frame draw command dispatch.
+**Application state and backend events.** `FernAppBuilder::app_state<T>(value)` registers a process-wide singleton keyed by `TypeId`, retrieved by widgets via `BuildContext::app_state::<T>() -> Option<&T>` (commit 7969424). The canonical pattern is a single `Rc<AppGlobals>` struct holding Signal fields rather than one state per type. The `EventSource` trait (`fern-core/src/event_source.rs`, commit 86ba93b) lets widgets subscribe to external event sources (backend message buses, database change notifiers, file watchers) directly from `build()` via `BuildContext::subscribe_event`, with cross-thread forwarding through the framework's event-loop proxy. Subscriptions have per-widget lifetime cleanup — when the widget is destroyed, the handle drops and the source unsubscribes.
 
-**Widget arena and layout.** SlotMap-based arena with parent-child relationships. SwiftUI-style propose/respond/place layout negotiation. Dirty flags (needs_layout, needs_paint) with ancestor propagation for relayout. Alignment system (HAlignment, VAlignment, Alignment) with per-child overrides. Layout direction (LTR/RTL). The `widget_tree.rs` module is split into eight implementation files for maintainability: `accessibility_impl`, `event_dispatch_impl`, `focus_impl`, `layout_impl`, `overlay_impl`, `query_impl`, `rendering_impl`, and `test_api`. This is an internal refactor with no API change.
+**Tokens and theming.** Theme struct with ColorTokens, SpacingTokens, TypographyTokens, ShapeTokens, MotionTokens. Light and dark defaults. FernTech-branded color tokens (commit 472d771). Subtree theme overrides with environment propagation. Runtime theme switching via `CommandContext::set_theme()` triggering composite rebuild across all windows. Easing curves (Linear, EaseIn, EaseOut, EaseInOut) with `lerp()`.
 
-**Primitive widgets.** RectWidget, TextWidget, HStack (with spacing, cross-axis alignment, spacer-aware distribution), VStack, ZStack, Padding, Spacer, Center, Expand, FixedSize, MinSize, MaxSize, Divider, IconWidget (vector icons via Path/PathAtlas), Grid, Wrap/FlowLayout, AspectRatio, Switcher.
+**Canvas and rendering.** Three-tier Canvas API: axis-aligned rects (DecorationRect), SDF shapes (ShapeQuad with rounded rect, circle, ellipse), and CPU-rasterized paths (PathAtlas with tiny-skia, LRU eviction). Image rendering pipeline (Canvas::draw_image, ImageManager in fern-render). Text rendering via text-typeset integration (SharedTypesetter, layout_single_line). Gradient support (linear, radial). Scissor rect stack for viewport clipping (SetClip/ClearClip with intersection). wgpu rendering pipeline with glyph atlas, shape atlas, and per-frame draw command dispatch. Feature-flagged variable fonts for Arabic and Hebrew (Noto Sans Arabic, Noto Sans Hebrew) plus Inter as the Latin-script default, added in commits 1210c82 and 342f948 alongside the i18n work.
 
-**Widget composition (V2).** Unified Widget trait with `build(&mut self)` for child construction. BuildContext provides `ctx.add()`, `ctx.signal()`, `ctx.effect()`, `ctx.animated_signal()`, `ctx.self_id()`, `ctx.apply_self_handlers()`. Inline child resolution via `child()`, `children()`, `child_opt()` on containers. `visible_when` and `enabled_when` as builder methods resolved during `add()`.
+**Widget arena and layout.** SlotMap-based arena with parent-child relationships. SwiftUI-style propose/respond/place layout negotiation. Dirty flags (needs_layout, needs_paint) with ancestor propagation for relayout. Alignment system (HAlignment, VAlignment, Alignment) with per-child overrides. Layout direction (LTR/RTL) exposed to widgets via `BuildContext::layout_direction()`. The `widget_tree.rs` module is split into eight implementation files for maintainability: `accessibility_impl`, `event_dispatch_impl`, `focus_impl`, `layout_impl`, `overlay_impl`, `query_impl`, `rendering_impl`, and `test_api`. This is an internal refactor with no API change.
 
-**Reactive state (V2).** Signal<T> as the primary reactivity type — `Signal::new()`, `signal.get()`, `signal.set()`, `signal.map()`, `signal.observe()` returning `ObserverHandle` for RAII cleanup. `Prop<T>` replaces `Reactive<T>` for widget properties, accepting both plain values and signals via `impl Into<Prop<T>>`. `ctx.effect()` for scoped side effects cleaned up on rebuild. V1 types (State<T>, DerivedState<T>, Reactive<T>, BindingRegistry) retained in state.rs for internal use.
+**Primitive widgets.** RectWidget, TextWidget, HStack (with spacing, cross-axis alignment, spacer-aware distribution), VStack, ZStack, Padding, Spacer, Center, Expand, FixedSize, MinSize, MaxSize, Divider, IconWidget (vector icons via Path/PathAtlas), Grid, Wrap/FlowLayout, AspectRatio, Switcher, FocusRing.
 
-**Event system (V2).** Pointer events (move, down, up, enter, leave), keyboard events (down, up), scroll events (lines, pixels), IME events (composition, commit), AccessKit action routing. Preview pass (root -> target) and bubble pass (target -> root). Hit testing against layout bounds. Gesture recognizers (TapRecognizer, DoubleTapRecognizer) with GestureArena for competition, auto-wired from attached handlers. Attached event handlers stored on arena nodes, dispatched by the framework. `HandlerSet` for handler construction during `build()`. Deferred tree mutations via EventContext (dormancy, activation, destruction). Additional EventContext operations for overlay-based widgets: `request_focus(id)`, `dismiss_all_overlays()`, `cancel_delayed_overlay(id)`, `synthetic_click(id)`.
+**Widget composition (V2).** Unified Widget trait with `build(&mut self)` for child construction. BuildContext provides `ctx.add()`, `ctx.signal()`, `ctx.effect()`, `ctx.animated_signal()`, `ctx.self_id()`, `ctx.apply_self_handlers()`, `ctx.app_state::<T>()`, `ctx.subscribe_event()`. Inline child resolution via `child()`, `children()`, `child_opt()` on containers. `visible_when` and `enabled_when` as builder methods resolved during `add()`.
 
-**Focus management.** Tab/Shift-Tab cycling in document order. Focus origin tracking (Keyboard, Pointer, Programmatic). Focus-visible behavior. Scroll-into-view on focus change (dispatches ScrollIntoView to nearest clipping ancestor). FocusGained/FocusLost events. Programmatic focus transfer via `ctx.request_focus()` for menu opening and dialog content.
+**Reactive state.** `Signal<T>` is the single reactive primitive — `Signal::new()`, `signal.get()`, `signal.set()`, `signal.map()`, `signal.observe()` returning `ObserverHandle` for RAII cleanup. `WeakSignal` for breaking reference cycles in cross-signal observers (used by `LocalizedString::to_signal()` to avoid the C1 memory leak — see §12.3 of the architecture doc). `attach_keepalive` to tie an observer handle's lifetime to a signal. `Prop<T>` replaces `Reactive<T>` for widget properties, accepting both plain values and signals via `impl Into<Prop<T>>`. `ctx.effect()` for scoped side effects cleaned up on rebuild.
 
-**Overlay system.** OverlayManager with stacking, cascade dismissal, Escape handling, click-outside detection. OverlayPlacement (Below, Above, BelowPreferred, TrailingEdge, AtPointer, NearAnchor). BelowPreferred flips to Above when insufficient space below (used by ComboBox and MenuBar). DismissBehavior (ClickOutside, PointerLeave, Manual). OverlayLayer (InTree, NativePopup, Auto). In-tree overlay layout and positioning. Delayed overlay opening (for submenu hover delays) with `cancel_delayed_overlay` support. Tooltip attachment with configurable delay and simulated clock for deterministic tests.
+**Event system (V2).** Pointer events (move, down, up, enter, leave) with modifier keys, keyboard events (down, up), scroll events (lines, pixels), IME events (composition, commit), AccessKit action routing. Preview pass (root → target) and bubble pass (target → root). Hit testing against layout bounds. Gesture recognizers: TapRecognizer, DoubleTapRecognizer, DragRecognizer (added for SplitView and reused by ListView/TreeView drag sources). GestureArena for competition, auto-wired from attached handlers. Attached event handlers stored on arena nodes, dispatched by the framework. `HandlerSet` for handler construction during `build()`. Deferred tree mutations via EventContext (dormancy, activation, destruction). Additional EventContext operations for overlay-based widgets: `request_focus(id)`, `dismiss_all_overlays()`, `cancel_delayed_overlay(id)`, `synthetic_click(id)`.
 
-**Shortcut system.** ShortcutMap with global and scoped bindings. Preview-pass interception before widget event dispatch. Shortcut unbinding. Automatic shortcut label lookup on MenuItem via `ctx.shortcut_label_for_any()`.
+**Focus management.** Tab/Shift-Tab cycling in document order. Focus origin tracking (Keyboard, Pointer, Programmatic). Focus-visible behavior. Scroll-into-view on focus change (dispatches ScrollIntoView to nearest clipping ancestor). FocusGained/FocusLost events. Programmatic focus transfer via `ctx.request_focus()` for menu opening, dialog content, and modal presentation. `first_focusable_descendant` method for initial focus on modal open (commit 029a6cd).
 
-**Scrolling (Sections 3.6-3.8 fully implemented).** clips_children flag on WidgetNode. ScrollArea widget with unbounded proposals, offset placement, scroll event handling via attached `on_scroll` handler, ScrollIntoView handling, AccessKit scroll properties. ScrollBar as a standalone widget with thumb drag, track click, keyboard adjustment. `ScrollBarStyle::Overlay` (default, Ubuntu-style) shows a thin resting indicator that expands to a full interactive scroll bar as an overlay on hover — viewport width unchanged. `ScrollBarStyle::Permanent` makes the ScrollBar a layout sibling of the content, reducing the viewport by the scroll bar's thickness. Scissor rect implementation in renderer with clip stack intersection.
+**Overlay system.** OverlayManager with stacking, cascade dismissal, Escape handling, click-outside detection. OverlayPlacement (Below, Above, BelowPreferred, TrailingEdge, AtPointer, NearAnchor, BottomCenter). BelowPreferred flips to Above when insufficient space below (used by ComboBox and MenuBar). DismissBehavior (ClickOutside, PointerLeave, Manual). OverlayLayer (InTree, NativePopup, Auto). In-tree overlay layout and positioning. Delayed overlay opening (for submenu hover delays) with `cancel_delayed_overlay` support. Tooltip attachment with configurable delay and simulated clock for deterministic tests. Auto-dismiss functionality with configurable duration (commit bc4cbad).
 
-**Animation.** AnimationScheduler driving both State<f32> (V1) and Signal<f32> (V2) values with duration and easing. Supports cancel, replace, zero-duration immediate set. Multiple independent animations. Signal<f32>::animate_to() and State<f32>::set_animated() both supported. Toggle, Accordion, ScrollArea, ProgressBar use Signal<f32>::animate_to(). Integrated into the widget tree's frame lifecycle.
+**Modal system.** Framework-level modal presentation (`fern-core/src/modal.rs`, commit 10a5225). `ModalPresentation` enum (Auto/InTree/NativeWindow), `ModalCloseBehavior` enum (ClickOutside, EscapeKey, EscapeOrClickOutside, Manual), `ModalContent` (existing widget reference or deferred builder closure), `ModalRequest` with title and close behavior. Native modal windows route through WindowManager's modal support (commit 36312a2) with focus management. ModalContainer widget in fern-widgets (commit 3e9592f) presents content via either in-tree overlay or a separate native window depending on the runtime and the `ModalPresentation::Auto` resolution. Modal dismissal handling (commit a54b3a8) returns focus to the parent window.
+
+**Shortcut system.** ShortcutMap with global and scoped bindings. Preview-pass interception before widget event dispatch. Shortcut unbinding. Automatic shortcut label lookup on MenuItem via `ctx.shortcut_label_for_any()`. Current label format is `Ctrl+S` regardless of platform and locale — locale/platform-aware `ShortcutFormatter` (`Strg+S`, `⌘S`) is still a TODO in `shortcut.rs:31` and is tracked under Milestone 7 as remaining work.
+
+**Scrolling.** clips_children flag on WidgetNode. ScrollArea widget with unbounded proposals, offset placement, scroll event handling via attached `on_scroll` handler, ScrollIntoView handling, AccessKit scroll properties. ScrollBar as a standalone widget with thumb drag, track click, keyboard adjustment. `ScrollBarStyle::Overlay` (default, Ubuntu-style) shows a thin resting indicator that expands to a full interactive scroll bar as an overlay on hover — viewport width unchanged. `ScrollBarStyle::Permanent` makes the ScrollBar a layout sibling of the content, reducing the viewport by the scroll bar's thickness. Scissor rect implementation in renderer with clip stack intersection.
+
+**Animation.** AnimationScheduler driving `Signal<f32>` values with duration and easing. Supports cancel, replace, zero-duration immediate set. Multiple independent animations. `Signal<f32>::animate_to()` is the sole animation entry point — the dual-track V1/V2 support described in earlier revisions of this doc is gone (commit 54ca939). Toggle, Accordion, ScrollArea, ProgressBar, Snackbar all animate through Signal. Integrated into the widget tree's frame lifecycle.
 
 **Dormancy.** Three activation states (Active, Dormant, Destroyed). Recursive dormancy/activation. visible_when binding for state-driven toggling. ComboBox and MenuBar pre-create their dropdown content as dormant subtrees, activating them via `ctx.activate()` when the menu opens.
 
-**Window management.** WindowManager in fern-app with per-window WidgetTree. Window creation/closure via CommandContext (queued operations). Theme propagation to all windows. Event routing by winit window ID. FernWindowId abstraction.
+**Window management.** WindowManager in fern-app with per-window WidgetTree. Window creation/closure via CommandContext (queued operations). Theme propagation to all windows. Event routing by winit window ID. FernWindowId abstraction. Modal window support with focus management (commit 36312a2). Primary window ID retrieval (commit 738aff5).
 
-**Accessibility.** AccessKit integration at the Widget trait level. AccessNodeBuilder with role, name, actions, disabled, bounds. sync_accessibility() generating TreeUpdate. AccessAction routing to target widgets. Focus tracking in TreeUpdate.
+**Custom title bar and window chrome.** The `fern-widgets/src/title_bar/` directory contains the custom title bar implementation: `controls.rs` (minimize/maximize/close buttons), `drag_region.rs` (window move via title bar click-and-drag), `resize_strip.rs` (edge-hit-testable resize areas), `window_frame.rs` (the overall frame composition). WindowFrame is now rendered as an overlay set of rects for resize handles rather than as a layout-participating widget (commit db8a609). Wayland gets a no-window-frame mode because it handles decorations server-side (commit c855478). Planning and scope for the custom title bar work is documented in `docs/title-bar-plan.md`.
 
-**Higher-level widgets (Milestones 3 and 4 complete).** Button, Panel, Card, Toolbar, StatusBar, Checkbox (two-state and tristate), RadioButton, Toggle/Switch, Slider (horizontal/vertical, stepped), SegmentedControl, ProgressBar (determinate and indeterminate), Badge, Accordion, Link, ScrollArea (overlay and permanent modes), ScrollBar, Tooltip, ComboBox (dropdown with keyboard navigation and type-ahead), MenuItem (with icons, shortcut labels auto-resolved from ShortcutMap, submenu support with hover delay and diagonal movement tolerance), MenuList (vertical container with keyboard highlight), MenuBar (horizontal menu bar with trailing slot for additional actions), MenuSeparator, ContextMenu (right-click with dynamic content).
+**Accessibility.** AccessKit integration at the Widget trait level. AccessNodeBuilder with role, name, actions, disabled, bounds. sync_accessibility() generating TreeUpdate. AccessAction routing to target widgets. Focus tracking in TreeUpdate. Accessibility wrappers for list/tree items (commit 63facc3).
 
-**Examples.** simple_button (Milestone 1 demo). text_and_layout (Milestone 2 demo). widget_catalog (Milestone 3 demo — all Milestone 3 widgets showcased with theme switching, 766 lines). menus_and_dropdowns (Milestone 4 demo — ComboBox, ContextMenu, MenuBar with File/Edit/Format menus, 909 lines).
+**Higher-level widgets.** Button, Panel, Card, Toolbar, StatusBar, Checkbox (two-state and tristate), RadioButton, Toggle/Switch, Slider (horizontal/vertical, stepped), SegmentedControl, ProgressBar (determinate and indeterminate), Badge, Accordion, Link, ScrollArea (overlay and permanent modes), ScrollBar, Tooltip, ComboBox (dropdown with keyboard navigation and type-ahead), MenuItem, MenuList, MenuBar, MenuSeparator, ContextMenu, TabWidget, SplitView with SplitHandle, Dialog with DialogContent and ModalContainer, Popover, Snackbar (queued auto-dismissing with animated slide-in), Breadcrumb (clickable path segments with chevron separators), Wizard (multi-step flow with header, footer, and step switching), Repeater, ListView, TreeView, TitleBar with custom controls and drag region.
+
+**Examples.** `simple_button` (M1), `text_and_layout` (M2), `widget_catalog` (M3), `menus_and_dropdowns` (M4), `split_view` (M5), `tab_widget` (M5), `dialogs_and_popovers` (M5), `data_collections` (M6), `internationalization` (M7), `title_bar_demo` (title bar subsystem).
+
+**Divergence note.** The i18n implementation diverged from the architecture doc in one substantive way: framework bundle registration for fern-widgets is **explicit**, not automatic. Applications that use fern-widgets must call `.framework_locales(fern_widgets::framework_locales())` on the `I18nConfig` builder chain. See architecture §12.13.3 for the rationale (fern-app is deliberately widget-agnostic) and the forgiving fallback path: apps that forget to register still see correct English accessibility labels via the proc macro's compile-time fallback.
 
 ---
 
@@ -70,197 +82,157 @@ Completed. A window with multiple widgets in nested layouts (HStack-in-VStack, S
 
 ## Milestone 3: Core Widget Catalog ✅
 
-Completed. All Milestone 3 widgets are implemented and tested. The milestone also included the V2 widget authoring model migration (architecture Section 28), which was driven by three problems identified during implementation: the Widget/CompositeWidget split forced wrong decisions, the RefCell<Option<State>> pattern was required by every stateful composite, and the four reactivity types confused widget authors.
+Completed. All Milestone 3 widgets are implemented and tested. The milestone also included the V2 widget authoring model migration (architecture Section 28), which was driven by three problems identified during implementation: the Widget/CompositeWidget split forced wrong decisions, the `RefCell<Option<State>>` pattern was required by every stateful composite, and the four reactivity types confused widget authors.
 
-**V2 migration completed alongside Milestone 3:**
-- composite_widget.rs and composite_adapter.rs deleted. No CompositeWidget references remain.
-- All 22 widget files use `impl Widget for` with the unified trait.
+**V2 migration is now complete.** The V1 state types and the compatibility layer from earlier phases are fully removed:
+
+- `composite_widget.rs` and `composite_adapter.rs` deleted. No CompositeWidget references remain.
+- All widget files use `impl Widget for` with the unified trait.
 - No `RefCell<Option<State<T>>>` pattern remains anywhere.
-- Every interactive widget uses Signal<T>: Button, Toggle, Checkbox, RadioButton, Slider, Accordion, Badge, Card, Link, SegmentedControl, ScrollArea, ScrollBar, ProgressBar.
-- ScrollArea fully migrated to Signal<f32> for all six scroll state fields.
-- Toggle fully Signal-ified (no Rc<Cell<>> remaining).
-- ProgressBar uses Prop<T> for fill/track colors and Signal<f32> for indeterminate animation.
-- AnimationScheduler supports both State<f32> and Signal<f32>; Toggle, Accordion, ScrollArea, ProgressBar use Signal<f32>::animate_to().
-- All container primitives implement build() for PendingChild resolution.
-- widget_catalog example uses exclusively `ctx.signal()` (14 calls, zero `ctx.state()`).
+- Every interactive widget uses `Signal<T>`: Button, Toggle, Checkbox, RadioButton, Slider, Accordion, Badge, Card, Link, SegmentedControl, ScrollArea, ScrollBar, ProgressBar.
+- ScrollArea fully migrated to `Signal<f32>` for all scroll state fields.
+- Toggle fully Signal-ified (no `Rc<Cell<>>` remaining for interaction state).
+- ProgressBar uses `Prop<T>` for fill/track colors and `Signal<f32>` for indeterminate animation.
+- AnimationScheduler exclusively uses `Signal<f32>::animate_to()` (commit 54ca939).
+- `state.rs` renamed to `binding.rs` (commit 851fff2). The module no longer contains any state primitive — it holds only the dirty-tracking infrastructure (`Binding`, `BindingRegistry`, `BindingLevel`) shared between `Signal<T>` and `WidgetTree`.
+- All container primitives implement `build()` for PendingChild resolution.
+- `ctx.state()` / `ctx.observe()` removed from BuildContext.
 
-**Remaining V1 internals:**
-- state.rs retained (758 lines) as internal binding infrastructure. Widget usage limited to BindingLevel enum (3 widget files), Reactive<bool> accepted by visible_when/enabled_when via bridge conversions.
-- BuildContext retains V1 legacy methods (`ctx.state()`, `ctx.observe()`) marked as deprecated.
-- ScrollBar uses Rc<Cell<>> for drag interaction state (legitimate low-level use).
-- DragRecognizer and LongPressRecognizer not yet implemented in gesture system.
+**Remaining low-level state.** ScrollBar uses `Rc<Cell<>>` for drag interaction state (legitimate low-level use; same pattern Slider uses). Slider uses the same pattern. These are not V1 remnants — they are the normal way to store widget-local interaction state that does not need to be observable from outside the widget.
+
+The `widget_catalog` example (766 lines) exercises every Milestone 3 widget with theme switching and comprehensive tests.
 
 ---
 
 ## Milestone 4: ScrollBar, ComboBox, Menus ✅
 
-Completed. Overlay-based interactive widgets and the ScrollArea overlay/permanent mode refactor from Section 3.7. The `menus_and_dropdowns` example demonstrates the full set with File/Edit/Format menus, ComboBox, and context menu.
+Completed. Overlay-based interactive widgets and the ScrollArea overlay/permanent mode refactor from architecture §3.7. The `menus_and_dropdowns` example demonstrates the full set with File/Edit/Format menus, ComboBox, and context menu.
 
 **Delivered:**
 - **ScrollArea overlay mode (default).** Thin resting indicator (4px) expands to full interactive ScrollBar as an overlay on hover. Viewport width unchanged. `ScrollBar::overlay_mode(true)` with configurable `resting_thickness`.
 - **ScrollArea permanent mode.** ScrollBar is a layout sibling of the content, reducing the viewport by the scroll bar's thickness. Selected via `ScrollBarStyle::Permanent`.
-- **ComboBox** (902 lines). Non-generic, index-based selection via `Signal<Option<usize>>`. Dropdown content pre-created as dormant subtree, activated on open. Keyboard navigation (Arrow Up/Down, Enter, Escape), type-ahead filtering, `BelowPreferred` placement.
-- **MenuItem** (910 lines). Non-generic, closure-based command erasure (same pattern as Button). Supports icons, shortcut labels, disabled state, submenu triggers. Automatic shortcut label lookup from ShortcutMap via `ctx.shortcut_label_for_any()`. Submenu opens on 200ms hover delay, closes on 150ms delay — provides diagonal movement tolerance across other menu items.
-- **MenuList** (464 lines). Vertical container for MenuItem and MenuSeparator. KeyboardHighlightWrapper for focus visualization. Arrow Up/Down navigation.
-- **MenuBar** (1,138 lines). Horizontal bar with dropdown menus. Trailing slot for additional actions. MenuContext coordinates open index, trigger focus, cross-menu Left/Right navigation.
+- **ComboBox** (~900 lines). Non-generic, index-based selection via `Signal<Option<usize>>`. Dropdown content pre-created as dormant subtree, activated on open. Keyboard navigation (Arrow Up/Down, Enter, Escape), type-ahead filtering, `BelowPreferred` placement.
+- **MenuItem** (~900 lines). Non-generic, closure-based command erasure. Supports icons, shortcut labels, disabled state, submenu triggers. Automatic shortcut label lookup from ShortcutMap via `ctx.shortcut_label_for_any()`. Submenu opens on hover delay (timing tuned in commit c4adfa7) with diagonal movement tolerance across other menu items.
+- **MenuList** (~460 lines). Vertical container for MenuItem and MenuSeparator. KeyboardHighlightWrapper for focus visualization. Arrow Up/Down navigation.
+- **MenuBar** (~1,100 lines). Horizontal bar with dropdown menus. Trailing slot for additional actions. MenuContext coordinates open index, trigger focus, cross-menu Left/Right navigation.
 - **MenuSeparator**. Themed 1px horizontal line with padding.
 - **ContextMenu.** Right-click opens a MenuList overlay at pointer position via `OverlayPlacement::AtPointer`.
-- **New EventContext operations.** `request_focus(id)` for transferring focus on menu open, `dismiss_all_overlays()` for closing the entire overlay stack, `cancel_delayed_overlay(id)` for aborting a pending submenu open when hover ends, `synthetic_click(id)` for keyboard Enter activation.
-- **New overlay placement.** `BelowPreferred` flips to `Above` when there is insufficient space below the anchor.
-- **widget_tree.rs refactor.** Split from a 3,621-line monolith into a 892-line main file plus eight implementation modules (accessibility_impl, event_dispatch_impl, focus_impl, layout_impl, overlay_impl, query_impl, rendering_impl, test_api). Internal refactor only — no API change.
-
-**Not done (deferred).** The DragRecognizer is still not implemented. ScrollBar uses `on_pointer_event` with manual drag state tracking (Rc<Cell<>> for hovered, dragging, drag_start_pointer, drag_start_scroll, cached_bounds). This is legitimate low-level interaction state and is the same pattern Slider uses.
+- **Widget-tree refactor.** `widget_tree.rs` split into a main file plus eight implementation modules (`accessibility_impl`, `event_dispatch_impl`, `focus_impl`, `layout_impl`, `overlay_impl`, `query_impl`, `rendering_impl`, `test_api`). Internal refactor only — no API change.
 
 ---
 
-## Milestone 5: Tabs, SplitView, and Dialogs
+## Milestone 5: Tabs, SplitView, Dialogs, Modals ✅
 
-**Goal:** Application structure widgets — tabbed interfaces, resizable panes, and modal/modeless dialogs.
+Completed. Application structure widgets — tabbed interfaces, resizable panes, modal and modeless dialogs, popovers, snackbars, breadcrumbs, and the multi-step wizard flow. Three examples cover the milestone: `split_view`, `tab_widget`, and `dialogs_and_popovers`.
 
-**Delivers:**
+**Delivered:**
 
-TabWidget: composite with HStack of tab headers above a Switcher for content panes. Signal<usize> for selected index. The TabWidget delegates switching to the Switcher primitive (already implemented) rather than reimplementing the logic. Trailing slot for tab-level actions (add tab button, overflow menu). Keyboard: Arrow Left/Right between tab headers.
+- **TabWidget** (`tab_widget.rs`). HStack of tab headers above a Switcher for content panes. `Signal<usize>` for selected index. Delegates switching to the Switcher primitive rather than reimplementing the logic. Trailing slot for tab-level actions. Tab header layout fixed in commit e61eee4 (prevented a subtle upward drift). Hidden-tab-bar bug fixed in dc7a3eb.
+- **SplitView and SplitHandle** (`split_view.rs`). Draggable divider with `Signal<f32>` split position. Uses `DragRecognizer` from the gesture system. SplitView refactor in commit 299a9ec introduced the SplitHandle as a separate widget with its own properties (cursor, hit region, minimum pane sizes) and improved layout handling. CursorIcon integration for col/row resize feedback. Keyboard adjustment on focused divider.
+- **DragRecognizer** (`fern-core/src/gesture.rs:394`). Added to the gesture system for SplitView and reused by ListView/TreeView as the drag-source trigger.
+- **Dialog, DialogContent, ModalContainer** (`dialog.rs`). Modal panel with title, content area, action bar. Focus trapping and focus restoration on dismiss. Escape dismissal. Works through either in-tree overlay or native modal window depending on `ModalPresentation`.
+- **Modal system** (`fern-core/src/modal.rs`, commits 10a5225, 3e9592f, a54b3a8). `ModalPresentation` enum (Auto/InTree/NativeWindow), `ModalCloseBehavior` (ClickOutside, EscapeKey, EscapeOrClickOutside, Manual), `ModalContent` (existing widget reference or deferred builder closure), `ModalRequest`. `Auto` presentation picks the best backend at runtime — native window where supported, in-tree overlay otherwise. Modal focus management (commit 029a6cd) with `first_focusable_descendant` for initial focus on open. Modal dismissal returns focus to the parent.
+- **Native modal windows** (commit 8022888, commit 36312a2). WindowManager supports modal window behavior with focus management. The OverlayDemo example includes a native-modal-window fallback path.
+- **Popover** (`popover.rs`). Interactive overlay anchored to a trigger. Arbitrary content, focus on show, ClickOutside dismissal, typed `PopoverSurface` for the content container.
+- **Snackbar** (`snackbar.rs`, commit 75b8c65). Auto-dismissing notification with configurable trigger. Animated slide-in/fade-out via `Signal<f32>::animate_to()`. Uses `OverlayPlacement::BottomCenter` (added for this widget in commit bc4cbad). Custom-trigger variant for non-automatic dismissal.
+- **Breadcrumb** (`breadcrumb.rs`). HStack of clickable `BreadcrumbItem`s separated by `BreadcrumbSeparator` chevron icons. `current` flag for the last segment with distinct styling.
+- **Wizard** (`wizard.rs`, commit 022ac03). Multi-step flow with `WizardStep`, `WizardHeader`, `WizardFooter`, `WizardFlow`. Modal handling, back/next navigation, step activation and dormancy. Used when an application needs a guided sequence of steps rather than a freely-navigable form.
+- **Overlay enhancements.** Auto-dismiss functionality with configurable duration (commit c3c62cb and bc4cbad). New overlay methods for retrieval and topmost-centered-overlay detection (commit ac63d97). Improved dismissal behavior (commit 738aff5).
 
-SplitView: Level 2 widget with draggable divider. Signal<f32> for split position. DragRecognizer on divider (this milestone adds DragRecognizer to the gesture system). CursorIcon::ColResize (horizontal) or RowResize (vertical). Configurable minimum pane sizes. Keyboard: focused divider adjustable with Arrow keys. Double-click resets to default.
-
-Dialog: modal Panel via OverlayLayer::NativePopup or in-window overlay with scrim. Focus trapping within dialog widgets. Escape to dismiss. Title, content area, action bar with buttons.
-
-Popover: interactive overlay anchored to trigger, arbitrary content, focus on show, ClickOutside dismissal.
-
-Snackbar/Toast: SnackbarManager for queued auto-dismissing notifications. Animated slide-in/fade-out via Signal<f32>::animate_to().
-
-Breadcrumb: HStack of clickable path segments separated by chevron icons.
-
-**Blocked by:** DragRecognizer gesture — this milestone adds it. LongPressRecognizer (optional, not strictly required).
-
-**Tests:**
-- TabWidget switches visible pane on tab click; inactive panes are dormant
-- TabWidget keyboard: Arrow Left/Right moves between tabs
-- TabWidget uses Switcher internally (delegation, not reimplementation)
-- SplitView divider drag updates Signal<f32> and resizes panes
-- SplitView respects minimum pane sizes
-- Dialog traps focus within its widget subtree
-- Dialog Escape dismissal returns focus to parent window
-- Modal dialog blocks input to parent window
-- Popover shows on trigger click, dismisses on click outside
-- Snackbar appears, auto-dismisses after configured duration
-- AccessKit: TabList/Tab/TabPanel roles, Splitter role with numeric value, Dialog role with modal
+**Still deferred.** LongPressRecognizer is not implemented. Most drag interactions use press-and-hold thresholds inside DragRecognizer, so LongPressRecognizer is not blocking any milestone — it would be an ergonomic improvement for widgets that want a distinct long-press gesture (context menu on touch, for example).
 
 ---
 
-## Milestone 6: Data-Driven Collections and Drag & Drop
+## Milestone 6: Data-Driven Collections and Drag & Drop ✅ (largely)
 
-**Goal:** Dynamic lists and trees backed by data models, with virtualization, selection, and the full drag-and-drop system from architecture Section 14.
+Substantially delivered. Dynamic lists and trees backed by reactive data models, with virtualization, selection, and the drag-and-drop system from architecture Section 14. The new `fern-data` crate hosts the data types; ListView/TreeView/Repeater live in fern-widgets. The `data_collections` example exercises the full system.
 
-**Delivers:**
+**Delivered:**
 
-ListModel<T>: concrete reactive list (Section 15.2 of architecture). Owns items as Vec<T> behind Rc<RefCell<>>. Mutations emit DataChange automatically. Cloneable for shared access.
+- **fern-data crate.** New workspace member. Houses the data-model types that are conceptually above the widget tree and should not depend on fern-core's widget internals.
+  - `ListModel<T>` (`list_model.rs`). Concrete reactive list owning items as `Vec<T>` behind `Rc<RefCell<>>`. Mutations emit `DataChange` automatically. Cloneable for shared access.
+  - `ListDataSource` trait (`list_data_source.rs`). Escape hatch for large/external datasets. Callback-based item access. Implementor emits `DataChange` manually. Not related to ListModel by inheritance — two separate input paths on ListView.
+  - `TreeModel<T>` (`tree_model.rs`). Concrete reactive tree with NodeId-addressed nodes. Mutations emit `TreeChange` automatically. Cloneable for shared access.
+  - `TreeSlice<T>` (`tree_slice.rs`). Per-view flattened projection of a TreeModel. Owns expand/collapse state. Exposes flat visible-node list with depth. Emits `DataChange`. Created internally by TreeView via `tree.create_slice()`. Multiple TreeViews sharing the same TreeModel get independent expand states.
+  - `SelectionModel` (`selection_model.rs`). `Signal<SelectionSet>` utility. Single-select (click), toggle (Ctrl+click), range (Shift+click), select-all (Ctrl+A). Consumed by both ListView and TreeView.
+  - `DataChange` and `TreeChange` enums (`data_change.rs`, `tree_change.rs`). ItemsInserted / ItemsRemoved / ItemsMoved / ItemsUpdated for ListModel; NodeInserted / NodeRemoved / NodeMoved / NodeUpdated for TreeModel.
 
-ListDataSource trait: escape hatch for large/external datasets (Section 15.3). Callback-based item access. Implementor emits DataChange manually. Not related to ListModel by inheritance — two separate input paths on ListView.
+- **Widget integration.**
+  - **Repeater** (`repeater.rs`). Non-virtualized dynamic collection. Takes a `ListModel<T>` and a delegate closure. Creates one child subtree per item. Targeted arena mutations on `DataChange` notifications (no full rebuild).
+  - **ListView** (`list_view.rs`). Virtualized scrollable list with scroll binding and selection handling (commits e546c25, 14365b8). Accepts `ListModel<T>` or `ListDataSource` through two constructors. Creates widget subtrees only for visible items plus buffer. Item lifecycle management based on scroll position.
+  - **TreeView** (`tree_view.rs`, commit bbc27e0). Hierarchical list with indent, expand/collapse arrows, virtualization. Backed by `TreeModel<T>`. Creates its own `TreeSlice` internally. Keyboard navigation, drop feedback for drag-and-drop (commit 1c9b9df), `toggle_expand` method on TreeSliceHandle (commit 386f014).
+  - **`list_item_a11y.rs`** — accessibility wrappers that list/tree items use to expose `position_in_set` / `size_of_set` and `expanded` / `level` correctly (commit 63facc3).
 
-Repeater: non-virtualized dynamic collection. Takes a ListModel<T> and a delegate closure. Creates one child subtree per item. Targeted arena mutations on DataChange notifications (no full rebuild).
+- **Drag and drop.** The core types in `fern-core/src/drag_payload.rs` and `fern-core/src/drag_state.rs`:
+  - **`DragPayload` with typed MIME representations.** Multiple representations of the same content carried in a single payload. Drop targets check accepted MIME types during hover without deserializing.
+  - **`DragSource` / `DropTarget` contract via attached handlers.** `on_drag_start` produces a DragPayload and preview widget. `on_drag_hover` evaluates whether the current payload is acceptable. `on_drop` handles the drop by emitting a typed command. The recognizer manages the drag state machine: press-threshold-hold-move-release, pointer capture for the duration, and cancellation on Escape.
+  - **Drag preview overlay.** The source widget's preview is rendered as a semi-transparent overlay following the pointer. Uses the existing overlay system with `OverlayLayer::InTree`, `OverlayPlacement::AtPointer` (commit 63facc3).
+  - **Intra-widget reordering.** ListView and TreeView produce insertion-line feedback and emit typed reorder commands on drop, routing through `ListModel::move_item` / `TreeModel::move_node`.
+  - **Pointer event modifiers.** Commit a3510d7 added modifier keys to pointer events, which DnD uses to distinguish copy-vs-move drags and for Ctrl-click multi-selection during a drag.
 
-ListView: virtualized scrollable list. Accepts ListModel<T> (common case) or ListDataSource (large datasets) through two constructors. Creates widget subtrees only for visible items plus buffer. Item lifecycle management based on scroll position.
+**Remaining work.**
 
-SelectionModel: Signal<SelectionSet> utility. Single-select (click), toggle (Ctrl+click), range (Shift+click), select-all (Ctrl+A). Consumed by ListView.
-
-TreeModel<T>: concrete reactive tree (Section 15.5). Owns hierarchy with NodeId-addressed nodes. Mutations emit TreeChange automatically. Cloneable for shared access.
-
-TreeSlice<T>: per-view flattened projection of a TreeModel (Section 15.6). Owns expand/collapse state. Exposes flat visible-node list with depth. Emits DataChange. Created internally by TreeView via tree.create_slice(). Multiple TreeViews sharing the same TreeModel get independent expand states.
-
-TreeView: hierarchical list with indent, expand/collapse arrows, virtualization. Backed by TreeModel<T>. Creates its own TreeSlice internally. Keyboard: Arrow Up/Down for focus, Arrow Right to expand, Arrow Left to collapse.
-
-Drag and Drop (Section 14 of architecture). Full implementation of the drag-and-drop system:
-
-- **DragPayload with typed MIME representations.** Multiple representations of the same content carried in a single payload (e.g., a file path as both `text/uri-list` and `text/plain`). Drop targets check accepted MIME types during hover without deserializing.
-- **DragData trait.** Typed wrapper for intra-application payloads, avoiding raw byte manipulation for common cases (moving a `ProjectDto`, reordering a `ChapterNode`). Cross-application transfers serialize to MIME types; intra-application transfers keep typed Rust values.
-- **DragSource trait.** Produces the `DragPayload` and the visual preview widget when a drag begins. Implemented by ListView items, TreeView items, and any custom widget via the attached `on_drag_start` handler.
-- **DropTarget trait.** Declares accepted MIME types, evaluates hover (does the current payload match?), renders drop feedback (insertion line, highlight rectangle), and handles the drop by emitting a typed command. Implemented via attached `on_drag_hover` and `on_drop` handlers.
-- **DropFeedback descriptors.** Widget-level rendering hints for drop targets: `InsertionLine { orientation, position }` for ordered lists, `HighlightRect { color }` for container drops, `NoFeedback` for rejecting payloads.
-- **DragRecognizer in the gesture system.** Added in Milestone 5 for SplitView; Milestone 6 extends it with payload pickup (from DragSource) and drop handling (to DropTarget). The recognizer manages the drag state machine: press-threshold-hold-move-release, pointer capture for the duration, and cancellation on Escape.
-- **Drag preview overlay.** The source widget's preview is rendered as a semi-transparent overlay following the pointer. Uses the existing overlay system with `OverlayLayer::InTree`, `OverlayPlacement::AtPointer`, and no dismiss behavior until the drag ends.
-- **Intra-widget reordering.** ListView and TreeView implement both DragSource and DropTarget, producing insertion-line feedback and emitting typed reorder commands on drop. The ListModel/TreeModel `move_item` methods provide the underlying data mutation.
-- **Inter-widget transfer.** Drag from one ListView to another (or from a TreeView to a trash button) works automatically when both widgets agree on a typed payload. No special wiring — the framework routes drops based on MIME type compatibility.
-- **Cross-application transfer (fern-platform).** `PlatformDragBackend` trait with OS-specific implementations: `WaylandDragBackend` (wl_data_device), `X11DragBackend` (XDnD), `WindowsDragBackend` (OLE IDataObject/IDropTarget), `MacOsDragBackend` (NSPasteboard/NSDraggingSource). The backend is hidden behind the DragPayload API — widget authors write the same code regardless of platform.
-- **Keyboard accessibility contract.** Every drag operation has a keyboard equivalent emitting the same command. ListView and TreeView support Alt+Arrow for reordering. Custom drag sources must provide a keyboard path as part of their implementation — this is a lint check, not a runtime requirement, but it is documented as a contract.
-
-Retroactive integration: once ListView exists, ComboBox and MenuList gain a `max_visible_items` option that uses a virtualized scrollable list internally. This is tracked by TODO(milestone-6) comments in combo_box.rs and menu_list.rs.
-
-**Blocked by:** ScrollBar/ScrollArea from Milestone 4 (done). DragRecognizer from Milestone 5. Platform-specific drag backends in fern-platform for cross-application transfer (intra-application DnD has no platform dependency).
-
-**Tests:**
-- ListModel push/remove/set emits correct DataChange notifications
-- Repeater creates/destroys children on ListModel insert/remove
-- ListView only instantiates visible items (arena size significantly smaller than total item count)
-- ListView scroll creates entering items, destroys exiting items
-- DataChange::ItemsInserted shifts visible items correctly
-- DataChange::ItemsRemoved removes item and relayouts
-- DataChange::ItemsMoved reorders without rebuild
-- SelectionModel: click selects one, Ctrl+click toggles, Shift+click selects range
-- TreeModel insert_child/remove emits correct TreeChange
-- TreeSlice expand emits DataChange::ItemsInserted for newly visible children
-- TreeSlice collapse emits DataChange::ItemsRemoved for hidden children
-- Two TreeSlices on the same TreeModel have independent expand states
-- TreeView expand/collapse toggles child visibility
-- DragPayload with multiple MIME types is accepted by a target declaring any one of them
-- DragSource produces preview widget; preview overlay follows pointer during drag
-- DropTarget hover feedback: insertion line appears between ListView items at correct Y position
-- DropTarget hover feedback: highlight rectangle appears on container drops
-- ListView intra-widget reorder via drag emits `ListModel::move_item`
-- TreeView intra-widget reorder via drag emits `TreeModel::move_node`
-- Inter-widget drag from ListView A to ListView B transfers the typed payload
-- Drop target that rejects payload (MIME mismatch) shows no feedback and does not accept drop
-- Drag that leaves the window without a valid target cancels cleanly
-- Escape during drag cancels and emits no command
-- Keyboard Alt+Arrow on ListView/TreeView emits the same reorder command as a drag
-- Cross-application drag from external file manager delivers `text/uri-list` payload to compatible drop targets (platform-specific integration test)
-- AccessKit: List/ListItem with position_in_set/size_of_set, Tree/TreeItem with expanded/level
+- **Cross-application drag backends in fern-platform.** `PlatformDragBackend` trait with OS-specific implementations (`WaylandDragBackend` via wl_data_device, `X11DragBackend` via XDnD, `WindowsDragBackend` via OLE IDataObject/IDropTarget, `MacOsDragBackend` via NSPasteboard/NSDraggingSource) are not yet implemented. Intra-application DnD works on all platforms because it does not depend on OS integration. Cross-application transfer (dragging from a file manager into a FernUI window, or dragging from a FernUI ListView to an external target) is tracked as a fern-platform task for a later phase.
+- **Keyboard Alt+Arrow reorder contract.** The DnD spec says every drag operation should have a keyboard equivalent emitting the same command. ListView and TreeView have the plumbing, but per-widget verification is outstanding. This is a documentation/test gap, not a design hole.
+- **Retroactive ComboBox/MenuList virtualization.** TODO(milestone-6) comments in `combo_box.rs` and `menu_list.rs` mark the spots where a `max_visible_items` option should switch the dropdown to use a virtualized ListView internally. Not required for M6 completion, but tracked.
 
 ---
 
-## Milestone 7: Internationalization
+## Milestone 7: Internationalization ✅ (largely)
 
-**Goal:** Full i18n support with Fluent translations, runtime language switching, and RTL layout. Scheduled before the Rich Text Editor so that editor labels, toolbar strings, command names, and accessibility descriptions are translatable from the first commit, rather than being retrofitted.
+Substantially delivered. Fluent-based translation runtime with compile-time key validation, hot-reload via file watcher, RTL layout, and the dual-bundle design for fern-widgets' own translatable strings. Two new crates (fern-i18n and fern-i18n-macros) implement the design from architecture §12. The `internationalization` example exercises the full system.
 
-**Delivers:**
+**Delivered:**
 
-fern-i18n: Fluent bundle loading, tr! macro, locale management. FluentBundle-per-locale caching. Resource file discovery from application-configurable paths.
+- **fern-i18n runtime** (~1500 lines).
+  - `I18nConfig` with `source_locale`, `supported_locales`, `compile_in`, `user_locale`, `auto_detect_os_locale`, `fallback_locale`, `runtime_override`, `framework_locales`, `override_widget_strings`, `test_only` / `with_locale` test constructors.
+  - `I18nManager` with three-bundle design: application bundles (from `compile_in`), framework bundles (from `framework_locales`), and widget-override bundles (from `override_widget_strings`). `resolve_app` uses two-step precedence (active locale → source locale); `resolve_widget` uses four-step precedence (override active → framework active → override source → framework source) per §12.13.5. `set_locale` returns `LocaleSwitchOutcome { direction_changed }` so app code can decide whether to trigger a composite rebuild.
+  - `LocalizedString` with `to_signal()`, `literal()`, `resolve_now()`, `Into<Prop<String>>` conversion. Deliberately no `From<&str>` to prevent accidental untranslated literals. The `to_signal()` path uses a `WeakSignal` in the observer closure and `attach_keepalive` on the target signal to cleanly unsubscribe when the signal is dropped — this fixes the C1 memory leak where the previous implementation called `mem::forget` on the observer handle and left stale callbacks firing after every locale change. A regression test (`to_signal_observer_unsubscribes_when_signal_drops`) pins this behavior.
+  - Thread-local bridge (`thread_local.rs`) — `install` / `clear` for setup and teardown, `with_active` for the resolver path, `current_locale()` / `current_direction()` / `current_version_signal()` for widget-facing accessors. Widget code reaches the installed manager via the public accessors; app code reaches it via `BuildContext::locale()` and `BuildContext::layout_direction()`.
+  - File watcher (`file_watcher.rs`) via the `notify` crate for hot-reload. Background thread watches override paths and forwards events through the EventSource bridge so reload happens on the UI thread inside `RefCell::borrow_mut`. `I18nManager::reload_from_path` parses the file via `FluentResource::try_new`, replaces the bundle, and bumps the version signal. Previous bundle is kept intact on any error.
+  - Locale resolution (`resolve_initial_locale`) with three-tier precedence: explicit user choice → OS auto-detect via `sys-locale::get_locale()` with partial matching → fallback locale.
+  - `LayoutDirection` enum re-exported from `fern-core::environment`. `rtl_from_locale` uses a hardcoded lookup table mapping script tags (`Arab`, `Hebr`, `Syrc`, etc.) to `LayoutDirection::Rtl`. Direction changes when `set_locale` crosses the LTR↔RTL boundary are reported back to the caller for composite rebuild.
+  - `compile_in_locales!` declarative macro for populating the `compile_in` slice with many locales × many files without writing repetitive `include_str!` calls by hand.
 
-Runtime language switching: CommandContext::set_locale() triggers composite rebuild across all windows. Active widgets re-query tr! and get new strings.
+- **fern-i18n-macros proc macro crate** (~800 lines).
+  - `tr!` and `tr_widget!` both validate at compile time. They read the consuming crate's source `.ftl` file (or directory) at expansion time, parse via `fluent-syntax`, build a key → `MessageInfo` map, and check every call.
+  - **Compile-time errors with suggestions.** Missing keys produce a `compile_error!` at the macro call site with a Levenshtein-based "did you mean?" suggestion (edit budget 3). Missing and unknown arguments are reported with the list of expected argument names. Non-ASCII Rust idents and `__`-containing segments are rejected at compile time. Malformed source `.ftl` files produce parser errors at every `tr!` invocation in the crate.
+  - **Source path resolution** via `FERN_I18N_SOURCE_DIR` / `FERN_I18N_SOURCE_PATH` env vars and auto-detection. Default behavior: if `$CARGO_MANIFEST_DIR/locales/en-US/` exists as a directory, enter directory mode and walk it; otherwise read `locales/en-US.ftl` as a single file. Env vars override auto-detection for test fixtures.
+  - **Nested module encoding.** `tr!(auth::login_title())` maps to the Fluent key `auth__login-title`. `_` → `-` within segments (kebab-case), `__` between segments (reserved separator). Arbitrary nesting depth supported.
+  - **Rebuild tracking via `include_bytes!`.** Every expansion emits anonymous `const _: &[u8] = include_bytes!(path);` tokens for every `.ftl` file read during expansion. Cargo already tracks `include_bytes!` paths as build dependencies, so editing any contributing `.ftl` file triggers a rebuild. More portable than `proc_macro::tracked_path::path` (which requires unstable features on older compilers) and correctly handles directory-mode expansion.
+  - **Compile-time fallback for simple patterns.** Patterns composed of literal text and simple `{ $var }` substitutions get a reconstructed source-language fallback at macro expansion time. If the runtime resolver returns the key literal as a placeholder (no manager installed, or key missing in active bundle), the expansion falls back to the reconstructed text rather than displaying the raw key. Patterns with selectors, plurals, term refs, message refs, or function calls get `fallback = None` and return the key literal when runtime resolution fails. This makes widget-level unit tests work without installing an I18nManager, and makes forgotten framework bundle registration silent (widgets still render correct English labels).
+  - **Parse cache.** Key maps cached per source path in a process-wide `Mutex<HashMap<PathBuf, KeyMap>>` for the duration of a proc-macro process. A crate with hundreds of `tr!` calls parses each `.ftl` file exactly once.
 
-RTL layout direction: HStack child reversal, Leading/Trailing resolution. The LayoutDirection enum already exists — this milestone adds the runtime switching and the widget-level reactivity.
+- **fern-widgets localization** (`crates/fern-widgets/locales/en-US.ftl`, `fr-FR.ftl`). Framework strings for built-in widget accessibility labels. Current keys: `a11y-status-bar-name`, `a11y-dialog-name`, `a11y-snackbar-name`, `a11y-split-view-divider-name`, `a11y-breadcrumb-current-page-value`. The set is small by design — fern-widgets only translates strings that fern-widgets authors, and leaves application strings to the application. `fern_widgets::framework_locales()` exposes the slice for explicit registration via `I18nConfig::framework_locales(...)`.
+  - **Explicit registration.** Unlike the original architecture sketch, fern-widgets' bundle is **not** registered automatically by `FernAppBuilder::run`. Applications opt in with `.framework_locales(fern_widgets::framework_locales())`. Rationale: fern-app is deliberately widget-agnostic (does not depend on fern-widgets), so automatic registration would invert the crate graph. Applications that build from custom widgets only would be forced to pull in fern-widgets and its ~3 MB of Arabic/Hebrew fonts. The proc macro's compile-time fallback covers the forget-to-register case — accessibility labels still render in English.
 
-Shortcut label localization: ShortcutFormatter in fern-i18n. Ctrl->Strg in German, Ctrl->Cmd (⌘) on macOS. MenuItem and Tooltip auto-query ShortcutFormatter rather than displaying the raw `Ctrl+X` string (replacing the current TODO in shortcut.rs).
+- **Fonts for RTL scripts** (commits 1210c82, 342f948). Noto Sans Arabic and Noto Sans Hebrew variable fonts under feature flags, with Inter as the Latin-script default. Licenses included alongside the fonts. Arabic and Hebrew rendering uses the RTL bidi path in text-typeset (via HarfBuzz).
 
-Built-in FernUI accessibility string translations: default-shipped .ftl files for the accessibility strings that the framework generates (scroll bar, tab list, menu item, etc.) so that applications do not have to redefine common framework strings.
+- **Brand name variable** (commit e166b02). Localization files use a `-brand-name` term reference for the product name, allowing a single edit to rebrand the application across all locales.
 
-Locale environment propagation: `ctx.locale()` returns the active Locale. Widgets can react to locale changes via `ctx.effect(&locale, |_| ...)`.
+**Remaining work.**
 
-**Blocked by:** Nothing. Can be developed in parallel with any other post-Milestone-6 work. The composite rebuild mechanism is already stable.
-
-**Tests:**
-- Language switch updates all visible text via composite rebuild
-- RTL layout reverses HStack children
-- Leading/Trailing resolves correctly per LayoutDirection
-- Shortcut labels format correctly per platform and locale ("Ctrl+S" in en-US, "Strg+S" in de-DE, "⌘S" on macOS)
-- tr! macro with plurals and gender produces correct output via Fluent's built-in support
-- Missing translation key falls back gracefully (to the key itself or a developer-configured default)
-- MenuItem shortcut labels auto-localize via ShortcutFormatter
-- Accessibility strings on framework-provided widgets come from the shipped .ftl files
+- **ShortcutFormatter.** `shortcut.rs:31` still holds a TODO for locale/platform-aware shortcut label formatting. Current behavior returns `Ctrl+S` regardless of platform or locale. The design calls for `Strg+S` in German, `⌘S` on macOS, etc. `MenuItem` and `Tooltip` would auto-query this formatter instead of displaying the raw string. Scope is small (a single format function and a platform-detection helper in fern-platform) but not yet implemented.
+- **Composite rebuild on LTR↔RTL switch.** `set_locale` returns `LocaleSwitchOutcome { direction_changed: bool }` so app code can trigger a rebuild, but the rebuild path has not been exercised in an integration test. The `internationalization` example switches between LTR locales (en-US ↔ fr-FR) only. A test that switches from en-US to ar-SA and verifies HStack child order flips is outstanding.
+- **Full `ctx.locale()` / `ctx.layout_direction()` integration testing.** The accessors exist and the signals update, but there are no integration tests yet that render through a real widget tree and assert on locale-dependent text / direction-dependent layout. Covered by unit tests on the individual pieces; end-to-end coverage is a remaining test gap.
+- **Translator-facing CLI.** The `--translation-dev` CLI flag for translator hot-reload workflow exists in the spec (§12.6) but the example application does not yet wire it up. Implementation is trivial once done; tracked as a small deliverable alongside the M7 polish.
+- **Expanded fern-widgets translations.** Only five keys are currently translated. As more built-in widgets gain user-visible strings (MenuItem labels, ComboBox placeholder, Wizard step headers), the list grows. This is an incremental task, not a blocker.
 
 ---
 
 ## Milestone 8: Rich Text Editor
 
-**Goal:** A functional rich text editor using text-document and text-typeset, with formatting toolbar and context menu. All UI strings use the tr! macro from Milestone 7.
+**Goal:** A functional rich text editor using text-document and text-typeset, with formatting toolbar and context menu. All UI strings use the `tr!` macro from Milestone 7.
 
 **Delivers:**
 
-RichTextEditor widget (fern-widgets, behind rich-text feature flag). Integration of text-document's TextCursor with FernUI's event system. Keyboard input for insertion and deletion. Mouse click/drag for cursor positioning and selection. Multi-cursor support. Formatting toolbar connected via typed commands (Bold, Italic, Heading — all labels via tr!). Context menu: Cut, Copy, Paste, Select All (all labels via tr!). Text selection rendering via text-typeset's DecorationRect. Syntax highlighting via text-document's Highlighter trait. Undo/redo integration: widget-level typing coalescing. Scrolling via text-typeset's viewport-scoped rendering inside a ScrollArea. Canvas::draw_render_frame() embedding text-typeset's output.
+RichTextEditor widget (fern-widgets, behind `rich-text` feature flag). Integration of text-document's TextCursor with FernUI's event system. Keyboard input for insertion and deletion. Mouse click/drag for cursor positioning and selection. Multi-cursor support. Formatting toolbar connected via typed commands (Bold, Italic, Heading — all labels via `tr_widget!` against fern-widgets' bundle or `tr!` for application-level toolbars). Context menu: Cut, Copy, Paste, Select All. Text selection rendering via text-typeset's DecorationRect. Syntax highlighting via text-document's Highlighter trait. Undo/redo integration: widget-level typing coalescing. Scrolling via text-typeset's viewport-scoped rendering inside an editor-owned scroll bar pair (not a ScrollArea — see architecture §27.10 for why). Canvas::draw_render_frame() embedding text-typeset's output.
 
-Clipboard: platform-level read/write of text via fern-platform (arboard crate or direct integration). Cut/Copy/Paste (Ctrl+X/C/V, ⌘X/C/V on macOS). Plain text clipboard for this milestone — rich-format clipboard (RTF, HTML) is a post-milestone refinement.
+RichTextView (read-only sibling). Same rendering pipeline, no editing inputs. Used for documentation display, message rendering, etc.
 
-**Blocked by:** Internationalization from Milestone 7 (for toolbar labels, context menu, accessibility strings). ScrollArea from Milestone 4 (done) for editor scrolling. ContextMenu from Milestone 4 (done) for right-click menu. Clipboard integration in fern-platform.
+Clipboard: platform-level read/write of text via fern-platform. Cut/Copy/Paste (Ctrl+X/C/V, ⌘X/C/V on macOS). Plain text clipboard for this milestone — rich-format clipboard (RTF, HTML) is a post-milestone refinement.
+
+**Blocked by:** text-document and text-typeset integration work (the crates exist but the integration surface into fern-widgets is new). ContextMenu from Milestone 4 (done) for right-click menu. Clipboard integration in fern-platform.
 
 **Tests:**
 - Typing produces correct document mutations
@@ -273,7 +245,7 @@ Clipboard: platform-level read/write of text via fern-platform (arboard crate or
 - Highlighter colors propagate through text-typeset to render output
 - RichTextEditor accepts externally-owned TextDocument reference
 - Application retains full access to TextDocument API
-- AccessKit: Role::MultilineTextInput with text value, caret position, selection
+- AccessKit: `Role::MultilineTextInput` with text value, caret position, selection
 
 ---
 
@@ -285,7 +257,7 @@ Clipboard: platform-level read/write of text via fern-platform (arboard crate or
 
 TextInput: Level 2 widget built on RichTextEditor from Milestone 8, with the following constraints enforced at construction:
 - Single paragraph (Enter key does not insert a newline; emits `on_submit` instead)
-- Single line (the debatable constraint — configurable via `multiline(bool)` builder method; default is single-line)
+- Single line (configurable via `multiline(bool)` builder method; default is single-line)
 - No rich formatting (Bold, Italic, Heading commands disabled at the command filter level)
 - Plain text representation exposed via `Signal<String>` (two-way binding with the underlying TextDocument)
 
@@ -295,26 +267,26 @@ NumberInput/SpinBox: TextInput with increment/decrement buttons and numeric vali
 
 Clipboard: already implemented in Milestone 8 — TextInput reuses it directly.
 
-**IME support is deferred** to a post-milestone refinement. The IME composition window positioning, composition text rendering, and CJK input handling require platform-specific work in fern-platform. TextInput in this milestone targets Latin-script languages; IME for CJK, Arabic, and Indic scripts is tracked separately and can be added without changing the TextInput API.
+**IME support is deferred** to a post-milestone refinement. IME composition window positioning, composition text rendering, and CJK input handling require platform-specific work in fern-platform. TextInput in this milestone targets Latin-script languages; IME for CJK, Arabic, and Indic scripts is tracked separately and can be added without changing the TextInput API.
 
 **Blocked by:** RichTextEditor from Milestone 8.
 
 **Tests:**
-- Typing produces correct text in Signal<String>
+- Typing produces correct text in `Signal<String>`
 - Cursor position updates on Arrow Left/Right, Home/End
 - Shift+Arrow produces correct selection range
 - Double-click selects word
 - Ctrl+A selects all
 - Backspace/Delete remove character at cursor or selected range
 - Ctrl+Backspace removes word
-- Cursor blinks at correct rate via tree.advance_time()
-- Enter in single-line mode does not insert newline; fires on_submit
+- Cursor blinks at correct rate via `tree.advance_time()`
+- Enter in single-line mode does not insert newline; fires `on_submit`
 - Formatting commands (Bold, Italic) are filtered and do not affect the document
 - Copy places selected text on clipboard; Paste inserts clipboard text at cursor
 - Cut removes selected text and places on clipboard
 - NumberInput rejects non-numeric typed input
 - NumberInput increment/decrement buttons adjust value within bounds
-- AccessKit: Role::TextInput with value, text_selection, caret position
+- AccessKit: `Role::TextInput` with value, text_selection, caret position
 
 ---
 
@@ -322,24 +294,26 @@ Clipboard: already implemented in Milestone 8 — TextInput reuses it directly.
 
 **Goal:** Multiple windows with shared state, modal/modeless dialogs using platform windows, and native menu bar integration.
 
-**Delivers:**
+**Partially delivered during earlier milestones.** The multi-window infrastructure exists in fern-app's WindowManager and was validated during Milestone 5's modal work — per-window WidgetTree, shared application state (theme, locale, shortcuts, app_state), command routing by source window, and native modal windows all work today. What remains for this milestone is the platform-native surface area: the macOS menu bar, the file dialogs, and the cross-platform declarative menu abstraction.
 
-Multi-window: per-window WidgetTree with shared application state (theme, locale, shortcuts, data models). Modal dialog with OS-level parent relationship. Modeless dialog with independent interaction. The multi-window infrastructure already exists in fern-app's WindowManager — this milestone validates it with real use cases.
+**Remaining deliverables:**
 
 Native menu bar: NSMenu on macOS, widget-based MenuBar (from Milestone 4) inside the window on Windows and Linux. Declarative MenuBar description through FernApp builder. Abstraction over the platform difference: the application declares its menu structure once, and FernUI routes to native on macOS and to the in-window MenuBar elsewhere.
 
-File dialog: native open/save via rfd crate or OS APIs. Async result via EventLoopProxy.
+File dialog: native open/save via `rfd` crate or OS APIs. Async result via EventLoopProxy.
+
+Multi-window application tests: the infrastructure exists, but a real multi-window example application (second editor window, detached inspector panel, etc.) has not been built. Adding one would exercise the shared-state path end-to-end.
 
 **Blocked by:** Platform-specific Cocoa/AppKit code for macOS menu bar (goes beyond winit).
 
 **Tests:**
-- Modal dialog blocks parent window input
+- Modal dialog blocks parent window input (done for M5)
 - Modeless dialog operates independently
-- Theme change propagates to all windows
+- Theme change propagates to all windows (done)
 - Locale change propagates to all windows
-- Command from secondary window reaches handler with correct source_window
+- Command from secondary window reaches handler with correct `source_window`
 - Closing window cleans up resources
-- Focus returns to parent after modal dismissal
+- Focus returns to parent after modal dismissal (done for M5)
 - Native menu bar on macOS mirrors the declared MenuBar structure
 - File dialog returns selected path asynchronously without blocking the event loop
 
@@ -351,11 +325,11 @@ File dialog: native open/save via rfd crate or OS APIs. Async result via EventLo
 |---|-----------|--------|----------------|
 | 1 | Button in a Window | ✅ Done | Full vertical slice, rendering pipeline |
 | 2 | Text and Layout | ✅ Done | Layout engine, text, theme switching |
-| 3 | Core Widget Catalog + V2 Migration | ✅ Done | Form controls, display, layout utilities, unified Widget trait, Signal<T> |
-| 4 | ScrollBar, ComboBox, Menus | ✅ Done | Overlay-based interactive widgets, ScrollArea overlay/permanent modes, MenuBar |
-| 5 | Tabs, SplitView, Dialogs | Next | Application structure, modal behavior, focus trapping, DragRecognizer |
-| 6 | Data-Driven Collections and Drag & Drop | Planned | ListModel, TreeModel, ListView, TreeView, Repeater, SelectionModel, full DnD system |
-| 7 | Internationalization | Planned | Fluent, tr!, RTL, shortcut localization (before rich text so labels translatable) |
-| 8 | Rich Text Editor | Planned | text-document integration, formatting, undo, clipboard |
-| 9 | Text Input | Planned | Plain-text specialization of RichTextEditor; IME deferred |
-| 10 | Multi-Window and Platform | Planned | Native menus, file dialogs, multi-window |
+| 3 | Core Widget Catalog + V2 Migration | ✅ Done | Form controls, unified Widget trait, Signal<T> only, binding.rs rename |
+| 4 | ScrollBar, ComboBox, Menus | ✅ Done | Overlay-based interactive widgets, ScrollArea modes, MenuBar |
+| 5 | Tabs, SplitView, Dialogs, Modals | ✅ Done | TabWidget, SplitView+SplitHandle, Dialog, ModalContainer, Popover, Snackbar, Breadcrumb, Wizard, DragRecognizer, in-tree and native modal presentations |
+| 6 | Data-Driven Collections + Drag & Drop | ✅ Largely done | fern-data crate, ListModel/TreeModel/TreeSlice/SelectionModel, Repeater/ListView/TreeView with virtualization, typed DnD with preview overlay. Cross-app platform backends remaining. |
+| 7 | Internationalization | ✅ Largely done | fern-i18n + fern-i18n-macros, `tr!`/`tr_widget!` with compile-time validation and Levenshtein suggestions, compile-time fallback, dual-bundle with explicit framework registration, hot-reload, RTL with Arabic/Hebrew fonts. ShortcutFormatter remaining. |
+| 8 | Rich Text Editor | Not started | text-document integration, formatting, undo, clipboard |
+| 9 | Text Input | Not started | Plain-text specialization of RichTextEditor; IME deferred |
+| 10 | Multi-Window and Platform | Partial | Multi-window infrastructure done (M5); native menu bar, file dialogs, multi-window example remaining |

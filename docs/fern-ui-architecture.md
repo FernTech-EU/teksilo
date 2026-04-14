@@ -1288,21 +1288,21 @@ The macro's compile-time validation happens *before* expansion. If the validatio
 
 #### 12.2.2 Configuring the Source File Path
 
-By default, the macro reads `$CARGO_MANIFEST_DIR/locales/en-US.ftl`. Applications that organize translations differently can override the path via a crate-level attribute placed at the root of the crate (lib.rs or main.rs):
+By default, the macro auto-detects the source file at one of two locations in the consuming crate's `CARGO_MANIFEST_DIR`:
 
-```rust
-#![fern_i18n::source_locale(path = "i18n/source.ftl")]
-```
+1. **`locales/en-US/`** — if this path exists as a directory, the macro enters *directory mode* and walks every `.ftl` file underneath it (see §12.2.3).
+2. **`locales/en-US.ftl`** — otherwise the macro reads this single file in *file mode*.
 
-The macro picks up the attribute during expansion and uses the configured path instead of the default. The path is interpreted relative to `CARGO_MANIFEST_DIR`. For applications with the standard layout (`locales/en-US.ftl`), no attribute is needed.
+Auto-detection prefers directory mode. An application that starts with a flat `locales/en-US.ftl` file and later promotes it to a `locales/en-US/` directory layout does not need to change any configuration — the macro picks up the new layout on the next compilation.
 
-For nested module layouts (per §12.2.3), the attribute can specify a directory instead of a single file:
+For tests and other situations where the source `.ftl` lives outside the default path, the macro honors two environment variables read at compile time:
 
-```rust
-#![fern_i18n::source_locale(dir = "locales/en-US/")]
-```
+- **`FERN_I18N_SOURCE_DIR`** — forces directory mode with the given path (relative to `CARGO_MANIFEST_DIR`, or absolute).
+- **`FERN_I18N_SOURCE_PATH`** — forces file mode with the given path (same resolution rules).
 
-The macro then walks the directory recursively, parses every `.ftl` file, and merges them into a single key/argument-signature map, with the file's relative path determining the module nesting. `locales/en-US/auth.ftl` populates the `auth::*` namespace, `locales/en-US/settings/display.ftl` populates `settings::display::*`, and so on.
+The env-var precedence is `FERN_I18N_SOURCE_DIR` > `FERN_I18N_SOURCE_PATH` > auto-detected directory > auto-detected file. Both variables are primarily used by the framework's own `trybuild` tests, which need to point the macro at a fixture `.ftl` file in the test's source tree rather than the consuming crate's real `locales/` directory. Applications should not set these variables in production builds — the default auto-detection covers the normal case.
+
+The architecture deliberately uses env vars rather than a crate-level attribute (like `#![fern_i18n::source_locale(...)]`) because env vars compose cleanly with `cargo test`, `trybuild`, and other tooling that already expects to set compile-time environment through `build.rs` or shell-level overrides. A crate attribute would require the proc macro to parse attribute arguments at a different layer from where it reads the file, and would not help the framework's own internal test fixtures.
 
 #### 12.2.3 Nested Message Modules
 
@@ -1318,17 +1318,68 @@ locales/en-US/
     keyboard.ftl     → tr!(settings::keyboard::shortcut_label())
 ```
 
-Each file's contents are parsed as a separate Fluent resource. Keys in `main.ftl` populate the root namespace. Keys in `auth.ftl` populate `auth::*`. Keys in `settings/display.ftl` populate `settings::display::*`. The proc macro walks the directory at compile time, builds a single nested key/argument-signature map, and validates `tr!` calls against the appropriate path.
+Each file's contents are parsed as a separate Fluent resource, and the proc macro walks the directory at compile time to build a single merged key map. The directory walk is recursive — nested subdirectories like `settings/` produce multi-level paths.
 
-At runtime, the FluentBundle for each locale is constructed by adding *multiple resources* — one per .ftl file in the locale's directory tree. FluentBundle natively supports multiple resources per bundle, and the framework's `resolve_message` function looks up keys with their full path (e.g., `auth.login-title`) so that nested modules don't collide with each other.
+**Key encoding from Rust path to Fluent id.** Fluent's message-id grammar is `[a-zA-Z][a-zA-Z0-9_-]*`, which does not allow `::` and does not naturally express hierarchy. The macro encodes Rust paths into flat Fluent keys by:
 
-The same nesting works on the runtime side: the application's `compile_in` slice (see §12.4) carries a list of resources per locale rather than a single concatenated blob, with each `.ftl` file becoming one entry.
+1. Replacing `_` with `-` within each path segment (matching Fluent's preference for kebab-case).
+2. Joining segments with `__` (double underscore) as the module separator.
+
+So `tr!(auth::login_title())` looks up the Fluent key `auth__login-title`, and `tr!(settings::display::resolution_label())` looks up `settings__display__resolution-label`. The `__` separator is reserved — if a Rust path segment contains `__`, the macro rejects it at compile time with an explicit error pointing at the offending segment, because allowing it would let a single-segment path collide with a two-segment path after encoding.
+
+**ASCII-only guard.** Rust identifiers permit Unicode (`tr!(héllo())` would parse), but Fluent message ids are ASCII-only per the grammar. The macro rejects non-ASCII segments at compile time with a clear error message, rather than letting them flow through to a confusing "key not found" error at runtime. Every segment must match `[a-zA-Z][a-zA-Z0-9_]*`.
+
+At runtime, the FluentBundle for each locale is constructed by adding *multiple resources* — one per .ftl file in the locale's directory tree. FluentBundle natively supports multiple resources per bundle, and `resolve_message` looks up keys by their encoded name (`auth__login-title`) so that nested modules don't collide with each other.
+
+The same nesting works on the runtime side: the application's `compile_in` slice (see §12.4) carries a list of resources per locale rather than a single concatenated blob, with each `.ftl` file becoming one entry. The `.ftl` files themselves use the encoded key form — authors write `auth__login-title = Log in` in the file, not `login-title` nested in some directory-implied scope. This keeps the runtime lookup a single flat HashMap probe and avoids ambiguity between flat and nested layouts.
 
 #### 12.2.4 Why the `.clone()` on Arguments
 
 The closure passed to `localized()` must be `Fn`, not `FnOnce`, because it may be called many times — once on initial resolution, then on every locale switch and every hot-reload. Capturing arguments by move and consuming them inside the closure body would make the closure `FnOnce`. The macro expands to a clone-on-call pattern: arguments are captured by `let` binding outside the closure (moving them once), then `.clone()`'d inside the closure body each time it runs.
 
 For Fluent's argument types — strings (`String`), numbers (`i64`, `f64`), booleans, dates — cloning is cheap. The `.clone()` is invisible in performance terms. For the rare case where an application wants to pass a non-cloneable argument, the escape hatch is to call `localized(move || fern_i18n::resolve_message("key", &[...]))` directly without the macro, accepting that the resulting closure may be `FnOnce` and the LocalizedString cannot be hot-reloaded for that specific instance. Most applications never hit this.
+
+#### 12.2.5 Compile-Time Fallback for Missing Runtime Bundles
+
+The runtime `resolve_message` function returns the literal key as a placeholder when no `I18nManager` is installed on the current thread (typical in unit tests for lower-level widgets) or when the active locale's bundle is missing the key (possible only if the source `.ftl` was edited between the compile-time validation and the runtime execution). A literal key placeholder like `"welcome-title"` is not useful in either situation — tests want to see the real English text, and production deserves a meaningful fallback rather than a raw id.
+
+The proc macro solves this by **reconstructing the source-language text at expansion time** and emitting it as an inline fallback. When parsing the source `.ftl`, the macro walks each message's pattern AST and records it as a list of `FallbackPart` nodes:
+
+- `FallbackPart::Text(String)` for verbatim literal text from a Fluent `TextElement`.
+- `FallbackPart::Var(String)` for a `{ $var }` substitution.
+
+The macro expansion concatenates these parts into a String at runtime, pulling variable values from the already-captured argument bindings via `ToString`. The expansion looks roughly like:
+
+```rust
+::fern_i18n::localized({
+    let name = user.name.clone();
+    move || {
+        let result = ::fern_i18n::resolve_message(
+            "welcome-greeting",
+            &[("name", FluentValue::from(name.clone()))],
+        );
+        if result == "welcome-greeting" {
+            // The runtime returned the key literal — fall back to the
+            // source-language text reconstructed at macro expansion time.
+            let mut fallback = String::new();
+            fallback.push_str("Hello, ");
+            fallback.push_str(&name.to_string());
+            fallback.push_str("!");
+            fallback
+        } else {
+            result
+        }
+    }
+})
+```
+
+**Not every pattern is eligible for fallback reconstruction.** The macro only emits a fallback for patterns composed entirely of literal text and simple `{ $var }` substitutions. Patterns that use Fluent selectors (`{ $count -> [one] ... [other] ... }`), plural rules, term references (`{ -brand-name }`), message references, or function calls set `fallback = None` at parse time, and the expansion omits the reconstruction branch. For those messages, the runtime's literal-key placeholder is returned as-is, because reproducing Fluent's selector resolution logic in macro-generated Rust code would double the runtime. The trade-off is acceptable: simple patterns cover the overwhelming majority of user-facing strings, and complex patterns almost always need a real runtime bundle to format correctly anyway.
+
+This feature has two practical consequences:
+
+1. **Widget-level unit tests work without installing an I18nManager.** A test that constructs a Button and checks its label text sees the English source text directly, without needing to set up locale resolution, bundle loading, or a thread-local install.
+2. **Forgotten framework bundle registration is silent.** An application that uses fern-widgets but forgets to call `.framework_locales(fern_widgets::framework_locales())` still sees English accessibility labels — the proc macro's fallback takes over. The missing registration is a mild configuration smell, not a broken UI. Per §12.13.3, applications that need localized framework strings must still opt in explicitly.
+
 
 ### 12.3 The `LocalizedString` Type
 
@@ -1605,15 +1656,25 @@ The bundles are stored in a `HashMap<LanguageIdentifier, FluentBundle<FluentReso
 
 ### 12.9 Translation Errors
 
-Three categories of error can occur at runtime, and each has a defined handling:
+Errors split into two categories: compile-time errors from the proc macro, and runtime errors from the bundle lookup.
 
-**Missing key in the active locale, present in the source.** The bundle's lookup falls back to the source language automatically. The source-language text is returned. No error is raised. This is the normal flow for partial translations.
+**Compile-time errors from the proc macro.** The macro catches most translation mistakes before the code builds, and emits `compile_error!` output that surfaces in cargo's regular error stream:
 
-**Missing key in both the active locale and the source.** This should be impossible because the source language is validated at build time by the proc macro — if a key is referenced in code, it must exist in the source `.ftl` file or the code does not compile. If somehow this state is reached (for example, the source file was modified between build and run, or an `include_str!` reference was stale), the framework returns the literal key as a placeholder string and logs a warning.
+- **Missing key.** `tr!(welcom_title())` when the source file defines `welcome-title` fails to compile with an error pointing at the macro invocation site. The message includes a "did you mean `welcome-title`?" suggestion computed via a Levenshtein edit-distance search over the source file's keys, with a small edit budget (typos within 3 edits are suggested; larger distances are not, to avoid noise). This single feature catches the overwhelming majority of real translation mistakes — misspellings, stale renames, and copy-paste errors from adjacent keys.
+- **Missing argument.** `tr!(welcome_greeting())` when `welcome-greeting = Hello, { $name }!` expects a `name` variable fails with an error naming the missing argument.
+- **Unknown argument.** `tr!(welcome_greeting(name = "A", extra = "B"))` when `welcome-greeting` only expects `name` fails with an error listing the expected arguments so the author can see what was valid.
+- **Non-ASCII or reserved path segment.** `tr!(héllo())` or `tr!(foo__bar())` fails with an error explaining the Fluent grammar constraint (ASCII only) or the reserved `__` separator.
+- **Malformed source .ftl.** If the source file contains a Fluent syntax error, every `tr!` invocation in the crate fails with a parser error quoting the file path and the parser's reported location. Authoring the source file with a Fluent-aware editor (or trybuild test against it) catches this before it blocks a compilation.
+
+**Runtime errors from the bundle lookup.** Three categories can occur at runtime, and each has defined handling:
+
+**Missing key in the active locale, present in the source.** The lookup falls back to the source-locale bundle and returns the source-language text. No error is raised. This is the normal flow for partial translations and requires no configuration.
+
+**Missing key in both the active locale and the source locale bundles.** This should be impossible because the proc macro validated the key at compile time — if a key is referenced in code, it must exist in the source `.ftl` file, or the code does not compile. If this state is somehow reached (source file edited between build and run, stale `include_str!` reference, corrupted bundle), the runtime returns the key literal as a placeholder. **The compile-time fallback (see §12.2.5) intercepts this placeholder** for simple patterns and produces the reconstructed English text from the macro's expansion, so the user sees meaningful output even in this failure mode. Patterns too complex for the fallback (selectors, plurals) do return the literal key and log a warning.
 
 **Malformed .ftl file at hot-reload.** The reload fails, the previous bundle stays in place, and the error is logged with the file path and the syntax error location. The application continues with the previous (working) translation. The translator sees no change in the running app and goes back to fix the file.
 
-**Argument type mismatch at runtime.** This should also be impossible because the proc macro validates argument names against the source `.ftl` at build time. If somehow it occurs (an edge case in a Fluent selector that the validation missed), `FluentBundle::format_pattern` returns the formatted result with default formatting and a `FluentError` in the errors vector, which the framework logs.
+**Argument type mismatch at runtime.** This should also be impossible because the proc macro validates argument names against the source `.ftl` at build time. If it occurs (edge case in a Fluent selector that the validation missed), `FluentBundle::format_pattern` returns the formatted result with default formatting and a `FluentError` in the errors vector, which the framework logs.
 
 ### 12.10 Testing Translations
 
@@ -1664,9 +1725,9 @@ The version Signal increments, observers re-resolve, the next render reflects th
 
 The i18n implementation is split across two crates:
 
-- **`fern-i18n`** — the runtime API: `LocalizedString`, `localized()`, `I18nConfig`, the `LayoutDirection` enum, the locale resolution logic, the bundle manager, the file watcher integration, the `resolve_message` runtime entry point. Depends on `fluent-bundle`, `fluent-syntax`, `unic-langid`, `sys-locale`, `notify`. Used at runtime.
+- **`fern-i18n`** — the runtime API: `LocalizedString`, `localized()`, `I18nConfig`, the `LayoutDirection` enum, the locale resolution logic, the bundle manager, the file watcher integration, the `resolve_message` / `resolve_message_widget` runtime entry points, and the `compile_in_locales!` declarative helper macro. Depends on `fluent-bundle`, `fluent-syntax`, `unic-langid`, `sys-locale`, `notify`. Used at runtime.
 
-- **`fern-i18n-macros`** — the procedural macro crate exporting `tr!` and `compile_in_locales!`. The `tr!` macro reads the application's source `.ftl` file at expansion time (via `proc_macro::tracked_path::path` so cargo rebuilds the crate when the file changes), parses it via `fluent-syntax`, and validates every invocation. Procedural macros must live in their own crate type; `fern-i18n` re-exports the macro through its prelude so application developers write `use fern_i18n::tr;` without needing to know about the macros crate.
+- **`fern-i18n-macros`** — the procedural macro crate exporting `tr!` and `tr_widget!`. The macros read the consuming crate's source `.ftl` file (or directory) at expansion time, parse it via `fluent-syntax`, and validate every invocation. Procedural macros must live in their own crate type; `fern-i18n` re-exports the macros through its public API so application developers write `use fern_i18n::tr;` without needing to know about the macros crate.
 
 There is no separate `fern-i18n-build` crate. There is no build script. There is no generated file in `OUT_DIR`. The application's `Cargo.toml` declares one dependency:
 
@@ -1692,9 +1753,11 @@ my-app/
 
 The proc macro reads `locales/en-US.ftl` at compile time to validate `tr!` calls. The runtime FluentBundle for each locale is constructed from `include_str!` references in the `compile_in` slice (see §12.4). The two paths read the same files but at different times: the macro reads the source language at build time, the runtime reads all locales at startup via `include_str!`.
 
-The fern-widgets crate has its own copy of the same setup: a `locales/en-US.ftl` source file, framework-internal `tr_widget!` calls validated against it at compile time, and `compile_in` references baked into the framework's bundle registration. See §12.13 for the dual-bundle design.
+The fern-widgets crate has its own copy of the same setup: a `locales/en-US.ftl` source file, framework-internal `tr_widget!` calls validated against it at compile time, and a public `framework_locales()` function returning a slice the application passes to `I18nConfig::framework_locales(...)` on the builder chain. See §12.13 for the dual-bundle design.
 
-**Build-time cost.** The proc macro reads and parses the source `.ftl` file once per crate per compilation. For a typical application with a few hundred messages in `en-US.ftl`, the parse takes single-digit milliseconds. The map is cached in a thread-local for the duration of the compilation, so subsequent `tr!` invocations in the same crate use the cached map without re-parsing. The file is registered with `proc_macro::tracked_path::path` so cargo rebuilds the crate when the file changes, ensuring stale caches are never used.
+**Rebuild tracking.** When cargo compiles a crate that invokes `tr!`, it needs to know that the crate depends on the `.ftl` file so that editing a translation triggers a rebuild. The proc macro solves this by emitting an anonymous `const _: &[u8] = include_bytes!(path);` token for every `.ftl` file it read during expansion. `include_bytes!` is a compiler builtin that registers the path as a build dependency — exactly the same mechanism cargo uses to track `include_str!` references in normal Rust code. The constants are discarded (their value is never read), they exist only so cargo sees the dependency. This is more portable than `proc_macro::tracked_path::path` (which requires an unstable feature on older compilers) and correctly handles directory-mode expansion (one `include_bytes!` per file walked).
+
+**Build-time cost.** The proc macro reads and parses the source `.ftl` file (or directory) once per proc-macro process, caching the parsed key map in a `Mutex<HashMap<PathBuf, KeyMap>>`. A crate with hundreds of `tr!` calls parses each `.ftl` file exactly once. For a typical application with a few hundred messages in `en-US.ftl`, the parse takes single-digit milliseconds. Subsequent `tr!` invocations hit the cache.
 
 ### 12.12 Constraints and Limitations
 
@@ -1768,19 +1831,41 @@ pub fn framework_locales() -> &'static [(&'static str, &'static [&'static str])]
     &[
         ("en-US", &[include_str!("../locales/en-US.ftl")]),
         ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]),
-        ("es-ES", &[include_str!("../locales/es-ES.ftl")]),
-        ("de-DE", &[include_str!("../locales/de-DE.ftl")]),
     ]
 }
 ```
 
-`FernAppBuilder::run` calls `fern_widgets::framework_locales()` automatically at startup and registers the slice as the framework bundle alongside the application bundle. Application code does not need to do this explicitly — the registration is part of framework initialization.
-
 This means **fern-widgets compiles in isolation**. Its source code uses `tr_widget!` calls validated against its own `en-US.ftl`. Its runtime exposes its own resource slice. There is no dependency on any application-side `.ftl` file, and the crate works as a normal library that can be added to any application's `Cargo.toml` without configuration.
 
-#### 12.13.3 Automatic Framework Bundle Registration
+#### 12.13.3 Explicit Framework Bundle Registration
 
-When `FernAppBuilder::run` is called, it automatically registers `fern_widgets::framework_locales()` with the i18n manager as the framework bundle. The framework bundle is constructed identically to the application bundle: one `FluentBundle` per locale found in the slice, with each `.ftl` file becoming a separate `FluentResource` per the multi-resource design from §12.4. The fern-widgets bundles are stored on the same i18n manager as the application bundles, in a separate `HashMap<LanguageIdentifier, FluentBundle>`. The version Signal increments apply to both maps simultaneously — a hot-reload of any locale (application or framework) increments the version, and every LocalizedString re-resolves regardless of which bundle its resolver consults.
+Applications that use fern-widgets register its translation bundle explicitly on the builder chain:
+
+```rust
+FernAppBuilder::new()
+    .i18n(I18nConfig::new()
+        .compile_in(&[ /* application locales */ ])
+        .framework_locales(fern_widgets::framework_locales())
+        // ...
+    )
+    .root(...)
+    .run();
+```
+
+**fern-app is deliberately widget-agnostic** — it does not depend on fern-widgets, and therefore cannot automatically register fern-widgets' translation bundle. The alternative (fern-app depending on fern-widgets) would invert the crate graph and force every application to pull in fern-widgets whether or not it uses the built-in widget catalog. An application that builds its UI from its own custom widgets should not be required to ship fern-widgets' translation bundle or its ~3 MB of Arabic/Hebrew fonts.
+
+The explicit registration pattern also lets applications compose multiple framework-style crates. A hypothetical third-party widget crate `spiffy-widgets` can expose its own `framework_locales()` function, and the application registers both in a single builder chain:
+
+```rust
+.framework_locales(fern_widgets::framework_locales())
+.framework_locales(spiffy_widgets::framework_locales())
+```
+
+Multiple calls to `framework_locales` accumulate — each slice is registered independently, and keys from one crate do not collide with keys from another because the proc macros validate against each crate's own source `.ftl` file at compile time.
+
+**Widgets that have not been explicitly registered still work.** The proc macro's compile-time fallback (see §12.2.5) reconstructs the source-language text from the `.ftl` parse tree at expansion time for simple patterns. If an application forgets to call `framework_locales()`, fern-widgets' accessibility labels still render in English (the source language) because the macro emits an inline fallback. The missing registration is silent — a log message at startup would be the right place to surface it, but the application does not crash or render empty strings.
+
+The framework bundle is constructed identically to the application bundle: one `FluentBundle` per locale in the slice, with each `.ftl` file becoming a separate `FluentResource` per the multi-resource design from §12.4. The fern-widgets bundles are stored on the same `I18nManager` as the application bundles, in a separate `HashMap<LanguageIdentifier, FluentBundle>`. The version Signal increments apply to both maps simultaneously — a hot-reload of any locale (application or framework) increments the version, and every LocalizedString re-resolves regardless of which bundle its resolver consults.
 
 #### 12.13.4 Application Override
 
