@@ -523,6 +523,52 @@ impl Default for ProgressBarStyle {
     }
 }
 
+/// A button split into two adjacent regions (a default action on the left
+/// and a chevron that opens a dropdown menu on the right), sharing a single
+/// rounded border. The main region's dimensions mirror [`ButtonStyle`] so
+/// the two controls can sit next to each other without visual drift.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SplitButtonStyle {
+    pub height: f32,
+    pub min_width: f32,
+    pub padding_horizontal: f32,
+    pub padding_vertical: f32,
+    pub corner_radius: f32,
+    pub border_width: f32,
+    /// Fixed width of the trailing chevron region.
+    pub chevron_width: f32,
+    /// Thickness of the vertical divider between the main region and the
+    /// chevron region.
+    pub divider_width: f32,
+    /// Pixel size of the chevron glyph drawn inside the chevron region.
+    pub chevron_icon_size: f32,
+    pub focus_ring_width: f32,
+    pub focus_ring_offset: f32,
+}
+
+impl Default for SplitButtonStyle {
+    fn default() -> Self {
+        Self {
+            // Dimensions mirror ButtonStyle so a Button and a SplitButton
+            // sit on the same baseline.
+            height: 24.0,
+            min_width: 72.0,
+            padding_horizontal: 14.0,
+            padding_vertical: 0.0,
+            corner_radius: 4.0,
+            border_width: 1.0,
+            // 22 dp matches ComboBoxStyle::arrow_column_width (minus the
+            // combo's internal padding) so the chevron affordance is
+            // visually consistent across dropdown-opening controls.
+            chevron_width: 22.0,
+            divider_width: 1.0,
+            chevron_icon_size: 12.0,
+            focus_ring_width: 2.0,
+            focus_ring_offset: 2.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SegmentedControlStyle {
     pub height: f32,
@@ -679,6 +725,7 @@ pub struct ComponentStyles {
     pub badge: BadgeStyle,
     pub progress_bar: ProgressBarStyle,
     pub segmented_control: SegmentedControlStyle,
+    pub split_button: SplitButtonStyle,
     pub breadcrumb: BreadcrumbStyle,
     pub link: LinkStyle,
     pub wizard: WizardStyle,

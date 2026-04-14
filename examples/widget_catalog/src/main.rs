@@ -33,8 +33,8 @@ use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
     FixedSize, Grid, GroupBox, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding,
-    Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar,
-    TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
+    Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, SplitButton,
+    StatusBar, TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
 
 // ---------------------------------------------------------------------------
@@ -51,6 +51,10 @@ enum Cmd {
     Save,
     Cancel,
     LearnMore,
+    Run,
+    RunTests,
+    RunCoverage,
+    Debug,
 }
 
 impl AppCommand for Cmd {}
@@ -670,11 +674,46 @@ impl Widget for WidgetCatalog {
                         .enabled(false),
                 ),
         );
+        // --- SplitButton: default action on the left, chevron dropdown on the
+        //     right. Reuses MenuItem directly for the dropdown rows so icons,
+        //     shortcut labels and separators come for free.
+        let split_buttons_row = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .child(
+                    SplitButton::new()
+                        .item(MenuItem::new_literal("Run").on_activate(Cmd::Run))
+                        .item(
+                            MenuItem::new_literal("Run Tests").on_activate(Cmd::RunTests),
+                        )
+                        .item(
+                            MenuItem::new_literal("Run with Coverage")
+                                .on_activate(Cmd::RunCoverage),
+                        )
+                        .separator()
+                        .item(MenuItem::new_literal("Debug").on_activate(Cmd::Debug))
+                        .style(ButtonVariant::Default),
+                )
+                .child(
+                    SplitButton::new()
+                        .item(MenuItem::new_literal("Save").on_activate(Cmd::Save))
+                        .item(MenuItem::new_literal("Save As…").on_activate(Cmd::Save))
+                        .style(ButtonVariant::Regular),
+                )
+                .child(
+                    SplitButton::new()
+                        .item(MenuItem::new_literal("Run").on_activate(Cmd::Run))
+                        .item(MenuItem::new_literal("Debug").on_activate(Cmd::Debug))
+                        .enabled(false),
+                ),
+        );
+
         let buttons_group = ctx.add(
             VStack::new()
                 .spacing(8.0)
                 .add_child(buttons_row)
-                .add_child(buttons_row_disabled),
+                .add_child(buttons_row_disabled)
+                .add_child(split_buttons_row),
         );
 
         // --- Checkbox ---
@@ -1471,6 +1510,10 @@ fn main() {
             Cmd::Save => println!("Save"),
             Cmd::Cancel => println!("Cancel"),
             Cmd::LearnMore => println!("Learn more"),
+            Cmd::Run => println!("Run"),
+            Cmd::RunTests => println!("Run Tests"),
+            Cmd::RunCoverage => println!("Run with Coverage"),
+            Cmd::Debug => println!("Debug"),
         })
         .root(|tree| tree.add(WidgetCatalog::new()))
         .run();
