@@ -7,11 +7,47 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-default = ["widgets", "text", "i18n"]
+# Default set: widgets, text backend, i18n runtime, plus Arabic and
+# Hebrew fallback fonts so the internationalization demo and common
+# RTL cases work out of the box. Applications that want a Latin-only
+# minimal build can disable fonts via `default-features = false` and
+# re-add only the features they need (e.g. `features = ["widgets",
+# "text", "i18n"]` for text support without the Noto bundles).
+default = [
+    "widgets",
+    "text",
+    "i18n",
+    "fonts-arabic",
+    "fonts-hebrew",
+]
+
 widgets = ["dep:fern-widgets"]
 text = ["dep:fern-text", "fern-app/text"]
 i18n = ["dep:fern-i18n"]
 rich-text = ["widgets", "fern-widgets/rich-text"]
+
+# Font bundle features — forwarded to `fern-text`'s own feature set
+# via the `fern-text?/...` optional-dep syntax. The `?` means the
+# forwarding only activates when `fern-text` itself is in the build
+# (i.e., when the `text` feature is enabled); a user that only wants
+# i18n-without-text will see these as silent no-ops. Applications
+# enable the scripts they ship for and disable the rest.
+#
+# Each feature maps 1:1 to a feature of the same name on `fern-text`,
+# which in turn decides whether to `include_bytes!` the corresponding
+# Noto Sans variable font at compile time and register it with the
+# typesetter's fallback chain.
+fonts-arabic = ["fern-text?/fonts-arabic"]
+fonts-hebrew = ["fern-text?/fonts-hebrew"]
+fonts-thai = ["fern-text?/fonts-thai"]
+fonts-devanagari = ["fern-text?/fonts-devanagari"]
+fonts-cjk-sc = ["fern-text?/fonts-cjk-sc"]
+fonts-cjk-jp = ["fern-text?/fonts-cjk-jp"]
+fonts-cjk-kr = ["fern-text?/fonts-cjk-kr"]
+
+# Convenience meta-features, again forwarded to `fern-text`.
+fonts-all-non-cjk = ["fern-text?/fonts-all-non-cjk"]
+fonts-all = ["fern-text?/fonts-all"]
 
 [dependencies]
 fern-tokens = { workspace = true }
@@ -22,5 +58,13 @@ fern-render = { workspace = true }
 fern-platform = { workspace = true }
 fern-app = { workspace = true }
 fern-widgets = { workspace = true, optional = true }
-fern-text = { workspace = true, optional = true }
+# Declared directly (not via `workspace = true`) so we can set
+# `default-features = false` — Cargo rejects overriding
+# `default-features` on a workspace-inherited dep. fern-ui's own
+# feature flags are then the authoritative control over which Noto
+# Sans fonts get bundled: `default = ["fonts-arabic", "fonts-hebrew"]`
+# restores the out-of-the-box behavior, and downstream apps that use
+# `default-features = false` on fern-ui get a clean slate with no
+# Noto fonts bundled.
+fern-text = { path = "../fern-text", version = "0.1.0", optional = true, default-features = false }
 fern-i18n = { workspace = true, optional = true }

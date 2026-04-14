@@ -6,6 +6,43 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+# Default set: Latin/Cyrillic/Greek via Inter (always embedded), plus
+# Arabic and Hebrew fallback bundles so the internationalization demo
+# and common RTL cases work out of the box. Applications shipping a
+# Latin-only UI can opt out with `default-features = false`.
+default = ["fonts-arabic", "fonts-hebrew"]
+
+# Per-script fallback fonts. Each enables an `include_bytes!` of one
+# variable-weight Noto Sans font at compile time, registered with the
+# typesetter in `register_default_font` so text-typeset's automatic
+# `.notdef` fallback loop can cover mixed-script text without any
+# locale awareness.
+fonts-arabic = []
+fonts-hebrew = []
+# Defined but the font files are not yet in the fonts/ directory.
+# Enable one of these features and the build will fail loudly with a
+# missing-file error, making it obvious to drop the file in place.
+fonts-thai = []
+fonts-devanagari = []
+fonts-cjk-sc = []
+fonts-cjk-jp = []
+fonts-cjk-kr = []
+
+# Convenience meta-features.
+fonts-all-non-cjk = [
+    "fonts-arabic",
+    "fonts-hebrew",
+    "fonts-thai",
+    "fonts-devanagari",
+]
+fonts-all = [
+    "fonts-all-non-cjk",
+    "fonts-cjk-sc",
+    "fonts-cjk-jp",
+    "fonts-cjk-kr",
+]
+
 [dependencies]
 fern-canvas = { workspace = true }
 fern-tokens = { workspace = true }

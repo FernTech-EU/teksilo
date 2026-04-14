@@ -61,7 +61,17 @@ impl TypesetterBridge {
         }
     }
 
-    /// Create a bridge with the bundled default font (Noto Sans).
+    /// Create a bridge with the bundled default font (Inter) plus
+    /// every script-specific fallback font whose Cargo feature is
+    /// enabled (`fonts-arabic`, `fonts-hebrew`, …).
+    ///
+    /// Inter is the primary font — it's what the default `TextStyle`
+    /// asks for via `TypographyTokens::default().family = "Inter"` —
+    /// and covers Latin, Cyrillic, Greek, and Vietnamese. The
+    /// additional Noto Sans variable fonts are registered into the
+    /// same font registry so that `text-typeset`'s shaper-level
+    /// `.notdef` fallback loop can cover mixed-script text without
+    /// any locale awareness at the caller site.
     pub fn new_with_default_font() -> Self {
         let mut bridge = Self::new();
         bridge.register_default_font();
@@ -73,12 +83,67 @@ impl TypesetterBridge {
         self.typesetter.register_font(data)
     }
 
-    /// Register and set the bundled default font.
+    /// Register Inter as the primary default, then register every
+    /// feature-gated script-specific fallback font. The feature-gated
+    /// registrations discard their `FontFaceId` because fallback
+    /// eligibility only requires that a font be in the registry —
+    /// `text-typeset`'s `find_fallback_font` iterates every registered
+    /// font and picks the first one whose charmap covers a `.notdef`
+    /// glyph's codepoint.
     fn register_default_font(&mut self) {
-        let font_data = include_bytes!("../fonts/InterVariable.ttf");
-        let face_id = self.typesetter.register_font(font_data);
+        // Primary default: InterVariable covers Latin, Cyrillic, Greek,
+        // and Vietnamese. Used as the default font in
+        // `TypographyTokens`.
+        let inter_data = include_bytes!("../fonts/InterVariable.ttf");
+        let face_id = self.typesetter.register_font(inter_data);
         self.typesetter.set_default_font(face_id, 14.0);
         self.default_font = Some(face_id);
+
+        // Script-specific fallback fonts. Each bundle is feature-gated
+        // so a Latin-only app can opt out via `default-features = false`.
+        // The order of registration below is also the order in which
+        // `find_fallback_font` consults fonts when resolving a `.notdef`,
+        // so scripts that commonly co-occur with Latin (Arabic, Hebrew)
+        // go first for minor cache locality.
+        #[cfg(feature = "fonts-arabic")]
+        {
+            let data =
+                include_bytes!("../fonts/NotoSansArabic-VariableFont_wdth,wght.ttf");
+            let _ = self.typesetter.register_font(data);
+        }
+        #[cfg(feature = "fonts-hebrew")]
+        {
+            let data =
+                include_bytes!("../fonts/NotoSansHebrew-VariableFont_wdth,wght.ttf");
+            let _ = self.typesetter.register_font(data);
+        }
+        #[cfg(feature = "fonts-thai")]
+        {
+            let data =
+                include_bytes!("../fonts/NotoSansThai-VariableFont_wdth,wght.ttf");
+            let _ = self.typesetter.register_font(data);
+        }
+        #[cfg(feature = "fonts-devanagari")]
+        {
+            let data =
+                include_bytes!("../fonts/NotoSansDevanagari-VariableFont_wdth,wght.ttf");
+            let _ = self.typesetter.register_font(data);
+        }
+        #[cfg(feature = "fonts-cjk-sc")]
+        {
+            let data = include_bytes!("../fonts/NotoSansSC-VariableFont_wght.ttf");
+            let _ = self.typesetter.register_font(data);
+        }
+        #[cfg(feature = "fonts-cjk-jp")]
+        {
+            let data = include_bytes!("../fonts/NotoSansJP-VariableFont_wght.ttf");
+            let _ = self.typesetter.register_font(data);
+        }
+        #[cfg(feature = "fonts-cjk-kr")]
+        {
+            let data = include_bytes!("../fonts/NotoSansKR-VariableFont_wght.ttf");
+            let _ = self.typesetter.register_font(data);
+        }
     }
 
     /// Set the default font and size.
@@ -250,6 +315,128 @@ mod tests {
         assert!(layout.ascent > 0.0);
         assert!(layout.descent > 0.0);
         assert!((layout.ascent + layout.descent - layout.height).abs() < 0.01);
+    }
+
+    /// Arabic text renders with visible glyphs — regression test for
+    /// the default-font gap that the font-coverage plan fixes. Before
+    /// the fix, `register_default_font` loaded only Inter, which has
+    /// no Arabic glyph coverage, so every shaped codepoint produced a
+    /// `.notdef` with a zero-size atlas rect. After the fix,
+    /// `fonts-arabic` (default) registers Noto Sans Arabic as a
+    /// fallback font, and text-typeset's codepoint-based fallback
+    /// loop picks it up automatically.
+    ///
+    /// The test shapes an Arabic greeting and asserts (a) the total
+    /// advance is positive and (b) at least one glyph in the layout
+    /// rasterizes to a non-zero atlas rect, proving a real glyph was
+    /// found (not an invisible `.notdef`).
+    #[cfg(feature = "fonts-arabic")]
+    #[test]
+    fn arabic_text_renders_with_visible_glyphs() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let layout =
+            bridge.layout_single_line("مرحبا", &TextStyle::default(), None);
+        assert!(
+            layout.width > 0.0,
+            "Arabic text should produce a non-zero advance, got {}",
+            layout.width
+        );
+        let glyphs = bridge.ensure_glyphs(&layout);
+        assert!(
+            !glyphs.is_empty(),
+            "Arabic text should produce at least one glyph"
+        );
+        // A `.notdef` glyph has atlas dimensions of exactly 0.0 (the
+        // rasterizer produces an empty rect for missing outlines).
+        // A real shaped glyph has positive atlas width AND height.
+        let visible = glyphs
+            .iter()
+            .any(|g| g.atlas[2] > 0.0 && g.atlas[3] > 0.0);
+        assert!(
+            visible,
+            "no Arabic glyph rasterized to a visible atlas rect — \
+             is `fonts-arabic` enabled and the Noto Sans Arabic font \
+             registered via `register_default_font`?"
+        );
+    }
+
+    /// Regression test for a text-typeset bidi bug: Latin text embedded in
+    /// an Arabic string must not be visually reversed.
+    ///
+    /// Before the fix, `layout_single_line` passed the whole string to
+    /// rustybuzz as one run with `Direction::Auto`. rustybuzz inferred RTL
+    /// from the first strong Arabic char and reversed the entire buffer,
+    /// so "Alice" embedded in an Arabic string rendered as "ecilA".
+    ///
+    /// After the fix, the layout path splits text into UAX #9 bidi runs
+    /// in visual order and shapes each run with an explicit direction.
+    ///
+    /// This test shapes "Alice" on its own and "مرحبا Alice" together,
+    /// then asserts the Latin glyphs in the mixed string appear in the
+    /// same left-to-right order as the pure-Latin layout.
+    #[cfg(feature = "fonts-arabic")]
+    #[test]
+    fn latin_in_arabic_is_not_visually_reversed() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let style = TextStyle::default();
+
+        // Reference: pure-Latin "Alice" in LTR order.
+        let pure = bridge.layout_single_line("Alice", &style, None);
+        let pure_glyphs = bridge.ensure_glyphs(&pure);
+        assert_eq!(
+            pure_glyphs.len(),
+            5,
+            "expected 5 glyphs for 'Alice', got {}",
+            pure_glyphs.len()
+        );
+        let pure_widths: Vec<f32> = pure_glyphs.iter().map(|g| g.screen[2]).collect();
+
+        // Arabic-first mixed string: paragraph direction is RTL, so under
+        // UAX #9 the Latin embedding ends up visually to the LEFT of the
+        // Arabic. Its internal order must still be LTR (A, l, i, c, e).
+        let mixed = bridge.layout_single_line("مرحبا Alice", &style, None);
+        let mixed_glyphs = bridge.ensure_glyphs(&mixed);
+        assert!(
+            mixed_glyphs.len() > pure_glyphs.len(),
+            "mixed layout should contain at least the Latin glyphs plus Arabic"
+        );
+
+        // The first 5 glyphs in visual order should be the Latin cluster
+        // (leftmost in RTL paragraph). Their widths must match "Alice".
+        for (i, (pw, mg)) in pure_widths.iter().zip(mixed_glyphs.iter()).take(5).enumerate() {
+            let mw = mg.screen[2];
+            assert!(
+                (pw - mw).abs() < 0.5,
+                "Latin glyph {} width mismatch: pure={:.2}, mixed={:.2} \
+                 (Latin cluster in RTL paragraph is reversed — text-typeset bidi bug)",
+                i,
+                pw,
+                mw,
+            );
+        }
+    }
+
+    /// Hebrew mirrors the Arabic test — verifies that the
+    /// `fonts-hebrew` default feature actually registers the Noto
+    /// Sans Hebrew font and that the shaper's codepoint fallback
+    /// picks it up.
+    #[cfg(feature = "fonts-hebrew")]
+    #[test]
+    fn hebrew_text_renders_with_visible_glyphs() {
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let layout =
+            bridge.layout_single_line("שלום", &TextStyle::default(), None);
+        assert!(layout.width > 0.0);
+        let glyphs = bridge.ensure_glyphs(&layout);
+        let visible = glyphs
+            .iter()
+            .any(|g| g.atlas[2] > 0.0 && g.atlas[3] > 0.0);
+        assert!(
+            visible,
+            "no Hebrew glyph rasterized to a visible atlas rect — \
+             is `fonts-hebrew` enabled and the Noto Sans Hebrew font \
+             registered via `register_default_font`?"
+        );
     }
 
     #[test]
