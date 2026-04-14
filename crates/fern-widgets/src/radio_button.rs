@@ -12,14 +12,15 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+use fern_tokens::{Color, CornerRadius, VAlignment};
 
 use crate::button::InteractionState;
-use crate::primitives::{FixedSize, HStack, MinSize, RectWidget, TextWidget, ZStack};
+use crate::primitives::{FixedSize, HStack, MinSize, RectWidget, TextWidget, VStack, ZStack};
 
 /// A radio button that sets a shared `Signal<usize>` to its value when selected.
 pub struct RadioButton {
     label: Option<String>,
+    caption: Option<String>,
     value: usize,
     selected: Signal<usize>,
     enabled: bool,
@@ -32,6 +33,7 @@ impl RadioButton {
     pub fn new(value: usize, selected: Signal<usize>) -> Self {
         Self {
             label: None,
+            caption: None,
             value,
             selected,
             enabled: true,
@@ -51,6 +53,22 @@ impl RadioButton {
     #[doc(hidden)]
     pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Secondary explanatory text rendered below the label, left-aligned
+    /// with the label (not the radio circle). Uses the `small` /
+    /// `text_secondary` style. Has no effect unless `label(...)` is also set.
+    pub fn caption(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.caption = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `caption(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn caption_literal(mut self, text: impl Into<String>) -> Self {
+        self.caption = Some(text.into());
         self
     }
 
@@ -81,6 +99,7 @@ impl std::fmt::Debug for RadioButton {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RadioButton")
             .field("label", &self.label)
+            .field("caption", &self.caption)
             .field("value", &self.value)
             .finish()
     }
@@ -170,9 +189,30 @@ impl Widget for RadioButton {
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(theme.typography.body.clone())
-                .color(theme.colors.text_primary);
+                .color(theme.colors.text_primary)
+                .single_line();
             let label_id = ctx.add(label_widget);
-            row = row.add_child(label_id);
+
+            let label_column_id = if let Some(ref caption) = self.caption {
+                let caption_widget = TextWidget::new_literal(caption)
+                    .style(theme.typography.small.clone())
+                    .color(theme.colors.text_secondary);
+                let caption_id = ctx.add(caption_widget);
+                ctx.add(
+                    VStack::new()
+                        .spacing(2.0)
+                        .add_child(label_id)
+                        .add_child(caption_id),
+                )
+            } else {
+                label_id
+            };
+            row = row.add_child(label_column_id);
+        }
+        // Top-align so the radio circle sits next to the label's first line
+        // instead of the vertical center of the label+caption column.
+        if self.caption.is_some() && self.label.is_some() {
+            row = row.alignment(VAlignment::Top);
         }
 
         let row_id = ctx.add(row);

@@ -16,10 +16,12 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+use fern_tokens::{Color, CornerRadius, VAlignment};
 
 use crate::button::InteractionState;
-use crate::primitives::{FixedSize, HStack, IconWidget, MinSize, RectWidget, TextWidget, ZStack};
+use crate::primitives::{
+    FixedSize, HStack, IconWidget, MinSize, RectWidget, TextWidget, VStack, ZStack,
+};
 
 // ---------------------------------------------------------------------------
 // CheckState
@@ -108,6 +110,7 @@ impl std::fmt::Debug for CheckKind {
 /// A checkbox that toggles a `Signal<bool>` or cycles a `Signal<CheckState>`.
 pub struct Checkbox {
     label: Option<String>,
+    caption: Option<String>,
     kind: CheckKind,
     enabled: bool,
     tooltip_text: Option<String>,
@@ -120,6 +123,7 @@ impl Checkbox {
     pub fn new(checked: Signal<bool>) -> Self {
         Self {
             label: None,
+            caption: None,
             kind: CheckKind::TwoState(checked),
             enabled: true,
             tooltip_text: None,
@@ -135,6 +139,7 @@ impl Checkbox {
     pub fn tristate(state: Signal<CheckState>) -> Self {
         Self {
             label: None,
+            caption: None,
             kind: CheckKind::TriState(state),
             enabled: true,
             tooltip_text: None,
@@ -153,6 +158,22 @@ impl Checkbox {
     #[doc(hidden)]
     pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Secondary explanatory text rendered below the label, left-aligned
+    /// with the label (not the box). Uses the `small` / `text_secondary`
+    /// style. Has no effect unless `label(...)` is also set.
+    pub fn caption(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.caption = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `caption(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn caption_literal(mut self, text: impl Into<String>) -> Self {
+        self.caption = Some(text.into());
         self
     }
 
@@ -183,6 +204,7 @@ impl std::fmt::Debug for Checkbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Checkbox")
             .field("label", &self.label)
+            .field("caption", &self.caption)
             .field("kind", &self.kind)
             .field("enabled", &self.enabled)
             .finish()
@@ -328,9 +350,30 @@ impl Widget for Checkbox {
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(theme.typography.body.clone())
-                .color(theme.colors.text_primary);
+                .color(theme.colors.text_primary)
+                .single_line();
             let label_id = ctx.add(label_widget);
-            row = row.add_child(label_id);
+
+            let label_column_id = if let Some(ref caption) = self.caption {
+                let caption_widget = TextWidget::new_literal(caption)
+                    .style(theme.typography.small.clone())
+                    .color(theme.colors.text_secondary);
+                let caption_id = ctx.add(caption_widget);
+                ctx.add(
+                    VStack::new()
+                        .spacing(2.0)
+                        .add_child(label_id)
+                        .add_child(caption_id),
+                )
+            } else {
+                label_id
+            };
+            row = row.add_child(label_column_id);
+        }
+        // When a caption is present, top-align the row so the box sits next
+        // to the label's first line rather than the center of both lines.
+        if self.caption.is_some() && self.label.is_some() {
+            row = row.alignment(VAlignment::Top);
         }
 
         let row_id = ctx.add(row);
