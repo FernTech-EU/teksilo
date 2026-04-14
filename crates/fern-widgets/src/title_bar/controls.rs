@@ -110,7 +110,8 @@ impl Widget for ControlButton {
 
         let glyph_text = TextWidget::new_literal(self.glyph)
             .style(theme.typography.body.clone())
-            .color(self.fg);
+            .color(self.fg)
+            .single_line();
         let centred_glyph = ctx.add(Center::new().child(glyph_text));
 
         let stack = ctx.add(ZStack::new().add_child(bg_rect).add_child(centred_glyph));

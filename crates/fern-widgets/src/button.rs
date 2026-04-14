@@ -256,7 +256,9 @@ impl fern_core::widget::Widget for Button {
         };
 
         // Build the widget subtree
-        let text = TextWidget::new_literal(&self.label).bind_color(text_color);
+        let text = TextWidget::new_literal(&self.label)
+            .bind_color(text_color)
+            .single_line();
         let text_id = ctx.add(text);
 
         let button_style = theme.components.button;

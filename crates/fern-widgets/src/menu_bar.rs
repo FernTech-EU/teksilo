@@ -161,7 +161,8 @@ impl Widget for MenuBarTrigger {
 
         let label = TextWidget::new_literal(&self.label)
             .style(theme.typography.small.clone())
-            .bind_color(text_color);
+            .bind_color(text_color)
+            .single_line();
         let label_id = ctx.add(label);
 
         let menu_style = theme.components.menu;

@@ -119,7 +119,8 @@ impl Widget for Link {
 
         let text = TextWidget::new_literal(&self.text)
             .style(theme.typography.body.clone())
-            .bind_color(text_color);
+            .bind_color(text_color)
+            .single_line();
         let text_id = ctx.add(text);
 
         // 1px underline below the text

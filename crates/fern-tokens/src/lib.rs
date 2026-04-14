@@ -17,7 +17,8 @@ pub use components::{
     ComboBoxStyle, ComponentStyles, DialogStyle, DividerStyle, GroupBoxStyle, IconButtonStyle,
     LinkStyle, MenuStyle, NotificationStyle, PanelStyle, PopoverStyle, ProgressBarStyle,
     RadioStyle, ScrollBarStyle, SegmentedControlStyle, SliderStyle, SnackbarStyle,
-    SplitViewStyle, StatusBarStyle, TabStyle, TextAreaStyle, TextFieldStyle, ToggleStyle,
+    SplitButtonStyle, SplitViewStyle, StatusBarStyle, TabStyle, TextAreaStyle, TextFieldStyle,
+    ToggleStyle,
     ToolbarStyle, TooltipStyle, TreeListStyle, WizardStyle,
 };
 pub use layout::LayoutTokens;

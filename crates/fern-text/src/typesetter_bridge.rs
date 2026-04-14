@@ -3,7 +3,17 @@ use std::collections::HashMap;
 use fern_canvas::GlyphQuad;
 use fern_canvas::text_backend::{AtlasInfo, TextBackend, TextLayout};
 use fern_tokens::TextStyle;
-use text_typeset::{FontFaceId, SingleLineResult, TextFormat, Typesetter};
+use text_typeset::{FontFaceId, ParagraphResult, SingleLineResult, TextFormat, Typesetter};
+
+/// Which layout method produced the cache entry — separates the
+/// single-line and paragraph caches so a single-line truncated result
+/// never masquerades as a wrapped paragraph result (or vice versa).
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum LayoutMode {
+    SingleLine,
+    /// `max_lines` cap expressed as `u32::MAX` when unbounded.
+    Paragraph(u32),
+}
 
 /// Cache key for text layout results.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -13,10 +23,16 @@ struct LayoutCacheKey {
     font_size_bits: u32, // f32 as bits for Hash/Eq
     font_weight: u32,
     max_width_bits: Option<u32>,
+    mode: LayoutMode,
 }
 
 impl LayoutCacheKey {
-    fn new(text: &str, style: &TextStyle, max_width: Option<f32>, scale_factor: f32) -> Self {
+    fn new_single_line(
+        text: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+        scale_factor: f32,
+    ) -> Self {
         let scaled_size = style.size * scale_factor;
         Self {
             text: text.to_string(),
@@ -24,6 +40,26 @@ impl LayoutCacheKey {
             font_size_bits: scaled_size.to_bits(),
             font_weight: style.weight.0 as u32,
             max_width_bits: max_width.map(|w| (w * scale_factor).to_bits()),
+            mode: LayoutMode::SingleLine,
+        }
+    }
+
+    fn new_paragraph(
+        text: &str,
+        style: &TextStyle,
+        max_width: f32,
+        max_lines: Option<usize>,
+        scale_factor: f32,
+    ) -> Self {
+        let scaled_size = style.size * scale_factor;
+        let cap = max_lines.map(|n| n.min(u32::MAX as usize) as u32).unwrap_or(u32::MAX);
+        Self {
+            text: text.to_string(),
+            font_family: style.family.clone(),
+            font_size_bits: scaled_size.to_bits(),
+            font_weight: style.weight.0 as u32,
+            max_width_bits: Some((max_width * scale_factor).to_bits()),
+            mode: LayoutMode::Paragraph(cap),
         }
     }
 }
@@ -283,7 +319,7 @@ impl TextBackend for TypesetterBridge {
         style: &TextStyle,
         max_width: Option<f32>,
     ) -> TextLayout {
-        let cache_key = LayoutCacheKey::new(text, style, max_width, self.scale_factor);
+        let cache_key = LayoutCacheKey::new_single_line(text, style, max_width, self.scale_factor);
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -308,6 +344,54 @@ impl TextBackend for TypesetterBridge {
             descent: result.height - result.baseline,
             layout_key: key,
             line_count: 1,
+        };
+
+        self.layout_cache.insert(cache_key.clone(), layout.clone());
+        self.glyph_cache.insert(
+            key,
+            result
+                .glyphs
+                .iter()
+                .map(|g| GlyphQuad {
+                    screen: g.screen,
+                    atlas: g.atlas,
+                    color: g.color,
+                })
+                .collect(),
+        );
+        layout
+    }
+
+    fn layout_paragraph(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> TextLayout {
+        let cache_key =
+            LayoutCacheKey::new_paragraph(text, style, max_width, max_lines, self.scale_factor);
+
+        if let Some(cached) = self.layout_cache.get(&cache_key) {
+            return cached.clone();
+        }
+
+        self.had_text_activity = true;
+        let format = Self::to_text_format(style);
+        let result: ParagraphResult =
+            self.typesetter
+                .layout_paragraph(text, &format, max_width, max_lines);
+
+        let key = self.next_layout_key;
+        self.next_layout_key += 1;
+
+        let layout = TextLayout {
+            width: result.width,
+            height: result.height,
+            ascent: result.baseline_first,
+            descent: (result.height - result.baseline_first).max(0.0),
+            layout_key: key,
+            line_count: result.line_count.max(1),
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());

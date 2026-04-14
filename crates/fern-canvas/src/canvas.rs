@@ -37,6 +37,13 @@ impl Canvas {
         }
     }
 
+    /// Access the canvas's text backend, when one is set. Used by widgets
+    /// that need to measure or ellipsize text outside of the built-in
+    /// draw_text / draw_paragraph helpers.
+    pub fn text_backend(&self) -> Option<&Rc<RefCell<dyn TextBackend>>> {
+        self.text_backend.as_ref()
+    }
+
     // --- Tier 1: Axis-aligned rectangles (DecorationRect) ---
 
     /// Fill an axis-aligned rectangle with a solid color.
@@ -460,19 +467,24 @@ impl Canvas {
 
     // --- Paragraph drawing ---
 
-    /// Draw a multi-line paragraph of text within the given rectangle.
-    /// Returns the measured size of the laid-out text, or None if no text backend.
+    /// Draw a multi-line paragraph of text within the given rectangle,
+    /// wrapping at `rect.width`. Optionally capped at `max_lines` lines —
+    /// lines beyond the cap are silently dropped.
+    ///
+    /// Returns the total paragraph size, or `None` if no text backend.
     pub fn draw_paragraph(
         &mut self,
         text: &str,
         rect: Rect,
         style: &TextStyle,
         color: Color,
+        max_lines: Option<usize>,
     ) -> Option<crate::geometry::Size> {
         let backend = self.text_backend.as_ref()?;
         let mut backend = backend.borrow_mut();
 
-        let layout = backend.layout_paragraph(text, style, rect.width, None);
+        let max_width = (rect.width + 0.5).max(0.0);
+        let layout = backend.layout_paragraph(text, style, max_width, max_lines);
         let glyphs = backend.ensure_glyphs(&layout);
 
         for glyph in &glyphs {
@@ -1075,6 +1087,7 @@ mod tests {
             Rect::new(0.0, 0.0, 200.0, 100.0),
             &TextStyle::default(),
             Color::BLACK,
+            None,
         );
         assert!(result.is_none());
     }
@@ -1089,6 +1102,7 @@ mod tests {
             Rect::new(0.0, 0.0, 200.0, 100.0),
             &TextStyle::default(),
             Color::BLACK,
+            None,
         );
         assert!(result.is_some());
     }

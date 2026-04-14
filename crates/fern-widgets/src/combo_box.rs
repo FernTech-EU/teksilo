@@ -183,7 +183,8 @@ impl Widget for DropdownItem {
 
         let text = TextWidget::new_literal(&self.label)
             .style(theme.typography.body.clone())
-            .color(theme.colors.text_primary);
+            .color(theme.colors.text_primary)
+            .single_line();
         let text_id = ctx.add(text);
 
         let menu_style = theme.components.menu;
@@ -368,7 +369,8 @@ impl Widget for ComboBox {
         let label = TextWidget::new_literal("")
             .style(theme.typography.body.clone())
             .bind_text(label_text)
-            .bind_color(text_color);
+            .bind_color(text_color)
+            .single_line();
         let label_id = ctx.add(label);
 
         let chevron = IconWidget::chevron_down(12.0).color(theme.colors.text_primary.with_alpha(0.5));

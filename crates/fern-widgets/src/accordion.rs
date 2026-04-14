@@ -99,7 +99,8 @@ impl Widget for Accordion {
 
         let title_widget = TextWidget::new_literal(&self.title)
             .style(theme.typography.body.clone())
-            .color(theme.colors.text_primary);
+            .color(theme.colors.text_primary)
+            .single_line();
         let title_id = ctx.add(title_widget);
         let spacer_id = ctx.add(Spacer::new());
 

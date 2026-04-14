@@ -2,6 +2,38 @@ use fern_tokens::TextStyle;
 
 use crate::render_frame::GlyphQuad;
 
+/// How a [`TextWidget`](../fern_widgets/primitives/struct.TextWidget.html)
+/// should handle text that doesn't fit in the proposed width.
+///
+/// The default is [`Wrap`](TextOverflow::Wrap): text flows onto multiple
+/// lines and the widget grows vertically. Widgets that must stay on a
+/// single line (buttons, menu items, tab headers) opt out by setting
+/// [`Ellipsis(Trailing)`](EllipsisMode::Trailing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextOverflow {
+    /// Keep the text on one line; replace the overflowing region with an
+    /// ellipsis ("…") at the position indicated by [`EllipsisMode`].
+    Ellipsis(EllipsisMode),
+    /// Wrap the text across multiple lines. The widget grows vertically
+    /// to fit every line; horizontal width is bounded by the layout
+    /// proposal.
+    #[default]
+    Wrap,
+}
+
+/// Where the ellipsis character goes when a single-line text is too wide
+/// for its layout proposal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EllipsisMode {
+    /// `"Lorem ipsum do…"` — truncate at the right edge.
+    Trailing,
+    /// `"Lorem…dolor"` — keep the beginning and the end, ellipsize the
+    /// middle.
+    Middle,
+    /// `"…dolor sit amet"` — truncate at the left edge.
+    Leading,
+}
+
 /// Result of measuring text.
 #[derive(Debug, Clone)]
 pub struct TextLayout {

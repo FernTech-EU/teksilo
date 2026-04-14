@@ -3,6 +3,7 @@
 //! Non-generic, closure-based command erasure (same pattern as Button).
 //! Supports icons, shortcut labels, disabled state, and submenu triggers.
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use fern_canvas::{Rect, Size, SizeProposal};
@@ -19,8 +20,11 @@ use fern_tokens::Color;
 
 use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
-/// Type-erased command factory (same as Button).
-type CommandFactory = Box<dyn Fn(&mut EventContext)>;
+/// Type-erased command factory. Stored as `Rc` (not `Box`) so the closure
+/// can be cloned and shared — in particular with SplitButton, which reads
+/// the action out of a MenuItem via `MenuItem::action()` and re-fires it
+/// from its main region without disturbing the MenuItem's own use of it.
+type CommandFactory = Rc<dyn Fn(&mut EventContext)>;
 
 /// Interaction state for a menu item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +90,7 @@ impl MenuItem {
     /// Also stores the command for automatic shortcut label lookup from the ShortcutMap.
     pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
         let cmd_for_lookup = command.clone();
-        self.action = Some(Box::new(move |ctx: &mut EventContext| {
+        self.action = Some(Rc::new(move |ctx: &mut EventContext| {
             ctx.emit(command.clone());
         }));
         self.command_any = Some(Box::new(cmd_for_lookup));
@@ -98,8 +102,24 @@ impl MenuItem {
     /// Note: shortcut label auto-lookup is not available with this variant
     /// since there is no typed command to look up.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
-        self.action = Some(Box::new(f));
+        self.action = Some(Rc::new(f));
         self
+    }
+
+    /// Read the item's display label. Exposed so SplitButton (and any other
+    /// compound widget that embeds a MenuItem) can mirror the label in its
+    /// own chrome.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Clone out a shared handle to the activation closure. Returns `None`
+    /// when this MenuItem has no action (e.g. it's a submenu trigger). The
+    /// returned `Rc` aliases MenuItem's own internal handle — invoking it
+    /// has the same effect as the user clicking this menu item (minus the
+    /// overlay dismissal that the tap handler also performs).
+    pub fn action(&self) -> Option<Rc<dyn Fn(&mut EventContext)>> {
+        self.action.clone()
     }
 
     /// Set a leading icon.
@@ -282,7 +302,8 @@ impl Widget for MenuItem {
         // Label
         let label = TextWidget::new_literal(&self.label)
             .style(theme.typography.body.clone())
-            .bind_color(text_color.clone());
+            .bind_color(text_color.clone())
+            .single_line();
         row = row.child(label);
 
         // Stretch spacer — pushes trailing content to the right edge.
@@ -321,7 +342,8 @@ impl Widget for MenuItem {
             };
             let shortcut = TextWidget::new_literal(shortcut_text)
                 .style(theme.typography.body.clone())
-                .bind_color(shortcut_color);
+                .bind_color(shortcut_color)
+                .single_line();
             row = row.child(shortcut);
         }
 

@@ -236,7 +236,8 @@ impl Widget for DialogContent {
                 header = header.child(
                     TextWidget::new_literal(title)
                         .style(theme.typography.body_bold.clone())
-                        .color(theme.colors.text_primary),
+                        .color(theme.colors.text_primary)
+                        .single_line(),
                 );
             }
             if let Some(text) = self.supporting_text.clone() {

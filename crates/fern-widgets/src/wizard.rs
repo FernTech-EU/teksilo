@@ -197,14 +197,18 @@ impl Widget for WizardHeader {
             TextWidget::new_literal("")
                 .bind_text(progress)
                 .style(theme.typography.small.clone())
-                .color(theme.colors.text_secondary),
+                .color(theme.colors.text_secondary)
+                .single_line(),
         );
         let title_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(title)
                 .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary),
+                .color(theme.colors.text_primary)
+                .single_line(),
         );
+        // `supporting_text` wraps naturally — it's the caller's
+        // explanatory paragraph.
         let supporting_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(supporting_text)

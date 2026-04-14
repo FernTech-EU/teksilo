@@ -78,21 +78,24 @@ impl Widget for FixedSize {
     }
 
     fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        // Forward the bound width/height to the child as its size proposal so
+        // wrap-aware children (TextWidget in TextOverflow::Wrap, ScrollArea,
+        // etc.) can compute their intrinsic cross-axis size against the same
+        // constraint we will place them into. Unbound dimensions stay
+        // unspecified so the child falls back to its own natural size.
+        let bound_width = self.width.as_ref().map(|r| r.get());
+        let bound_height = self.height.as_ref().map(|r| r.get());
+        let child_proposal = SizeProposal {
+            width: bound_width,
+            height: bound_height,
+        };
         let child_size = self
             .child_id
-            .and_then(|id| ctx.child_size(id, SizeProposal::unspecified()))
+            .and_then(|id| ctx.child_size(id, child_proposal))
             .unwrap_or(Size::ZERO);
 
-        let w = self
-            .width
-            .as_ref()
-            .map(|r| r.get())
-            .unwrap_or(child_size.width);
-        let h = self
-            .height
-            .as_ref()
-            .map(|r| r.get())
-            .unwrap_or(child_size.height);
+        let w = bound_width.unwrap_or(child_size.width);
+        let h = bound_height.unwrap_or(child_size.height);
         Size::new(w, h)
     }
 

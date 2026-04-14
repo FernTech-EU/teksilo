@@ -36,7 +36,7 @@ pub mod prelude {
     pub use fern_canvas::{Point, Rect, Size, SizeProposal, Vec2};
 
     // Canvas and rendering
-    pub use fern_canvas::{Canvas, Paint, Path, RenderFrame};
+    pub use fern_canvas::{Canvas, EllipsisMode, Paint, Path, RenderFrame, TextOverflow};
 
     // Tokens
     pub use fern_tokens::{Color, CornerRadius, Theme};

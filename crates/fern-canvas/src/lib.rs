@@ -1,4 +1,5 @@
 pub mod canvas;
+pub mod ellipsis;
 pub mod geometry;
 pub mod paint;
 pub mod path;
@@ -13,4 +14,6 @@ pub use render_frame::{
     BlendMode, DecorationKind, DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData,
     PathEntry, RasterizedQuad, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
-pub use text_backend::{AtlasInfo, MockTextBackend, TextBackend, TextLayout};
+pub use text_backend::{
+    AtlasInfo, EllipsisMode, MockTextBackend, TextBackend, TextLayout, TextOverflow,
+};

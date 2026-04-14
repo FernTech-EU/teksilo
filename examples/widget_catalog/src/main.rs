@@ -679,13 +679,22 @@ impl Widget for WidgetCatalog {
 
         // --- Checkbox ---
         let cb_disabled_state = ctx.signal(true);
+        let cb_sounds = ctx.signal(true);
         let checkbox_group = ctx.add(
             VStack::new()
-                .spacing(4.0)
+                .spacing(8.0)
                 .child(
                     Checkbox::new(checkbox_checked.clone())
                         .label_literal("Accept terms")
                         .tooltip_literal("Click to accept the terms and conditions"),
+                )
+                .child(
+                    Checkbox::new(cb_sounds)
+                        .label_literal("Play notification sounds")
+                        .caption_literal(
+                            "Play a short chime when a new message arrives. \
+                             Muted automatically while you're in a call.",
+                        ),
                 )
                 .child(
                     Checkbox::new(cb_disabled_state)
@@ -695,6 +704,7 @@ impl Widget for WidgetCatalog {
                 .child(
                     Checkbox::tristate(tristate.clone())
                         .label_literal("Select all (tristate)")
+                        .caption_literal("Cycles unchecked → checked → indeterminate")
                         .tooltip_literal("Cycles: unchecked, checked, indeterminate"),
                 ),
         );
@@ -702,14 +712,22 @@ impl Widget for WidgetCatalog {
         // --- RadioButton ---
         let radio_group = ctx.add(
             VStack::new()
-                .spacing(4.0)
+                .spacing(8.0)
                 .child(
                     RadioButton::new(0, radio_selected.clone())
-                        .label_literal("Option A")
+                        .label_literal("Standard")
+                        .caption_literal("Recommended for most users — sensible defaults.")
                         .tooltip_literal("First option"),
                 )
-                .child(RadioButton::new(1, radio_selected.clone()).label_literal("Option B"))
-                .child(RadioButton::new(2, radio_selected.clone()).label_literal("Option C")),
+                .child(
+                    RadioButton::new(1, radio_selected.clone())
+                        .label_literal("Advanced")
+                        .caption_literal(
+                            "Expose every option, including experimental features \
+                             that may change between releases.",
+                        ),
+                )
+                .child(RadioButton::new(2, radio_selected.clone()).label_literal("Custom")),
         );
 
         // --- Toggle ---
@@ -919,6 +937,92 @@ impl Widget for WidgetCatalog {
                         .child(Badge::new_literal("3").color(c.text_error).text_color(Color::WHITE))
                         .child(Badge::new_literal("New").color(c.text_success).text_color(Color::WHITE))
                         .child(Badge::new_literal("Beta").color(c.text_warning)),
+                ),
+        );
+
+        // =====================================================================
+        // Section 4.5: Text overflow modes
+        //
+        // TextWidget defaults to wrap; other modes are opt-in via
+        // .overflow(TextOverflow::...) / .single_line().
+        // =====================================================================
+
+        const LOREM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing \
+                             elit. Sed do eiusmod tempor incididunt ut labore \
+                             et dolore magna aliqua. Ut enim ad minim veniam, \
+                             quis nostrud exercitation ullamco laboris nisi ut \
+                             aliquip ex ea commodo consequat.";
+
+        const LONG_TITLE: &str =
+            "A somewhat verbose section title that almost certainly will not fit";
+
+        let text_overflow_section = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new_literal("Text overflow")
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary)
+                        .single_line(),
+                )
+                .child(
+                    TextWidget::new_literal("Wrap (default) — grows vertically")
+                        .style(t.small.clone())
+                        .color(c.text_secondary)
+                        .single_line(),
+                )
+                .child(
+                    // Paragraph wraps inside a narrow FixedSize column so the
+                    // effect is obvious regardless of window size.
+                    FixedSize::new().bind_width(360.0_f32).child(
+                        TextWidget::new_literal(LOREM)
+                            .style(t.body.clone())
+                            .color(c.text_primary),
+                    ),
+                )
+                .child(
+                    TextWidget::new_literal("Wrap capped at 2 lines")
+                        .style(t.small.clone())
+                        .color(c.text_secondary)
+                        .single_line(),
+                )
+                .child(
+                    FixedSize::new().bind_width(360.0_f32).child(
+                        TextWidget::new_literal(LOREM)
+                            .style(t.body.clone())
+                            .color(c.text_primary)
+                            .max_lines(2),
+                    ),
+                )
+                .child(
+                    TextWidget::new_literal("Ellipsis — trailing / middle / leading")
+                        .style(t.small.clone())
+                        .color(c.text_secondary)
+                        .single_line(),
+                )
+                .child(
+                    FixedSize::new().bind_width(280.0_f32).child(
+                        TextWidget::new_literal(LONG_TITLE)
+                            .style(t.body.clone())
+                            .color(c.text_primary)
+                            .overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing)),
+                    ),
+                )
+                .child(
+                    FixedSize::new().bind_width(280.0_f32).child(
+                        TextWidget::new_literal(LONG_TITLE)
+                            .style(t.body.clone())
+                            .color(c.text_primary)
+                            .overflow(TextOverflow::Ellipsis(EllipsisMode::Middle)),
+                    ),
+                )
+                .child(
+                    FixedSize::new().bind_width(280.0_f32).child(
+                        TextWidget::new_literal(LONG_TITLE)
+                            .style(t.body.clone())
+                            .color(c.text_primary)
+                            .overflow(TextOverflow::Ellipsis(EllipsisMode::Leading)),
+                    ),
                 ),
         );
 
@@ -1276,6 +1380,8 @@ impl Widget for WidgetCatalog {
                 .child(Divider::new())
                 .add_child(display_section)
                 .child(Divider::new())
+                .add_child(text_overflow_section)
+                .child(Divider::new())
                 .add_child(containers_section)
                 .child(Divider::new())
                 .add_child(nav_section)
@@ -1550,7 +1656,7 @@ mod tests {
     #[test]
     fn catalog_missing_text_candidates_produce_bright_pixels_offscreen() {
         // Render at the max 2 K texture size (2048 rows) instead of 700 so
-        // the labels this test probes ("Rust", "A1", "Option A") still fit
+        // the labels this test probes ("Rust", "A1", "Standard") still fit
         // in the captured viewport regardless of how many sections are
         // stacked above them. wgpu's default max texture dimension is 2048.
         const TEST_HEIGHT: u32 = 2048;
@@ -1656,7 +1762,7 @@ mod tests {
         let pixels =
             test_support::read_texture_rgba(&device, &queue, &texture, 900, TEST_HEIGHT);
 
-        for label in ["Rust", "A1", "Option A"] {
+        for label in ["Rust", "A1", "Standard"] {
             let id = tree
                 .find_by_label(label)
                 .unwrap_or_else(|| panic!("expected to find text node for {label:?}"));
