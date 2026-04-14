@@ -178,11 +178,3 @@ old/
 # qleany specific
 temp_manifest.yaml
 tested_project
-
-# LLM/AI tools
-.claude/
-.cursor/
-.copilot/
-.aider*
-.codeium/
-.continue/
