@@ -222,30 +222,62 @@ Substantially delivered. Fluent-based translation runtime with compile-time key 
 
 ## Milestone 8: Rich Text Editor
 
-**Goal:** A functional rich text editor using text-document and text-typeset, with formatting toolbar and context menu. All UI strings use the `tr!` macro from Milestone 7.
+**Goal:** A functional rich text widget using text-document and text-typeset, with formatting toolbar and context menu for the editable preset and a read-only preset for documentation displays, help panels, and message rendering. All UI strings use the `tr!` / `tr_widget!` macros from Milestone 7.
 
 **Delivers:**
 
-RichTextEditor widget (fern-widgets, behind `rich-text` feature flag). Integration of text-document's TextCursor with FernUI's event system. Keyboard input for insertion and deletion. Mouse click/drag for cursor positioning and selection. Multi-cursor support. Formatting toolbar connected via typed commands (Bold, Italic, Heading — all labels via `tr_widget!` against fern-widgets' bundle or `tr!` for application-level toolbars). Context menu: Cut, Copy, Paste, Select All. Text selection rendering via text-typeset's DecorationRect. Syntax highlighting via text-document's Highlighter trait. Undo/redo integration: widget-level typing coalescing. Scrolling via text-typeset's viewport-scoped rendering inside an editor-owned scroll bar pair (not a ScrollArea — see architecture §27.10 for why). Canvas::draw_render_frame() embedding text-typeset's output.
+`RichTextEditor` widget (fern-widgets, behind `rich-text` feature flag) with **two construction presets** that share a single implementation:
 
-RichTextView (read-only sibling). Same rendering pipeline, no editing inputs. Used for documentation display, message rendering, etc.
+- **`RichTextEditor::editor(document, typesetter)`** — the editable preset. Full command filter (Bold, Italic, Heading, list insertion, table insertion, etc.), blinking caret, `Role::MultilineTextInput`, full clipboard (cut/copy/paste/select-all), IME composition hooks, undo/redo stack, debounced `text_changed` signals.
+- **`RichTextEditor::read_only(document, typesetter)`** — the read-only preset. Command filter rejecting every mutating command, non-blinking caret (static on focus for screen-reader navigation, or hidden), `Role::Document`, copy/select-all clipboard only, no undo stack. Link click activation still works — it is the main interaction in a read-only view.
+
+Both presets produce the same Rust type, share the same arena node structure, the same paint pipeline, the same hit-testing logic, the same scroll bar pair, and the same frame-loop bridge from document events to the reactive Signal model. The preset machinery configures a `CommandFilter`, a `CaretPolicy`, an `AccessibilityRole`, and a `ClipboardPolicy` at construction time; the rest of the implementation is unaware of which preset built it. There is no `read_only: bool` field, and there is no runtime toggle — switching a widget from editable to read-only requires a composite rebuild. See architecture §27.10.1 for the rationale.
+
+Editor functionality: integration of text-document's TextCursor with FernUI's event system. Keyboard input for insertion and deletion. Mouse click/drag for cursor positioning and selection. Double-click word selection, triple-click paragraph selection. Multi-cursor support. Formatting toolbar connected via typed commands (labels via `tr!` for application-level toolbars, or `tr_widget!` if the framework eventually ships a built-in toolbar). Context menu: Cut, Copy, Paste, Select All. Text selection rendering via text-typeset's DecorationRect. Syntax highlighting via text-document's Highlighter trait. Undo/redo with widget-level typing coalescing. Scrolling via text-typeset's viewport-scoped rendering inside an editor-owned scroll bar pair (not a ScrollArea — see architecture §27.10 for the circular-dependency reason). `Canvas::draw_render_frame()` embedding text-typeset's output.
 
 Clipboard: platform-level read/write of text via fern-platform. Cut/Copy/Paste (Ctrl+X/C/V, ⌘X/C/V on macOS). Plain text clipboard for this milestone — rich-format clipboard (RTF, HTML) is a post-milestone refinement.
 
-**Blocked by:** text-document and text-typeset integration work (the crates exist but the integration surface into fern-widgets is new). ContextMenu from Milestone 4 (done) for right-click menu. Clipboard integration in fern-platform.
+**Recommended decomposition (per architecture §27.10.16):**
+
+- **M8a: read-only preset.** Implement the policy-preset machinery (`CommandFilter`, `CaretPolicy`, `AccessibilityRole`, `ClipboardPolicy`) and the `RichTextEditor::read_only(...)` constructor. This delivers a usable read-only widget backed by the full shared core (document + typesetter ownership, frame loop bridge, scroll bar pair, the four-pass paint pipeline, hit testing). Validates the architectural approach without the complications of editing, undo, IME, or formatting commands.
+- **M8b: editor preset.** Add the `RichTextEditor::editor(...)` constructor with the editable command filter, cursor mutation commands, undo/redo, debounced `text_changed`, drag-select with auto-scroll, clipboard mutation, and the typed-command builder methods. No file from M8a is rewritten — only extended.
+
+**Blocked by:** text-document and text-typeset integration work (the crates exist but the integration surface into fern-widgets is new). ContextMenu from Milestone 4 (done). Clipboard integration in fern-platform.
 
 **Tests:**
+
+Shared across both presets:
+- Text selection via mouse click-drag matches TextCursor range
+- Double-click selects word, triple-click selects paragraph
+- Link click activation emits the declared `on_link_clicked` command
+- Copy places selected text on clipboard in both presets
+- Scroll bars integrate correctly with editor-owned scroll signals
+- AccessKit: selection and caret position exposed via `set_text_selection` and `set_caret_position`
+
+Read-only preset only:
+- Typing a character is rejected (no document mutation)
+- Cut, Paste, and Delete commands are rejected
+- Undo/Redo are rejected (no undo stack to consult)
+- Accessibility role is `Role::Document`, not `Role::MultilineTextInput`
+- Screen reader focus does not enter forms-navigation mode
+- Static caret is visible on focus (if the widget was constructed with keyboard navigation enabled)
+
+Editor preset only:
 - Typing produces correct document mutations
 - Formatting commands apply to selection and are reflected in rendering
 - Undo reverses last operation, Redo re-applies
 - Undo coalescing: consecutive character insertions grouped into one undo step
-- Selection rendering matches TextCursor range
 - Context menu Cut/Copy/Paste work with clipboard
 - Toolbar and menu labels respond to locale changes
 - Highlighter colors propagate through text-typeset to render output
 - RichTextEditor accepts externally-owned TextDocument reference
 - Application retains full access to TextDocument API
-- AccessKit: `Role::MultilineTextInput` with text value, caret position, selection
+- Caret blinks at the configured rate via `tree.advance_time()`
+- Accessibility role is `Role::MultilineTextInput`
+- `Action::SetValue` replaces document content
+
+Mixed:
+- Same TextDocument bound to an `editor()` widget and a `read_only()` widget in the same window: edits in the editor widget immediately appear in the read-only widget via the shared document-version Signal
 
 ---
 

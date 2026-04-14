@@ -1165,21 +1165,14 @@ pub trait GestureRecognizer {
     fn process(&mut self, event: &RawPointerEvent) -> GestureResult;
     fn reset(&mut self);
     fn priority(&self) -> u32;
-    // Time-driven recognizers (e.g. long-press) override these:
-    fn tick(&mut self, now: Instant) -> GestureResult { GestureResult::Pending }
-    fn next_deadline(&self) -> Option<Instant> { None }
 }
 ```
 
-Built-in recognizers: tap, double-tap, long-press, drag, and swipe. Priorities: tap=10, double-tap=15, drag=20, long-press=25, swipe=30 — higher priorities win arbitration, so a long-press beats a drag that would otherwise start at the same threshold.
+Built-in recognizers include tap, double-tap, long-press, drag, pinch, and swipe. When multiple recognizers could match the same input (tap vs. drag vs. long-press), they run in parallel with priority-based arbitration. When one commits, the others reset.
 
-**Arbitration.** When multiple recognizers compete on the same widget they run in parallel. On a new `Down` each recognizer gets a fresh chance (the per-arena `failed` flag clears), but per-sequence state is left alone so cross-sequence recognizers such as `DoubleTapRecognizer` (which must remember the first tap across a full `Down → Up → Down → Up`) keep working. When one recognizer commits, the others are reset; the winner keeps its state so multi-event gestures like drag can continue emitting `Moved` / `Ended`.
+On desktop, most trackpad gestures arrive as already-recognized events from the OS (winit's `TouchpadMagnify`, `TouchpadRotate`). The recognizer pipeline becomes essential for touch targets.
 
-**Time-driven recognizers.** `LongPressRecognizer` cannot fire from a single pointer event — it needs the event loop to wake it after the press threshold. The recognizer stores `down_time` on `Down` and exposes `next_deadline()`; the tree surfaces the earliest pending deadline through `WidgetTree::next_gesture_deadline`, and `fern-app` folds it into the global `next_timer_deadline` so winit's `ControlFlow::WaitUntil` wakes the loop in time. On wake-up `fern-app` calls `WidgetTree::tick_gestures(Instant::now())`, which walks every arena, calls `tick` on the recognizers, and dispatches the recognized gesture through the same handler routing as a pointer-driven recognition.
-
-**Pinch and rotation.** Desktop trackpad pinch and rotation arrive as already-recognized events from the OS (winit's `TouchpadMagnify`, `RotationGesture`). `fern-platform` translates them into `WidgetEvent::Gesture { gesture: PinchStarted/Changed/Ended }`, which the event dispatcher routes directly to the hovered widget's `on_pinch` handler. No pinch recognizer runs on the raw pointer stream on desktop — that path is reserved for touch targets, which the framework does not target yet.
-
-Gesture recognizers are pure state machines with no platform dependencies, making them trivially unit-testable. Time-driven ones are tested via the explicit `Instant` parameter on `tick`.
+Gesture recognizers are pure state machines with no platform dependencies, making them trivially unit-testable.
 
 ---
 
@@ -2946,21 +2939,34 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 This section is longer than other widget catalog entries because the rich text editor is the most architecturally distinctive widget in FernUI. It cannot use ScrollArea, it cannot delegate text layout to TextWidget, and its frame loop has to bridge text-document's deferred event model into FernUI's reactive Signal model. The design below is informed by `godot-rich-text`, a working reference implementation of the same `text-document` + `text-typeset` integration in Godot 4 (~2,100 lines of editor logic, plus a 780-line read-only viewer).
 
-#### 27.10.1 Two Widgets: RichTextView and RichTextEditor
+#### 27.10.1 One Widget, Two Construction Presets
 
-FernUI ships two text editing widgets, both feature-gated behind the `[rich-text]` cargo feature.
+FernUI ships a single rich text widget, `RichTextEditor`, feature-gated behind the `[rich-text]` cargo feature. The widget has two public constructors that bundle different **policy presets** — a command filter, a caret policy, an accessibility role, and a clipboard policy — at construction time. There is no separate `RichTextView` type and no runtime-mutable `read_only` flag.
 
-**`RichTextView`** is the read-only display widget. It owns a `TextDocument` (loaded from plain text, HTML, or markdown), a `Typesetter` for layout, and an optional read-only `TextCursor` for selection. It supports text selection via mouse drag, double-click word selection, triple-click paragraph selection, copy to clipboard, link click detection, and image click detection. It does not support editing, IME, or formatting commands. It is the right starting point for documentation viewers, help panels, message displays, log readers, and any case where text content needs rich rendering without modification. Approximately 60% of the editor's code is shared with the viewer and lives in a common module.
+**`RichTextEditor::editor(document)`** produces an editable widget. All editing commands accepted. Caret blinks. Accessibility role is `Role::MultilineTextInput`. Full clipboard support (cut, copy, paste). IME composition hooks active (even when IME itself is deferred to a post-M9 refinement; see §27.10.14). Undo stack active. This is the foundation for the writer-IDE use case (Atelier, novelist tools), code editors, note-taking applications, and any case where the user authors rich content.
 
-**`RichTextEditor`** is the editable widget. It extends `RichTextView` with cursor positioning, character insertion, deletion, formatting commands (bold, italic, underline, headings, lists, tables), undo/redo, IME composition, paste with format preservation, and a debounced text-changed notification. It is the foundation for the writer-IDE use case (Atelier, novelist tools), code editors, note-taking applications, and any case where the user authors rich content.
+**`RichTextEditor::read_only(document)`** produces a non-editing display widget. The command filter rejects every mutating command. The caret does not blink — it is either static (visible on focus for screen-reader navigation) or hidden entirely, depending on whether the application wants keyboard navigation. Accessibility role is `Role::Document`. Clipboard is limited to copy and select-all. No undo stack (nothing to undo). Link click activation still works (and is in fact the main interaction in a read-only view). This is the right starting point for documentation viewers, help panels, message displays, log readers, and any case where text content needs rich rendering without modification.
 
-Both widgets are constructed in `build()` and own their `TextDocument`, `Typesetter`, and `TextCursor` as struct fields. The document can also be externally owned and passed in via constructor, allowing multiple widgets to share a single document or the application to retain access for save/load operations.
+Both constructors produce the same Rust type, share the same arena node structure, use the same paint pipeline, the same hit-testing logic, the same scroll bar pair, the same frame loop bridge, and the same ~60% of shared code that would otherwise justify a separate `RichTextView` widget. The difference is entirely in the policy bundle selected at construction.
+
+**Why presets instead of a boolean flag.** A `read_only: bool` field suggests runtime togglability, which is a trap. The real policies that differ between "read-only" and "editable" are not one bit of state but four independent decisions:
+
+- **Command filter** — which typed commands are accepted and dispatched to the cursor.
+- **Caret policy** — blinking, static visible, or hidden, plus whether the caret participates in keyboard navigation.
+- **Accessibility role** — `Role::Document` vs. `Role::MultilineTextInput`. Critically important because screen readers enter forms-navigation mode on focus for `MultilineTextInput` roles, announcing "editing" and expecting typed input. Reporting `MultilineTextInput` for a read-only widget is a real accessibility bug.
+- **Clipboard policy** — which clipboard operations (cut, copy, paste, select-all) are allowed.
+
+A single boolean would have to be consulted in at least four places (command dispatch, paint, accessibility, clipboard setup), with nothing preventing a future contributor from adding a fifth branch and forgetting one of them. The named-constructor approach sets every policy once, at construction, and the widget implementation never sees a boolean — it sees a `CommandFilter`, a `CaretPolicy`, an `AccessibilityRole`, and a `ClipboardPolicy`, each consulted where it belongs.
+
+**Why not runtime-toggleable.** Toggling between read-only and editable at runtime creates a set of nasty transitional questions with no clean answers: what happens to the blinking caret animation when the flag flips mid-blink, what happens to an in-progress IME composition, what happens to the undo stack, what happens during a drag-selection, what does the accessibility role flip do to a focused screen reader. All of these have to be handled for a runtime toggle to be correct, and none of them have obvious right answers. The named-constructor design sidesteps all of this: once a `RichTextEditor::read_only(doc)` is built, it stays read-only for its entire lifetime. An application that needs the semantic of toggling editability — a document that becomes editable after a permission check, for example — destroys the widget and rebuilds it through composite rebuild, with the document reference surviving intact because it is externally owned.
+
+**Future presets.** The preset machinery naturally accommodates additional construction modes without breaking the existing two. A hypothetical `RichTextEditor::comments_only(doc, comment_regions)` could accept edits only inside marked regions by configuring the command filter to reject commands whose cursor position falls outside the regions. A `RichTextEditor::restricted(doc, filter)` could accept an application-supplied command filter directly for specialized cases. None of these would require touching the existing `editor()` / `read_only()` constructors — each preset is an independent bundle of policies over the same shared widget core.
 
 ```rust
+// Editable — full rich text editor.
 let editor = ctx.add(
-    RichTextEditor::new(document.clone(), shared_typesetter.clone())
+    RichTextEditor::editor(document.clone(), shared_typesetter.clone())
         .wrap_mode(WrapMode::Word)
-        .editable(true)
         .zoom(1.0)
         .on_text_changed(AppCmd::DocumentMarkDirty)
         .on_link_clicked(|href| AppCmd::OpenUrl(href.into()))
@@ -2968,7 +2974,17 @@ let editor = ctx.add(
             AppCmd::UpdateUndoButtons { can_undo, can_redo }
         })
 );
+
+// Read-only — same widget type, different construction preset.
+let viewer = ctx.add(
+    RichTextEditor::read_only(documentation_doc.clone(), shared_typesetter.clone())
+        .wrap_mode(WrapMode::Word)
+        .zoom(1.0)
+        .on_link_clicked(|href| AppCmd::OpenDocsUrl(href.into()))
+);
 ```
+
+The document can be externally owned and passed in via either constructor, allowing multiple widgets to share a single document or the application to retain access for save/load operations. A common pattern is one `RichTextEditor::editor(doc)` for authoring and a second `RichTextEditor::read_only(doc)` bound to the same document as a preview pane — edits in the author widget appear in the preview via the same reactive document-version Signal that drives the editor's own rendering.
 
 #### 27.10.2 The Triple Ownership Model
 
@@ -3346,34 +3362,40 @@ The editor handles IME via its `on_focus` handler: gaining focus enables IME via
 
 #### 27.10.15 Accessibility
 
-Both `RichTextView` and `RichTextEditor` declare `Role::MultilineTextInput` (or `Role::Document` for the read-only viewer) with the following AccessKit properties:
+The widget's AccessKit role is determined by the construction preset, not by a runtime flag:
+
+- **`RichTextEditor::editor(...)`** declares `Role::MultilineTextInput` and sets `set_multiline(true)`. Screen readers enter forms-navigation mode on focus and announce the widget as an editable multi-line text field.
+- **`RichTextEditor::read_only(...)`** declares `Role::Document` and sets `set_multiline(true)`. Screen readers treat it as a document to be read, not a form field to be filled.
+
+Both presets expose the same AccessKit properties for the underlying content:
 
 - `set_value(text)` — the plain-text content of the document.
 - `set_text_selection(range)` — the current selection range as a character offset pair.
-- `set_caret_position(offset)` — the caret position as a character offset.
-- `set_read_only(true)` for `RichTextView`.
-- `set_multiline(true)` for both.
-- `Action::SetValue` — handled by replacing the document content.
+- `set_caret_position(offset)` — the caret position as a character offset, for presets where the caret participates in navigation.
 - `Action::SetTextSelection` — handled by setting the cursor's anchor and position.
 - `Action::ScrollIntoView` — handled by adjusting the scroll signals.
 
+The `editor()` preset additionally handles `Action::SetValue` by replacing the document content, and sets `set_read_only(false)` so screen readers know the widget accepts typed input. The `read_only()` preset sets `set_read_only(true)` and does not handle `Action::SetValue` (the action is silently ignored if dispatched, rather than overwriting the document).
+
 Screen readers can read the entire document content via `set_value` and track the caret position for keyboard navigation. Format information (bold, italic, headings) is not exposed via AccessKit in the first version because AccessKit's text-attribute support is platform-specific and incomplete. The plain-text representation is sufficient for the most common screen reader use cases.
+
+**Why this matters for accessibility correctness.** Reporting `Role::MultilineTextInput` from a widget that does not accept input is a real accessibility bug — screen readers will announce "editing" on focus and enter forms-navigation mode, promising the user a text field that does nothing when they type. Reporting `Role::Document` from an editable widget would have the opposite bug: screen readers would treat the widget as read-only content and would not switch to forms-navigation mode, making typing feel broken. The preset-based design makes the right role an unambiguous consequence of which constructor was used, rather than a boolean flag that could drift out of sync with the widget's actual command acceptance.
 
 #### 27.10.16 What This Means for Milestone 8 Implementation
 
 Milestone 8 is significantly larger than other milestones because of the editor's complexity. The recommended decomposition is:
 
-**M8a: RichTextView** — read-only viewer with text selection, link/image click events, scroll bar integration, the frame loop pattern, the three-tier render strategy, and the document version Signal. This validates the architectural approach (document + typesetter ownership, frame loop bridge, no ScrollArea, dual scroll bars) without the complications of editing, undo, IME, or formatting. Approximately 60% of the editor's eventual code lives in shared modules used by both widgets.
+**M8a: Read-only preset** — `RichTextEditor::read_only(...)` with text selection, link/image click events, scroll bar integration, the frame loop pattern, the three-tier render strategy, and the document version Signal. This validates the architectural approach (document + typesetter ownership, frame loop bridge, no ScrollArea, dual scroll bars) without the complications of editing, undo, IME, or formatting commands. The command filter, caret policy, accessibility role, and clipboard policy bundle — i.e. the policy-preset machinery itself — is designed and implemented in this stage, so that M8b's `editor()` constructor is a second preset layered over the same core rather than a second widget.
 
-**M8b: RichTextEditor** — adds cursor positioning, character insertion, deletion, formatting commands, undo/redo, debounced signals, click counting for double/triple click, sticky preferred X, drag-select with auto-scroll, plain-text clipboard, and the typed-command builder methods.
+**M8b: Editor preset** — `RichTextEditor::editor(...)` adds the editable command filter, cursor positioning, character insertion, deletion, formatting commands, undo/redo, debounced `text_changed` signals, click counting for double/triple click, sticky preferred X, drag-select with auto-scroll, plain-text clipboard mutations, and the typed-command builder methods.
 
-Both substages share the same module structure (`fern-widgets/src/rich_text/`) with files for `view.rs` (RichTextView), `editor.rs` (RichTextEditor), `frame_loop.rs` (the per-frame effect logic, shared), `paint.rs` (the four-pass render frame walker, shared), `hit_test.rs` (region dispatch, shared), and `keyboard.rs` (the editor's key handler, editor-only).
+Both stages share the same module structure (`fern-widgets/src/rich_text/`) with files for `lib.rs` (the `RichTextEditor` type and its two public constructors), `policy.rs` (the `CommandFilter`, `CaretPolicy`, `AccessibilityRole`, `ClipboardPolicy` types and the two preset bundles), `frame_loop.rs` (the per-frame effect logic), `paint.rs` (the four-pass render frame walker), `hit_test.rs` (region dispatch), and `keyboard.rs` (the keyboard handler, which consults the command filter before dispatching to the cursor). The M8a stage produces a usable read-only widget; the M8b stage adds the editor preset without modifying any file from M8a — it only extends `policy.rs` with the editable bundle and adds editor-only methods to `keyboard.rs`.
 
-The Godot reference at github.com/jacquetc/godot-rich-text is the working implementation of this same design in a different framework. It is approximately 2,100 lines for the editor and 780 lines for the viewer, with another 580 lines of shared bridge/input/fonts code. The FernUI port should be similar in size (~3,500 lines total) with most of the logic translating directly: Godot signals become typed commands, `queue_redraw()` becomes Signal mutations, `_process(delta)` becomes a frame-tick effect, native scroll bar children become FernUI ScrollBar widgets, and the rest is mechanical.
+The Godot reference at github.com/jacquetc/godot-rich-text is the working implementation of this same design in a different framework. It is approximately 2,100 lines for the editor and 780 lines for the viewer, with another 580 lines of shared bridge/input/fonts code. In the Godot implementation, the editor and viewer are two separate classes because GDScript has no clean mechanism for a type with multiple named constructors that bundle different behavior. FernUI's Rust implementation collapses the two into one type with two constructors; the overall line count is similar (~3,500 lines), but the split between "shared" and "editor-specific" is cleaner because the policy types mediate the interface rather than inheritance.
 
 ---
 
-**TextInput** — Milestone 9 widget, plain-text specialization of `RichTextEditor`. Constructed by configuring a `RichTextEditor` with formatting commands disabled (the command filter rejects Bold/Italic/Heading at the cursor level), Enter key remapped to `on_submit` instead of `cursor.insert_block()`, and an optional single-line constraint that rejects Enter entirely. Bound to a `Signal<String>` via two-way binding with the underlying TextDocument's plain-text representation. Cursor rendering, selection, keyboard editing, and clipboard are all inherited from RichTextEditor — TextInput is a thin configuration layer, not a reimplementation. NumberInput/SpinBox is TextInput plus increment/decrement buttons plus a numeric validation filter on character input. IME is deferred (see 27.10.14). Accessibility: `Role::TextInput` with `set_value`, `set_text_selection`, `Action::SetValue`.
+**TextInput** — Milestone 9 widget, plain-text specialization of `RichTextEditor`. A natural fit for the policy-preset machinery introduced in M8 (§27.10.1): TextInput is a thin wrapper that constructs a `RichTextEditor` with a command filter rejecting formatting commands (Bold, Italic, Heading), an Enter key handler that emits `on_submit` instead of inserting a new block, and an optional single-line constraint that rejects Enter entirely. Bound to a `Signal<String>` via two-way binding with the underlying TextDocument's plain-text representation. Cursor rendering, selection, keyboard editing, and clipboard are all inherited from RichTextEditor — TextInput is a thin configuration layer, not a reimplementation. Whether TextInput exposes itself as its own public type or as a third `RichTextEditor::plain_text(...)` constructor preset is a judgement call for M9 — the former gives TextInput a distinct name and builder methods, the latter emphasizes the shared implementation. Either way, the underlying code is the same. NumberInput/SpinBox is TextInput plus increment/decrement buttons plus a numeric validation filter on character input. IME is deferred (see 27.10.14). Accessibility: `Role::TextInput` with `set_value`, `set_text_selection`, `Action::SetValue`.
 
 ### 27.11 Platform-Dependent (`fern-platform/`, `fern-app/`)
 
@@ -3506,11 +3528,6 @@ pub trait WidgetBuilder: Widget + Sized {
     fn on_double_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
     fn on_long_press(self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self;
     fn on_drag(self, f: impl FnMut(DragPhase, &mut EventContext) + 'static) -> Self;
-    fn on_swipe(
-        self,
-        f: impl FnMut(SwipeDirection, f32, &mut EventContext) + 'static,
-    ) -> Self;
-    fn on_pinch(self, f: impl FnMut(PinchPhase, &mut EventContext) + 'static) -> Self;
 
     // Focus and keyboard
     fn on_focus(self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self;
@@ -3538,7 +3555,7 @@ pub trait WidgetBuilder: Widget + Sized {
 
 Handler attachment works by storing closures temporarily on the widget value (via a generic metadata wrapper or a separate `HandlerSet` struct stored alongside the widget). When `BuildContext::add()` or `WidgetTree::add()` inserts the widget into the arena, the handlers are transferred to the `WidgetNode`. This is the same mechanism currently used for `take_visible_when()` and `take_pending_children()`, generalized to all node metadata.
 
-**How dispatch works.** The framework's event dispatch path (preview pass root → target, bubble pass target → root) is unchanged. At each node, instead of calling `node.widget.event(event, ctx)`, the framework checks which handler is relevant for the event type and calls it. A `PointerDown`/`PointerUp` sequence on a node with `on_tap` feeds through a `TapRecognizer` (attached automatically when `on_tap` is called) and invokes the handler when the recognizer reports a recognized tap. A `PointerEnter`/`PointerLeave` on a node with `on_hover` invokes the hover handler. The gesture recognizer infrastructure (`TapRecognizer`, `DragRecognizer`, `GestureArena`) is used internally — the widget author never instantiates a recognizer. `on_pinch` and `on_swipe` receive pre-recognized `WidgetEvent::Gesture` values dispatched from the OS trackpad stream (see §10) without running any recognizer on the raw pointer events. `on_drag`'s closure receives a `DragPhase` (`Started { position, button }`, `Moved { position, delta }`, `Ended { position }`); the raw `GestureEvent::Drag*` variants are an implementation detail of the recognizer pipeline.
+**How dispatch works.** The framework's event dispatch path (preview pass root → target, bubble pass target → root) is unchanged. At each node, instead of calling `node.widget.event(event, ctx)`, the framework checks which handler is relevant for the event type and calls it. A `PointerDown`/`PointerUp` sequence on a node with `on_tap` feeds through a `TapRecognizer` (attached automatically when `on_tap` is called) and invokes the handler when the recognizer reports a recognized tap. A `PointerEnter`/`PointerLeave` on a node with `on_hover` invokes the hover handler. The gesture recognizer infrastructure (`TapRecognizer`, `DragRecognizer`, `GestureArena`) is used internally — the widget author never instantiates a recognizer.
 
 **Low-level escape hatch.** For widgets that need raw pointer events (a color wheel, a node graph editor, a custom drawing canvas), `on_pointer_event` provides unprocessed `PointerEvent::Down`, `PointerEvent::Move`, `PointerEvent::Up` with full position and button information.
 
