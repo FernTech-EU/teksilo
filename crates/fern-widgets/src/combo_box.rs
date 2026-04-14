@@ -201,7 +201,7 @@ impl Widget for DropdownItem {
         self.root_child_id = Some(root_id);
 
         let handler_set = HandlerSet::new()
-            .on_tap(move |ctx: &mut EventContext| {
+            .on_tap(move |_pos, ctx: &mut EventContext| {
                 selected_signal.set(Some(index));
                 ctx.dismiss_all_overlays();
             })
@@ -430,7 +430,7 @@ impl Widget for ComboBox {
             .on_tap({
                 let interaction = interaction.clone();
                 let dropdown_id = dropdown_id;
-                move |ctx: &mut EventContext| {
+                move |_pos, ctx: &mut EventContext| {
                     if !enabled {
                         return;
                     }

@@ -321,7 +321,7 @@ impl fern_core::widget::Widget for Button {
         let handler_set = HandlerSet::new()
             .on_tap({
                 let interaction = int_tap;
-                move |ctx: &mut EventContext| {
+                move |_pos, ctx: &mut EventContext| {
                     if !enabled {
                         return;
                     }

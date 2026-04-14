@@ -719,7 +719,7 @@ impl Widget for Wizard {
                             let next_label = next_label.clone();
                             let finish_label = finish_label.clone();
                             let finish_action = finish_action.clone();
-                            move |ctx| {
+                            move |_pos, ctx| {
                                 if !enabled {
                                     return;
                                 }

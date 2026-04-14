@@ -60,7 +60,7 @@ impl Widget for OverlayDemo {
             .child(
                 Button::new_literal("Dismiss")
                     .style(ButtonVariant::Regular)
-                    .on_tap(|ctx| ctx.dismiss_top_overlay()),
+                    .on_tap(|_, ctx| ctx.dismiss_top_overlay()),
             );
 
         let popover_trigger = Panel::new().padding(12.0).child(
@@ -105,7 +105,7 @@ impl Widget for OverlayDemo {
                     .footer(
                         Button::new_literal("Close")
                             .style(ButtonVariant::Default)
-                            .on_tap(|ctx| ctx.dismiss_modal()),
+                            .on_tap(|_, ctx| ctx.dismiss_modal()),
                     )
             })
             .style(ButtonVariant::Regular),
@@ -158,12 +158,12 @@ impl Widget for OverlayDemo {
                                                     .child(
                                                         Button::new_literal("Cancel")
                                                             .style(ButtonVariant::Regular)
-                                                            .on_tap(|ctx| ctx.dismiss_modal()),
+                                                            .on_tap(|_, ctx| ctx.dismiss_modal()),
                                                     )
                                                     .child(
                                                         Button::new_literal("Apply")
                                                             .style(ButtonVariant::Default)
-                                                            .on_tap(|ctx| ctx.dismiss_modal()),
+                                                            .on_tap(|_, ctx| ctx.dismiss_modal()),
                                                     ),
                                             )
                                     })

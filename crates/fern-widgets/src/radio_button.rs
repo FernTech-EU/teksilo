@@ -198,7 +198,7 @@ impl Widget for RadioButton {
 
         let handler_set = HandlerSet::new()
             .on_tap({
-                move |_ctx: &mut EventContext| {
+                move |_pos, _ctx: &mut EventContext| {
                     if !enabled {
                         return;
                     }

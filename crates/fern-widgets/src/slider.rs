@@ -10,6 +10,7 @@ use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use fern_core::focus::FocusOrigin;
+use fern_core::gesture::DragPhase;
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
@@ -179,64 +180,49 @@ impl Widget for Slider {
             .focusable(enabled)
             .cursor(CursorIcon::Pointer);
 
-        // Pointer event handler (drag to change value)
+        // Thumb drag — routed through the typed gesture API. The
+        // framework auto-captures the pointer at `DragPhase::Started`
+        // and releases it at `DragPhase::Ended`, so the slider keeps
+        // receiving `Moved` events even when the cursor leaves its
+        // bounds (the old `on_pointer_event` path silently stopped
+        // updating when the pointer moved off the slider).
         {
             let dragging = dragging.clone();
-            let cached_bounds = cached_bounds.clone();
-            let value = value.clone();
             let set_value = set_value_from_position.clone();
-            handlers = handlers.on_pointer_event(move |event, _ctx| {
+            handlers = handlers.on_drag(move |phase, _ctx| {
                 if !enabled {
-                    return EventResponse::Ignored;
+                    return;
                 }
-                let bounds = cached_bounds.get();
-                match event {
-                    WidgetEvent::PointerDown {
-                        position, button, ..
+                match phase {
+                    DragPhase::Started {
+                        position,
+                        button: PointerButton::Primary,
                     } => {
-                        if *button == PointerButton::Primary {
-                            // Check if click is on the thumb
-                            let pos = match orientation {
-                                Orientation::Horizontal => position.x,
-                                Orientation::Vertical => position.y,
-                            };
-                            let usable = match orientation {
-                                Orientation::Horizontal => bounds.width,
-                                Orientation::Vertical => bounds.height,
-                            } - thumb_radius * 2.0;
-                            let start = match orientation {
-                                Orientation::Horizontal => bounds.x,
-                                Orientation::Vertical => bounds.y,
-                            };
-                            let range = max - min;
-                            let normalized = if range > 0.0 {
-                                ((value.get() - min) / range).clamp(0.0, 1.0)
-                            } else {
-                                0.0
-                            };
-                            let thumb_center = start + thumb_radius + usable * normalized;
-                            let on_thumb = (pos - thumb_center).abs() <= thumb_radius;
-                            if !on_thumb {
-                                set_value(position.x, position.y);
-                            }
-                            dragging.set(true);
-                        }
-                        EventResponse::Handled
+                        dragging.set(true);
+                        set_value(position.x, position.y);
                     }
-                    WidgetEvent::PointerUp { .. } => {
+                    DragPhase::Moved { position, .. } if dragging.get() => {
+                        set_value(position.x, position.y);
+                    }
+                    DragPhase::Ended { .. } => {
                         dragging.set(false);
-                        EventResponse::Handled
                     }
-                    WidgetEvent::PointerMove { position } => {
-                        if dragging.get() {
-                            set_value(position.x, position.y);
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
-                        }
-                    }
-                    _ => EventResponse::Ignored,
+                    _ => {}
                 }
+            });
+        }
+
+        // Track click — jump the value to the click position without
+        // entering a drag. A press+release without movement past the
+        // 5 px drag threshold lands here; a longer press that slides
+        // past threshold goes to `on_drag` instead.
+        {
+            let set_value = set_value_from_position.clone();
+            handlers = handlers.on_tap(move |position, _ctx| {
+                if !enabled {
+                    return;
+                }
+                set_value(position.x, position.y);
             });
         }
 
@@ -560,8 +546,12 @@ mod tests {
         // Pointer down on thumb
         tree.pointer_down_button(Point::new(thumb_cx, center_y), PointerButton::Primary);
 
-        // Drag to 75% position
+        // Drag to 75% position. DragRecognizer needs one move past its
+        // 5 px threshold to emit `DragStarted` (which carries the *down*
+        // position, leaving value at 50%), and a second move to emit
+        // `DragMoved` — the latter is what actually drives the value.
         let target_x = bounds.x + thumb_radius + (bounds.width - thumb_radius * 2.0) * 0.75;
+        tree.pointer_move(Point::new(thumb_cx + 10.0, center_y));
         tree.pointer_move(Point::new(target_x, center_y));
 
         let val = value.get();

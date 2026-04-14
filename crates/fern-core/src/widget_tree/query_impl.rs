@@ -97,7 +97,7 @@ mod tests {
         let called = Rc::new(Cell::new(false));
         let called_flag = called.clone();
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new().on_tap(move |ctx| {
+        let widget = tree.add(FillWidget::new().on_tap(move |_pos, ctx| {
             let called = called_flag.clone();
             ctx.request_idle_callback(move |_deadline| {
                 called.set(true);
@@ -129,7 +129,7 @@ mod tests {
     fn modal_request_requested_from_event_handler() {
         let mut tree = WidgetTree::new();
         let content = tree.add(FillWidget::new().label("Modal content"));
-        let trigger = tree.add(FillWidget::new().on_tap(move |ctx| {
+        let trigger = tree.add(FillWidget::new().on_tap(move |_pos, ctx| {
             ctx.present_modal(
                 ModalRequest::in_tree(content)
                     .presentation(ModalPresentation::InTree)
@@ -162,7 +162,7 @@ mod tests {
     fn draining_modal_requests_clears_queue() {
         let mut tree = WidgetTree::new();
         let content = tree.add(FillWidget::new());
-        let trigger = tree.add(FillWidget::new().on_tap(move |ctx| {
+        let trigger = tree.add(FillWidget::new().on_tap(move |_pos, ctx| {
             ctx.present_modal(ModalRequest::in_tree(content));
         }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -176,7 +176,7 @@ mod tests {
     fn dismiss_modal_closes_centered_overlay_for_source_widget() {
         let mut tree = WidgetTree::new();
         let trigger = tree.add(FillWidget::new().label("Trigger"));
-        let modal_content = tree.add(FixedWidget(120.0, 48.0).on_tap(|ctx| {
+        let modal_content = tree.add(FixedWidget(120.0, 48.0).on_tap(|_pos, ctx| {
             ctx.dismiss_modal();
         }));
         tree.layout(SizeProposal::exact(320.0, 200.0));
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn dismiss_modal_without_in_tree_modal_queues_window_dismissal() {
         let mut tree = WidgetTree::new();
-        let trigger = tree.add(FillWidget::new().on_tap(|ctx| {
+        let trigger = tree.add(FillWidget::new().on_tap(|_pos, ctx| {
             ctx.dismiss_modal();
         }));
         tree.layout(SizeProposal::exact(100.0, 50.0));

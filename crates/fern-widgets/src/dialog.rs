@@ -391,7 +391,7 @@ impl Widget for Dialog {
                         .on_tap({
                             let label = label.clone();
                             let content_factory = content_factory.clone();
-                            move |ctx| {
+                            move |_pos, ctx| {
                                 if !enabled {
                                     return;
                                 }
@@ -453,7 +453,7 @@ impl Widget for Dialog {
                     .on_tap({
                         let label = self.label.clone();
                         let content_factory = content_factory.clone();
-                        move |ctx| {
+                        move |_pos, ctx| {
                             if !enabled {
                                 return;
                             }

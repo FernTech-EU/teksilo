@@ -152,7 +152,7 @@ impl Widget for Accordion {
 
         let handler_set = HandlerSet::new()
             .on_tap({
-                move |_ctx: &mut EventContext| {
+                move |_pos, _ctx: &mut EventContext| {
                     let new_expanded = !expanded_tap.get();
                     expanded_tap.set(new_expanded);
                     if let Some(ref height) = height_tap {

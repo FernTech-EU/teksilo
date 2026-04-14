@@ -290,7 +290,7 @@ impl Widget for Popover {
                         .on_tap({
                             let placement = placement.clone();
                             let dismiss = dismiss.clone();
-                            move |ctx| {
+                            move |_pos, ctx| {
                                 if !enabled {
                                     return;
                                 }
@@ -359,7 +359,7 @@ impl Widget for Popover {
                     .on_tap({
                         let placement = placement.clone();
                         let dismiss = dismiss.clone();
-                        move |ctx| {
+                        move |_pos, ctx| {
                             if !enabled {
                                 return;
                             }

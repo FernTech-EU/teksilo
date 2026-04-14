@@ -399,7 +399,7 @@ impl Widget for MenuItem {
 
             handler_set = handler_set
                 .on_tap({
-                    move |ctx: &mut EventContext| {
+                    move |_pos, ctx: &mut EventContext| {
                         if !enabled {
                             return;
                         }
@@ -455,7 +455,7 @@ impl Widget for MenuItem {
 
             handler_set = handler_set
                 .on_tap({
-                    move |ctx: &mut EventContext| {
+                    move |_pos, ctx: &mut EventContext| {
                         if !enabled {
                             return;
                         }

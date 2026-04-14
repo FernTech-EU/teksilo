@@ -80,7 +80,7 @@ impl Widget for DragRegion {
                     let _ = host_drag.begin_drag();
                 }
             })
-            .on_double_tap(move |_ctx| {
+            .on_double_tap(move |_pos, _ctx| {
                 host_dbl.toggle_maximize();
             })
             .on_pointer_event(move |evt, _ctx| {

@@ -167,7 +167,7 @@ impl Widget for Link {
 
         let handler_set = HandlerSet::new()
             .on_tap({
-                move |ctx: &mut EventContext| {
+                move |_pos, ctx: &mut EventContext| {
                     if let Some(ref action) = *action_for_tap {
                         action(ctx);
                     }

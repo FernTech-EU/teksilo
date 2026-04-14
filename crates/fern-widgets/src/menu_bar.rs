@@ -184,7 +184,7 @@ impl Widget for MenuBarTrigger {
         let handler_set = HandlerSet::new()
             .on_tap({
                 let menu_ctx = menu_ctx.clone();
-                move |ctx: &mut EventContext| {
+                move |_pos, ctx: &mut EventContext| {
                     if menu_ctx.open_index.get() == Some(index) {
                         menu_ctx.close(ctx);
                     } else {

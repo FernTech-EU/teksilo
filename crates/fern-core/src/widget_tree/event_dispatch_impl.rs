@@ -427,6 +427,15 @@ impl WidgetTree {
                 }
                 Self::ensure_gesture_arena(node);
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
+                    // Implicit capture for the Down..Up sequence so that
+                    // moves leaving the widget bounds still reach the
+                    // arena. Without this, a drag that starts inside the
+                    // widget but crosses its edge before the recognizer
+                    // latches would be hit-tested to another widget and
+                    // the press-origin arena would never see a `Move`.
+                    // Released unconditionally by the `PointerUp` branch
+                    // in `dispatch_event`.
+                    ctx.capture_pointer();
                     let result = arena.process(&RawPointerEvent::Down {
                         position: *position,
                         button: *button,
@@ -470,6 +479,18 @@ impl WidgetTree {
                     });
                     if let Some(gesture) = result {
                         Self::dispatch_recognized_gesture(node, gesture, ctx);
+                        // A recognized gesture (DragStarted / DragMoved / …)
+                        // almost always changes visible state — return
+                        // `Handled` so the bubble loop marks this widget
+                        // `needs_paint`, which in turn makes
+                        // `WidgetTree::needs_redraw()` return true and
+                        // triggers a `request_redraw` for the next frame.
+                        // Without this, state updates via bound signals are
+                        // only observed on the *next* layout/render pass,
+                        // which in turn is never scheduled because
+                        // `fern-app::update_control_flow` only wakes up when
+                        // `needs_redraw()` is true.
+                        return Some(EventResponse::Handled);
                     }
                     return Some(EventResponse::Ignored);
                 }
@@ -532,14 +553,14 @@ impl WidgetTree {
     ) {
         use crate::gesture::{DragPhase, PinchPhase};
         match gesture {
-            GestureEvent::Tap { .. } => {
+            GestureEvent::Tap { position } => {
                 if let Some(handler) = node.handlers.on_tap.as_mut() {
-                    handler(ctx);
+                    handler(position, ctx);
                 }
             }
-            GestureEvent::DoubleTap { .. } => {
+            GestureEvent::DoubleTap { position } => {
                 if let Some(handler) = node.handlers.on_double_tap.as_mut() {
-                    handler(ctx);
+                    handler(position, ctx);
                 }
             }
             GestureEvent::LongPress { position } => {
@@ -548,6 +569,10 @@ impl WidgetTree {
                 }
             }
             GestureEvent::DragStarted { position, button } => {
+                // Auto-capture the pointer for the duration of the drag so
+                // the widget keeps receiving `Moved` / `Ended` even when
+                // the cursor leaves its bounds. Released on `DragEnded`.
+                ctx.capture_pointer();
                 if let Some(handler) = node.handlers.on_drag.as_mut() {
                     handler(DragPhase::Started { position, button }, ctx);
                 }
@@ -561,6 +586,7 @@ impl WidgetTree {
                 if let Some(handler) = node.handlers.on_drag.as_mut() {
                     handler(DragPhase::Ended { position }, ctx);
                 }
+                ctx.release_pointer();
             }
             GestureEvent::Swipe {
                 direction,
@@ -1068,7 +1094,7 @@ mod tests {
         let tapped_flag = tapped.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new().on_tap(move |_ctx| {
+        let widget = tree.add(FillWidget::new().on_tap(move |_pos, _ctx| {
             tapped_flag.set(true);
         }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -1111,7 +1137,7 @@ mod tests {
         let received_flag = cmd_received.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new().on_tap(|ctx| {
+        let widget = tree.add(FillWidget::new().on_tap(|_pos, ctx| {
             ctx.emit(TestCmd::Save);
         }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -1135,7 +1161,7 @@ mod tests {
         let handler_flag = handler_called.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new().on_tap(move |_ctx| {
+        let widget = tree.add(FillWidget::new().on_tap(move |_pos, _ctx| {
             handler_flag.set(true);
         }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -1217,6 +1243,66 @@ mod tests {
     }
 
     #[test]
+    fn drag_auto_captures_pointer_until_ended() {
+        use crate::gesture::DragPhase;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let started = Rc::new(Cell::new(false));
+        let moved = Rc::new(Cell::new(0));
+        let ended = Rc::new(Cell::new(false));
+        let started_flag = started.clone();
+        let moved_flag = moved.clone();
+        let ended_flag = ended.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new().on_drag(move |phase, _ctx| match phase {
+                DragPhase::Started { .. } => started_flag.set(true),
+                DragPhase::Moved { .. } => moved_flag.set(moved_flag.get() + 1),
+                DragPhase::Ended { .. } => ended_flag.set(true),
+            }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Press inside, move past the 5px threshold while still inside —
+        // DragRecognizer emits DragStarted, and auto-capture kicks in.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(70.0, 25.0),
+        });
+        assert!(started.get(), "DragStarted must fire");
+
+        // Move the pointer well outside the widget bounds. Without
+        // auto-capture this event would hit-test to another widget and
+        // the scrollbar would never see it.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(500.0, 500.0),
+        });
+        assert!(moved.get() >= 1, "Move outside bounds must still reach drag handler");
+
+        // Release outside bounds — must still fire DragEnded on the
+        // original widget, and pointer capture must be released.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(500.0, 500.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert!(ended.get(), "DragEnded must fire on the original widget");
+        assert_eq!(
+            tree.pointer_captured_by, None,
+            "pointer capture must be released after DragEnded"
+        );
+
+        // Sanity: the widget we instantiated is the one we hooked.
+        let _ = widget;
+    }
+
+    #[test]
     fn on_long_press_fires_from_tick_gestures() {
         use std::cell::Cell;
         use std::rc::Rc;
@@ -1264,7 +1350,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let widget = tree.add(
             FillWidget::new()
-                .on_tap(move |_ctx| {
+                .on_tap(move |_pos, _ctx| {
                     tapped_flag.set(true);
                 })
                 .on_drag(move |phase, _ctx| {
@@ -1351,7 +1437,7 @@ mod tests {
     fn start_drag_creates_session() {
         let mut tree = WidgetTree::new();
         let source = tree.add(FillWidget::new().on_tap({
-            move |ctx: &mut crate::widget::EventContext| {
+            move |_pos, ctx: &mut crate::widget::EventContext| {
                 ctx.start_drag(
                     ctx.focus_requests.first().copied().unwrap_or_default(),
                     crate::drag_payload::DragPayload::typed(42_u32),

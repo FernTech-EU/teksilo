@@ -517,8 +517,15 @@ impl GestureRecognizer for DragRecognizer {
                 if (dx * dx + dy * dy).sqrt() >= self.threshold {
                     self.dragging = true;
                     self.last_position = Some(*position);
+                    // `DragStarted.position` reports the *initial press*
+                    // (where `down_position` was stored on `Down`), not the
+                    // threshold-crossing position. Widgets that need to
+                    // classify where the grab originated (e.g. ScrollBar's
+                    // thumb-vs-track hit test) can rely on this; widgets
+                    // that want the current pointer will get it in the
+                    // immediately-following `DragMoved`.
                     return GestureResult::Recognized(GestureEvent::DragStarted {
-                        position: *position,
+                        position: down,
                         button: self.down_button.unwrap_or(PointerButton::Primary),
                     });
                 }

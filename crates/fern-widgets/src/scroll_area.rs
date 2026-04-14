@@ -335,6 +335,14 @@ impl Widget for ScrollArea {
 
         let mut handlers = HandlerSet::new().clips_children(true);
 
+        // ScrollArea stays on `on_scroll` — both mouse-wheel clicks
+        // (`ScrollDelta::Lines`) and trackpad two-finger pans
+        // (`ScrollDelta::Pixels`) already arrive as `WidgetEvent::Scroll`
+        // from the platform, and momentum is handled by animating
+        // `scroll_y`/`scroll_x` with `Easing::EaseOut` below. A future
+        // touch backend would add `on_swipe` here for flick-to-scroll;
+        // there is nothing to migrate today.
+        //
         // Scroll handler (handles both Scroll and ScrollIntoView)
         {
             let scroll_y = scroll_y.clone();

@@ -136,7 +136,7 @@ impl Widget for ControlButton {
             });
 
         if let Some(action) = self.action.take() {
-            handlers = handlers.on_tap(move |ctx| action(ctx));
+            handlers = handlers.on_tap(move |_pos, ctx| action(ctx));
         }
 
         ctx.apply_self_handlers(handlers);

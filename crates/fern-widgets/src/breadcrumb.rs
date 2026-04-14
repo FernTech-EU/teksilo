@@ -167,7 +167,7 @@ impl Widget for BreadcrumbSegment {
         let handler_set = HandlerSet::new()
             .on_tap({
                 let interaction = interaction.clone();
-                move |ctx: &mut EventContext| {
+                move |_pos, ctx: &mut EventContext| {
                     if !interactive {
                         return;
                     }

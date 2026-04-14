@@ -112,7 +112,7 @@ impl Widget for Toggle {
         // Tap handler
         {
             let toggle = toggle.clone();
-            handlers = handlers.on_tap(move |_ctx| {
+            handlers = handlers.on_tap(move |_pos, _ctx| {
                 if enabled {
                     toggle();
                 }

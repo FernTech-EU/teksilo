@@ -209,7 +209,7 @@ impl Widget for TabHeader {
         // Otherwise we assume `Keyboard`. This matches how SegmentedControl,
         // Slider, and Toggle handle it.
         let handler_set = HandlerSet::new()
-            .on_tap(move |_ctx: &mut EventContext| {
+            .on_tap(move |_pos, _ctx: &mut EventContext| {
                 if enabled {
                     selected.set(index);
                 }

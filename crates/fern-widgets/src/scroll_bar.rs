@@ -4,6 +4,7 @@ use std::rc::Rc;
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
+use fern_core::gesture::DragPhase;
 use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_core::widget_builder::HandlerSet;
@@ -299,81 +300,90 @@ impl Widget for ScrollBar {
 
         let mut handlers = HandlerSet::new().focusable(true);
 
-        // Pointer event handler
+        // Thumb drag — routed through the typed gesture API. The
+        // framework auto-captures the pointer on `DragPhase::Started`
+        // and releases it on `DragPhase::Ended`, so thumb drags that
+        // leave the widget bounds keep firing.
+        //
+        // A drag that began off the thumb (e.g. on the track) is
+        // deliberately ignored: the `dragging` signal only flips true
+        // when the initial press was on the thumb, and track clicks
+        // are handled by `on_tap` below.
         {
             let dragging = dragging.clone();
             let drag_start_pointer = drag_start_pointer.clone();
             let drag_start_scroll = drag_start_scroll.clone();
             let scroll_position = scroll_position.clone();
             let max_scroll = max_scroll.clone();
-            let viewport_ratio = viewport_ratio.clone();
             let set_scroll = set_scroll.clone();
             let thumb_rect = thumb_rect.clone();
             let track_length = track_length.clone();
             let thumb_length = thumb_length.clone();
-            handlers = handlers.on_pointer_event(move |event, ctx| {
+            handlers = handlers.on_drag(move |phase, _ctx| {
                 let max = max_scroll.get();
                 if max <= 0.0 {
-                    return EventResponse::Ignored;
+                    return;
                 }
-                match event {
-                    WidgetEvent::PointerDown {
+                match phase {
+                    DragPhase::Started {
                         position,
                         button: PointerButton::Primary,
-                        ..
                     } => {
-                        let tr = thumb_rect();
-                        if tr.contains(*position) {
-                            // Start thumb drag
+                        if thumb_rect().contains(position) {
                             dragging.set(true);
-                            drag_start_pointer.set(axis_value(*position));
+                            drag_start_pointer.set(axis_value(position));
                             drag_start_scroll.set(scroll_position.get());
-                            ctx.capture_pointer();
-                        } else {
-                            // Track click — page scroll toward click position
-                            let click_axis = axis_value(*position);
-                            let thumb_center = match orientation {
-                                ScrollBarOrientation::Vertical => tr.y + tr.height / 2.0,
-                                ScrollBarOrientation::Horizontal => tr.x + tr.width / 2.0,
-                            };
-                            let ratio = viewport_ratio.get().clamp(0.001, 0.999);
-                            let viewport_scroll = max * ratio / (1.0 - ratio);
-                            let current = scroll_position.get();
-                            if click_axis < thumb_center {
-                                set_scroll(current - viewport_scroll);
-                            } else {
-                                set_scroll(current + viewport_scroll);
-                            }
-                        }
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::PointerMove { position } => {
-                        if dragging.get() {
-                            let current = axis_value(*position);
-                            let delta_pixels = current - drag_start_pointer.get();
-                            let available = track_length() - thumb_length();
-                            if available > 0.0 {
-                                let scroll_delta = delta_pixels * max / available;
-                                set_scroll(drag_start_scroll.get() + scroll_delta);
-                            }
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
                         }
                     }
-                    WidgetEvent::PointerUp {
-                        button: PointerButton::Primary,
-                        ..
-                    } => {
-                        if dragging.get() {
-                            dragging.set(false);
-                            ctx.release_pointer();
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
+                    DragPhase::Moved { position, .. } if dragging.get() => {
+                        let current = axis_value(position);
+                        let delta_pixels = current - drag_start_pointer.get();
+                        let available = track_length() - thumb_length();
+                        if available > 0.0 {
+                            let scroll_delta = delta_pixels * max / available;
+                            set_scroll(drag_start_scroll.get() + scroll_delta);
                         }
                     }
-                    _ => EventResponse::Ignored,
+                    DragPhase::Ended { .. } => {
+                        dragging.set(false);
+                    }
+                    _ => {}
+                }
+            });
+        }
+
+        // Track click — page-scroll toward the click position.
+        // The tap recognizer only fires on press+release without
+        // movement past the 5 px threshold, so a thumb grab that
+        // starts as a click but becomes a drag is handled by the
+        // `on_drag` arm above and never reaches here.
+        {
+            let scroll_position = scroll_position.clone();
+            let max_scroll = max_scroll.clone();
+            let viewport_ratio = viewport_ratio.clone();
+            let set_scroll = set_scroll.clone();
+            let thumb_rect = thumb_rect.clone();
+            handlers = handlers.on_tap(move |position, _ctx| {
+                let max = max_scroll.get();
+                if max <= 0.0 {
+                    return;
+                }
+                let tr = thumb_rect();
+                if tr.contains(position) {
+                    return;
+                }
+                let click_axis = axis_value(position);
+                let thumb_center = match orientation {
+                    ScrollBarOrientation::Vertical => tr.y + tr.height / 2.0,
+                    ScrollBarOrientation::Horizontal => tr.x + tr.width / 2.0,
+                };
+                let ratio = viewport_ratio.get().clamp(0.001, 0.999);
+                let viewport_scroll = max * ratio / (1.0 - ratio);
+                let current = scroll_position.get();
+                if click_axis < thumb_center {
+                    set_scroll(current - viewport_scroll);
+                } else {
+                    set_scroll(current + viewport_scroll);
                 }
             });
         }
@@ -636,7 +646,14 @@ mod tests {
         });
 
         // Drag 100px down: track is 400px, thumb is 200px (50% ratio),
-        // so available travel = 200px, 100px drag = 50% of travel = 250 scroll
+        // so available travel = 200px, 100px drag = 50% of travel = 250 scroll.
+        // DragRecognizer needs one move to cross the 5px threshold and emit
+        // DragStarted (which carries the *down* position, so the thumb-vs-track
+        // check latches on), then subsequent moves emit DragMoved with a delta
+        // from the initial press.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(6.0, 20.0),
+        });
         tree.dispatch_event(WidgetEvent::PointerMove {
             position: Point::new(6.0, 110.0),
         });
@@ -727,9 +744,17 @@ mod tests {
         tree.layout(SizeProposal::exact(12.0, 400.0));
         tree.render();
 
-        // Click on the track below the thumb (thumb starts at top, ~200px tall)
+        // Click on the track below the thumb (thumb starts at top, ~200px tall).
+        // Track clicks are routed through `on_tap`, which requires a full
+        // press+release sequence without the pointer crossing the drag
+        // threshold.
         tree.pointer_move(Point::new(6.0, 350.0));
         tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(6.0, 350.0),
+            button: PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
             position: Point::new(6.0, 350.0),
             button: PointerButton::Primary,
             modifiers: fern_core::event::Modifiers::NONE,
@@ -740,6 +765,83 @@ mod tests {
             pos > 0.0,
             "Expected positive scroll after track click, got {}",
             pos
+        );
+    }
+
+    #[test]
+    fn scrollbar_drag_inside_scroll_area_updates_position() {
+        // Regression: reproduces the real-app case where the ScrollBar
+        // is a child of a ScrollArea (overlay mode), which wraps a tall
+        // content widget. Before the V2 migration this worked through
+        // `on_pointer_event`; the drag must keep working through the
+        // typed `on_drag` + auto-capture path.
+        use crate::primitives::MinSize;
+        use crate::scroll_area::{ScrollArea, ScrollBarMode};
+        use fern_canvas::Point;
+        use fern_core::event::{Modifiers, PointerButton};
+
+        let mut tree = WidgetTree::new();
+        // Content is twice as tall as the ScrollArea viewport → v scrollbar
+        // is needed with viewport_ratio = 0.5.
+        let content = MinSize::new(400.0, 800.0);
+        let root = tree.add(
+            ScrollArea::new(content).scroll_bar_style(ScrollBarMode::Permanent),
+        );
+        tree.layout(SizeProposal::exact(400.0, 400.0));
+        tree.render();
+
+        // Find the vertical scrollbar child (second child of ScrollArea:
+        // content is first, v-scrollbar second).
+        let sb_id = tree.children(root)[1];
+        let sb_bounds = tree.bounds(sb_id);
+        assert!(sb_bounds.width > 0.0, "scrollbar should have non-zero width");
+        assert!(
+            sb_bounds.height > 0.0,
+            "scrollbar should have non-zero height"
+        );
+
+        // Press in the middle of the thumb (thumb spans y=sb_bounds.y..+half).
+        let thumb_cx = sb_bounds.x + sb_bounds.width / 2.0;
+        let thumb_cy = sb_bounds.y + sb_bounds.height / 4.0;
+        tree.pointer_move(Point::new(thumb_cx, thumb_cy));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(thumb_cx, thumb_cy),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        // Cross the drag threshold…
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(thumb_cx, thumb_cy + 10.0),
+        });
+        // …and then actually drag down.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(thumb_cx, thumb_cy + 100.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(thumb_cx, thumb_cy + 100.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        // Apply the scroll-triggered relayout so the content's cached
+        // bounds reflect the new scroll offset (the real event loop does
+        // this automatically every frame).
+        tree.layout(SizeProposal::exact(400.0, 400.0));
+
+        // The scroll position should have advanced by a substantial amount
+        // (a 100-px drag on a 400-px track with 50 % viewport ratio moves
+        // the content ~200 px).
+        let final_scroll = tree.hit_test(Point::new(1.0, 1.0)); // dummy, just keep borrow checker quiet
+        let _ = final_scroll;
+        // We can't read scroll_y directly from the public API; assert the
+        // *bounds* of the content child moved in the ScrollArea's layout
+        // rect — after layout the content's origin.y is `-scroll_y`.
+        let content_bounds = tree.bounds(tree.children(root)[0]);
+        assert!(
+            content_bounds.y < -1.0,
+            "content should have scrolled up (y < 0); got y={}",
+            content_bounds.y
         );
     }
 

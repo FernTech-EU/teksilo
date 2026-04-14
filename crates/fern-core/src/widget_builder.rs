@@ -46,14 +46,15 @@ impl HandlerSet {
 
     // -- Builder methods (mirror WidgetWithHandlers) --
 
-    /// Set the on_tap handler.
-    pub fn on_tap(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+    /// Set the on_tap handler. The closure receives the tap position
+    /// (in widget-local coordinates inside the widget's bounds).
+    pub fn on_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
         self.handlers.on_tap = Some(Box::new(f));
         self
     }
 
     /// Set the on_double_tap handler.
-    pub fn on_double_tap(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+    pub fn on_double_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
         self.handlers.on_double_tap = Some(Box::new(f));
         self
     }
@@ -236,12 +237,12 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     // -- Gesture handlers --
 
-    pub fn on_tap(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+    pub fn on_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_tap = Some(Box::new(f));
         self
     }
 
-    pub fn on_double_tap(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+    pub fn on_double_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_double_tap = Some(Box::new(f));
         self
     }
@@ -493,7 +494,7 @@ mod tests {
     #[test]
     fn wrapped_composite_widget_still_builds_children() {
         let mut tree = WidgetTree::new();
-        let root = tree.add(CompositeLeaf::new().on_tap(|_ctx| {}));
+        let root = tree.add(CompositeLeaf::new().on_tap(|_pos, _ctx| {}));
         tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
 
         assert_eq!(tree.children(root).len(), 1);
@@ -507,11 +508,17 @@ mod tests {
 /// Blanket trait providing attached handler methods for all Widget types.
 /// The first builder method call wraps the widget in `WidgetWithHandlers`.
 pub trait WidgetBuilder: Widget + Sized + 'static {
-    fn on_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> WidgetWithHandlers<Self> {
+    fn on_tap(
+        self,
+        f: impl FnMut(Point, &mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_tap(f)
     }
 
-    fn on_double_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> WidgetWithHandlers<Self> {
+    fn on_double_tap(
+        self,
+        f: impl FnMut(Point, &mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_double_tap(f)
     }
 

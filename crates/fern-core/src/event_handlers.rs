@@ -16,8 +16,8 @@ use crate::widget::EventContext;
 /// closure dispatched by the framework during the event pass.
 #[allow(clippy::type_complexity)]
 pub(crate) struct EventHandlers {
-    pub on_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
-    pub on_double_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
+    pub on_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
+    pub on_double_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
     pub on_long_press: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
     pub on_drag: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
     pub on_swipe: Option<Box<dyn FnMut(SwipeDirection, f32, &mut EventContext)>>,
@@ -84,8 +84,8 @@ impl EventHandlers {
 
     pub fn merge(self, other: EventHandlers) -> EventHandlers {
         EventHandlers {
-            on_tap: merge_void_handler(self.on_tap, other.on_tap),
-            on_double_tap: merge_void_handler(self.on_double_tap, other.on_double_tap),
+            on_tap: merge_point_handler(self.on_tap, other.on_tap),
+            on_double_tap: merge_point_handler(self.on_double_tap, other.on_double_tap),
             on_long_press: merge_point_handler(self.on_long_press, other.on_long_press),
             on_drag: merge_drag_handler(self.on_drag, other.on_drag),
             on_swipe: merge_swipe_handler(self.on_swipe, other.on_swipe),
@@ -100,21 +100,6 @@ impl EventHandlers {
             on_drop: other.on_drop.or(self.on_drop),
             gesture_arena: other.gesture_arena.or(self.gesture_arena),
         }
-    }
-}
-
-fn merge_void_handler(
-    existing: Option<Box<dyn FnMut(&mut EventContext)>>,
-    incoming: Option<Box<dyn FnMut(&mut EventContext)>>,
-) -> Option<Box<dyn FnMut(&mut EventContext)>> {
-    match (existing, incoming) {
-        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |ctx| {
-            existing(ctx);
-            incoming(ctx);
-        })),
-        (Some(existing), None) => Some(existing),
-        (None, Some(incoming)) => Some(incoming),
-        (None, None) => None,
     }
 }
 
