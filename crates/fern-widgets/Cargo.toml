@@ -7,7 +7,7 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-rich-text = []
+rich-text = ["dep:fern-text"]
 
 [dependencies]
 fern-core = { workspace = true }
@@ -15,3 +15,8 @@ fern-data = { workspace = true }
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-i18n = { workspace = true }
+# text-typeset + text-document come through fern-text's re-exports
+# (`fern_text::text_document`, `fern_text::RichTextEngine`, …) under
+# its own `rich-text` feature. Widgets never name either crate
+# directly, keeping fern-widgets's dependency surface minimal.
+fern-text = { workspace = true, optional = true, features = ["rich-text"] }

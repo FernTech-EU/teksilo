@@ -49,6 +49,7 @@ impl WidgetTree {
         self.process_pending_animations();
 
         let now = std::time::Instant::now();
+        self.advance_frame_tick(now);
         self.animation_scheduler.tick(now);
 
         self.process_state_changes();

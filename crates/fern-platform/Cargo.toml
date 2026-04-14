@@ -15,6 +15,18 @@ winit = { workspace = true }
 wgpu = { workspace = true }
 accesskit = { workspace = true }
 accesskit_winit = "0.32"
+arboard = { workspace = true, optional = true }
+
+[features]
+default = []
+# M8a: the `clipboard` feature is declared but not chained to any
+# other crate yet. M8b will wire it into `fern-widgets/rich-text`
+# and `fern-app/rich-text` so the editor preset's cut/paste
+# command dispatch receives a real `ClipboardHandle` instead of
+# the M8a no-op. Until then, enabling it by itself pulls in
+# `arboard` and exposes `ArboardClipboard` for apps that want
+# the system clipboard for other widgets.
+clipboard = ["dep:arboard"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

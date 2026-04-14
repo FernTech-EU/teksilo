@@ -46,6 +46,17 @@ pub struct TypesetterBridge {
     /// since the last atlas_info() call. When false, we skip advancing
     /// the eviction generation to avoid aging out idle-but-visible glyphs.
     had_text_activity: bool,
+    /// Sticky atlas-dirty flag set by rich-text widgets via
+    /// `typesetter_mut()`. Necessary because text-typeset's `render()`
+    /// path clears `typesetter.atlas.dirty` after copying pixels into
+    /// the returned `RenderFrame`. fern-app consumes the atlas through
+    /// `atlas_info()` *after* `tree.render()`, so by then the
+    /// typesetter's own dirty flag is already false and the atlas
+    /// would never be uploaded, leaving rich-text glyphs invisible on
+    /// the GPU. This flag closes the gap: anyone who touched the
+    /// typesetter mutably since the last `atlas_info()` call forces
+    /// the bridge to report the atlas as dirty one more time.
+    rich_text_atlas_dirty: bool,
 }
 
 impl TypesetterBridge {
@@ -58,6 +69,7 @@ impl TypesetterBridge {
             layout_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             had_text_activity: false,
+            rich_text_atlas_dirty: false,
         }
     }
 
@@ -159,9 +171,11 @@ impl TypesetterBridge {
     pub fn atlas_info(&mut self) -> AtlasInfo {
         let (dirty, width, height, pixels, glyphs_evicted) =
             self.typesetter.atlas_snapshot(self.had_text_activity);
+        let rich_dirty = self.rich_text_atlas_dirty;
+        self.rich_text_atlas_dirty = false;
         self.had_text_activity = false;
         AtlasInfo {
-            dirty,
+            dirty: dirty || rich_dirty,
             width,
             height,
             pixels: pixels.to_vec(),
@@ -186,6 +200,59 @@ impl TypesetterBridge {
         self.layout_cache.clear();
         self.glyph_cache.clear();
     }
+
+    /// Mutable access to the underlying `text_typeset::Typesetter`.
+    ///
+    /// The bridge normally restricts itself to single-line layout for
+    /// labels and similar widgets. Rich-text consumers (the
+    /// `fern_text::RichTextEngine` used by the `RichTextEditor`
+    /// widget) need direct access to the typesetter's full-flow layout
+    /// and render methods, and must share the same instance the bridge
+    /// uses so glyphs end up in the same atlas fern-render uploads to
+    /// the GPU. Exposed behind `#[cfg(feature = "rich-text")]` so the
+    /// default feature set keeps a minimal public surface.
+    #[cfg(feature = "rich-text")]
+    pub fn typesetter_mut(&mut self) -> &mut Typesetter {
+        self.had_text_activity = true;
+        self.rich_text_atlas_dirty = true;
+        &mut self.typesetter
+    }
+
+    /// Immutable read-only queries on the inner typesetter, used by
+    /// `RichTextEngine` for zoom / content-size getters that must not
+    /// mark the bridge dirty. Kept alongside `typesetter_mut` under
+    /// the `rich-text` feature.
+    #[cfg(feature = "rich-text")]
+    pub fn typesetter_zoom_readonly(&self) -> f32 {
+        self.typesetter.zoom()
+    }
+
+    #[cfg(feature = "rich-text")]
+    pub fn typesetter_layout_width_readonly(&self) -> f32 {
+        self.typesetter.layout_width()
+    }
+
+    #[cfg(feature = "rich-text")]
+    pub fn typesetter_content_height_readonly(&self) -> f32 {
+        self.typesetter.content_height()
+    }
+
+    #[cfg(feature = "rich-text")]
+    pub fn typesetter_max_content_width_readonly(&self) -> f32 {
+        self.typesetter.max_content_width()
+    }
+
+    /// Current HiDPI display scale factor as last set by
+    /// `TextBackend::set_scale_factor`. The rich-text engine reads
+    /// this on every `layout_full` so glyph rasterization stays
+    /// crisp on HiDPI displays — the widget itself never needs to
+    /// know about it, exactly like `TextWidget`'s label path where
+    /// `layout_single_line` pre-multiplies the font size by
+    /// `self.scale_factor` internally.
+    #[cfg(feature = "rich-text")]
+    pub fn display_scale_factor(&self) -> f32 {
+        self.scale_factor
+    }
 }
 
 impl Default for TypesetterBridge {
@@ -198,6 +265,13 @@ impl TextBackend for TypesetterBridge {
     fn set_scale_factor(&mut self, scale_factor: f32) {
         if (self.scale_factor - scale_factor).abs() > 0.001 {
             self.scale_factor = scale_factor;
+            // text-typeset now owns the pre-scale: forward the new
+            // value and let it clear its own caches. Our layout /
+            // glyph caches still need to be dropped because they
+            // key off the scale factor (and the typesetter itself
+            // has evicted every rasterized glyph, so any cached
+            // atlas coords are now stale).
+            self.typesetter.set_scale_factor(scale_factor);
             self.layout_cache.clear();
             self.glyph_cache.clear();
         }
@@ -209,50 +283,41 @@ impl TextBackend for TypesetterBridge {
         style: &TextStyle,
         max_width: Option<f32>,
     ) -> TextLayout {
-        let sf = self.scale_factor;
-        let cache_key = LayoutCacheKey::new(text, style, max_width, sf);
+        let cache_key = LayoutCacheKey::new(text, style, max_width, self.scale_factor);
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
         }
 
-        // Full shaping on cache miss.
+        // Full shaping on cache miss. text-typeset handles the
+        // scale-factor pre-multiply internally now, so the caller
+        // supplies logical font sizes and gets logical metrics back.
         self.had_text_activity = true;
-        let mut format = Self::to_text_format(style);
-        format.font_size = format.font_size.map(|s| s * sf);
-
-        let physical_max = max_width.map(|w| w * sf);
+        let format = Self::to_text_format(style);
         let result: SingleLineResult =
             self.typesetter
-                .layout_single_line(text, &format, physical_max);
+                .layout_single_line(text, &format, max_width);
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
 
-        let inv = 1.0 / sf;
         let layout = TextLayout {
-            width: result.width * inv,
-            height: result.height * inv,
-            ascent: result.baseline * inv,
-            descent: (result.height - result.baseline) * inv,
+            width: result.width,
+            height: result.height,
+            ascent: result.baseline,
+            descent: result.height - result.baseline,
             layout_key: key,
             line_count: 1,
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
-        let inv = 1.0 / sf;
         self.glyph_cache.insert(
             key,
             result
                 .glyphs
                 .iter()
                 .map(|g| GlyphQuad {
-                    screen: [
-                        g.screen[0] * inv,
-                        g.screen[1] * inv,
-                        g.screen[2] * inv,
-                        g.screen[3] * inv,
-                    ],
+                    screen: g.screen,
                     atlas: g.atlas,
                     color: g.color,
                 })

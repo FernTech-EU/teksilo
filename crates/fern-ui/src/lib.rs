@@ -11,6 +11,15 @@ pub use fern_widgets as widgets;
 #[cfg(feature = "text")]
 pub use fern_text as text;
 
+/// Re-export of `text_document` when the `rich-text` feature is
+/// enabled, so applications can access the rich document model
+/// through the umbrella crate without adding a second direct
+/// workspace dependency. `fern-text` pulls in `text-document`
+/// under its own `rich-text` feature and re-exports it; this line
+/// just forwards the re-export one more level up.
+#[cfg(feature = "rich-text")]
+pub use fern_text::text_document;
+
 #[cfg(feature = "i18n")]
 pub use fern_i18n as i18n;
 

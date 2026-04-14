@@ -1,7 +1,7 @@
 RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p menus-and-dropdowns
 FERN_IDLE_TRACE=1 ./target/profiling/menus-and-dropdowns
 
-RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p widget-catalog && FERN_IDLE_TRACE=1 ./target/profiling/widget-catalog
+RUSTFLAGS="-C force-frame-pointers=yes" CARGO_PROFILE_PROFILING_DEBUG=2 cargo build --profile profiling -p rich-text-viewer && FERN_IDLE_TRACE=1 ./target/profiling/rich-text-viewer
 
 
-cargo build --workspace && cargo run -p menus-and-dropdowns && cargo run -p split-view && cargo run -p tab-widget && cargo run -p dialogs-and-popovers && cargo run -p data-collections
+cargo build --workspace && cargo run -p menus-and-dropdowns && cargo run -p split-view && cargo run -p tab-widget && cargo run -p dialogs-and-popovers && cargo run -p data-collectionsfv 

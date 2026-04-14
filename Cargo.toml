@@ -24,6 +24,9 @@ unic-langid = "0.9"
 sys-locale = "0.3"
 notify = "8.2.0"
 serde = { version = "1", features = ["derive"] }
+arboard = "3.4"
+text-document = { path = "../text-document/crates/public_api" }
+text-typeset = { path = "../text-typeset" }
 
 # Internal crates
 fern-tokens = { path = "crates/fern-tokens", version = "0.1.0" }

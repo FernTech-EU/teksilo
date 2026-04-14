@@ -621,6 +621,14 @@ impl Canvas {
         }
     }
 
+    /// Append one pre-positioned glyph quad. Used by the rich text editor's
+    /// paint walker to emit glyphs while applying a scroll/zoom offset.
+    pub fn draw_glyph_quad(&mut self, quad: GlyphQuad) {
+        let idx = self.frame.glyphs.len();
+        self.frame.glyphs.push(quad);
+        self.frame.draw_order.push(DrawCommand::Glyph(idx));
+    }
+
     /// Consume the canvas and produce the accumulated RenderFrame.
     pub fn into_render_frame(self) -> RenderFrame {
         self.frame

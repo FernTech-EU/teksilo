@@ -425,6 +425,7 @@ impl FernAppHandler {
         let mut timer_windows = 0_usize;
         let mut animation_timers = 0_usize;
         let mut tooltip_timers = 0_usize;
+        let mut any_frame_requested = false;
         for managed in self.wm.iter() {
             let animation_count = managed.tree.active_animation_count();
             let tooltip_count = managed.tree.pending_tooltip_count();
@@ -439,9 +440,22 @@ impl FernAppHandler {
                     None => deadline,
                 });
             }
+            if managed.tree.frame_requested() {
+                any_frame_requested = true;
+            }
         }
 
-        if let Some(deadline) = earliest_deadline {
+        if any_frame_requested {
+            // A widget has a per-frame effect actively running
+            // (caret blink, drag auto-scroll, continuous animation
+            // that drives the state via its tick closure). Poll
+            // mode keeps winit pumping events at the OS's maximum
+            // rate instead of sleeping — the only way to get a
+            // visibly regular blink cadence without a dedicated
+            // timer wake. Other widgets that only need deadline
+            // wakes keep doing that; frame pumping is additive.
+            event_loop.set_control_flow(ControlFlow::Poll);
+        } else if let Some(deadline) = earliest_deadline {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);
@@ -551,6 +565,17 @@ impl FernAppHandler {
             }
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_rendered_frame();
+            }
+
+            // Chain-request another redraw if the tree still wants to
+            // pump frames (caret blink, drag auto-scroll, pending
+            // document events still draining). Without this the
+            // frame-tick effect would set `frame_tick_requested`
+            // during paint but winit would idle because no one woke
+            // the event loop — continuous animations must keep
+            // asking for the next frame here, once per real frame.
+            if managed.tree.frame_requested() {
+                managed.platform_window.request_redraw();
             }
         }
     }
@@ -1087,16 +1112,26 @@ impl FernAppBuilder {
     }
 
     /// Build a headless app for testing (no window, no GPU).
-    pub fn build_headless(self) -> HeadlessApp {
+    pub fn build_headless(mut self) -> HeadlessApp {
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
 
         #[cfg(feature = "text")]
-        {
-            let typesetter = self
+        let typesetter = {
+            let ts = self
                 .typesetter
+                .take()
                 .unwrap_or_else(SharedTypesetter::new_with_default_font);
-            tree = tree.with_text_backend(typesetter.as_text_backend());
-        }
+            tree = tree.with_text_backend(ts.as_text_backend());
+            // Auto-register so rich-text widgets can reach the shared
+            // typesetter via `ctx.app_state::<SharedTypesetter>()` in
+            // headless tests too.
+            use std::any::TypeId;
+            self.app_state_registry
+                .insert(TypeId::of::<SharedTypesetter>(), Box::new(ts.clone()));
+            ts
+        };
+        #[cfg(not(feature = "text"))]
+        let _ = &mut self;
 
         // Install the i18n manager (if any) and seed the tree with the
         // resolved initial locale and layout direction. Must happen before
@@ -1111,6 +1146,8 @@ impl FernAppBuilder {
             let ctx = TreeAppContext::empty().with_app_state(self.app_state_registry);
             tree.set_app_context(std::rc::Rc::new(ctx));
         }
+        #[cfg(feature = "text")]
+        let _ = &typesetter;
 
         if let Some(root_builder) = self.root_builder {
             root_builder(&mut tree);
@@ -1124,7 +1161,7 @@ impl FernAppBuilder {
     }
 
     /// Build and run the application with windowed rendering.
-    pub fn run(self) {
+    pub fn run(mut self) {
         // Construct the i18n manager (if configured) and install it on
         // the thread-local before any window or widget tree is created.
         // `WindowManager::create_window` seeds every new tree from the
@@ -1184,6 +1221,25 @@ impl FernAppBuilder {
             }
         };
 
+        // Build the typesetter first so we can auto-register it into
+        // the per-tree app-state registry below. This gives rich-text
+        // widgets (and anything else that needs direct typesetter
+        // access) a reachable handle via `ctx.app_state::<SharedTypesetter>()`
+        // without forcing the application author to wire it manually.
+        #[cfg(feature = "text")]
+        let typesetter = self
+            .typesetter
+            .unwrap_or_else(SharedTypesetter::new_with_default_font);
+
+        #[cfg(feature = "text")]
+        {
+            use std::any::TypeId;
+            self.app_state_registry.insert(
+                TypeId::of::<SharedTypesetter>(),
+                Box::new(typesetter.clone()),
+            );
+        }
+
         // If an event source OR an app-state registry is present, build
         // the per-tree app context that carries them. This single context
         // is shared with every window the WindowManager creates.
@@ -1209,11 +1265,6 @@ impl FernAppBuilder {
         if let Some(on_ready) = self.on_ready {
             on_ready(proxy.clone());
         }
-
-        #[cfg(feature = "text")]
-        let typesetter = self
-            .typesetter
-            .unwrap_or_else(SharedTypesetter::new_with_default_font);
 
         // Build the initial window config
         let initial_config = if let Some(config) = self.initial_window {

@@ -288,6 +288,14 @@ impl<T: 'static> Signal<T> {
         }
     }
 
+    /// Number of active observers on this signal. Derived signals always return 0.
+    pub fn observer_count(&self) -> usize {
+        match &self.kind {
+            SignalKind::Mutable { inner, .. } => inner.borrow().observers.len(),
+            SignalKind::Derived { .. } => 0,
+        }
+    }
+
     /// Whether two Signal handles point to the same underlying value.
     pub fn same(a: &Self, b: &Self) -> bool {
         match (&a.kind, &b.kind) {

@@ -119,6 +119,20 @@ pub struct WidgetTree {
     /// only stores the value and rebuilds composite widgets on change —
     /// translation lookup happens entirely in user code today.
     pub(crate) locale: Option<String>,
+    /// Per-frame delta-seconds signal, advanced by `layout()` **only when
+    /// a widget has explicitly requested a frame** via `request_frame()`.
+    /// This preserves FernUI's draw-when-needed model: idle trees stay
+    /// idle even if widgets have registered observers on this signal.
+    pub(crate) frame_tick: crate::signal::Signal<f32>,
+    /// Set by `request_frame()`; consumed by `advance_frame_tick()` on
+    /// the next `layout()`. Observers that need another tick after the
+    /// current one must re-request. Stored as `Rc<Cell>` so observers
+    /// fired from inside the layout pass (`ctx.effect` closures on
+    /// `frame_tick`) can chain-request without needing &mut access
+    /// to the tree — see [`FrameRequestHandle`].
+    pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Wall-clock time of the previous `layout()` call (for delta computation).
+    pub(crate) last_frame_time: Option<std::time::Instant>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -181,7 +195,71 @@ impl WidgetTree {
             title_bar_host: None,
             app_context: Rc::new(crate::event_source::TreeAppContext::empty()),
             locale: None,
+            frame_tick: crate::signal::Signal::new(0.0_f32),
+            frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
+            last_frame_time: None,
         }
+    }
+
+    /// Clone the shared "frame requested" flag. Widgets stash this
+    /// in their state and call `.set(true)` from inside frame-tick
+    /// closures to chain-request another frame without needing
+    /// mutable access to the tree. See `RichTextEditor` for the
+    /// canonical use (caret blink, drag-select auto-scroll).
+    pub fn frame_request_handle(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
+        self.frame_tick_requested.clone()
+    }
+
+    /// The per-frame delta-seconds signal. Observers fire **only on frames
+    /// the tree was asked to pump** via [`request_frame`](Self::request_frame);
+    /// merely observing the signal does not keep the event loop awake.
+    /// See [`BuildContext::frame_tick`] for widget-side access and
+    /// [`BuildContext::request_frame`] for the opt-in request side.
+    pub fn frame_tick(&self) -> crate::signal::Signal<f32> {
+        self.frame_tick.clone()
+    }
+
+    /// Ask the tree to pump exactly one more frame. `needs_redraw()`
+    /// returns true until the request is consumed by the next
+    /// `layout()` call, which fires the per-frame tick signal and
+    /// clears the flag. Observers that still need more frames (drag
+    /// auto-scroll, caret blink, pending document events) must call
+    /// `request_frame()` again from inside their tick closure.
+    ///
+    /// Takes `&self` on purpose: widget handlers and per-frame effects
+    /// receive a shared reference to the tree via `EventContext` /
+    /// `BuildContext`, and the request flag is a `Cell` specifically so
+    /// those shared paths can toggle it without ceremony.
+    pub fn request_frame(&self) {
+        self.frame_tick_requested.set(true);
+    }
+
+    /// Whether a frame was explicitly requested. Exposed for tests and
+    /// for the event-loop driver that decides when to schedule the next
+    /// wake-up.
+    pub fn frame_requested(&self) -> bool {
+        self.frame_tick_requested.get()
+    }
+
+    /// Advance the frame tick signal when (and only when) a frame was
+    /// requested. Called by `layout()` before the scheduler tick so the
+    /// per-frame observers fire on the same frame they asked for.
+    pub(crate) fn advance_frame_tick(&mut self, now: std::time::Instant) {
+        if !self.frame_tick_requested.get() {
+            self.last_frame_time = Some(now);
+            return;
+        }
+        self.frame_tick_requested.set(false);
+        let delta = match self.last_frame_time {
+            Some(prev) => {
+                let d = now.saturating_duration_since(prev).as_secs_f32();
+                // Clamp absurd deltas (pause/breakpoint) so observers never see a spike.
+                d.clamp(0.0, 0.1)
+            }
+            None => 0.0,
+        };
+        self.last_frame_time = Some(now);
+        self.frame_tick.set(delta);
     }
 
     /// Replace the per-tree app context. Called by `fern-app` when
@@ -451,6 +529,7 @@ impl WidgetTree {
         self.arena.any_needs_layout()
             || self.arena.any_needs_paint()
             || self.animation_scheduler.has_active()
+            || self.frame_tick_requested.get()
     }
 
     /// Whether a render pass is needed (any widget needs layout or paint).
@@ -562,6 +641,12 @@ impl WidgetTree {
         self.process_pending_animations_at(self.sim_clock);
 
         self.sim_clock += duration;
+
+        if self.frame_tick_requested.get() {
+            self.frame_tick_requested.set(false);
+            let delta = duration.as_secs_f32().clamp(0.0, 0.1);
+            self.frame_tick.set(delta);
+        }
 
         self.animation_scheduler.tick(self.sim_clock);
 

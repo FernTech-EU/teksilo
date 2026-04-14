@@ -626,6 +626,9 @@ impl WidgetTree {
     }
 
     pub(super) fn collect_from_ctx(&mut self, ctx: EventContext, source_widget: WidgetId) {
+        if ctx.frame_requested {
+            self.request_frame();
+        }
         if let Some(cursor) = ctx.cursor_request {
             self.current_cursor = cursor;
         }

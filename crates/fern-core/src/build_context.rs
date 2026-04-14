@@ -69,6 +69,33 @@ impl<'a> BuildContext<'a> {
         self.tree.register_animated_signal(signal);
     }
 
+    /// The per-frame delta-seconds signal. Observe it via
+    /// `ctx.effect(&ctx.frame_tick(), |delta| ...)` to run code once per
+    /// frame **the tree was explicitly asked to pump**. Merely observing
+    /// this signal does not keep the event loop awake — widgets must
+    /// call [`request_frame`](Self::request_frame) (typically from an
+    /// event handler or from inside the tick closure itself) to schedule
+    /// the next wake-up. This preserves FernUI's draw-when-needed model.
+    pub fn frame_tick(&self) -> Signal<f32> {
+        self.tree.frame_tick()
+    }
+
+    /// Ask the tree to pump exactly one more frame. See
+    /// [`frame_tick`](Self::frame_tick) for the observer side.
+    pub fn request_frame(&self) {
+        self.tree.request_frame();
+    }
+
+    /// Clone the shared "frame requested" flag. Stash it on widget
+    /// state and call `.set(true)` from inside a frame-tick effect
+    /// closure to chain-request another frame without needing
+    /// mutable access to the tree. Used by widgets with continuous
+    /// frame needs (caret blink, drag auto-scroll, smooth
+    /// animations driven from a tick closure).
+    pub fn frame_request_handle(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
+        self.tree.frame_request_handle()
+    }
+
     /// Register a scoped effect tied to this build cycle.
     /// The effect fires whenever the signal changes. It is automatically
     /// cleaned up on rebuild or widget destruction.
@@ -268,6 +295,125 @@ mod effect_tests {
         fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
             proposal.resolve(0.0, 0.0)
         }
+    }
+
+    /// A widget that observes the per-frame tick signal and accumulates the
+    /// deltas it receives into a shared counter, so a test can verify both
+    /// that the tick fires at all and that the delta value is non-zero.
+    #[derive(Debug)]
+    struct FrameTickListener {
+        ticks: Signal<u32>,
+        last_delta: Signal<f32>,
+    }
+
+    impl Widget for FrameTickListener {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let ticks = self.ticks.clone();
+            let last_delta = self.last_delta.clone();
+            let tick = ctx.frame_tick();
+            ctx.effect(&tick, move |delta| {
+                ticks.set(ticks.get() + 1);
+                last_delta.set(*delta);
+            });
+            Vec::new()
+        }
+
+        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+            proposal.resolve(0.0, 0.0)
+        }
+    }
+
+    #[test]
+    fn frame_tick_stays_silent_until_explicit_request() {
+        // The draw-when-needed contract: a widget that merely observes
+        // frame_tick must NOT keep the tree awake. Only an explicit
+        // `request_frame()` call pumps a tick.
+        let mut tree = WidgetTree::new();
+        let ticks = Signal::new(0_u32);
+        let last_delta = Signal::new(-1.0_f32);
+        tree.add(FrameTickListener {
+            ticks: ticks.clone(),
+            last_delta: last_delta.clone(),
+        });
+
+        // Flush the initial layout-dirty flag from widget insertion.
+        tree.layout(fern_canvas::SizeProposal::exact(400.0, 300.0));
+        assert!(
+            !tree.frame_requested(),
+            "observing frame_tick does not set the request flag"
+        );
+
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        assert_eq!(
+            ticks.get(),
+            0,
+            "an un-requested tick_animations must not fire frame_tick observers"
+        );
+        assert_eq!(last_delta.get(), -1.0);
+    }
+
+    #[test]
+    fn frame_tick_fires_once_per_request() {
+        let mut tree = WidgetTree::new();
+        let ticks = Signal::new(0_u32);
+        let last_delta = Signal::new(-1.0_f32);
+        let id = tree.add(FrameTickListener {
+            ticks: ticks.clone(),
+            last_delta: last_delta.clone(),
+        });
+
+        // Flush initial layout-dirty flag so assertions reflect only
+        // the frame-tick contract.
+        tree.layout(fern_canvas::SizeProposal::exact(400.0, 300.0));
+
+        tree.request_frame();
+        assert!(tree.needs_redraw(), "explicit request marks the tree dirty");
+        assert!(tree.frame_requested());
+
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        assert_eq!(ticks.get(), 1);
+        assert!((last_delta.get() - 0.016).abs() < 0.001);
+        assert!(
+            !tree.frame_requested(),
+            "request flag must be cleared after the tick fired"
+        );
+
+        // Second request fires exactly one more tick.
+        tree.request_frame();
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        assert_eq!(ticks.get(), 2);
+
+        // Without a request, further ticks silently advance time.
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        assert_eq!(ticks.get(), 2);
+
+        tree.destroy_subtree(id);
+        tree.request_frame();
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        assert_eq!(
+            ticks.get(),
+            2,
+            "destroyed widget's observer must not resurrect"
+        );
+    }
+
+    #[test]
+    fn frame_tick_delta_clamped_against_huge_pauses() {
+        let mut tree = WidgetTree::new();
+        let ticks = Signal::new(0_u32);
+        let last_delta = Signal::new(-1.0_f32);
+        tree.add(FrameTickListener {
+            ticks: ticks.clone(),
+            last_delta: last_delta.clone(),
+        });
+
+        tree.request_frame();
+        tree.tick_animations(std::time::Duration::from_secs(5));
+        assert_eq!(ticks.get(), 1);
+        assert!(
+            (last_delta.get() - 0.1).abs() < 1e-4,
+            "frame delta must clamp at 0.1s even after a multi-second pause"
+        );
     }
 
     #[test]

@@ -43,7 +43,14 @@ fonts-all = [
     "fonts-cjk-kr",
 ]
 
+# Enables `RichTextEngine` and the `FontRegistrar` trait. Pulls in
+# `text-document` directly so the engine can consume `FlowSnapshot`,
+# `TextCursor`, and `DocumentFragment`. Required by fern-widgets's
+# `rich-text` feature.
+rich-text = ["dep:text-document"]
+
 [dependencies]
 fern-canvas = { workspace = true }
 fern-tokens = { workspace = true }
-text-typeset = { path = "../../../text-typeset" }
+text-typeset = { workspace = true }
+text-document = { workspace = true, optional = true }

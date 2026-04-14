@@ -20,6 +20,8 @@ pub mod primitives;
 pub mod progress_bar;
 pub mod radio_button;
 pub mod repeater;
+#[cfg(feature = "rich-text")]
+pub mod rich_text;
 pub mod scroll_area;
 pub mod scroll_bar;
 pub mod segmented_control;

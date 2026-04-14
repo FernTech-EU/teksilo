@@ -152,10 +152,15 @@ pub enum DecorationKind {
     Selection,
     Cursor,
     Underline,
+    Overline,
     Strikeout,
     FocusRing,
     DropIndicator,
     TableBorder,
+    TableCellBackground,
+    BlockBackground,
+    TextBackground,
+    CellSelection,
 }
 
 /// A shape rendered via SDF (signed distance field) shaders.

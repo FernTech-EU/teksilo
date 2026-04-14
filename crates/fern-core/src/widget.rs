@@ -226,6 +226,10 @@ pub struct EventContext {
     /// Replace the tree-level locale identifier. Drained after dispatch;
     /// triggers a composite-widget rebuild and full repaint.
     pub(crate) locale_request: Option<String>,
+    /// Set by `request_frame()`; consumed by the event dispatcher which
+    /// forwards it to `WidgetTree::request_frame()` so the next layout
+    /// pass advances the per-frame tick signal.
+    pub(crate) frame_requested: bool,
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -261,7 +265,17 @@ impl EventContext {
             cancel_drag: false,
             theme_request: None,
             locale_request: None,
+            frame_requested: false,
         }
+    }
+
+    /// Ask the tree to pump one more frame after this handler returns.
+    /// Use from event handlers that kick off per-frame work (pending
+    /// document events to drain, drag-select auto-scroll, caret blink
+    /// restart on focus). See `WidgetTree::request_frame` for the
+    /// draw-when-needed contract.
+    pub fn request_frame(&mut self) {
+        self.frame_requested = true;
     }
 
     /// Emit a typed application command.

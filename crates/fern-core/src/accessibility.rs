@@ -1,4 +1,4 @@
-use accesskit::{Action, Live, Node, NodeId, Role};
+use accesskit::{Action, Live, Node, NodeId, Role, TextPosition, TextSelection};
 
 use crate::widget_id::WidgetId;
 
@@ -123,6 +123,38 @@ impl AccessNodeBuilder {
     /// Get a reference to the inner node for advanced use.
     pub fn inner_mut(&mut self) -> &mut Node {
         &mut self.inner
+    }
+
+    /// Mark this node as read-only. Used by `RichTextEditor::read_only` so
+    /// screen readers announce the widget as a document rather than a form
+    /// field.
+    pub fn set_read_only(&mut self) {
+        self.inner.set_read_only();
+    }
+
+    /// Declare the current text selection. `anchor` and `focus` are
+    /// character indices into the widget's flat text representation; pass
+    /// equal indices for a collapsed caret. Uses the same `NodeId` for
+    /// both positions (typical for single-node text widgets that expose
+    /// the document as one run, which is what the first milestone of
+    /// `RichTextEditor` does).
+    pub fn set_text_selection(&mut self, node_id: NodeId, anchor: usize, focus: usize) {
+        let selection = TextSelection {
+            anchor: TextPosition {
+                node: node_id,
+                character_index: anchor,
+            },
+            focus: TextPosition {
+                node: node_id,
+                character_index: focus,
+            },
+        };
+        self.inner.set_text_selection(selection);
+    }
+
+    /// Convenience for exposing a caret position as a collapsed selection.
+    pub fn set_caret_position(&mut self, node_id: NodeId, character_index: usize) {
+        self.set_text_selection(node_id, character_index, character_index);
     }
 }
 
