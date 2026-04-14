@@ -44,7 +44,7 @@ struct TreeViewDragData {
 /// TreeView::new(tree_model, |item, entry, selected| {
 ///     Box::new(HStack::new()
 ///         .child(Padding::left(entry.depth as f32 * 20.0))
-///         .child(TextWidget::new(&item.title)))
+///         .child(TextWidget::new_literal(&item.title)))
 /// })
 /// .item_height(28.0)
 /// ```

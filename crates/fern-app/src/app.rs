@@ -8,10 +8,12 @@ use fern_core::event_source::{
 use fern_core::modal::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
 use fern_core::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use fern_core::{WidgetId, WidgetTree};
+use fern_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
 use fern_platform::event_translation;
 use fern_tokens::{ColorTokens, Theme};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
@@ -284,6 +286,11 @@ struct FernAppHandler {
     theme_mode: ThemeMode,
     #[cfg(feature = "text")]
     typesetter: SharedTypesetter,
+    /// Kept alive for the lifetime of the event loop so that the
+    /// `notify::RecommendedWatcher` background thread keeps running.
+    /// Created in `FernAppBuilder::run` when the `I18nConfig` registers
+    /// any `runtime_override`s; otherwise `None`.
+    _i18n_watcher: Option<fern_i18n::FtlFileWatcher>,
 }
 
 impl FernAppHandler {
@@ -295,6 +302,7 @@ impl FernAppHandler {
         initial_window: WindowConfig,
         app_context_template: Option<std::rc::Rc<TreeAppContext>>,
         #[cfg(feature = "text")] typesetter: SharedTypesetter,
+        i18n_watcher: Option<fern_i18n::FtlFileWatcher>,
     ) -> Self {
         let mut wm = WindowManager::new(theme);
         wm.set_theme_mode(theme_mode);
@@ -318,6 +326,7 @@ impl FernAppHandler {
             theme_mode,
             #[cfg(feature = "text")]
             typesetter,
+            _i18n_watcher: i18n_watcher,
         }
     }
 
@@ -760,6 +769,36 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                     template.dispatch_subscription_event(sub_id, &*event);
                 }
             }
+            // Hot-reload of an `.ftl` file registered via
+            // `I18nConfig::runtime_override(...)`. Architecture §12.7:
+            // the reload must *not* trigger a composite rebuild — only
+            // the version signal is bumped, and the existing binding
+            // system propagates the change to every `LocalizedString`
+            // observer. Direction and active locale are unchanged.
+            AppEvent::I18nReload { locale, path } => {
+                let parsed: Result<fern_i18n::LanguageIdentifier, _> = locale.parse();
+                match parsed {
+                    Ok(loc) => {
+                        let reloaded =
+                            fern_i18n::thread_local::with_active(|mgr| {
+                                mgr.reload_from_path(&loc, &path)
+                            });
+                        match reloaded {
+                            Some(Ok(())) => {}
+                            Some(Err(e)) => eprintln!(
+                                "fern-app: hot-reload failed for {loc} ({}): {e}",
+                                path.display()
+                            ),
+                            None => eprintln!(
+                                "fern-app: hot-reload event for {loc} but no i18n manager installed"
+                            ),
+                        }
+                    }
+                    Err(e) => eprintln!(
+                        "fern-app: hot-reload event with invalid locale `{locale}`: {e}"
+                    ),
+                }
+            }
             _ => {}
         }
         if let Some(trace) = &mut self.idle_trace {
@@ -878,6 +917,11 @@ pub struct FernAppBuilder {
     /// Installed via `app_state::<T>(value)` and reachable from any
     /// `BuildContext` via `ctx.app_state::<T>()`.
     app_state_registry: HashMap<TypeId, Box<dyn Any>>,
+    /// Internationalization configuration (architecture §12). Installed
+    /// via `i18n(I18nConfig)`. When present, an `I18nManager` is built at
+    /// `build_headless` / `run` time and registered on the thread-local so
+    /// `tr!`-expanded code can resolve translations.
+    i18n: Option<I18nConfig>,
 }
 
 impl FernAppBuilder {
@@ -898,6 +942,7 @@ impl FernAppBuilder {
             custom_chrome: false,
             event_source: None,
             app_state_registry: HashMap::new(),
+            i18n: None,
         }
     }
 
@@ -921,6 +966,16 @@ impl FernAppBuilder {
     pub fn app_state<T: 'static>(mut self, value: T) -> Self {
         self.app_state_registry
             .insert(TypeId::of::<T>(), Box::new(value));
+        self
+    }
+
+    /// Register an `I18nConfig` (architecture §12). Constructs an
+    /// `I18nManager` at startup, installs it on the thread-local, and
+    /// seeds the widget tree with the resolved initial locale and layout
+    /// direction. Without this call, `tr!`-expanded code falls back to
+    /// returning the literal key as a placeholder.
+    pub fn i18n(mut self, config: I18nConfig) -> Self {
+        self.i18n = Some(config);
         self
     }
 
@@ -1022,6 +1077,12 @@ impl FernAppBuilder {
             tree = tree.with_text_backend(typesetter.as_text_backend());
         }
 
+        // Install the i18n manager (if any) and seed the tree with the
+        // resolved initial locale and layout direction. Must happen before
+        // the root builder runs so that any `tr!` calls inside `build()`
+        // resolve against the correct locale on first build.
+        let i18n_manager = self.i18n.as_ref().map(|cfg| install_i18n(&mut tree, cfg));
+
         // Install the app-state registry (if any) before running the root
         // builder so that widgets' `build()` methods can call
         // `ctx.app_state::<T>()`.
@@ -1037,11 +1098,33 @@ impl FernAppBuilder {
         HeadlessApp {
             tree,
             theme: self.theme,
+            i18n_manager,
         }
     }
 
     /// Build and run the application with windowed rendering.
     pub fn run(self) {
+        // Construct the i18n manager (if configured) and install it on the
+        // thread-local before any window or widget tree is created. The
+        // `WindowManager` will seed each new tree with the resolved locale
+        // and direction at window-creation time.
+        //
+        // `runtime_override` entries are collected here so the hot-reload
+        // watcher can be spun up after the winit event loop exists (we
+        // need the `EventLoopProxy` as the sink target).
+        let runtime_overrides: Vec<(LanguageIdentifier, std::path::PathBuf)> =
+            self.i18n
+                .as_ref()
+                .map(|cfg| cfg.runtime_overrides().to_vec())
+                .unwrap_or_default();
+
+        if let Some(cfg) = self.i18n.as_ref() {
+            let mgr = I18nManager::from_config(cfg);
+            let initial_loc = I18nManager::resolve_initial_locale(cfg);
+            mgr.set_locale(initial_loc);
+            fern_i18n::thread_local::install(mgr);
+        }
+
         let event_loop = winit::event_loop::EventLoop::<AppEvent>::with_user_event()
             .build()
             .unwrap();
@@ -1052,6 +1135,32 @@ impl FernAppBuilder {
         // proxy is cheap to clone.
         let proxy = AppEventProxy {
             inner: event_loop.create_proxy(),
+        };
+
+        // Build the i18n hot-reload watcher if any `runtime_override`s
+        // were registered. The sink posts `AppEvent::I18nReload` through
+        // the event loop proxy; the watcher's background thread converts
+        // file-change events into these messages. The watcher handle is
+        // handed to `FernAppHandler` which keeps it alive for the loop
+        // lifetime. Construction failures log and fall back to no
+        // hot-reload (the rest of i18n still works).
+        let i18n_watcher = if runtime_overrides.is_empty() {
+            None
+        } else {
+            let proxy_for_sink = proxy.inner.clone();
+            let sink: fern_i18n::ReloadSink = std::sync::Arc::new(move |locale, path| {
+                let _ = proxy_for_sink.send_event(AppEvent::I18nReload {
+                    locale: locale.to_string(),
+                    path,
+                });
+            });
+            match fern_i18n::FtlFileWatcher::new(runtime_overrides, sink) {
+                Ok(watcher) => Some(watcher),
+                Err(e) => {
+                    eprintln!("fern-app: failed to start i18n file watcher: {e}");
+                    None
+                }
+            }
         };
 
         // If an event source OR an app-state registry is present, build
@@ -1108,6 +1217,7 @@ impl FernAppBuilder {
             app_context_template,
             #[cfg(feature = "text")]
             typesetter,
+            i18n_watcher,
         );
 
         event_loop.run_app(&mut app).unwrap();
@@ -1120,15 +1230,57 @@ impl Default for FernAppBuilder {
     }
 }
 
+/// Build an `I18nManager` from `cfg`, install it on the thread-local, and
+/// seed `tree` with the resolved initial locale and layout direction.
+/// Returns the manager so the caller can hand it to `HeadlessApp` (or, in
+/// `run()`, drop it because the thread-local owns it for the process).
+fn install_i18n(tree: &mut WidgetTree, cfg: &I18nConfig) -> Rc<I18nManager> {
+    let mgr = I18nManager::from_config(cfg);
+    let initial_loc = I18nManager::resolve_initial_locale(cfg);
+    mgr.set_locale(initial_loc.clone());
+    fern_i18n::thread_local::install(mgr.clone());
+
+    tree.set_locale(initial_loc.to_string());
+    tree.set_layout_direction(mgr.direction_signal().get());
+
+    mgr
+}
+
 /// A headless app for testing (no window, no GPU).
 pub struct HeadlessApp {
     pub tree: WidgetTree,
     pub theme: Theme,
+    /// Active i18n manager, if `FernAppBuilder::i18n(...)` was used. Tests
+    /// can reach the bundles, version signal, and locale signal directly
+    /// through this handle.
+    pub i18n_manager: Option<Rc<I18nManager>>,
 }
 
 impl HeadlessApp {
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    /// The active i18n manager, if `i18n(...)` was registered on the
+    /// builder.
+    pub fn i18n_manager(&self) -> Option<&Rc<I18nManager>> {
+        self.i18n_manager.as_ref()
+    }
+
+    /// Switch the active locale. Updates the manager (which increments the
+    /// version signal so any `LocalizedString::to_signal()` observers
+    /// re-resolve), then seeds the tree with the new direction (only when
+    /// it actually changed) and triggers a composite rebuild via
+    /// `WidgetTree::set_locale`. No-op if no `I18nConfig` was registered.
+    pub fn set_locale(&mut self, locale: LanguageIdentifier) {
+        let Some(mgr) = self.i18n_manager.clone() else {
+            return;
+        };
+        let outcome = mgr.set_locale(locale.clone());
+        if outcome.direction_changed {
+            self.tree.set_layout_direction(mgr.direction_signal().get());
+        }
+        self.tree.set_locale(locale.to_string());
     }
 }
 
@@ -1210,7 +1362,7 @@ mod tests {
 
     #[test]
     fn auto_prefers_native_for_deferred_content_when_supported() {
-        let request = ModalRequest::deferred(|tree| tree.add(Button::new("Deferred")));
+        let request = ModalRequest::deferred(|tree| tree.add(Button::new_literal("Deferred")));
 
         assert_eq!(
             resolve_modal_presentation(request.presentation, &request.content, true),
@@ -1221,7 +1373,7 @@ mod tests {
     #[test]
     fn existing_widget_forces_in_tree_even_if_native_requested() {
         let mut tree = WidgetTree::new();
-        let content = tree.add(Button::new("Existing"));
+        let content = tree.add(Button::new_literal("Existing"));
         let request = ModalRequest::in_tree(content).presentation(ModalPresentation::NativeWindow);
 
         assert_eq!(
@@ -1233,8 +1385,8 @@ mod tests {
     #[test]
     fn present_in_tree_modal_request_shows_centered_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let source = tree.add(Button::new("Trigger"));
-        let content = tree.add(Button::new("Modal content"));
+        let source = tree.add(Button::new_literal("Trigger"));
+        let content = tree.add(Button::new_literal("Modal content"));
         tree.set_dormant(content);
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -1252,13 +1404,13 @@ mod tests {
     #[test]
     fn present_in_tree_modal_request_builds_deferred_content() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let source = tree.add(Button::new("Trigger"));
+        let source = tree.add(Button::new_literal("Trigger"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         present_in_tree_modal_request(
             &mut tree,
             source,
-            ModalRequest::deferred(|tree| tree.add(Button::new("Deferred modal")))
+            ModalRequest::deferred(|tree| tree.add(Button::new_literal("Deferred modal")))
                 .presentation(ModalPresentation::InTree),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -1270,7 +1422,7 @@ mod tests {
     #[test]
     fn present_in_tree_modal_request_moves_focus_into_modal() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let source = tree.add(Button::new("Trigger"));
+        let source = tree.add(Button::new_literal("Trigger"));
         tree.layout(SizeProposal::exact(800.0, 600.0));
         tree.focus(source);
 
@@ -1278,7 +1430,7 @@ mod tests {
             &mut tree,
             source,
             ModalRequest::deferred(|tree| {
-                tree.add(ModalContainer::new(Button::new("Continue")))
+                tree.add(ModalContainer::new(Button::new_literal("Continue")))
             })
             .presentation(ModalPresentation::InTree),
         );

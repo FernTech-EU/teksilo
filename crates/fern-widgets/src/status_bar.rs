@@ -107,7 +107,7 @@ impl Widget for StatusBar {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
-        builder.set_name("Status");
+        builder.set_name(fern_i18n::tr_widget!(a11y_status_bar_name()).resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {

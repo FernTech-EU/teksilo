@@ -18,13 +18,20 @@ pub struct Badge {
 }
 
 impl Badge {
-    pub fn new(label: impl Into<String>) -> Self {
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             color: None,
             text_color: None,
             root_child_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw string in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
     }
 
     pub fn color(mut self, color: Color) -> Self {
@@ -55,7 +62,7 @@ impl Widget for Badge {
             .unwrap_or(theme.colors.accent_subtle_bg);
         let text = self.text_color.unwrap_or(theme.colors.status_info_fg);
 
-        let text_widget = TextWidget::new(&self.label)
+        let text_widget = TextWidget::new_literal(&self.label)
             .style(theme.typography.tiny.clone())
             .color(text);
         let bg_rect = RectWidget::new()
@@ -117,7 +124,7 @@ mod tests {
     #[test]
     fn badge_builds_and_renders() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let badge = tree.add(Badge::new("New"));
+        let badge = tree.add(Badge::new_literal("New"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let b = tree.bounds(badge);
         assert!(b.width > 0.0);
@@ -127,7 +134,7 @@ mod tests {
     #[test]
     fn badge_accessibility() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let badge = tree.add(Badge::new("3"));
+        let badge = tree.add(Badge::new_literal("3"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(badge);
         assert_eq!(info.role(), fern_core::accesskit::Role::Label);

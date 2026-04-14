@@ -122,7 +122,7 @@ impl Widget for SnackbarSurface {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
-        builder.set_name("Snackbar");
+        builder.set_name(fern_i18n::tr_widget!(a11y_snackbar_name()).resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -142,9 +142,13 @@ pub struct Snackbar {
 }
 
 impl Snackbar {
-    pub fn new(label: impl Into<String>, content: impl Widget + 'static) -> Self {
+    pub fn new(
+        label: impl Into<fern_i18n::LocalizedString>,
+        content: impl Widget + 'static,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             style: ButtonVariant::Regular,
             enabled: true,
             dismiss: DismissBehavior::ClickOutside,
@@ -153,6 +157,12 @@ impl Snackbar {
             pending_trigger: None,
             root_child_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label), content)
     }
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
@@ -275,7 +285,7 @@ impl Widget for Snackbar {
             )
         } else {
             ctx.add(
-                Button::new(label)
+                Button::new_literal(label)
                     .style(style)
                     .enabled(enabled)
                     .on_tap(open_on_tap)
@@ -367,7 +377,7 @@ mod tests {
     #[test]
     fn access_click_opens_bottom_center_snackbar() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Snackbar::new("Show snackbar", FixedLeaf(220.0, 40.0)));
+        tree.add(Snackbar::new_literal("Show snackbar", FixedLeaf(220.0, 40.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
@@ -389,7 +399,7 @@ mod tests {
     fn custom_trigger_opens_snackbar() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Snackbar::new("Show snackbar", FixedLeaf(180.0, 36.0)).trigger(FixedLeaf(132.0, 36.0)),
+            Snackbar::new_literal("Show snackbar", FixedLeaf(180.0, 36.0)).trigger(FixedLeaf(132.0, 36.0)),
         );
         tree.layout(SizeProposal::exact(640.0, 480.0));
 
@@ -406,7 +416,7 @@ mod tests {
     fn snackbar_auto_dismisses_after_duration() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Snackbar::new("Show snackbar", FixedLeaf(220.0, 40.0))
+            Snackbar::new_literal("Show snackbar", FixedLeaf(220.0, 40.0))
                 .auto_dismiss_after(Duration::from_millis(300)),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));

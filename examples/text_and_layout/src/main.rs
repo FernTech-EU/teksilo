@@ -61,13 +61,13 @@ impl Widget for RootContent {
                     .child(
                         HStack::new()
                             .child(
-                                TextWidget::new("Text & Layout")
+                                TextWidget::new_literal("Text & Layout")
                                     .style(t.body_bold.clone())
                                     .color(c.text_primary),
                             )
                             .child(Spacer::new())
                             .child(
-                                Button::new("Toggle Dark Mode")
+                                Button::new_literal("Toggle Dark Mode")
                                     .style(ButtonVariant::Regular)
                                     .on_activate(Cmd::ToggleDarkMode),
                             ),
@@ -77,33 +77,33 @@ impl Widget for RootContent {
                         VStack::new()
                             .spacing(6.0)
                             .child(
-                                TextWidget::new("Typography Styles")
+                                TextWidget::new_literal("Typography Styles")
                                     .style(t.body_bold.clone())
                                     .color(c.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "Body text (14px) — the default reading style for content.",
                                 )
                                 .style(t.body.clone())
                                 .color(c.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "Body small (12px) — secondary information and descriptions.",
                                 )
                                 .style(t.small.clone())
                                 .color(c.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "Caption (11px) — timestamps, footnotes, and fine print.",
                                 )
                                 .style(t.tiny.clone())
                                 .color(c.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "LABEL (12px medium, +0.5 tracking) — form labels and tags.",
                                 )
                                 .style(t.small.clone())
@@ -115,7 +115,7 @@ impl Widget for RootContent {
                         VStack::new()
                             .spacing(6.0)
                             .child(
-                                TextWidget::new("Layout Primitives")
+                                TextWidget::new_literal("Layout Primitives")
                                     .style(t.body_bold.clone())
                                     .color(c.text_primary),
                             )
@@ -127,26 +127,26 @@ impl Widget for RootContent {
                                     .child(build_color_box(c.text_error, "C")),
                             )
                             .child(
-                                TextWidget::new("HStack with spacing — three colored boxes")
+                                TextWidget::new_literal("HStack with spacing — three colored boxes")
                                     .style(t.tiny.clone())
                                     .color(c.text_primary),
                             )
                             .child(
                                 HStack::new()
                                     .child(
-                                        TextWidget::new("Leading")
+                                        TextWidget::new_literal("Leading")
                                             .style(t.body.clone())
                                             .color(c.text_primary),
                                     )
                                     .child(Spacer::new())
                                     .child(
-                                        TextWidget::new("Trailing")
+                                        TextWidget::new_literal("Trailing")
                                             .style(t.body.clone())
                                             .color(c.text_primary),
                                     ),
                             )
                             .child(
-                                TextWidget::new("Spacer pushing items to edges")
+                                TextWidget::new_literal("Spacer pushing items to edges")
                                     .style(t.tiny.clone())
                                     .color(c.text_primary),
                             ),
@@ -175,7 +175,7 @@ fn build_color_box(color: Color, label: &str) -> Panel {
         .corner_radius(6.0)
         .padding(8.0)
         .child(
-            TextWidget::new(label)
+            TextWidget::new_literal(label)
                 .style(TextStyle {
                     family: "sans-serif".into(),
                     size: 14.0,
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn text_widget_measures_correctly_without_backend() {
         let theme = Theme::light_default();
-        let w = TextWidget::new("Hello World").style(theme.typography.body.clone());
+        let w = TextWidget::new_literal("Hello World").style(theme.typography.body.clone());
         let ctx = LayoutContext::for_testing(&theme);
         let size = w.size_that_fits(SizeProposal::unspecified(), &ctx);
         assert!((size.width - 88.0).abs() < 0.01);

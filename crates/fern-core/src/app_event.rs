@@ -4,6 +4,7 @@
 //! proxy. The UI thread processes them like any other input event.
 
 use std::any::Any;
+use std::path::PathBuf;
 
 use crate::app_command::ErasedCommand;
 use crate::event_source::SubscriptionId;
@@ -34,6 +35,15 @@ pub enum AppEvent {
         sub_id: SubscriptionId,
         event: Box<dyn Any + Send>,
     },
+
+    /// An `.ftl` translation file registered via
+    /// `I18nConfig::runtime_override(locale, path)` changed on disk.
+    /// The fern-app handler calls `I18nManager::reload_from_path` and
+    /// bumps the translation version signal. Architecture §12.6.
+    I18nReload {
+        locale: String,
+        path: PathBuf,
+    },
 }
 
 impl std::fmt::Debug for AppEvent {
@@ -59,6 +69,11 @@ impl std::fmt::Debug for AppEvent {
                 .debug_struct("SubscriptionEvent")
                 .field("sub_id", sub_id)
                 .field("event", &"..")
+                .finish(),
+            Self::I18nReload { locale, path } => f
+                .debug_struct("I18nReload")
+                .field("locale", locale)
+                .field("path", path)
                 .finish(),
         }
     }

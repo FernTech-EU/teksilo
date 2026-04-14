@@ -31,12 +31,12 @@ impl Widget for OverlayDemo {
         let popover_content = VStack::new()
             .spacing(12.0)
             .child(
-                TextWidget::new("Popover")
+                TextWidget::new_literal("Popover")
                     .style(t.small.clone())
                     .color(c.text_primary),
             )
             .child(
-                TextWidget::new(
+                TextWidget::new_literal(
                     "Use popovers for compact contextual actions without leaving the current surface.",
                 )
                 .style(t.body.clone())
@@ -45,20 +45,20 @@ impl Widget for OverlayDemo {
             .child(
                 HStack::new()
                     .spacing(8.0)
-                    .child(Badge::new("Quick actions"))
-                    .child(Badge::new("Inline help"))
-                    .child(Badge::new("Inspector")),
+                    .child(Badge::new_literal("Quick actions"))
+                    .child(Badge::new_literal("Inline help"))
+                    .child(Badge::new_literal("Inspector")),
             );
 
         let snackbar_content = HStack::new()
             .spacing(14.0)
             .child(
-                TextWidget::new("Autosave complete")
+                TextWidget::new_literal("Autosave complete")
                     .style(t.body.clone())
                     .color(c.tooltip_text),
             )
             .child(
-                Button::new("Dismiss")
+                Button::new_literal("Dismiss")
                     .style(ButtonVariant::Regular)
                     .on_tap(|ctx| ctx.dismiss_top_overlay()),
             );
@@ -66,9 +66,9 @@ impl Widget for OverlayDemo {
         let popover_trigger = Panel::new().padding(12.0).child(
             HStack::new()
                 .spacing(10.0)
-                .child(Badge::new("Context"))
+                .child(Badge::new_literal("Context"))
                 .child(
-                    TextWidget::new("Popover actions")
+                    TextWidget::new_literal("Popover actions")
                         .style(t.small.clone())
                         .color(c.text_primary),
                 ),
@@ -77,9 +77,9 @@ impl Widget for OverlayDemo {
         let dialog_trigger = Panel::new().padding(12.0).child(
             HStack::new()
                 .spacing(10.0)
-                .child(Badge::new("Modal"))
+                .child(Badge::new_literal("Modal"))
                 .child(
-                    TextWidget::new("Review changes")
+                    TextWidget::new_literal("Review changes")
                         .style(t.small.clone())
                         .color(c.text_primary),
                 ),
@@ -87,23 +87,23 @@ impl Widget for OverlayDemo {
 
         let auto_modal_theme = theme.clone();
         let modal_trigger_id = ctx.add(
-            Dialog::new("Adaptive modal window", move || {
+            Dialog::new_literal("Adaptive modal window", move || {
                 let t = &auto_modal_theme.typography;
                 let c = &auto_modal_theme.colors;
                 DialogContent::new()
-                    .title("Adaptive modal dialog")
-                    .supporting_text(
+                    .title_literal("Adaptive modal dialog")
+                    .supporting_text_literal(
                         "The framework chooses the best modal presentation for the current backend: a native modal child window when reliable, otherwise a centered in-tree dialog.",
                     )
                     .body(
-                        TextWidget::new(
+                        TextWidget::new_literal(
                             "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets FernUI resolve it.",
                         )
                         .style(t.body.clone())
                         .color(c.text_secondary),
                     )
                     .footer(
-                        Button::new("Close")
+                        Button::new_literal("Close")
                             .style(ButtonVariant::Default)
                             .on_tap(|ctx| ctx.dismiss_modal()),
                     )
@@ -116,12 +116,12 @@ impl Widget for OverlayDemo {
                 VStack::new()
                     .spacing(24.0)
                     .child(
-                        TextWidget::new("Dialogs and Popovers")
+                        TextWidget::new_literal("Dialogs and Popovers")
                             .style(t.body_bold.clone())
                             .color(c.text_primary),
                     )
                     .child(
-                        TextWidget::new(
+                        TextWidget::new_literal(
                             "FernUI now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.",
                         )
                         .style(t.body.clone())
@@ -132,21 +132,21 @@ impl Widget for OverlayDemo {
                             HStack::new()
                                 .spacing(16.0)
                                 .child(
-                                    Popover::new("Show popover", popover_content)
+                                    Popover::new_literal("Show popover", popover_content)
                                         .caret_size(12.0)
                                         .trigger(popover_trigger),
                                 )
                                 .child(
-                                    Dialog::new("Open dialog", move || {
+                                    Dialog::new_literal("Open dialog", move || {
                                         let t = &dialog_theme.typography;
                                         let c = &dialog_theme.colors;
                                         DialogContent::new()
-                                            .title("Review Changes")
-                                            .supporting_text(
+                                            .title_literal("Review Changes")
+                                            .supporting_text_literal(
                                                 "Dialogs open centered, dismiss on Escape or outside click, and can host structured body and action sections.",
                                             )
                                             .body(
-                                                TextWidget::new(
+                                                TextWidget::new_literal(
                                                     "This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout.",
                                                 )
                                                 .style(t.body.clone())
@@ -156,12 +156,12 @@ impl Widget for OverlayDemo {
                                                 HStack::new()
                                                     .spacing(12.0)
                                                     .child(
-                                                        Button::new("Cancel")
+                                                        Button::new_literal("Cancel")
                                                             .style(ButtonVariant::Regular)
                                                             .on_tap(|ctx| ctx.dismiss_modal()),
                                                     )
                                                     .child(
-                                                        Button::new("Apply")
+                                                        Button::new_literal("Apply")
                                                             .style(ButtonVariant::Default)
                                                             .on_tap(|ctx| ctx.dismiss_modal()),
                                                     ),
@@ -170,7 +170,7 @@ impl Widget for OverlayDemo {
                                         .trigger(dialog_trigger),
                                 )
                                 .child(
-                                    Snackbar::new("Show snackbar", snackbar_content)
+                                    Snackbar::new_literal("Show snackbar", snackbar_content)
                                         .auto_dismiss_after(Duration::from_millis(2500)),
                                 )
                                 .add_child(modal_trigger_id),
@@ -181,12 +181,12 @@ impl Widget for OverlayDemo {
                             VStack::new()
                                 .spacing(10.0)
                                 .child(
-                                    TextWidget::new("Notes")
+                                    TextWidget::new_literal("Notes")
                                         .style(t.body_bold.clone())
                                         .color(c.text_primary),
                                 )
                                 .child(
-                                    TextWidget::new(
+                                    TextWidget::new_literal(
                                         "Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether FernUI resolved it to an in-tree overlay or a native modal child window.",
                                     )
                                     .style(t.body.clone())

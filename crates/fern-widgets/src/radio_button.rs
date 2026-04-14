@@ -41,7 +41,15 @@ impl RadioButton {
         }
     }
 
-    pub fn label(mut self, label: impl Into<String>) -> Self {
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
@@ -51,7 +59,15 @@ impl RadioButton {
         self
     }
 
-    pub fn tooltip(mut self, text: impl Into<String>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.tooltip_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `tooltip(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self
     }
@@ -152,7 +168,7 @@ impl Widget for RadioButton {
 
         let mut row = HStack::new().spacing(radio_style.label_gap).add_child(radio);
         if let Some(ref label) = self.label {
-            let label_widget = TextWidget::new(label)
+            let label_widget = TextWidget::new_literal(label)
                 .style(theme.typography.body.clone())
                 .color(theme.colors.text_primary);
             let label_id = ctx.add(label_widget);
@@ -164,7 +180,7 @@ impl Widget for RadioButton {
             ctx.add(MinSize::new(radio_style.hit_area, radio_style.hit_area).set_child(row_id));
 
         if let Some(ref tooltip_text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
+            let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tid = ctx.add(tw);
             ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));
         }
@@ -308,9 +324,9 @@ mod tests {
         use crate::primitives::VStack;
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let r0 = tree.add(RadioButton::new(0, selected.clone()).label("A"));
-        let r1 = tree.add(RadioButton::new(1, selected.clone()).label("B"));
-        let r2 = tree.add(RadioButton::new(2, selected.clone()).label("C"));
+        let r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
+        let r2 = tree.add(RadioButton::new(2, selected.clone()).label_literal("C"));
         let _root = tree.add(VStack::new().add_child(r0).add_child(r1).add_child(r2));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
@@ -327,8 +343,8 @@ mod tests {
     fn space_selects() {
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let _r0 = tree.add(RadioButton::new(0, selected.clone()).label("A"));
-        let r1 = tree.add(RadioButton::new(1, selected.clone()).label("B"));
+        let _r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         tree.focus(r1);
@@ -340,8 +356,8 @@ mod tests {
     fn accessibility() {
         let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let r0 = tree.add(RadioButton::new(0, selected.clone()).label("A"));
-        let r1 = tree.add(RadioButton::new(1, selected.clone()).label("B"));
+        let r0 = tree.add(RadioButton::new(0, selected.clone()).label_literal("A"));
+        let r1 = tree.add(RadioButton::new(1, selected.clone()).label_literal("B"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         let info0 = tree.accessibility_node(r0);
@@ -356,7 +372,7 @@ mod tests {
     fn accessibility_has_actions() {
         let selected = Signal::new(0_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let r0 = tree.add(RadioButton::new(0, selected).label("A"));
+        let r0 = tree.add(RadioButton::new(0, selected).label_literal("A"));
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let info = tree.accessibility_node(r0);
         assert!(

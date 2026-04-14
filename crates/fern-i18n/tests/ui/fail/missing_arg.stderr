@@ -1,0 +1,5 @@
+error: fern-i18n: missing argument `name` for key `welcome`
+ --> tests/ui/fail/missing_arg.rs:6:17
+  |
+6 |     let _ = tr!(welcome());
+  |                 ^^^^^^^

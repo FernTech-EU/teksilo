@@ -59,9 +59,10 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
-    pub fn new(label: impl Into<String>) -> Self {
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             icon: None,
             shortcut_label: None,
             action: None,
@@ -73,6 +74,12 @@ impl MenuItem {
             root_child_id: None,
             submenu_content_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Set the command to emit on activation. Generic only at this call site.
@@ -101,7 +108,9 @@ impl MenuItem {
         self
     }
 
-    /// Set a trailing shortcut label (e.g., "Ctrl+X").
+    /// Set a trailing shortcut label (e.g., "Ctrl+X"). Shortcut labels are
+    /// typically not translated (they're the key combination literal), so
+    /// this accepts a plain string.
     pub fn shortcut_label(mut self, label: impl Into<String>) -> Self {
         self.shortcut_label = Some(label.into());
         self
@@ -116,11 +125,12 @@ impl MenuItem {
     /// pre-create the submenu content (typically a `MenuList`), which is kept
     /// dormant until the hover delay elapses.
     pub fn submenu(
-        label: impl Into<String>,
+        label: impl Into<fern_i18n::LocalizedString>,
         factory: impl Fn() -> Box<dyn Widget> + 'static,
     ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             icon: None,
             shortcut_label: None,
             action: None,
@@ -132,6 +142,15 @@ impl MenuItem {
             root_child_id: None,
             submenu_content_id: None,
         }
+    }
+
+    /// Transitional shim for `submenu(...)` accepting a raw label.
+    #[doc(hidden)]
+    pub fn submenu_literal(
+        label: impl Into<String>,
+        factory: impl Fn() -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self::submenu(fern_i18n::LocalizedString::literal(label), factory)
     }
 
     /// Set a custom submenu open delay (default: 200ms).
@@ -261,7 +280,7 @@ impl Widget for MenuItem {
         row = row.add_child(icon_label_gap);
 
         // Label
-        let label = TextWidget::new(&self.label)
+        let label = TextWidget::new_literal(&self.label)
             .style(theme.typography.body.clone())
             .bind_color(text_color.clone());
         row = row.child(label);
@@ -300,7 +319,7 @@ impl Widget for MenuItem {
                 let disabled = theme.colors.text_disabled;
                 interaction.map(move |s| resolve_shortcut(*s, shortcut, disabled))
             };
-            let shortcut = TextWidget::new(shortcut_text)
+            let shortcut = TextWidget::new_literal(shortcut_text)
                 .style(theme.typography.body.clone())
                 .bind_color(shortcut_color);
             row = row.child(shortcut);
@@ -608,7 +627,7 @@ mod tests {
 
     fn setup_item(label: &str, cmd: TestCmd) -> (WidgetTree, WidgetId) {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::new(label).on_activate(cmd));
+        let item = tree.add(MenuItem::new_literal(label).on_activate(cmd));
         tree.layout(SizeProposal::exact(200.0, 40.0));
         (tree, item)
     }
@@ -675,7 +694,7 @@ mod tests {
     fn disabled_ignores_tap() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::new("Cut")
+            MenuItem::new_literal("Cut")
                 .on_activate(TestCmd::Cut)
                 .enabled(false),
         );
@@ -706,7 +725,7 @@ mod tests {
     fn with_shortcut_label() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::new("Cut")
+            MenuItem::new_literal("Cut")
                 .on_activate(TestCmd::Cut)
                 .shortcut_label("Ctrl+X"),
         );
@@ -725,12 +744,12 @@ mod tests {
         let mut tree_with = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_shortcuts(shortcuts);
-        let item_with = tree_with.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        let item_with = tree_with.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
         tree_with.layout(SizeProposal::unspecified());
 
         // Item without shortcuts registered
         let mut tree_without = WidgetTree::new().with_theme(Theme::light_default());
-        let item_without = tree_without.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        let item_without = tree_without.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
         tree_without.layout(SizeProposal::unspecified());
 
         // The item with an auto-resolved shortcut label should be wider
@@ -755,7 +774,7 @@ mod tests {
             .with_theme(Theme::light_default())
             .with_shortcuts(shortcuts);
         let item = tree.add(
-            MenuItem::new("Cut")
+            MenuItem::new_literal("Cut")
                 .on_activate(TestCmd::Cut)
                 .shortcut_label("Custom"),
         );
@@ -774,11 +793,11 @@ mod tests {
         let mut tree_with_map = WidgetTree::new()
             .with_theme(Theme::light_default())
             .with_shortcuts(shortcuts);
-        let item_with_map = tree_with_map.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        let item_with_map = tree_with_map.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
         tree_with_map.layout(SizeProposal::unspecified());
 
         let mut tree_no_map = WidgetTree::new().with_theme(Theme::light_default());
-        let item_no_map = tree_no_map.add(MenuItem::new("Cut").on_activate(TestCmd::Cut));
+        let item_no_map = tree_no_map.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
         tree_no_map.layout(SizeProposal::unspecified());
 
         // Widths should be the same — no shortcut label resolved for Cut
@@ -795,8 +814,8 @@ mod tests {
     #[test]
     fn submenu_item_has_chevron() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::submenu("Open Recent", || {
-            Box::new(TextWidget::new("placeholder"))
+        let item = tree.add(MenuItem::submenu_literal("Open Recent", || {
+            Box::new(TextWidget::new_literal("placeholder"))
         }));
         tree.layout(SizeProposal::exact(300.0, 40.0));
         // Verify it builds with the chevron without panic
@@ -816,7 +835,7 @@ mod tests {
         // collapses to its content width.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::new("Cut")
+            MenuItem::new_literal("Cut")
                 .on_activate(TestCmd::Cut)
                 .shortcut_label("Ctrl+X"),
         );
@@ -848,12 +867,12 @@ mod tests {
         let menu = tree.add(
             MenuList::new()
                 .item(
-                    MenuItem::new("Cut")
+                    MenuItem::new_literal("Cut")
                         .on_activate(TestCmd::Cut)
                         .shortcut_label("Ctrl+X"),
                 )
                 .item(
-                    MenuItem::new("Paste With A Longer Label")
+                    MenuItem::new_literal("Paste With A Longer Label")
                         .on_activate(TestCmd::Paste)
                         .shortcut_label("Ctrl+V"),
                 ),
@@ -936,7 +955,7 @@ mod tests {
         // shortcut regardless.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::new("Cut")
+            MenuItem::new_literal("Cut")
                 .on_activate(TestCmd::Cut)
                 .shortcut_label("Ctrl+X"),
         );
@@ -986,7 +1005,7 @@ mod tests {
         // not the inner 20-dp label TextWidget.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::new("Cut")
+            MenuItem::new_literal("Cut")
                 .on_activate(TestCmd::Cut)
                 .shortcut_label("Ctrl+X"),
         );
@@ -1042,10 +1061,10 @@ mod tests {
     #[test]
     fn submenu_does_not_open_immediately_on_hover() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::submenu("More", || {
+        let item = tree.add(MenuItem::submenu_literal("More", || {
             Box::new(
                 crate::menu_list::MenuList::new()
-                    .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                    .item(MenuItem::new_literal("Sub").on_activate(TestCmd::Cut)),
             )
         }));
         tree.layout(SizeProposal::exact(200.0, 40.0));
@@ -1070,10 +1089,10 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let commands = capture_commands(&mut tree);
         let item = tree.add(
-            MenuItem::submenu("More", || {
+            MenuItem::submenu_literal("More", || {
                 Box::new(
                     crate::menu_list::MenuList::new()
-                        .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                        .item(MenuItem::new_literal("Sub").on_activate(TestCmd::Cut)),
                 )
             })
             .submenu_delay(std::time::Duration::from_millis(100)),
@@ -1107,10 +1126,10 @@ mod tests {
         // With a non-zero delay, quickly moving through a submenu trigger
         // to another item cancels the pending open — this IS diagonal tolerance.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::submenu("More", || {
+        let item = tree.add(MenuItem::submenu_literal("More", || {
             Box::new(
                 crate::menu_list::MenuList::new()
-                    .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                    .item(MenuItem::new_literal("Sub").on_activate(TestCmd::Cut)),
             )
         }));
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -1134,10 +1153,10 @@ mod tests {
     fn submenu_opens_on_enter_key() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let commands = capture_commands(&mut tree);
-        let item = tree.add(MenuItem::submenu("More", || {
+        let item = tree.add(MenuItem::submenu_literal("More", || {
             Box::new(
                 crate::menu_list::MenuList::new()
-                    .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                    .item(MenuItem::new_literal("Sub").on_activate(TestCmd::Cut)),
             )
         }));
         tree.layout(SizeProposal::exact(200.0, 40.0));
@@ -1167,13 +1186,13 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let menu = tree.add(
             crate::menu_list::MenuList::new()
-                .item(MenuItem::submenu("More", || {
+                .item(MenuItem::submenu_literal("More", || {
                     Box::new(
                         crate::menu_list::MenuList::new()
-                            .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                            .item(MenuItem::new_literal("Sub").on_activate(TestCmd::Cut)),
                     )
                 }))
-                .item(MenuItem::new("Paste").on_activate(TestCmd::Paste)),
+                .item(MenuItem::new_literal("Paste").on_activate(TestCmd::Paste)),
         );
         tree.layout(SizeProposal::exact(240.0, 120.0));
 
@@ -1195,16 +1214,16 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let menu = tree.add(
             crate::menu_list::MenuList::new()
-                .item(MenuItem::submenu("More", || {
+                .item(MenuItem::submenu_literal("More", || {
                     Box::new(
                         crate::menu_list::MenuList::new()
-                            .item(MenuItem::new("Sub A").on_activate(TestCmd::Cut)),
+                            .item(MenuItem::new_literal("Sub A").on_activate(TestCmd::Cut)),
                     )
                 }))
-                .item(MenuItem::submenu("Recent", || {
+                .item(MenuItem::submenu_literal("Recent", || {
                     Box::new(
                         crate::menu_list::MenuList::new()
-                            .item(MenuItem::new("Sub B").on_activate(TestCmd::Paste)),
+                            .item(MenuItem::new_literal("Sub B").on_activate(TestCmd::Paste)),
                     )
                 })),
         );
@@ -1230,12 +1249,12 @@ mod tests {
     #[test]
     fn moving_pointer_outside_closes_open_submenu_after_delay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let menu = tree.add(crate::menu_list::MenuList::new().item(MenuItem::submenu(
+        let menu = tree.add(crate::menu_list::MenuList::new().item(MenuItem::submenu_literal(
             "More",
             || {
                 Box::new(
                     crate::menu_list::MenuList::new()
-                        .item(MenuItem::new("Sub").on_activate(TestCmd::Cut)),
+                        .item(MenuItem::new_literal("Sub").on_activate(TestCmd::Cut)),
                 )
             },
         )));
@@ -1259,7 +1278,7 @@ mod tests {
         // Verify the submenu_delay builder method is accepted
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::submenu("More", || Box::new(TextWidget::new("placeholder")))
+            MenuItem::submenu_literal("More", || Box::new(TextWidget::new_literal("placeholder")))
                 .submenu_delay(std::time::Duration::from_millis(500)),
         );
         tree.layout(SizeProposal::exact(200.0, 40.0));
@@ -1271,7 +1290,7 @@ mod tests {
         let called = Rc::new(Cell::new(false));
         let c = called.clone();
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::new("Action").on_activate_fn(move |_ctx| {
+        let item = tree.add(MenuItem::new_literal("Action").on_activate_fn(move |_ctx| {
             c.set(true);
         }));
         tree.layout(SizeProposal::exact(200.0, 40.0));
@@ -1286,7 +1305,7 @@ mod tests {
         let c = called.clone();
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::new("Nope")
+            MenuItem::new_literal("Nope")
                 .on_activate_fn(move |_ctx| c.set(true))
                 .enabled(false),
         );

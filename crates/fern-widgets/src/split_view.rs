@@ -457,7 +457,7 @@ impl Widget for SplitHandle {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Splitter);
-        builder.set_name("Split view divider");
+        builder.set_name(fern_i18n::tr_widget!(a11y_split_view_divider_name()).resolve_now());
         builder.set_numeric_value((self.split.get() * 100.0) as f64);
         builder.set_min_numeric_value(0.0);
         builder.set_max_numeric_value(100.0);

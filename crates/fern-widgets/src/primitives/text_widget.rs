@@ -7,6 +7,7 @@ use fern_tokens::{Color, TextStyle};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
+use fern_i18n::LocalizedString;
 
 /// A leaf widget that renders a single line of text via the TextBackend.
 /// Text and color can be static or bound to reactive state.
@@ -24,13 +25,30 @@ impl std::fmt::Debug for TextWidget {
 }
 
 impl TextWidget {
-    pub fn new(text: impl Into<String>) -> Self {
+    /// Construct a text widget whose content is a `LocalizedString`. The
+    /// text may come from `tr!(...)` (reactive, re-resolves on locale
+    /// change) or from `LocalizedString::literal("…")` for genuinely
+    /// non-translated strings.
+    pub fn new(text: impl Into<LocalizedString>) -> Self {
+        let ls: LocalizedString = text.into();
         Self {
-            text: Prop::Static(text.into()),
+            text: Prop::from(ls),
             color: Prop::Static(Color::BLACK),
             style: TextStyle::default(),
             text_backend: None,
         }
+    }
+
+    /// Shim accepting a raw string, for tests and scaffolding where
+    /// translation is overkill. Wraps the input in
+    /// `LocalizedString::literal(...)` and forwards to `new(...)`.
+    /// `#[doc(hidden)]` so production code reaches for `new(tr!(...))`
+    /// or `new(LocalizedString::literal(...))` instead, but the shim
+    /// is permanent — grep rule for untranslated strings is
+    /// `LocalizedString::literal` OR `*_literal`.
+    #[doc(hidden)]
+    pub fn new_literal(text: impl Into<String>) -> Self {
+        Self::new(LocalizedString::literal(text))
     }
 
     pub fn color(mut self, color: Color) -> Self {
@@ -124,7 +142,7 @@ mod tests {
     fn bind_text_renders_state_value() {
         let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
-        let w = tree.add(TextWidget::new("").bind_text(text.clone()));
+        let w = tree.add(TextWidget::new_literal("").bind_text(text.clone()));
         text.bind_to(
             w,
             tree.binding_registry(),
@@ -139,7 +157,7 @@ mod tests {
     fn bind_text_updates_on_state_change() {
         let text = Signal::new("Hello".to_string());
         let mut tree = WidgetTree::new();
-        let w = tree.add(TextWidget::new("").bind_text(text.clone()));
+        let w = tree.add(TextWidget::new_literal("").bind_text(text.clone()));
         text.bind_to(
             w,
             tree.binding_registry(),

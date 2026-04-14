@@ -34,4 +34,10 @@ pub mod prelude {
 
     // App
     pub use fern_app::{FernAppBuilder, ThemeMode};
+
+    // i18n (architecture §12)
+    #[cfg(feature = "i18n")]
+    pub use fern_i18n::{
+        I18nConfig, LanguageIdentifier, LocalizedString, localized, tr, tr_widget,
+    };
 }

@@ -128,7 +128,7 @@ mod tests {
     fn toolbar_with_children() {
         use crate::Button;
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(Button::new("Action"));
+        let btn = tree.add(Button::new_literal("Action"));
         let tb = tree.add(Toolbar::new().add_child(btn));
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let b = tree.bounds(tb);

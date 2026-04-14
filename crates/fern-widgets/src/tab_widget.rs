@@ -45,12 +45,22 @@ impl std::fmt::Debug for TabItem {
 }
 
 impl TabItem {
-    pub fn new(label: impl Into<String>, content: impl Widget + 'static) -> Self {
+    pub fn new(
+        label: impl Into<fern_i18n::LocalizedString>,
+        content: impl Widget + 'static,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             content: Box::new(content),
             enabled: true,
         }
+    }
+
+    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label), content)
     }
 
     pub fn enabled(mut self, enabled: bool) -> Self {
@@ -591,13 +601,28 @@ impl TabWidget {
         }
     }
 
-    pub fn tab(mut self, label: impl Into<String>, content: impl Widget + 'static) -> Self {
+    pub fn tab(
+        mut self,
+        label: impl Into<fern_i18n::LocalizedString>,
+        content: impl Widget + 'static,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         self.entries.push(TabEntry {
-            label: label.into(),
+            label: ls.resolve_now(),
             content: Box::new(content),
             enabled: true,
         });
         self
+    }
+
+    /// Transitional shim for `tab(...)` accepting a raw label.
+    #[doc(hidden)]
+    pub fn tab_literal(
+        self,
+        label: impl Into<String>,
+        content: impl Widget + 'static,
+    ) -> Self {
+        self.tab(fern_i18n::LocalizedString::literal(label), content)
     }
 
     pub fn tab_item(mut self, item: TabItem) -> Self {
@@ -759,8 +784,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let tabs = tree.add(
             TabWidget::new(selected.clone())
-                .tab("Overview", FixedLeaf(120.0, 48.0))
-                .tab("Details", FixedLeaf(140.0, 52.0)),
+                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
+                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
         );
 
         tree.layout(SizeProposal::exact(480.0, 240.0));
@@ -779,9 +804,9 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let tabs = tree.add(
             TabWidget::new(selected.clone())
-                .tab("Overview", FixedLeaf(120.0, 48.0))
-                .tab("Details", FixedLeaf(140.0, 52.0))
-                .tab("Activity", FixedLeaf(160.0, 56.0)),
+                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
+                .tab_literal("Details", FixedLeaf(140.0, 52.0))
+                .tab_literal("Activity", FixedLeaf(160.0, 56.0)),
         );
 
         tree.layout(SizeProposal::exact(640.0, 320.0));
@@ -803,8 +828,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let tabs = tree.add(
             TabWidget::new(selected.clone())
-                .tab("Overview", FixedLeaf(120.0, 48.0))
-                .tab("Details", FixedLeaf(140.0, 52.0)),
+                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
+                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
         );
 
         tree.layout(SizeProposal::exact(480.0, 240.0));
@@ -832,13 +857,13 @@ mod tests {
 
         tree.add(
             TabWidget::new(selected.clone())
-                .tab(
+                .tab_literal(
                     "Overview",
                     BuildCountingLeaf {
                         build_count: first_builds.clone(),
                     },
                 )
-                .tab(
+                .tab_literal(
                     "Details",
                     BuildCountingLeaf {
                         build_count: second_builds.clone(),
@@ -865,8 +890,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
             TabWidget::new(selected)
-                .tab("Overview", FixedLeaf(120.0, 48.0))
-                .tab("Details", FixedLeaf(140.0, 52.0)),
+                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
+                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
         );
 
         tree.layout(SizeProposal::exact(480.0, 240.0));
@@ -893,9 +918,9 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let tabs = tree.add(
             TabWidget::new(selected.clone())
-                .tab("Overview", FixedLeaf(120.0, 48.0))
-                .tab_item(TabItem::new("Locked", FixedLeaf(120.0, 48.0)).enabled(false))
-                .tab("Activity", FixedLeaf(120.0, 48.0)),
+                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
+                .tab_item(TabItem::new_literal("Locked", FixedLeaf(120.0, 48.0)).enabled(false))
+                .tab_literal("Activity", FixedLeaf(120.0, 48.0)),
         );
 
         tree.layout(SizeProposal::exact(640.0, 320.0));
@@ -927,8 +952,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let tabs = tree.add(
             TabWidget::new(selected)
-                .tab("Overview", FixedLeaf(120.0, 48.0))
-                .tab("Details", FixedLeaf(140.0, 52.0)),
+                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
+                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
         );
 
         tree.layout(SizeProposal::exact(480.0, 240.0));
@@ -950,11 +975,11 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let tabs = tree.add(
             TabWidget::new(selected)
-                .tab("One", FixedLeaf(120.0, 48.0))
-                .tab("Two", FixedLeaf(120.0, 48.0))
-                .tab("Three", FixedLeaf(120.0, 48.0))
-                .tab("Four", FixedLeaf(120.0, 48.0))
-                .tab("Five", FixedLeaf(120.0, 48.0)),
+                .tab_literal("One", FixedLeaf(120.0, 48.0))
+                .tab_literal("Two", FixedLeaf(120.0, 48.0))
+                .tab_literal("Three", FixedLeaf(120.0, 48.0))
+                .tab_literal("Four", FixedLeaf(120.0, 48.0))
+                .tab_literal("Five", FixedLeaf(120.0, 48.0)),
         );
 
         tree.layout(SizeProposal::exact(220.0, 240.0));

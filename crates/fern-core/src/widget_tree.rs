@@ -203,6 +203,24 @@ impl WidgetTree {
     /// Switch the tree-level locale at runtime. Rebuilds all composite
     /// widgets so that any tr! lookups picked up at build time are
     /// re-evaluated against the new locale, and marks all widgets dirty.
+    ///
+    /// **Rebuild policy (architecture §12.7).** A composite rebuild is
+    /// only strictly required when the layout direction flips (because
+    /// child order and leading/trailing resolution are decided inside
+    /// `build()`). For same-direction locale switches, the reactive
+    /// binding system alone is sufficient: every `LocalizedString` that
+    /// went through `to_signal()` observes the i18n manager's version
+    /// counter and re-resolves automatically, and the framework only
+    /// needs to mark bound widgets dirty for repaint/relayout.
+    ///
+    /// This method currently always rebuilds for safety, matching the
+    /// Phase G / Phase H exit state. A later optimization — skip the
+    /// rebuild when the caller already applied a direction change (or
+    /// when no direction change is needed) — is tracked as a follow-up.
+    /// The optimization requires proving that every composite widget
+    /// which builds translated children does so through a
+    /// `LocalizedString::to_signal()` binding, not by resolving text
+    /// eagerly inside `build()` into a static `String`.
     pub fn set_locale(&mut self, locale: String) {
         if self.locale.as_deref() == Some(locale.as_str()) {
             return;
@@ -622,6 +640,11 @@ impl WidgetTree {
     pub fn set_layout_direction(&mut self, direction: crate::environment::LayoutDirection) {
         self.layout_direction = direction;
         self.arena.mark_all_dirty();
+    }
+
+    /// The current layout direction.
+    pub fn layout_direction(&self) -> crate::environment::LayoutDirection {
+        self.layout_direction
     }
 
     /// Set OS-level accessibility preferences.

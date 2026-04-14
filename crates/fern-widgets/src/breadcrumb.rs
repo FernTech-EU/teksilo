@@ -51,20 +51,34 @@ impl std::fmt::Debug for BreadcrumbItem {
 }
 
 impl BreadcrumbItem {
-    pub fn new(label: impl Into<String>) -> Self {
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             action: None,
             current: false,
         }
     }
 
-    pub fn current(label: impl Into<String>) -> Self {
+    pub fn current(label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             action: None,
             current: true,
         }
+    }
+
+    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
+    }
+
+    /// Transitional shim for `current(...)` accepting a raw label.
+    #[doc(hidden)]
+    pub fn current_literal(label: impl Into<String>) -> Self {
+        Self::current(fern_i18n::LocalizedString::literal(label))
     }
 
     pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
@@ -335,7 +349,9 @@ impl Widget for BreadcrumbSegment {
         });
         builder.set_name(&self.label);
         if self.current {
-            builder.inner_mut().set_value("current page".to_string());
+            builder
+                .inner_mut()
+                .set_value(fern_i18n::tr_widget!(a11y_breadcrumb_current_page_value()).resolve_now());
         } else if self.is_interactive() {
             builder.add_action(fern_core::accesskit::Action::Click);
             builder.add_action(fern_core::accesskit::Action::Focus);
@@ -498,9 +514,9 @@ mod tests {
 
         let breadcrumb = tree.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_activate(TestCmd::GoLibrary))
-                .item(BreadcrumbItem::new("Project").on_activate(TestCmd::GoProject))
-                .item(BreadcrumbItem::current("Current")),
+                .item(BreadcrumbItem::new_literal("Library").on_activate(TestCmd::GoLibrary))
+                .item(BreadcrumbItem::new_literal("Project").on_activate(TestCmd::GoProject))
+                .item(BreadcrumbItem::current_literal("Current")),
         );
         tree.layout(SizeProposal::exact(500.0, 48.0));
 
@@ -516,8 +532,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let breadcrumb = tree.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_activate(TestCmd::GoLibrary))
-                .item(BreadcrumbItem::current("Current")),
+                .item(BreadcrumbItem::new_literal("Library").on_activate(TestCmd::GoLibrary))
+                .item(BreadcrumbItem::current_literal("Current")),
         );
         tree.layout(SizeProposal::exact(400.0, 48.0));
 
@@ -538,8 +554,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let breadcrumb = tree.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_activate(TestCmd::GoLibrary))
-                .item(BreadcrumbItem::current("Current")),
+                .item(BreadcrumbItem::new_literal("Library").on_activate(TestCmd::GoLibrary))
+                .item(BreadcrumbItem::current_literal("Current")),
         );
         tree.layout(SizeProposal::exact(400.0, 48.0));
 
@@ -554,10 +570,10 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let breadcrumb = tree.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Home").on_activate_fn(move |_ctx| {
+                .item(BreadcrumbItem::new_literal("Home").on_activate_fn(move |_ctx| {
                     c.set(true);
                 }))
-                .item(BreadcrumbItem::current("Current")),
+                .item(BreadcrumbItem::current_literal("Current")),
         );
         tree.layout(SizeProposal::exact(400.0, 48.0));
 

@@ -40,7 +40,15 @@ impl Toggle {
         }
     }
 
-    pub fn label(mut self, label: impl Into<String>) -> Self {
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }

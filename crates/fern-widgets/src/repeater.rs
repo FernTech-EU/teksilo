@@ -26,7 +26,7 @@ use crate::primitives::VStack;
 ///
 /// ```ignore
 /// Repeater::new(model, |index, item| {
-///     Box::new(TextWidget::new(&item.title))
+///     Box::new(TextWidget::new_literal(&item.title))
 /// })
 /// .spacing(8.0)
 /// ```

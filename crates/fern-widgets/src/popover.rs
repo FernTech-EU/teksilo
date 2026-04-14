@@ -189,9 +189,13 @@ pub struct Popover {
 }
 
 impl Popover {
-    pub fn new(label: impl Into<String>, content: impl Widget + 'static) -> Self {
+    pub fn new(
+        label: impl Into<fern_i18n::LocalizedString>,
+        content: impl Widget + 'static,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             style: ButtonVariant::Regular,
             enabled: true,
             placement: OverlayPlacement::BelowPreferred,
@@ -202,6 +206,12 @@ impl Popover {
             caret_size: 10.0,
             root_child_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label), content)
     }
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
@@ -343,7 +353,7 @@ impl Widget for Popover {
             )
         } else {
             ctx.add(
-                Button::new(label)
+                Button::new_literal(label)
                     .style(style)
                     .enabled(enabled)
                     .on_tap({
@@ -460,7 +470,7 @@ mod tests {
     #[test]
     fn access_click_opens_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Popover::new("Show popover", FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
@@ -475,7 +485,7 @@ mod tests {
     #[test]
     fn escape_dismisses_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Popover::new("Show popover", FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
@@ -492,7 +502,7 @@ mod tests {
     fn custom_trigger_opens_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Popover::new("Show popover", FixedLeaf(140.0, 60.0)).trigger(FixedLeaf(128.0, 36.0)),
+            Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)).trigger(FixedLeaf(128.0, 36.0)),
         );
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
@@ -509,7 +519,7 @@ mod tests {
     fn caret_increases_popover_height_for_below_placement() {
         let mut plain_tree = WidgetTree::new().with_theme(Theme::light_default());
         plain_tree.add(
-            Popover::new("Show popover", FixedLeaf(140.0, 60.0))
+            Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0))
                 .placement(OverlayPlacement::Below)
                 .caret(false),
         );
@@ -524,7 +534,7 @@ mod tests {
 
         let mut caret_tree = WidgetTree::new().with_theme(Theme::light_default());
         caret_tree.add(
-            Popover::new("Show popover", FixedLeaf(140.0, 60.0))
+            Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0))
                 .placement(OverlayPlacement::Below)
                 .caret_size(12.0),
         );

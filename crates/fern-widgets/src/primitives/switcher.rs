@@ -14,9 +14,9 @@ use crate::primitives::ZStack;
 /// ```ignore
 /// let page = Signal::new(0_usize);
 /// Switcher::new(page.clone())
-///     .child(TextWidget::new("Page 0"))
-///     .child(TextWidget::new("Page 1"))
-///     .child(TextWidget::new("Page 2"))
+///     .child(TextWidget::new_literal("Page 0"))
+///     .child(TextWidget::new_literal("Page 1"))
+///     .child(TextWidget::new_literal("Page 2"))
 /// ```
 pub struct Switcher {
     selected: Signal<usize>,

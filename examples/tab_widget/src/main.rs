@@ -44,23 +44,23 @@ impl Widget for Root {
         let trailing = HStack::new()
             .spacing(12.0)
             .child(
-                TextWidget::new("")
+                TextWidget::new_literal("")
                     .bind_text(selected_label)
                     .style(theme.typography.small.clone()),
             )
             .child(
-                Button::new("Toggle Theme")
+                Button::new_literal("Toggle Theme")
                     .style(ButtonVariant::Flat)
                     .on_activate(Cmd::ToggleTheme),
             );
 
         let tabs = ctx.add(
             TabWidget::new(selected)
-                .tab(
+                .tab_literal(
                     "Overview",
                     Card::new()
                         .header(
-                            TextWidget::new("Overview")
+                            TextWidget::new_literal("Overview")
                                 .style(theme.typography.body_bold.clone())
                                 .color(theme.colors.text_primary),
                         )
@@ -68,7 +68,7 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(12.0)
                                 .child(
-                                    TextWidget::new(
+                                    TextWidget::new_literal(
                                         "This first Milestone 6 slice ships a real TabWidget with dormant panes, keyboard navigation, and a trailing action slot.",
                                     )
                                     .style(theme.typography.body.clone())
@@ -77,24 +77,24 @@ impl Widget for Root {
                                 .child(
                                     HStack::new()
                                         .spacing(8.0)
-                                        .child(Badge::new("Dormant Panes"))
-                                        .child(Badge::new("Arrow Navigation"))
-                                        .child(Badge::new("Trailing Slot")),
+                                        .child(Badge::new_literal("Dormant Panes"))
+                                        .child(Badge::new_literal("Arrow Navigation"))
+                                        .child(Badge::new_literal("Trailing Slot")),
                                 ),
                         ),
                 )
-                .tab(
+                .tab_literal(
                     "Inspector",
                     Panel::new().padding(20.0).child(
                         VStack::new()
                             .spacing(10.0)
                             .child(
-                                TextWidget::new("Inspector")
+                                TextWidget::new_literal("Inspector")
                                     .style(theme.typography.body_bold.clone())
                                     .color(theme.colors.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "Use Tab to move focus into the tab strip, then Arrow Left and Arrow Right to switch tabs from the keyboard.",
                                 )
                                 .style(theme.typography.body.clone())
@@ -102,18 +102,18 @@ impl Widget for Root {
                             ),
                     ),
                 )
-                .tab(
+                .tab_literal(
                     "Activity",
                     Panel::new().padding(20.0).child(
                         VStack::new()
                             .spacing(10.0)
                             .child(
-                                TextWidget::new("Activity")
+                                TextWidget::new_literal("Activity")
                                     .style(theme.typography.body_bold.clone())
                                     .color(theme.colors.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "This example will grow into the broader Milestone 6 showcase as SplitView, Dialog, Popover, and Snackbar land.",
                                 )
                                 .style(theme.typography.body.clone())
@@ -122,10 +122,10 @@ impl Widget for Root {
                     ),
                 )
                 .tab_item(
-                    TabItem::new(
+                    TabItem::new_literal(
                         "Disabled",
                         Panel::new().padding(20.0).child(
-                            TextWidget::new("Disabled tabs are visible but cannot be activated.")
+                            TextWidget::new_literal("Disabled tabs are visible but cannot be activated.")
                                 .style(theme.typography.body.clone())
                                 .color(theme.colors.text_primary),
                         ),
@@ -137,9 +137,9 @@ impl Widget for Root {
 
         let breadcrumb = ctx.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new("Library").on_activate(Cmd::OpenLibrary))
-                .item(BreadcrumbItem::new("Components").on_activate(Cmd::OpenComponents))
-                .item(BreadcrumbItem::current("TabWidget")),
+                .item(BreadcrumbItem::new_literal("Library").on_activate(Cmd::OpenLibrary))
+                .item(BreadcrumbItem::new_literal("Components").on_activate(Cmd::OpenComponents))
+                .item(BreadcrumbItem::current_literal("TabWidget")),
         );
 
         let root_id = ctx.add(
@@ -148,12 +148,12 @@ impl Widget for Root {
                     .spacing(16.0)
                     .add_child(breadcrumb)
                     .child(
-                        TextWidget::new("TabWidget")
+                        TextWidget::new_literal("TabWidget")
                             .style(theme.typography.body_bold.clone())
                             .color(theme.colors.text_primary),
                     )
                     .child(
-                        TextWidget::new(
+                        TextWidget::new_literal(
                             "A focused Milestone 6 example for the first implementation slice.",
                         )
                         .style(theme.typography.body.clone())

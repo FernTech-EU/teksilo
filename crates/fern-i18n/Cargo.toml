@@ -7,3 +7,13 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+fern-core = { workspace = true }
+fern-i18n-macros = { workspace = true }
+fluent-bundle = { workspace = true }
+fluent-syntax = { workspace = true }
+unic-langid = { workspace = true }
+sys-locale = { workspace = true }
+notify = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"

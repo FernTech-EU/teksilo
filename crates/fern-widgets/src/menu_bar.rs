@@ -3,18 +3,18 @@
 //! # FernUI
 //! ```ignore
 //! MenuBar::new()
-//!     .menu("File", || Box::new(
+//!     .menu_literal("File", || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new("New").on_activate(Cmd::New))
+//!             .item(MenuItem::new_literal("New").on_activate(Cmd::New))
 //!             .separator()
-//!             .item(MenuItem::new("Quit").on_activate(Cmd::Quit))
+//!             .item(MenuItem::new_literal("Quit").on_activate(Cmd::Quit))
 //!     ))
-//!     .menu("Edit", || Box::new(
+//!     .menu_literal("Edit", || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new("Cut").on_activate(Cmd::Cut))
-//!             .item(MenuItem::new("Copy").on_activate(Cmd::Copy))
+//!             .item(MenuItem::new_literal("Cut").on_activate(Cmd::Cut))
+//!             .item(MenuItem::new_literal("Copy").on_activate(Cmd::Copy))
 //!     ))
-//!     .trailing_slot(Button::new("Settings").on_activate(Cmd::Settings))
+//!     .trailing_slot(Button::new_literal("Settings").on_activate(Cmd::Settings))
 //! ```
 
 use fern_canvas::{Rect, Size, SizeProposal};
@@ -69,14 +69,25 @@ impl MenuBar {
 
     pub fn menu(
         mut self,
-        label: impl Into<String>,
+        label: impl Into<fern_i18n::LocalizedString>,
         factory: impl Fn() -> Box<dyn Widget> + 'static,
     ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         self.entries.push(MenuBarEntry {
-            label: label.into(),
+            label: ls.resolve_now(),
             factory: Box::new(factory),
         });
         self
+    }
+
+    /// Transitional shim for `menu(...)` accepting a raw label.
+    #[doc(hidden)]
+    pub fn menu_literal(
+        self,
+        label: impl Into<String>,
+        factory: impl Fn() -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        self.menu(fern_i18n::LocalizedString::literal(label), factory)
     }
 
     pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
@@ -148,7 +159,7 @@ impl Widget for MenuBarTrigger {
             }
         });
 
-        let label = TextWidget::new(&self.label)
+        let label = TextWidget::new_literal(&self.label)
             .style(theme.typography.small.clone())
             .bind_color(text_color);
         let label_id = ctx.add(label);
@@ -522,25 +533,25 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let bar = tree.add(
             MenuBar::new()
-                .menu("File", || {
+                .menu_literal("File", || {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::new("New").on_activate(TestCmd::New))
-                            .item(MenuItem::new("Open").on_activate(TestCmd::Open)),
+                            .item(MenuItem::new_literal("New").on_activate(TestCmd::New))
+                            .item(MenuItem::new_literal("Open").on_activate(TestCmd::Open)),
                     )
                 })
-                .menu("Edit", || {
+                .menu_literal("Edit", || {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::new("Cut").on_activate(TestCmd::Cut))
-                            .item(MenuItem::new("Copy").on_activate(TestCmd::Copy)),
+                            .item(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut))
+                            .item(MenuItem::new_literal("Copy").on_activate(TestCmd::Copy)),
                     )
                 })
-                .menu("View", || {
+                .menu_literal("View", || {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::new("Zoom In").on_activate(TestCmd::New))
-                            .item(MenuItem::new("Zoom Out").on_activate(TestCmd::Open)),
+                            .item(MenuItem::new_literal("Zoom In").on_activate(TestCmd::New))
+                            .item(MenuItem::new_literal("Zoom Out").on_activate(TestCmd::Open)),
                     )
                 }),
         );
@@ -724,10 +735,10 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let bar = tree.add(
             MenuBar::new()
-                .menu("File", || {
-                    Box::new(MenuList::new().item(MenuItem::new("New").on_activate(TestCmd::New)))
+                .menu_literal("File", || {
+                    Box::new(MenuList::new().item(MenuItem::new_literal("New").on_activate(TestCmd::New)))
                 })
-                .trailing_slot(Button::new("Settings")),
+                .trailing_slot(Button::new_literal("Settings")),
         );
         tree.layout(SizeProposal::exact(600.0, 400.0));
         assert!(tree.bounds(bar).width > 0.0);
@@ -738,9 +749,9 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let bar = tree.add(
             MenuBar::new()
-                .leading_slot(TextWidget::new("AppIcon"))
-                .menu("File", || {
-                    Box::new(MenuList::new().item(MenuItem::new("New").on_activate(TestCmd::New)))
+                .leading_slot(TextWidget::new_literal("AppIcon"))
+                .menu_literal("File", || {
+                    Box::new(MenuList::new().item(MenuItem::new_literal("New").on_activate(TestCmd::New)))
                 }),
         );
         tree.layout(SizeProposal::exact(600.0, 400.0));
@@ -1050,28 +1061,28 @@ mod tests {
 
         let menu_bar = tree.add(
             MenuBar::new()
-                .menu("File", || {
+                .menu_literal("File", || {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::new("New").on_activate(TestCmd::New))
-                            .item(MenuItem::new("Open").on_activate(TestCmd::Open)),
+                            .item(MenuItem::new_literal("New").on_activate(TestCmd::New))
+                            .item(MenuItem::new_literal("Open").on_activate(TestCmd::Open)),
                     )
                 })
-                .menu("Edit", || {
+                .menu_literal("Edit", || {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::new("Cut").on_activate(TestCmd::Cut))
-                            .item(MenuItem::new("Copy").on_activate(TestCmd::Copy)),
+                            .item(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut))
+                            .item(MenuItem::new_literal("Copy").on_activate(TestCmd::Copy)),
                     )
                 })
-                .menu("View", || {
-                    Box::new(MenuList::new().item(MenuItem::new("Zoom").on_activate(TestCmd::New)))
+                .menu_literal("View", || {
+                    Box::new(MenuList::new().item(MenuItem::new_literal("Zoom").on_activate(TestCmd::New)))
                 }),
         );
 
-        let toolbar = tree.add(TextWidget::new("Toolbar"));
-        let content = tree.add(TextWidget::new("Content Area"));
-        let status_bar = tree.add(TextWidget::new("Status Bar"));
+        let toolbar = tree.add(TextWidget::new_literal("Toolbar"));
+        let content = tree.add(TextWidget::new_literal("Content Area"));
+        let status_bar = tree.add(TextWidget::new_literal("Status Bar"));
 
         let root = tree.add(
             VStack::new()

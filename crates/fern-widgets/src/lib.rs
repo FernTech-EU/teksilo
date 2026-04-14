@@ -73,5 +73,22 @@ pub use toolbar::Toolbar;
 pub use tree_view::TreeView;
 pub use wizard::{Wizard, WizardStep};
 
+/// The framework bundle: fern-widgets' own translatable strings, grouped
+/// by locale. Registered by applications via
+/// `I18nConfig::framework_locales(fern_widgets::framework_locales())`
+/// at startup (architecture §12.13).
+///
+/// fern-widgets currently ships `en-US` (source) and `fr-FR`. Keys
+/// missing from a locale's bundle fall back to the en-US source via
+/// fluent-bundle's per-key fallback. Applications that need a locale
+/// fern-widgets doesn't ship can fill the gap with
+/// `I18nConfig::override_widget_strings(...)` — see §12.13.4.
+pub fn framework_locales() -> &'static [(&'static str, &'static [&'static str])] {
+    &[
+        ("en-US", &[include_str!("../locales/en-US.ftl")]),
+        ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]),
+    ]
+}
+
 #[cfg(test)]
 mod layout_integration_tests;

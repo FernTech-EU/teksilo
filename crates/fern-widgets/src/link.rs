@@ -30,15 +30,22 @@ pub struct Link {
 }
 
 impl Link {
-    pub fn new(text: impl Into<String>) -> Self {
+    pub fn new(text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
         Self {
-            text: text.into(),
+            text: ls.resolve_now(),
             url: None,
             action: None,
             tooltip_text: None,
             interaction: None,
             root_child_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw string in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(text: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(text))
     }
 
     pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
@@ -61,7 +68,15 @@ impl Link {
         self
     }
 
-    pub fn tooltip(mut self, text: impl Into<String>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.tooltip_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `tooltip(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self
     }
@@ -102,7 +117,7 @@ impl Widget for Link {
             interaction.map(move |s| resolve_link_color(*s, &colors))
         };
 
-        let text = TextWidget::new(&self.text)
+        let text = TextWidget::new_literal(&self.text)
             .style(theme.typography.body.clone())
             .bind_color(text_color);
         let text_id = ctx.add(text);
@@ -132,7 +147,7 @@ impl Widget for Link {
         );
 
         if let Some(ref tooltip_text) = self.tooltip_text {
-            let tw = crate::tooltip::TooltipWidget::new(tooltip_text);
+            let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tid = ctx.add(tw);
             ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));
         }
@@ -277,7 +292,7 @@ mod tests {
     #[test]
     fn click_fires_command() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new("Go here").on_activate(TestCmd::Navigate));
+        let link = tree.add(Link::new_literal("Go here").on_activate(TestCmd::Navigate));
         tree.layout(SizeProposal::exact(200.0, 50.0));
 
         let called = Rc::new(Cell::new(false));
@@ -294,7 +309,7 @@ mod tests {
     #[test]
     fn accessibility() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new("Go here"));
+        let link = tree.add(Link::new_literal("Go here"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(link);
         assert_eq!(info.role(), fern_core::accesskit::Role::Link);
@@ -304,7 +319,7 @@ mod tests {
     #[test]
     fn accessibility_has_actions() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new("Go here"));
+        let link = tree.add(Link::new_literal("Go here"));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(link);
         assert!(
@@ -318,7 +333,7 @@ mod tests {
         let called = Rc::new(Cell::new(false));
         let c = called.clone();
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new("Action").on_activate_fn(move |_ctx| {
+        let link = tree.add(Link::new_literal("Action").on_activate_fn(move |_ctx| {
             c.set(true);
         }));
         tree.layout(SizeProposal::exact(200.0, 50.0));

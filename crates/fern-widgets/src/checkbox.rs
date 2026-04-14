@@ -143,7 +143,15 @@ impl Checkbox {
         }
     }
 
-    pub fn label(mut self, label: impl Into<String>) -> Self {
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
@@ -153,7 +161,15 @@ impl Checkbox {
         self
     }
 
-    pub fn tooltip(mut self, text: impl Into<String>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.tooltip_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `tooltip(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self
     }
@@ -310,7 +326,7 @@ impl Widget for Checkbox {
 
         let mut row = HStack::new().spacing(cb_style.label_gap).add_child(check_box);
         if let Some(ref label) = self.label {
-            let label_widget = TextWidget::new(label)
+            let label_widget = TextWidget::new_literal(label)
                 .style(theme.typography.body.clone())
                 .color(theme.colors.text_primary);
             let label_id = ctx.add(label_widget);
@@ -323,7 +339,7 @@ impl Widget for Checkbox {
         );
 
         if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
+            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             ctx.attach_tooltip(root_id, tooltip_id, std::time::Duration::from_millis(500));
         }
@@ -481,7 +497,7 @@ mod tests {
     fn click_toggles_bool_state() {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add(Checkbox::new(checked.clone()).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked.clone()).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         assert!(!checked.get());
@@ -495,7 +511,7 @@ mod tests {
     fn space_toggles_bool_state() {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add(Checkbox::new(checked.clone()).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked.clone()).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         tree.focus(cb);
@@ -511,7 +527,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let cb = tree.add(
             Checkbox::new(checked.clone())
-                .label("Accept")
+                .label_literal("Accept")
                 .enabled(false),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -524,7 +540,7 @@ mod tests {
     fn two_state_accessibility() {
         let checked = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add(Checkbox::new(checked).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         let info = tree.accessibility_node(cb);
@@ -539,7 +555,7 @@ mod tests {
     fn tristate_cycles_through_all_states() {
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add(Checkbox::tristate(state.clone()).label("Select All"));
+        let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         assert_eq!(state.get(), CheckState::Unchecked);
@@ -555,7 +571,7 @@ mod tests {
     fn tristate_space_cycles() {
         let state = Signal::new(CheckState::Unchecked);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add(Checkbox::tristate(state.clone()).label("Select All"));
+        let cb = tree.add(Checkbox::tristate(state.clone()).label_literal("Select All"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         tree.focus(cb);
@@ -570,7 +586,7 @@ mod tests {
         // Indeterminate is_filled() == true, so it should have a primary background
         let state = Signal::new(CheckState::Indeterminate);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Checkbox::tristate(state).label("Partial"));
+        tree.add(Checkbox::tristate(state).label_literal("Partial"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         let primary = Theme::light_default().colors.accent.to_array();
@@ -593,7 +609,7 @@ mod tests {
     fn disabled_has_disabled_colors() {
         let checked = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Checkbox::new(checked).label("Disabled").enabled(false));
+        tree.add(Checkbox::new(checked).label_literal("Disabled").enabled(false));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         let disabled_fill = Theme::light_default().colors.accent_disabled.to_array();
@@ -607,7 +623,7 @@ mod tests {
     fn accessibility_has_actions() {
         let checked = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let cb = tree.add(Checkbox::new(checked).label("Accept"));
+        let cb = tree.add(Checkbox::new(checked).label_literal("Accept"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let info = tree.accessibility_node(cb);
         assert!(

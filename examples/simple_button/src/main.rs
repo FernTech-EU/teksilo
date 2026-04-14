@@ -11,7 +11,7 @@
 //! - Focus-visible behavior (focus ring only on keyboard focus)
 
 use fern_ui::prelude::*;
-use fern_ui::widgets::{Button, ButtonVariant, tooltip};
+use fern_ui::widgets::{Button, ButtonVariant};
 
 // ---------------------------------------------------------------------------
 // Application command
@@ -40,10 +40,10 @@ fn main() {
         })
         .root(|tree| {
             tree.add(
-                Button::new("Click Me")
+                Button::new_literal("Click Me")
                     .style(ButtonVariant::Default)
                     .on_activate(DemoCmd::ButtonClicked)
-                    .tooltip("This is a simple button. Click it to see a message in the console."),
+                    .tooltip_literal("This is a simple button. Click it to see a message in the console."),
             )
         })
         .run();
@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn button_has_correct_accessibility() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let button = tree.add(Button::new("Click Me").on_activate(DemoCmd::ButtonClicked));
+        let button = tree.add(Button::new_literal("Click Me").on_activate(DemoCmd::ButtonClicked));
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         let info = tree.accessibility_node(button);
@@ -85,7 +85,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let button = tree.add(Button::new("Click Me").on_activate(DemoCmd::ButtonClicked));
+        let button = tree.add(Button::new_literal("Click Me").on_activate(DemoCmd::ButtonClicked));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         tree.click(button);
         assert!(clicked.get());
@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn button_hover_changes_render_output() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let button = tree.add(Button::new("Click Me").on_activate(DemoCmd::ButtonClicked));
+        let button = tree.add(Button::new_literal("Click Me").on_activate(DemoCmd::ButtonClicked));
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         let frame_idle = tree.render();
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn button_renders_shape() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Button::new("Click Me").on_activate(DemoCmd::ButtonClicked));
+        tree.add(Button::new_literal("Click Me").on_activate(DemoCmd::ButtonClicked));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let frame = tree.render();
         assert!(!frame.shapes.is_empty(), "button should render a shape");
@@ -128,7 +128,7 @@ mod tests {
                 c.set(true);
             }
         });
-        let button = tree.add(Button::new("Click Me").on_activate(DemoCmd::ButtonClicked));
+        let button = tree.add(Button::new_literal("Click Me").on_activate(DemoCmd::ButtonClicked));
         tree.layout(SizeProposal::exact(400.0, 300.0));
         tree.focus(button);
         tree.press_key(Key::Space, Modifiers::NONE);

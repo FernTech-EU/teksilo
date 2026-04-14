@@ -20,8 +20,17 @@ pub struct TooltipWidget {
 }
 
 impl TooltipWidget {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
+    pub fn new(text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        Self {
+            text: ls.resolve_now(),
+        }
+    }
+
+    /// Transitional shim — wraps a raw string in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(text: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(text))
     }
 }
 

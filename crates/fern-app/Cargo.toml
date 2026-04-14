@@ -14,6 +14,7 @@ text = ["dep:fern-text"]
 fern-core = { workspace = true }
 fern-canvas = { workspace = true }
 fern-tokens = { workspace = true }
+fern-i18n = { workspace = true }
 fern-render = { workspace = true }
 fern-platform = { workspace = true }
 fern-text = { workspace = true, optional = true }

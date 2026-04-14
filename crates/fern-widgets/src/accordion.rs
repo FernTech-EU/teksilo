@@ -35,15 +35,22 @@ pub struct Accordion {
 }
 
 impl Accordion {
-    pub fn new(title: impl Into<String>, expanded: Signal<bool>) -> Self {
+    pub fn new(title: impl Into<fern_i18n::LocalizedString>, expanded: Signal<bool>) -> Self {
+        let ls: fern_i18n::LocalizedString = title.into();
         Self {
-            title: title.into(),
+            title: ls.resolve_now(),
             expanded,
             content_id: None,
             pending_content: None,
             content_height: None,
             root_child_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw title in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(title: impl Into<String>, expanded: Signal<bool>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(title), expanded)
     }
 
     /// Set the content widget by pre-registered ID.
@@ -90,7 +97,7 @@ impl Widget for Accordion {
         ctx.visible_when(chevron_down_id, expanded.clone());
         ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
-        let title_widget = TextWidget::new(&self.title)
+        let title_widget = TextWidget::new_literal(&self.title)
             .style(theme.typography.body.clone())
             .color(theme.colors.text_primary);
         let title_id = ctx.add(title_widget);
@@ -249,7 +256,7 @@ mod tests {
     fn accordion_builds_collapsed() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let acc = tree.add(Accordion::new("Section", expanded.clone()));
+        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
         assert!(b.width > 0.0);
@@ -259,7 +266,7 @@ mod tests {
     fn click_toggles_expanded_state() {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let acc = tree.add(Accordion::new("Section", expanded.clone()));
+        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
         tree.click(acc);
@@ -273,8 +280,8 @@ mod tests {
         use crate::primitives::TextWidget;
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let content = tree.add(TextWidget::new("Content text"));
-        let acc = tree.add(Accordion::new("Details", expanded.clone()).set_content(content));
+        let content = tree.add(TextWidget::new_literal("Content text"));
+        let acc = tree.add(Accordion::new_literal("Details", expanded.clone()).set_content(content));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
         assert!(b.height > 0.0);
@@ -284,7 +291,7 @@ mod tests {
     fn accessibility() {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let acc = tree.add(Accordion::new("Details", expanded));
+        let acc = tree.add(Accordion::new_literal("Details", expanded));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let info = tree.accessibility_node(acc);
         assert_eq!(info.name(), Some("Details"));
@@ -298,8 +305,8 @@ mod tests {
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let content = tree.add(TextWidget::new("Some content text here"));
-        let acc = tree.add(Accordion::new("Section", expanded.clone()).set_content(content));
+        let content = tree.add(TextWidget::new_literal("Some content text here"));
+        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).set_content(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

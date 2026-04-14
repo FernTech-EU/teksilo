@@ -31,12 +31,12 @@ impl Widget for SplitViewDemo {
                 VStack::new()
                     .spacing(24.0)
                     .child(
-                        TextWidget::new("SplitView")
+                        TextWidget::new_literal("SplitView")
                             .style(t.body_bold.clone())
                             .color(c.text_primary),
                     )
                     .child(
-                        TextWidget::new(
+                        TextWidget::new_literal(
                             "Drag the divider or focus it and use arrow keys to resize the panes.",
                         )
                         .style(t.body.clone())
@@ -112,12 +112,12 @@ impl Widget for SplitViewDemo {
 
 fn build_editor_pane(title: &str, items: &[&str], theme: &Theme) -> impl Widget {
     let mut stack = VStack::new().spacing(10.0).child(
-        TextWidget::new(title)
+        TextWidget::new_literal(title)
             .style(theme.typography.body_bold.clone())
             .color(theme.colors.text_primary),
     );
     for item in items {
-        stack = stack.child(Badge::new(*item));
+        stack = stack.child(Badge::new_literal(*item));
     }
     Panel::new().padding(16.0).child(stack)
 }
@@ -127,12 +127,12 @@ fn build_preview_pane(title: &str, text: &str, theme: &Theme) -> impl Widget {
         VStack::new()
             .spacing(12.0)
             .child(
-                TextWidget::new(title)
+                TextWidget::new_literal(title)
                     .style(theme.typography.body_bold.clone())
                     .color(theme.colors.text_primary),
             )
             .child(
-                TextWidget::new(text)
+                TextWidget::new_literal(text)
                     .style(theme.typography.body.clone())
                     .color(theme.colors.text_secondary),
             ),

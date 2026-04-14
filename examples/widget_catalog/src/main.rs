@@ -121,13 +121,13 @@ impl Widget for WidgetCatalog {
                         .corner_radius(4.0)
                         .padding(10.0)
                         .child(MaxSize::new(f32::INFINITY, 44.0).child(
-                            TextWidget::new(name)
+                            TextWidget::new_literal(name)
                                 .style(t.small.clone())
                                 .color(text_color),
                         )),
                 )
                 .child(
-                    TextWidget::new(text_role)
+                    TextWidget::new_literal(text_role)
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
@@ -201,18 +201,18 @@ impl Widget for WidgetCatalog {
             HStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new("The quick brown fox jumps over the lazy dog")
+                    TextWidget::new_literal("The quick brown fox jumps over the lazy dog")
                         .style(t.body.clone())
                         .color(color),
                 )
                 .child(Spacer::new())
                 .child(
-                    TextWidget::new(name)
+                    TextWidget::new_literal(name)
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
                 .child(
-                    TextWidget::new(description)
+                    TextWidget::new_literal(description)
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
@@ -269,13 +269,13 @@ impl Widget for WidgetCatalog {
                     HStack::new()
                         .spacing(12.0)
                         .child(
-                            TextWidget::new("Default button label")
+                            TextWidget::new_literal("Default button label")
                                 .style(t.body.clone())
                                 .color(c.text_on_accent),
                         )
                         .child(Spacer::new())
                         .child(
-                            TextWidget::new("text_on_accent on accent")
+                            TextWidget::new_literal("text_on_accent on accent")
                                 .style(t.tiny.clone())
                                 .color(c.text_on_accent),
                         ),
@@ -310,13 +310,13 @@ impl Widget for WidgetCatalog {
                     FixedSize::new()
                         .bind_width(24.0_f32)
                         .child(
-                            TextWidget::new(line_no)
+                            TextWidget::new_literal(line_no)
                                 .style(mono.clone())
                                 .color(c.editor_gutter_fg),
                         ),
                 )
                 .child(
-                    TextWidget::new(code)
+                    TextWidget::new_literal(code)
                         .style(mono.clone())
                         .color(c.editor_fg),
                 )
@@ -331,13 +331,13 @@ impl Widget for WidgetCatalog {
                     FixedSize::new()
                         .bind_width(24.0_f32)
                         .child(
-                            TextWidget::new("2")
+                            TextWidget::new_literal("2")
                                 .style(mono.clone())
                                 .color(c.editor_gutter_fg),
                         ),
                 )
                 .child(
-                    TextWidget::new("    let ")
+                    TextWidget::new_literal("    let ")
                         .style(mono.clone())
                         .color(c.editor_fg),
                 )
@@ -350,14 +350,14 @@ impl Widget for WidgetCatalog {
                         .border_width(0.0)
                         .child(
                             Padding::symmetric(1.0, 2.0).child(
-                                TextWidget::new("x")
+                                TextWidget::new_literal("x")
                                     .style(mono.clone())
                                     .color(c.editor_fg),
                             ),
                         ),
                 )
                 .child(
-                    TextWidget::new(" = 42;")
+                    TextWidget::new_literal(" = 42;")
                         .style(mono.clone())
                         .color(c.editor_fg),
                 )
@@ -420,13 +420,13 @@ impl Widget for WidgetCatalog {
                         .corner_radius(4.0)
                         .padding(10.0)
                         .child(MaxSize::new(f32::INFINITY, 44.0).child(
-                            TextWidget::new("Aa Bb 123")
+                            TextWidget::new_literal("Aa Bb 123")
                                 .style(t.mono.clone())
                                 .color(sample_color),
                         )),
                 )
                 .child(
-                    TextWidget::new(name)
+                    TextWidget::new_literal(name)
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
@@ -471,25 +471,25 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new("Theme Palette")
+                    TextWidget::new_literal("Theme Palette")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("Surfaces")
+                    TextWidget::new_literal("Surfaces")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .add_child(surfaces_grid)
                 .child(
-                    TextWidget::new("Text")
+                    TextWidget::new_literal("Text")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .add_child(text_samples)
                 .add_child(text_on_accent_row)
                 .child(
-                    TextWidget::new("Editor")
+                    TextWidget::new_literal("Editor")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
@@ -509,7 +509,7 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("H")
+                            TextWidget::new_literal("H")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
@@ -519,7 +519,7 @@ impl Widget for WidgetCatalog {
                     HStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("V")
+                            TextWidget::new_literal("V")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
@@ -529,7 +529,7 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("Thick")
+                            TextWidget::new_literal("Thick")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
@@ -550,18 +550,18 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new("Primitives")
+                    TextWidget::new_literal("Primitives")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("Divider (horizontal, vertical, thick, colored)")
+                    TextWidget::new_literal("Divider (horizontal, vertical, thick, colored)")
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
                 .add_child(div_row)
                 .child(
-                    TextWidget::new("IconWidget (checkmark, chevrons)")
+                    TextWidget::new_literal("IconWidget (checkmark, chevrons)")
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
@@ -576,12 +576,12 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new("Layout Primitives")
+                    TextWidget::new_literal("Layout Primitives")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)")
+                    TextWidget::new_literal("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)")
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
@@ -603,7 +603,7 @@ impl Widget for WidgetCatalog {
                         .child(build_color_cell(c.text_warning, "C2")),
                 )
                 .child(
-                    TextWidget::new("Wrap (flow layout, 8px spacing)")
+                    TextWidget::new_literal("Wrap (flow layout, 8px spacing)")
                         .style(t.tiny.clone())
                         .color(c.text_secondary),
                 )
@@ -611,14 +611,14 @@ impl Widget for WidgetCatalog {
                     Wrap::new()
                         .spacing(8.0)
                         .line_spacing(8.0)
-                        .child(Badge::new("Rust"))
-                        .child(Badge::new("GUI"))
-                        .child(Badge::new("Accessible"))
-                        .child(Badge::new("Reactive"))
-                        .child(Badge::new("Fast"))
-                        .child(Badge::new("Cross-platform"))
-                        .child(Badge::new("Retained"))
-                        .child(Badge::new("wgpu")),
+                        .child(Badge::new_literal("Rust"))
+                        .child(Badge::new_literal("GUI"))
+                        .child(Badge::new_literal("Accessible"))
+                        .child(Badge::new_literal("Reactive"))
+                        .child(Badge::new_literal("Fast"))
+                        .child(Badge::new_literal("Cross-platform"))
+                        .child(Badge::new_literal("Retained"))
+                        .child(Badge::new_literal("wgpu")),
                 ),
         );
 
@@ -635,17 +635,17 @@ impl Widget for WidgetCatalog {
             HStack::new()
                 .spacing(8.0)
                 .child(
-                    Button::new("Save")
+                    Button::new_literal("Save")
                         .style(ButtonVariant::Default)
                         .on_activate(Cmd::Save),
                 )
                 .child(
-                    Button::new("Cancel")
+                    Button::new_literal("Cancel")
                         .style(ButtonVariant::Regular)
                         .on_activate(Cmd::Cancel),
                 )
                 .child(
-                    Button::new("Learn more")
+                    Button::new_literal("Learn more")
                         .style(ButtonVariant::Flat)
                         .on_activate(Cmd::LearnMore),
                 ),
@@ -654,17 +654,17 @@ impl Widget for WidgetCatalog {
             HStack::new()
                 .spacing(8.0)
                 .child(
-                    Button::new("Save")
+                    Button::new_literal("Save")
                         .style(ButtonVariant::Default)
                         .enabled(false),
                 )
                 .child(
-                    Button::new("Cancel")
+                    Button::new_literal("Cancel")
                         .style(ButtonVariant::Regular)
                         .enabled(false),
                 )
                 .child(
-                    Button::new("Learn more")
+                    Button::new_literal("Learn more")
                         .style(ButtonVariant::Flat)
                         .enabled(false),
                 ),
@@ -683,18 +683,18 @@ impl Widget for WidgetCatalog {
                 .spacing(4.0)
                 .child(
                     Checkbox::new(checkbox_checked.clone())
-                        .label("Accept terms")
-                        .tooltip("Click to accept the terms and conditions"),
+                        .label_literal("Accept terms")
+                        .tooltip_literal("Click to accept the terms and conditions"),
                 )
                 .child(
                     Checkbox::new(cb_disabled_state)
-                        .label("Always on (disabled)")
+                        .label_literal("Always on (disabled)")
                         .enabled(false),
                 )
                 .child(
                     Checkbox::tristate(tristate.clone())
-                        .label("Select all (tristate)")
-                        .tooltip("Cycles: unchecked, checked, indeterminate"),
+                        .label_literal("Select all (tristate)")
+                        .tooltip_literal("Cycles: unchecked, checked, indeterminate"),
                 ),
         );
 
@@ -704,11 +704,11 @@ impl Widget for WidgetCatalog {
                 .spacing(4.0)
                 .child(
                     RadioButton::new(0, radio_selected.clone())
-                        .label("Option A")
-                        .tooltip("First option"),
+                        .label_literal("Option A")
+                        .tooltip_literal("First option"),
                 )
-                .child(RadioButton::new(1, radio_selected.clone()).label("Option B"))
-                .child(RadioButton::new(2, radio_selected.clone()).label("Option C")),
+                .child(RadioButton::new(1, radio_selected.clone()).label_literal("Option B"))
+                .child(RadioButton::new(2, radio_selected.clone()).label_literal("Option C")),
         );
 
         // --- Toggle ---
@@ -717,7 +717,7 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(8.0)
                 .child(Toggle::new(toggle_on.clone()))
-                .child(Toggle::new(toggle_label_on.clone()).label("Notifications"))
+                .child(Toggle::new(toggle_label_on.clone()).label_literal("Notifications"))
                 .child(Toggle::new(toggle_disabled_state).enabled(false)),
         );
 
@@ -732,19 +732,19 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(8.0)
                         .child(
-                            TextWidget::new("Horizontal")
+                            TextWidget::new_literal("Horizontal")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
                         .child(Slider::new(slider_value.clone(), 0.0, 100.0))
                         .child(
-                            TextWidget::new("Stepped (25)")
+                            TextWidget::new_literal("Stepped (25)")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
                         .child(Slider::new(slider_stepped.clone(), 0.0, 100.0).step(25.0))
                         .child(
-                            TextWidget::new("Disabled")
+                            TextWidget::new_literal("Disabled")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
@@ -754,7 +754,7 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("Vertical")
+                            TextWidget::new_literal("Vertical")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
@@ -776,7 +776,7 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("Checkbox")
+                            TextWidget::new_literal("Checkbox")
                                 .style(t.small.clone())
                                 .color(c.text_secondary),
                         )
@@ -786,7 +786,7 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("RadioButton")
+                            TextWidget::new_literal("RadioButton")
                                 .style(t.small.clone())
                                 .color(c.text_secondary),
                         )
@@ -796,7 +796,7 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("Toggle")
+                            TextWidget::new_literal("Toggle")
                                 .style(t.small.clone())
                                 .color(c.text_secondary),
                         )
@@ -808,12 +808,12 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new("Form Controls")
+                    TextWidget::new_literal("Form Controls")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("Button")
+                    TextWidget::new_literal("Button")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
@@ -822,14 +822,14 @@ impl Widget for WidgetCatalog {
                 .add_child(form_row)
                 .child(Divider::new())
                 .child(
-                    TextWidget::new("Slider")
+                    TextWidget::new_literal("Slider")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .add_child(slider_section)
                 .child(Divider::new())
                 .child(
-                    TextWidget::new("SegmentedControl")
+                    TextWidget::new_literal("SegmentedControl")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
@@ -856,19 +856,19 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(8.0)
                         .child(
-                            TextWidget::new("Determinate (65%)")
+                            TextWidget::new_literal("Determinate (65%)")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
                         .child(ProgressBar::new(0.65))
                         .child(
-                            TextWidget::new("Indeterminate")
+                            TextWidget::new_literal("Indeterminate")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
                         .child(ProgressBar::indeterminate())
                         .child(
-                            TextWidget::new("Custom colors + thick")
+                            TextWidget::new_literal("Custom colors + thick")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
@@ -883,7 +883,7 @@ impl Widget for WidgetCatalog {
                     VStack::new()
                         .spacing(4.0)
                         .child(
-                            TextWidget::new("Vertical")
+                            TextWidget::new_literal("Vertical")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
@@ -895,29 +895,29 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new("Display Widgets")
+                    TextWidget::new_literal("Display Widgets")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("ProgressBar")
+                    TextWidget::new_literal("ProgressBar")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .add_child(progress_section)
                 .child(Divider::new())
                 .child(
-                    TextWidget::new("Badge")
+                    TextWidget::new_literal("Badge")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .child(
                     HStack::new()
                         .spacing(8.0)
-                        .child(Badge::new("Default"))
-                        .child(Badge::new("3").color(c.text_error).text_color(Color::WHITE))
-                        .child(Badge::new("New").color(c.text_success).text_color(Color::WHITE))
-                        .child(Badge::new("Beta").color(c.text_warning)),
+                        .child(Badge::new_literal("Default"))
+                        .child(Badge::new_literal("3").color(c.text_error).text_color(Color::WHITE))
+                        .child(Badge::new_literal("New").color(c.text_success).text_color(Color::WHITE))
+                        .child(Badge::new_literal("Beta").color(c.text_warning)),
                 ),
         );
 
@@ -927,12 +927,12 @@ impl Widget for WidgetCatalog {
 
         // --- Accordion (needs pre-registered content children) ---
         let acc_content1 = ctx.add(
-            TextWidget::new("This content is revealed with an animated expand.")
+            TextWidget::new_literal("This content is revealed with an animated expand.")
                 .style(t.body.clone())
                 .color(c.text_primary),
         );
         let acc_content2 = ctx.add(
-            TextWidget::new("This section starts expanded and can be collapsed.")
+            TextWidget::new_literal("This section starts expanded and can be collapsed.")
                 .style(t.body.clone())
                 .color(c.text_primary),
         );
@@ -941,45 +941,45 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new("Containers")
+                    TextWidget::new_literal("Containers")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("Card")
+                    TextWidget::new_literal("Card")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .child(
                     Card::new()
                         .header(
-                            TextWidget::new("Card Header")
+                            TextWidget::new_literal("Card Header")
                                 .style(t.small.clone())
                                 .color(c.text_secondary),
                         )
                         .content(
-                            TextWidget::new("Card content with shadow and themed background.")
+                            TextWidget::new_literal("Card content with shadow and themed background.")
                                 .style(t.body.clone())
                                 .color(c.text_primary),
                         )
                         .footer(
-                            TextWidget::new("Footer text")
+                            TextWidget::new_literal("Footer text")
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         ),
                 )
                 .child(Divider::new())
                 .child(
-                    TextWidget::new("Accordion")
+                    TextWidget::new_literal("Accordion")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .child(
-                    Accordion::new("Click to expand", accordion_expanded.clone())
+                    Accordion::new_literal("Click to expand", accordion_expanded.clone())
                         .set_content(acc_content1),
                 )
                 .child(
-                    Accordion::new("Already expanded", accordion2_expanded.clone())
+                    Accordion::new_literal("Already expanded", accordion2_expanded.clone())
                         .set_content(acc_content2),
                 ),
         );
@@ -996,18 +996,18 @@ impl Widget for WidgetCatalog {
         let tabs_selected = ctx.signal(0_usize);
         let tabs = ctx.add(
             TabWidget::new(tabs_selected)
-                .tab(
+                .tab_literal(
                     "Overview",
                     Panel::new().padding(16.0).child(
                         VStack::new()
                             .spacing(8.0)
                             .child(
-                                TextWidget::new("Overview")
+                                TextWidget::new_literal("Overview")
                                     .style(t.body_bold.clone())
                                     .color(c.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "TabWidget is a retained container with dormant panes: \
                                      only the active tab is built, inactive panes keep \
                                      their state but don't receive layout or paint until \
@@ -1019,24 +1019,24 @@ impl Widget for WidgetCatalog {
                             .child(
                                 HStack::new()
                                     .spacing(8.0)
-                                    .child(Badge::new("Dormant panes"))
-                                    .child(Badge::new("Arrow keys"))
-                                    .child(Badge::new("Trailing slot")),
+                                    .child(Badge::new_literal("Dormant panes"))
+                                    .child(Badge::new_literal("Arrow keys"))
+                                    .child(Badge::new_literal("Trailing slot")),
                             ),
                     ),
                 )
-                .tab(
+                .tab_literal(
                     "Usage",
                     Panel::new().padding(16.0).child(
                         VStack::new()
                             .spacing(8.0)
                             .child(
-                                TextWidget::new("Usage")
+                                TextWidget::new_literal("Usage")
                                     .style(t.body_bold.clone())
                                     .color(c.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "Press Tab to move focus into the tab strip, then \
                                      Arrow Left / Arrow Right to switch between tabs. \
                                      Disabled tabs are skipped by keyboard navigation.",
@@ -1046,18 +1046,18 @@ impl Widget for WidgetCatalog {
                             ),
                     ),
                 )
-                .tab(
+                .tab_literal(
                     "Structure",
                     Panel::new().padding(16.0).child(
                         VStack::new()
                             .spacing(8.0)
                             .child(
-                                TextWidget::new("Structure")
+                                TextWidget::new_literal("Structure")
                                     .style(t.body_bold.clone())
                                     .color(c.text_primary),
                             )
                             .child(
-                                TextWidget::new(
+                                TextWidget::new_literal(
                                     "Int UI tabs: flat headers, no rounded corners, no \
                                      borders. The selected tab is marked only by a 3 dp \
                                      accent underline at its bottom edge, which \
@@ -1069,10 +1069,10 @@ impl Widget for WidgetCatalog {
                     ),
                 )
                 .tab_item(
-                    TabItem::new(
+                    TabItem::new_literal(
                         "Disabled",
                         Panel::new().padding(16.0).child(
-                            TextWidget::new(
+                            TextWidget::new_literal(
                                 "Disabled panes are still listed in the tab bar but \
                                  cannot be activated by click or keyboard.",
                             )
@@ -1083,7 +1083,7 @@ impl Widget for WidgetCatalog {
                     .enabled(false),
                 )
                 .trailing_slot(
-                    Button::new("More")
+                    Button::new_literal("More")
                         .style(ButtonVariant::Flat)
                         .on_activate(Cmd::LinkClicked),
                 ),
@@ -1098,18 +1098,18 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new("Navigation")
+                    TextWidget::new_literal("Navigation")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("TabWidget")
+                    TextWidget::new_literal("TabWidget")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .add_child(tabs_block)
                 .child(
-                    TextWidget::new("Link")
+                    TextWidget::new_literal("Link")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
@@ -1117,12 +1117,12 @@ impl Widget for WidgetCatalog {
                     HStack::new()
                         .spacing(16.0)
                         .child(
-                            Link::new("Click me")
+                            Link::new_literal("Click me")
                                 .on_activate(Cmd::LinkClicked)
-                                .tooltip("Fires the LinkClicked command"),
+                                .tooltip_literal("Fires the LinkClicked command"),
                         )
                         .child(
-                            Link::new("FernUI Documentation")
+                            Link::new_literal("FernUI Documentation")
                                 .url("https://github.com/jacquetc/fern-ui"),
                         ),
                 ),
@@ -1137,26 +1137,26 @@ impl Widget for WidgetCatalog {
             VStack::new()
                 .spacing(8.0)
                 .child(
-                    TextWidget::new("Menus & Dropdowns")
+                    TextWidget::new_literal("Menus & Dropdowns")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new("ComboBox")
+                    TextWidget::new_literal("ComboBox")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
                 .child(
                     HStack::new().spacing(16.0).child(
-                        ComboBox::new(
+                        ComboBox::new_literal(
                             vec!["Apple", "Banana", "Cherry", "Date", "Elderberry"],
                             combo_selected.clone(),
                         )
-                        .placeholder("Select a fruit..."),
+                        .placeholder_literal("Select a fruit..."),
                     ),
                 )
                 .child(
-                    TextWidget::new("Context Menu (right-click the panel below)")
+                    TextWidget::new_literal("Context Menu (right-click the panel below)")
                         .style(t.small.clone())
                         .color(c.text_secondary),
                 )
@@ -1166,7 +1166,7 @@ impl Widget for WidgetCatalog {
                         .corner_radius(8.0)
                         .padding(16.0)
                         .child(
-                            TextWidget::new("Right-click here for a context menu")
+                            TextWidget::new_literal("Right-click here for a context menu")
                                 .style(t.body.clone())
                                 .color(c.text_primary),
                         )
@@ -1174,22 +1174,22 @@ impl Widget for WidgetCatalog {
                             Box::new(
                                 MenuList::new()
                                     .item(
-                                        MenuItem::new("Cut")
+                                        MenuItem::new_literal("Cut")
                                             .on_activate(Cmd::Cut)
                                             .shortcut_label("Ctrl+X"),
                                     )
                                     .item(
-                                        MenuItem::new("Copy")
+                                        MenuItem::new_literal("Copy")
                                             .on_activate(Cmd::Copy)
                                             .shortcut_label("Ctrl+C"),
                                     )
                                     .item(
-                                        MenuItem::new("Paste")
+                                        MenuItem::new_literal("Paste")
                                             .on_activate(Cmd::Paste)
                                             .shortcut_label("Ctrl+V"),
                                     )
                                     .separator()
-                                    .item(MenuItem::new("Disabled item").enabled(false)),
+                                    .item(MenuItem::new_literal("Disabled item").enabled(false)),
                             )
                         }),
                 ),
@@ -1204,13 +1204,13 @@ impl Widget for WidgetCatalog {
             Toolbar::new().child(
                 HStack::new()
                     .child(
-                        TextWidget::new("Widget Catalog")
+                        TextWidget::new_literal("Widget Catalog")
                             .style(t.body_bold.clone())
                             .color(c.text_primary),
                     )
                     .child(Spacer::new())
                     .child(
-                        Button::new("Toggle Dark Mode")
+                        Button::new_literal("Toggle Dark Mode")
                             .style(ButtonVariant::Regular)
                             .on_activate(Cmd::ToggleDarkMode),
                     ),
@@ -1250,7 +1250,7 @@ impl Widget for WidgetCatalog {
                 .child(Expand::new().fills_stack().set_child(scroll))
                 .child(
                     StatusBar::new().child(
-                        TextWidget::new("Milestone 4 -- All widgets demonstrated")
+                        TextWidget::new_literal("Milestone 4 -- All widgets demonstrated")
                             .style(t.tiny.clone())
                             .color(c.text_secondary),
                     ),
@@ -1280,7 +1280,7 @@ fn build_color_cell(color: Color, label: &str) -> Panel {
         .corner_radius(4.0)
         .padding(8.0)
         .child(
-            TextWidget::new(label)
+            TextWidget::new_literal(label)
                 .style(TextStyle {
                     family: "sans-serif".into(),
                     size: 12.0,
@@ -1495,7 +1495,7 @@ mod tests {
     #[test]
     fn badge_renders_text_with_real_text_backend() {
         let mut tree = tree_with_real_text_backend();
-        tree.add(Badge::new("Badge text"));
+        tree.add(Badge::new_literal("Badge text"));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         let frame = tree.render();

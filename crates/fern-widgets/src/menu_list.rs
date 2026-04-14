@@ -135,9 +135,9 @@ impl Widget for KeyboardHighlightWrapper {
 ///
 /// ```ignore
 /// MenuList::new()
-///     .item(MenuItem::new("Cut").on_activate(AppCmd::Cut))
+///     .item(MenuItem::new_literal("Cut").on_activate(AppCmd::Cut))
 ///     .separator()
-///     .item(MenuItem::new("Paste").on_activate(AppCmd::Paste))
+///     .item(MenuItem::new_literal("Paste").on_activate(AppCmd::Paste))
 /// ```
 pub struct MenuList {
     entries: Vec<MenuEntry>,
@@ -394,10 +394,10 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let menu = tree.add(
             MenuList::new()
-                .item(MenuItem::new("Cut").on_activate(TestCmd::Cut))
+                .item(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut))
                 .separator()
-                .item(MenuItem::new("Copy").on_activate(TestCmd::Copy))
-                .item(MenuItem::new("Paste").on_activate(TestCmd::Paste)),
+                .item(MenuItem::new_literal("Copy").on_activate(TestCmd::Copy))
+                .item(MenuItem::new_literal("Paste").on_activate(TestCmd::Paste)),
         );
         tree.layout(SizeProposal::exact(300.0, 300.0));
         (tree, menu)

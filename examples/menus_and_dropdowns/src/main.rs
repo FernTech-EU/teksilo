@@ -74,12 +74,12 @@ impl Widget for Root {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new("ComboBox / Dropdown")
+                    TextWidget::new_literal("ComboBox / Dropdown")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new(
+                    TextWidget::new_literal(
                         "Click to open the dropdown. Use arrow keys to navigate, \
                          Enter to select, Escape to close.",
                     )
@@ -93,12 +93,12 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new("Fruit")
+                                    TextWidget::new_literal("Fruit")
                                         .style(t.small.clone())
                                         .color(c.text_primary),
                                 )
                                 .child(
-                                    ComboBox::new(
+                                    ComboBox::new_literal(
                                         vec![
                                             "Apple",
                                             "Banana",
@@ -110,18 +110,18 @@ impl Widget for Root {
                                         ],
                                         fruit_selected.clone(),
                                     )
-                                    .placeholder("Select a fruit..."),
+                                    .placeholder_literal("Select a fruit..."),
                                 ),
                         )
                         .child(
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new("Color")
+                                    TextWidget::new_literal("Color")
                                         .style(t.small.clone())
                                         .color(c.text_primary),
                                 )
-                                .child(ComboBox::new(
+                                .child(ComboBox::new_literal(
                                     vec!["Red", "Green", "Blue", "Yellow", "Purple"],
                                     color_selected.clone(),
                                 )),
@@ -130,16 +130,16 @@ impl Widget for Root {
                             VStack::new()
                                 .spacing(4.0)
                                 .child(
-                                    TextWidget::new("Size (disabled)")
+                                    TextWidget::new_literal("Size (disabled)")
                                         .style(t.small.clone())
                                         .color(c.text_primary),
                                 )
                                 .child(
-                                    ComboBox::new(
+                                    ComboBox::new_literal(
                                         vec!["Small", "Medium", "Large"],
                                         size_selected.clone(),
                                     )
-                                    .placeholder("Choose size")
+                                    .placeholder_literal("Choose size")
                                     .enabled(false),
                                 ),
                         ),
@@ -152,12 +152,12 @@ impl Widget for Root {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new("Context Menu")
+                    TextWidget::new_literal("Context Menu")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new(
+                    TextWidget::new_literal(
                         "Right-click on the panels below to open a context menu. \
                          Each panel has a different menu.",
                     )
@@ -176,12 +176,12 @@ impl Widget for Root {
                                     VStack::new()
                                         .spacing(6.0)
                                         .child(
-                                            TextWidget::new("Edit Menu")
+                                            TextWidget::new_literal("Edit Menu")
                                                 .style(t.small.clone())
                                                 .color(c.text_primary),
                                         )
                                         .child(
-                                            TextWidget::new("Right-click for Cut/Copy/Paste")
+                                            TextWidget::new_literal("Right-click for Cut/Copy/Paste")
                                                 .style(t.body.clone())
                                                 .color(c.text_primary),
                                         ),
@@ -190,55 +190,55 @@ impl Widget for Root {
                                     Box::new(
                                         MenuList::new()
                                             .item(
-                                                MenuItem::new("Undo")
+                                                MenuItem::new_literal("Undo")
                                                     .on_activate(Cmd::Undo)
                                                     .shortcut_label("Ctrl+Z"),
                                             )
                                             .item(
-                                                MenuItem::new("Redo")
+                                                MenuItem::new_literal("Redo")
                                                     .on_activate(Cmd::Redo)
                                                     .shortcut_label("Ctrl+Shift+Z"),
                                             )
                                             .separator()
                                             .item(
-                                                MenuItem::new("Cut")
+                                                MenuItem::new_literal("Cut")
                                                     .on_activate(Cmd::Cut)
                                                     .shortcut_label("Ctrl+X"),
                                             )
                                             .item(
-                                                MenuItem::new("Copy")
+                                                MenuItem::new_literal("Copy")
                                                     .on_activate(Cmd::Copy)
                                                     .shortcut_label("Ctrl+C"),
                                             )
                                             .item(
-                                                MenuItem::new("Paste")
+                                                MenuItem::new_literal("Paste")
                                                     .on_activate(Cmd::Paste)
                                                     .shortcut_label("Ctrl+V"),
                                             )
                                             .separator()
                                             .item(
-                                                MenuItem::new("Select All")
+                                                MenuItem::new_literal("Select All")
                                                     .on_activate(Cmd::SelectAll)
                                                     .shortcut_label("Ctrl+A"),
                                             )
                                             .separator()
-                                            .item(MenuItem::submenu("Alignment", || {
+                                            .item(MenuItem::submenu_literal("Alignment", || {
                                                 Box::new(
                                                     MenuList::new()
                                                         .item(
-                                                            MenuItem::new("Left")
+                                                            MenuItem::new_literal("Left")
                                                                 .on_activate(Cmd::AlignLeft),
                                                         )
                                                         .item(
-                                                            MenuItem::new("Center")
+                                                            MenuItem::new_literal("Center")
                                                                 .on_activate(Cmd::AlignCenter),
                                                         )
                                                         .item(
-                                                            MenuItem::new("Right")
+                                                            MenuItem::new_literal("Right")
                                                                 .on_activate(Cmd::AlignRight),
                                                         )
                                                         .item(
-                                                            MenuItem::new("Justify")
+                                                            MenuItem::new_literal("Justify")
                                                                 .on_activate(Cmd::AlignJustify),
                                                         ),
                                                 )
@@ -255,12 +255,12 @@ impl Widget for Root {
                                     VStack::new()
                                         .spacing(6.0)
                                         .child(
-                                            TextWidget::new("File Menu")
+                                            TextWidget::new_literal("File Menu")
                                                 .style(t.small.clone())
                                                 .color(c.text_primary),
                                         )
                                         .child(
-                                            TextWidget::new("Right-click for file operations")
+                                            TextWidget::new_literal("Right-click for file operations")
                                                 .style(t.body.clone())
                                                 .color(c.text_primary),
                                         ),
@@ -269,22 +269,22 @@ impl Widget for Root {
                                     Box::new(
                                         MenuList::new()
                                             .item(
-                                                MenuItem::new("New File")
+                                                MenuItem::new_literal("New File")
                                                     .on_activate(Cmd::NewFile)
                                                     .shortcut_label("Ctrl+N"),
                                             )
                                             .item(
-                                                MenuItem::new("Open File...")
+                                                MenuItem::new_literal("Open File...")
                                                     .on_activate(Cmd::OpenFile)
                                                     .shortcut_label("Ctrl+O"),
                                             )
                                             .item(
-                                                MenuItem::new("Save")
+                                                MenuItem::new_literal("Save")
                                                     .on_activate(Cmd::SaveFile)
                                                     .shortcut_label("Ctrl+S"),
                                             )
                                             .separator()
-                                            .item(MenuItem::new("Export as PDF").enabled(false)),
+                                            .item(MenuItem::new_literal("Export as PDF").enabled(false)),
                                     )
                                 }),
                         ),
@@ -297,12 +297,12 @@ impl Widget for Root {
             VStack::new()
                 .spacing(12.0)
                 .child(
-                    TextWidget::new("Menu Items (inline)")
+                    TextWidget::new_literal("Menu Items (inline)")
                         .style(t.body_bold.clone())
                         .color(c.text_primary),
                 )
                 .child(
-                    TextWidget::new(
+                    TextWidget::new_literal(
                         "MenuItems shown directly (not in an overlay) to demonstrate \
                          their visual styles and interaction states.",
                     )
@@ -318,19 +318,19 @@ impl Widget for Root {
                         .child(
                             VStack::new()
                                 .child(
-                                    MenuItem::new("Normal item")
+                                    MenuItem::new_literal("Normal item")
                                         .on_activate(Cmd::Cut)
                                         .shortcut_label("Ctrl+X"),
                                 )
                                 .child(
-                                    MenuItem::new("With icon")
+                                    MenuItem::new_literal("With icon")
                                         .on_activate(Cmd::Copy)
                                         .icon(IconWidget::checkmark(16.0))
                                         .shortcut_label("Ctrl+C"),
                                 )
-                                .child(MenuItem::new("Disabled item").enabled(false))
-                                .child(MenuItem::submenu("Submenu trigger", || {
-                                    Box::new(TextWidget::new("submenu placeholder"))
+                                .child(MenuItem::new_literal("Disabled item").enabled(false))
+                                .child(MenuItem::submenu_literal("Submenu trigger", || {
+                                    Box::new(TextWidget::new_literal("submenu placeholder"))
                                 })),
                         ),
                 ),
@@ -342,13 +342,13 @@ impl Widget for Root {
             Toolbar::new().child(
                 HStack::new()
                     .child(
-                        TextWidget::new("Menus & Dropdowns")
+                        TextWidget::new_literal("Menus & Dropdowns")
                             .style(t.body_bold.clone())
                             .color(c.text_primary),
                     )
                     .child(Spacer::new())
                     .child(
-                        Button::new("Toggle Dark Mode")
+                        Button::new_literal("Toggle Dark Mode")
                             .style(ButtonVariant::Regular)
                             .on_activate(Cmd::ToggleDarkMode),
                     ),
@@ -372,87 +372,87 @@ impl Widget for Root {
         let menu_bar = ctx.add(
             MenuBar::new()
                 .leading_slot(IconWidget::chevron_right(16.0).color(c.accent))
-                .menu("File", || {
+                .menu_literal("File", || {
                     Box::new(
                         MenuList::new()
                             .item(
-                                MenuItem::new("New")
+                                MenuItem::new_literal("New")
                                     .on_activate(Cmd::NewFile)
                                     .shortcut_label("Ctrl+N"),
                             )
                             .item(
-                                MenuItem::new("Open")
+                                MenuItem::new_literal("Open")
                                     .on_activate(Cmd::OpenFile)
                                     .shortcut_label("Ctrl+O"),
                             )
                             .item(
-                                MenuItem::new("Save")
+                                MenuItem::new_literal("Save")
                                     .on_activate(Cmd::SaveFile)
                                     .shortcut_label("Ctrl+S"),
                             )
                             .separator()
-                            .item(MenuItem::new("Quit").on_activate(Cmd::ToggleDarkMode)),
+                            .item(MenuItem::new_literal("Quit").on_activate(Cmd::ToggleDarkMode)),
                     )
                 })
-                .menu("Edit", || {
+                .menu_literal("Edit", || {
                     Box::new(
                         MenuList::new()
                             .item(
-                                MenuItem::new("Undo")
+                                MenuItem::new_literal("Undo")
                                     .on_activate(Cmd::Undo)
                                     .shortcut_label("Ctrl+Z"),
                             )
                             .item(
-                                MenuItem::new("Redo")
+                                MenuItem::new_literal("Redo")
                                     .on_activate(Cmd::Redo)
                                     .shortcut_label("Ctrl+Shift+Z"),
                             )
                             .separator()
                             .item(
-                                MenuItem::new("Cut")
+                                MenuItem::new_literal("Cut")
                                     .on_activate(Cmd::Cut)
                                     .shortcut_label("Ctrl+X"),
                             )
                             .item(
-                                MenuItem::new("Copy")
+                                MenuItem::new_literal("Copy")
                                     .on_activate(Cmd::Copy)
                                     .shortcut_label("Ctrl+C"),
                             )
                             .item(
-                                MenuItem::new("Paste")
+                                MenuItem::new_literal("Paste")
                                     .on_activate(Cmd::Paste)
                                     .shortcut_label("Ctrl+V"),
                             )
                             .separator()
                             .item(
-                                MenuItem::new("Select All")
+                                MenuItem::new_literal("Select All")
                                     .on_activate(Cmd::SelectAll)
                                     .shortcut_label("Ctrl+A"),
                             ),
                     )
                 })
-                .menu("View", || {
+                .menu_literal("View", || {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::submenu("Alignment", || {
+                            .item(MenuItem::submenu_literal("Alignment", || {
                                 Box::new(
                                     MenuList::new()
-                                        .item(MenuItem::new("Left").on_activate(Cmd::AlignLeft))
-                                        .item(MenuItem::new("Center").on_activate(Cmd::AlignCenter))
-                                        .item(MenuItem::new("Right").on_activate(Cmd::AlignRight))
+                                        .item(MenuItem::new_literal("Left").on_activate(Cmd::AlignLeft))
+                                        .item(MenuItem::new_literal("Center").on_activate(Cmd::AlignCenter))
+                                        .item(MenuItem::new_literal("Right").on_activate(Cmd::AlignRight))
                                         .item(
-                                            MenuItem::new("Justify").on_activate(Cmd::AlignJustify),
+                                            MenuItem::new_literal("Justify").on_activate(Cmd::AlignJustify),
                                         ),
                                 )
                             }))
                             .separator()
                             .item(
-                                MenuItem::new("Toggle Dark Mode").on_activate(Cmd::ToggleDarkMode),
+                                MenuItem::new_literal("Toggle Dark Mode").on_activate(Cmd::ToggleDarkMode),
                             ),
                     )
                 })
                 .trailing_slot(
-                    Button::new("Settings")
+                    Button::new_literal("Settings")
                         .style(ButtonVariant::Flat)
                         .on_activate(Cmd::ToggleDarkMode),
                 ),
@@ -465,7 +465,7 @@ impl Widget for Root {
                 .child(Expand::new().fills_stack().set_child(scroll))
                 .child(
                     StatusBar::new().child(
-                        TextWidget::new("Milestone 4 -- Menus & Dropdowns")
+                        TextWidget::new_literal("Milestone 4 -- Menus & Dropdowns")
                             .style(t.tiny.clone())
                             .color(c.text_primary),
                     ),
@@ -547,8 +547,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
         let cb = tree.add(
-            ComboBox::new(vec!["Apple", "Banana", "Cherry"], selected.clone())
-                .placeholder("Pick one"),
+            ComboBox::new_literal(vec!["Apple", "Banana", "Cherry"], selected.clone())
+                .placeholder_literal("Pick one"),
         );
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
@@ -562,7 +562,7 @@ mod tests {
     fn combo_box_arrow_keys_change_selection() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(vec!["A", "B", "C"], selected.clone()));
+        let cb = tree.add(ComboBox::new_literal(vec!["A", "B", "C"], selected.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         tree.focus(cb);
 
@@ -578,9 +578,9 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let menu = tree.add(
             MenuList::new()
-                .item(MenuItem::new("Cut").on_activate(TestCmd::Action))
+                .item(MenuItem::new_literal("Cut").on_activate(TestCmd::Action))
                 .separator()
-                .item(MenuItem::new("Copy").on_activate(TestCmd::Action)),
+                .item(MenuItem::new_literal("Copy").on_activate(TestCmd::Action)),
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let bounds = tree.bounds(menu);
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn menu_item_tap_emits_command() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::new("Cut").on_activate(TestCmd::Action));
+        let item = tree.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Action));
         tree.layout(SizeProposal::exact(200.0, 40.0));
 
         let called = std::rc::Rc::new(std::cell::Cell::new(false));
@@ -610,7 +610,7 @@ mod tests {
     fn menu_item_disabled_ignores_tap() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::new("Nope")
+            MenuItem::new_literal("Nope")
                 .on_activate(TestCmd::Action)
                 .enabled(false),
         );
@@ -633,10 +633,10 @@ mod tests {
         let panel = tree.add(
             Panel::new()
                 .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -664,10 +664,10 @@ mod tests {
         let panel = tree.add(
             Panel::new()
                 .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -713,14 +713,14 @@ mod tests {
         let panel = tree.add(
             Panel::new()
                 .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
                 .context_menu(|| {
                     Box::new(
                         MenuList::new()
-                            .item(MenuItem::new("Cut").on_activate(TestCmd::Action))
+                            .item(MenuItem::new_literal("Cut").on_activate(TestCmd::Action))
                             .separator()
-                            .item(MenuItem::new("Copy").on_activate(TestCmd::Action))
-                            .item(MenuItem::new("Paste").on_activate(TestCmd::Action)),
+                            .item(MenuItem::new_literal("Copy").on_activate(TestCmd::Action))
+                            .item(MenuItem::new_literal("Paste").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -768,11 +768,11 @@ mod tests {
 
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let item = tree.add(
-            MenuItem::submenu("Open Recent", || {
+            MenuItem::submenu_literal("Open Recent", || {
                 Box::new(
                     MenuList::new()
-                        .item(MenuItem::new("File 1").on_activate(TestCmd::Action))
-                        .item(MenuItem::new("File 2").on_activate(TestCmd::Action)),
+                        .item(MenuItem::new_literal("File 1").on_activate(TestCmd::Action))
+                        .item(MenuItem::new_literal("File 2").on_activate(TestCmd::Action)),
                 )
             })
             .submenu_delay(Duration::from_millis(100)),
@@ -804,10 +804,10 @@ mod tests {
         let panel = tree.add(
             Panel::new()
                 .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -840,10 +840,10 @@ mod tests {
         let panel = tree.add(
             Panel::new()
                 .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );
@@ -873,10 +873,10 @@ mod tests {
         let panel = tree.add(
             Panel::new()
                 .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new("Right-click me"))
+                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
                 .context_menu(|| {
                     Box::new(
-                        MenuList::new().item(MenuItem::new("Action").on_activate(TestCmd::Action)),
+                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
                     )
                 }),
         );

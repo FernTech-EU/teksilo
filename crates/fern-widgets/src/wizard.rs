@@ -39,19 +39,38 @@ pub struct WizardStep {
 }
 
 impl WizardStep {
-    pub fn new<W, F>(title: impl Into<String>, factory: F) -> Self
+    pub fn new<W, F>(title: impl Into<fern_i18n::LocalizedString>, factory: F) -> Self
     where
         W: Widget + 'static,
         F: Fn() -> W + 'static,
     {
+        let ls: fern_i18n::LocalizedString = title.into();
         Self {
-            title: title.into(),
+            title: ls.resolve_now(),
             supporting_text: None,
             content_factory: Rc::new(move || Box::new(factory()) as Box<dyn Widget>),
         }
     }
 
-    pub fn supporting_text(mut self, text: impl Into<String>) -> Self {
+    /// Transitional shim — wraps a raw title in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal<W, F>(title: impl Into<String>, factory: F) -> Self
+    where
+        W: Widget + 'static,
+        F: Fn() -> W + 'static,
+    {
+        Self::new(fern_i18n::LocalizedString::literal(title), factory)
+    }
+
+    pub fn supporting_text(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.supporting_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `supporting_text(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn supporting_text_literal(mut self, text: impl Into<String>) -> Self {
         self.supporting_text = Some(text.into());
         self
     }
@@ -175,19 +194,19 @@ impl Widget for WizardHeader {
         });
 
         let progress_id = ctx.add(
-            TextWidget::new("")
+            TextWidget::new_literal("")
                 .bind_text(progress)
                 .style(theme.typography.small.clone())
                 .color(theme.colors.text_secondary),
         );
         let title_id = ctx.add(
-            TextWidget::new("")
+            TextWidget::new_literal("")
                 .bind_text(title)
                 .style(theme.typography.body_bold.clone())
                 .color(theme.colors.text_primary),
         );
         let supporting_id = ctx.add(
-            TextWidget::new("")
+            TextWidget::new_literal("")
                 .bind_text(supporting_text)
                 .style(theme.typography.body.clone())
                 .color(theme.colors.text_secondary),
@@ -294,7 +313,7 @@ impl Widget for WizardFooter {
             let finish_focus_id = Rc::new(RefCell::new(None));
 
             let back_id = ctx.add(
-                Button::new(self.back_label.clone())
+                Button::new_literal(self.back_label.clone())
                     .style(ButtonVariant::Regular)
                     .on_activate_fn({
                         let current_step = current_step.clone();
@@ -313,13 +332,13 @@ impl Widget for WizardFooter {
             );
 
             let cancel_id = ctx.add(
-                Button::new(self.cancel_label.clone())
+                Button::new_literal(self.cancel_label.clone())
                     .style(ButtonVariant::Flat)
                     .on_activate_fn(|ctx| ctx.dismiss_modal()),
             );
 
             let next_id = ctx.add(
-                Button::new(self.next_label.clone())
+                Button::new_literal(self.next_label.clone())
                     .style(ButtonVariant::Default)
                     .on_activate_fn({
                         let current_step = current_step.clone();
@@ -346,7 +365,7 @@ impl Widget for WizardFooter {
 
             let finish_action = self.finish_action.clone();
             let finish_id = ctx.add(
-                Button::new(self.finish_label.clone())
+                Button::new_literal(self.finish_label.clone())
                     .style(ButtonVariant::Default)
                     .on_activate_fn(move |ctx| {
                         if let Some(action) = &finish_action {
@@ -536,9 +555,10 @@ pub struct Wizard {
 }
 
 impl Wizard {
-    pub fn new(label: impl Into<String>) -> Self {
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             style: ButtonVariant::Default,
             enabled: true,
             presentation: ModalPresentation::Auto,
@@ -553,6 +573,12 @@ impl Wizard {
             pending_trigger: None,
             root_child_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
     }
 
     pub fn step(mut self, step: WizardStep) -> Self {
@@ -590,22 +616,54 @@ impl Wizard {
         self
     }
 
-    pub fn back_label(mut self, label: impl Into<String>) -> Self {
+    pub fn back_label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.back_label = ls.resolve_now();
+        self
+    }
+
+    /// Transitional shim for `back_label(...)`.
+    #[doc(hidden)]
+    pub fn back_label_literal(mut self, label: impl Into<String>) -> Self {
         self.back_label = label.into();
         self
     }
 
-    pub fn cancel_label(mut self, label: impl Into<String>) -> Self {
+    pub fn cancel_label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.cancel_label = ls.resolve_now();
+        self
+    }
+
+    /// Transitional shim for `cancel_label(...)`.
+    #[doc(hidden)]
+    pub fn cancel_label_literal(mut self, label: impl Into<String>) -> Self {
         self.cancel_label = label.into();
         self
     }
 
-    pub fn next_label(mut self, label: impl Into<String>) -> Self {
+    pub fn next_label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.next_label = ls.resolve_now();
+        self
+    }
+
+    /// Transitional shim for `next_label(...)`.
+    #[doc(hidden)]
+    pub fn next_label_literal(mut self, label: impl Into<String>) -> Self {
         self.next_label = label.into();
         self
     }
 
-    pub fn finish_label(mut self, label: impl Into<String>) -> Self {
+    pub fn finish_label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.finish_label = ls.resolve_now();
+        self
+    }
+
+    /// Transitional shim for `finish_label(...)`.
+    #[doc(hidden)]
+    pub fn finish_label_literal(mut self, label: impl Into<String>) -> Self {
         self.finish_label = label.into();
         self
     }
@@ -745,7 +803,7 @@ impl Widget for Wizard {
             )
         } else {
             ctx.add(
-                Button::new(self.label.clone())
+                Button::new_literal(self.label.clone())
                     .style(style)
                     .enabled(enabled)
                     .on_activate_fn({
@@ -830,7 +888,7 @@ mod tests {
     #[test]
     fn wizard_queues_modal_request() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Wizard::new("Open wizard").step(WizardStep::new("Details", || {
+        tree.add(Wizard::new_literal("Open wizard").step(WizardStep::new_literal("Details", || {
             FixedLeaf(220.0, 120.0)
         })));
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -854,15 +912,15 @@ mod tests {
         let finished_flag = finished.clone();
 
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let trigger = tree.add(Button::new("Anchor"));
+        let trigger = tree.add(Button::new_literal("Anchor"));
         tree.add(
-            Wizard::new("Launch")
+            Wizard::new_literal("Launch")
                 .step(
-                    WizardStep::new("Account", || Button::new("Account field"))
-                        .supporting_text("Enter the account details before continuing."),
+                    WizardStep::new_literal("Account", || Button::new_literal("Account field"))
+                        .supporting_text_literal("Enter the account details before continuing."),
                 )
-                .step(WizardStep::new("Review", || Button::new("Review field")))
-                .finish_label("Create")
+                .step(WizardStep::new_literal("Review", || Button::new_literal("Review field")))
+                .finish_label_literal("Create")
                 .on_finish(move |_ctx| {
                     *finished_flag.borrow_mut() = true;
                 }),

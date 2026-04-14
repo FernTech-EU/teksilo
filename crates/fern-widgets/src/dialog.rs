@@ -126,7 +126,7 @@ impl Widget for ModalContainer {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Dialog);
-        builder.set_name("Dialog");
+        builder.set_name(fern_i18n::tr_widget!(a11y_dialog_name()).resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -173,12 +173,28 @@ impl DialogContent {
         }
     }
 
-    pub fn title(mut self, title: impl Into<String>) -> Self {
+    pub fn title(mut self, title: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = title.into();
+        self.title = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `title(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn title_literal(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
-    pub fn supporting_text(mut self, text: impl Into<String>) -> Self {
+    pub fn supporting_text(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.supporting_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `supporting_text(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn supporting_text_literal(mut self, text: impl Into<String>) -> Self {
         self.supporting_text = Some(text.into());
         self
     }
@@ -218,14 +234,14 @@ impl Widget for DialogContent {
             let mut header = VStack::new().spacing(8.0);
             if let Some(title) = self.title.clone() {
                 header = header.child(
-                    TextWidget::new(title)
+                    TextWidget::new_literal(title)
                         .style(theme.typography.body_bold.clone())
                         .color(theme.colors.text_primary),
                 );
             }
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
-                    TextWidget::new(text)
+                    TextWidget::new_literal(text)
                         .style(theme.typography.body.clone())
                         .color(theme.colors.text_secondary),
                 );
@@ -290,13 +306,14 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    pub fn new<W, F>(label: impl Into<String>, factory: F) -> Self
+    pub fn new<W, F>(label: impl Into<fern_i18n::LocalizedString>, factory: F) -> Self
     where
         W: Widget + 'static,
         F: Fn() -> W + 'static,
     {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             style: ButtonVariant::Default,
             enabled: true,
             presentation: ModalPresentation::Auto,
@@ -307,6 +324,16 @@ impl Dialog {
             pending_trigger: None,
             root_child_id: None,
         }
+    }
+
+    /// Transitional shim — wraps a raw label in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal<W, F>(label: impl Into<String>, factory: F) -> Self
+    where
+        W: Widget + 'static,
+        F: Fn() -> W + 'static,
+    {
+        Self::new(fern_i18n::LocalizedString::literal(label), factory)
     }
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
@@ -420,7 +447,7 @@ impl Widget for Dialog {
             )
         } else {
             ctx.add(
-                Button::new(label)
+                Button::new_literal(label)
                     .style(style)
                     .enabled(enabled)
                     .on_tap({
@@ -531,7 +558,7 @@ mod tests {
     #[test]
     fn access_click_opens_centered_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -553,7 +580,7 @@ mod tests {
     #[test]
     fn dialog_surface_exposes_dialog_role() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -615,7 +642,7 @@ mod tests {
     fn custom_trigger_opens_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)),
+            Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -631,14 +658,14 @@ mod tests {
     #[test]
     fn dialog_content_helper_builds_dialog_sections() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new(
+        tree.add(Dialog::new_literal(
             "Open dialog",
             || {
                 DialogContent::new()
-                    .title("Review Changes")
-                    .supporting_text("Confirm the staged updates before continuing.")
+                    .title_literal("Review Changes")
+                    .supporting_text_literal("Confirm the staged updates before continuing.")
                     .body(FixedLeaf(220.0, 120.0))
-                    .footer(Button::new("Close"))
+                    .footer(Button::new_literal("Close"))
             },
         ));
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -666,7 +693,7 @@ mod tests {
     fn dialog_presentation_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0))
+            Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0))
                 .presentation(ModalPresentation::InTree),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -686,7 +713,7 @@ mod tests {
     fn dialog_close_behavior_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Dialog::new("Open dialog", || FixedLeaf(220.0, 120.0))
+            Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0))
                 .close_behavior(ModalCloseBehavior::Manual),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));

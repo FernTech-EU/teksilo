@@ -63,7 +63,7 @@ pub enum InteractionState {
 /// A production-quality button widget — non-generic, composition-based.
 ///
 /// ```ignore
-/// Button::new("Save")
+/// Button::new_literal("Save")
 ///     .style(ButtonVariant::Default)
 ///     .on_activate(AppCmd::Save)
 /// ```
@@ -84,9 +84,16 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn new(label: impl Into<String>) -> Self {
+    /// Construct a button from a `LocalizedString` label. The label may
+    /// come from `tr!(...)` (translated) or `LocalizedString::literal(...)`
+    /// (explicit non-translated). The text is resolved eagerly at
+    /// construction and stored as a plain `String`; locale changes rebuild
+    /// the composite parent, which re-creates this `Button` with a fresh
+    /// translation.
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: label.into(),
+            label: ls.resolve_now(),
             // Int UI default is a Regular (non-primary) button; the caller
             // opts into `ButtonVariant::Default` for the one primary action.
             style: ButtonVariant::Regular,
@@ -96,6 +103,18 @@ impl Button {
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
+    }
+
+    /// Shim accepting a raw string, for tests and scaffolding where
+    /// translation is overkill. Wraps the input in
+    /// `LocalizedString::literal(...)` and forwards to `new(...)`.
+    /// `#[doc(hidden)]` so production code reaches for `new(tr!(...))`
+    /// or `new(LocalizedString::literal(...))` instead, but the shim
+    /// is permanent — grep rule for untranslated strings is
+    /// `LocalizedString::literal` OR `*_literal`.
+    #[doc(hidden)]
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
     }
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
@@ -123,7 +142,15 @@ impl Button {
     }
 
     /// Attach a tooltip that appears after a hover delay.
-    pub fn tooltip(mut self, text: impl Into<String>) -> Self {
+    pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.tooltip_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Transitional shim for `tooltip(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
         self
     }
@@ -231,7 +258,7 @@ impl fern_core::widget::Widget for Button {
         };
 
         // Build the widget subtree
-        let text = TextWidget::new(&self.label).bind_color(text_color);
+        let text = TextWidget::new_literal(&self.label).bind_color(text_color);
         let text_id = ctx.add(text);
 
         let button_style = theme.components.button;
@@ -272,7 +299,7 @@ impl fern_core::widget::Widget for Button {
 
         // Attach tooltip if configured
         if let Some(ref tooltip_text) = self.tooltip_text {
-            let tooltip_widget = crate::tooltip::TooltipWidget::new(tooltip_text);
+            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);
             ctx.attach_tooltip(root_id, tooltip_id, delay);
@@ -442,7 +469,7 @@ mod tests {
 
     fn setup() -> (WidgetTree, WidgetId) {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(Button::new("Save").on_activate(TestCmd::Save));
+        let btn = tree.add(Button::new_literal("Save").on_activate(TestCmd::Save));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         (tree, btn)
     }
@@ -495,7 +522,7 @@ mod tests {
     fn disabled_ignores_click() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let btn = tree.add(
-            Button::new("Save")
+            Button::new_literal("Save")
                 .on_activate(TestCmd::Save)
                 .enabled(false),
         );
@@ -522,7 +549,7 @@ mod tests {
     #[test]
     fn default_variant_renders_accent_background() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Button::new("Save").style(ButtonVariant::Default));
+        tree.add(Button::new_literal("Save").style(ButtonVariant::Default));
         tree.layout(SizeProposal::exact(200.0, 80.0));
         let frame = tree.render();
         let accent = Theme::light_default().colors.accent.to_array();
@@ -546,7 +573,7 @@ mod tests {
     #[test]
     fn button_sizes_to_content() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(Button::new("X"));
+        let btn = tree.add(Button::new_literal("X"));
         tree.layout(SizeProposal {
             width: None,
             height: None,
@@ -656,9 +683,9 @@ mod tests {
     fn button_tooltip_appears_after_delay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let btn = tree.add(
-            Button::new("Save")
+            Button::new_literal("Save")
                 .on_activate(TestCmd::Save)
-                .tooltip("Save the document"),
+                .tooltip_literal("Save the document"),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -680,9 +707,9 @@ mod tests {
     fn button_tooltip_dismissed_on_leave() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let btn = tree.add(
-            Button::new("Save")
+            Button::new_literal("Save")
                 .on_activate(TestCmd::Save)
-                .tooltip("Save the document"),
+                .tooltip_literal("Save the document"),
         );
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -709,7 +736,7 @@ mod tests {
         let counter = Rc::new(Cell::new(0_u32));
         let c = counter.clone();
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(Button::new("Inc").on_activate_fn(move |_ctx| {
+        let btn = tree.add(Button::new_literal("Inc").on_activate_fn(move |_ctx| {
             c.set(c.get() + 1);
         }));
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -725,7 +752,7 @@ mod tests {
         let called = Rc::new(Cell::new(false));
         let c = called.clone();
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let btn = tree.add(Button::new("Do").on_activate_fn(move |_ctx| {
+        let btn = tree.add(Button::new_literal("Do").on_activate_fn(move |_ctx| {
             c.set(true);
         }));
         tree.layout(SizeProposal::exact(200.0, 80.0));
@@ -741,7 +768,7 @@ mod tests {
         let c = called.clone();
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let btn = tree.add(
-            Button::new("Nope")
+            Button::new_literal("Nope")
                 .on_activate_fn(move |_ctx| c.set(true))
                 .enabled(false),
         );
@@ -761,7 +788,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.on_command(move |_cmd: &TestCmd| cc.set(true));
         let btn = tree.add(
-            Button::new("Test")
+            Button::new_literal("Test")
                 .on_activate(TestCmd::Save)
                 .on_activate_fn(move |_ctx| fc.set(true)),
         );

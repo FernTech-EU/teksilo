@@ -377,6 +377,24 @@ impl WindowManager {
         }
     }
 
+    /// Broadcast a locale switch to all windows. Updates the i18n manager
+    /// (incrementing the version signal) and seeds each tree with the new
+    /// locale and layout direction. No-op if no `I18nConfig` was registered.
+    pub fn set_locale(&mut self, locale: fern_i18n::LanguageIdentifier) {
+        let Some((outcome, new_dir)) = fern_i18n::thread_local::with_active(|mgr| {
+            let outcome = mgr.set_locale(locale.clone());
+            (outcome, mgr.direction_signal().get())
+        }) else {
+            return;
+        };
+        for managed in self.windows.values_mut() {
+            if outcome.direction_changed {
+                managed.tree.set_layout_direction(new_dir);
+            }
+            managed.tree.set_locale(locale.to_string());
+        }
+    }
+
     /// Get the current shared theme.
     pub fn theme(&self) -> &Theme {
         &self.theme
@@ -492,6 +510,9 @@ impl WindowManager {
                 // Apply deferred operations
                 if let Some(new_theme) = ctx.take_theme() {
                     self.set_theme(new_theme);
+                }
+                if let Some(new_locale) = ctx.take_locale() {
+                    self.set_locale(new_locale);
                 }
                 for config in ctx.take_creates() {
                     self.queue_create(config);

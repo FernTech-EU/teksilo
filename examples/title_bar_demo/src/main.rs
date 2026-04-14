@@ -57,12 +57,12 @@ fn main() {
                         .background(theme.colors.surface_pressed)
                         .border(theme.colors.text_secondary, 2.0)
                         .leading(
-                            TextWidget::new("  FernUI — Title Bar Demo")
+                            TextWidget::new_literal("  FernUI — Title Bar Demo")
                                 .style(theme.typography.body_bold.clone())
                                 .color(theme.colors.text_primary),
                         )
                         .center(
-                            TextWidget::new(
+                            TextWidget::new_literal(
                                 "drag · double-click maximize · right-click for menu  ",
                             )
                             .style(theme.typography.small.clone())
@@ -71,7 +71,7 @@ fn main() {
                         .close_action(|ctx| ctx.emit(DemoCmd::Close)),
                 ),
                 None => Box::new(
-                    TextWidget::new(
+                    TextWidget::new_literal(
                         "(custom chrome unsupported on this platform — \
                          falling back to native decorations)",
                     )
@@ -83,7 +83,7 @@ fn main() {
                 .child(RectWidget::new().background(theme.colors.surface_main))
                 .child(
                     Expand::new().child(
-                        TextWidget::new("body content goes here")
+                        TextWidget::new_literal("body content goes here")
                             .style(theme.typography.body.clone())
                             .color(theme.colors.text_primary),
                     ),

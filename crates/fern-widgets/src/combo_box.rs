@@ -41,8 +41,8 @@ enum ComboBoxState {
 ///
 /// ```ignore
 /// let selected = ctx.signal(None::<usize>);
-/// ComboBox::new(vec!["Apple", "Banana", "Cherry"], selected.clone())
-///     .placeholder("Select a fruit...")
+/// ComboBox::new_literal(vec!["Apple", "Banana", "Cherry"], selected.clone())
+///     .placeholder_literal("Select a fruit...")
 /// ```
 pub struct ComboBox {
     items: Vec<String>,
@@ -57,11 +57,17 @@ pub struct ComboBox {
 
 impl ComboBox {
     pub fn new(
-        items: impl IntoIterator<Item = impl Into<String>>,
+        items: impl IntoIterator<Item = impl Into<fern_i18n::LocalizedString>>,
         selected: Signal<Option<usize>>,
     ) -> Self {
         Self {
-            items: items.into_iter().map(|s| s.into()).collect(),
+            items: items
+                .into_iter()
+                .map(|s| {
+                    let ls: fern_i18n::LocalizedString = s.into();
+                    ls.resolve_now()
+                })
+                .collect(),
             selected,
             placeholder: String::new(),
             enabled: true,
@@ -71,7 +77,30 @@ impl ComboBox {
         }
     }
 
-    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+    /// Transitional shim — wraps each raw item in `LocalizedString::literal`.
+    #[doc(hidden)]
+    pub fn new_literal(
+        items: impl IntoIterator<Item = impl Into<String>>,
+        selected: Signal<Option<usize>>,
+    ) -> Self {
+        Self::new(
+            items
+                .into_iter()
+                .map(|s| fern_i18n::LocalizedString::literal(s))
+                .collect::<Vec<_>>(),
+            selected,
+        )
+    }
+
+    pub fn placeholder(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.placeholder = ls.resolve_now();
+        self
+    }
+
+    /// Transitional shim for `placeholder(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
         self.placeholder = text.into();
         self
     }
@@ -152,7 +181,7 @@ impl Widget for DropdownItem {
             }
         });
 
-        let text = TextWidget::new(&self.label)
+        let text = TextWidget::new_literal(&self.label)
             .style(theme.typography.body.clone())
             .color(theme.colors.text_primary);
         let text_id = ctx.add(text);
@@ -336,7 +365,7 @@ impl Widget for ComboBox {
         };
 
         // Build trigger: [label | Spacer | chevron]
-        let label = TextWidget::new("")
+        let label = TextWidget::new_literal("")
             .style(theme.typography.body.clone())
             .bind_text(label_text)
             .bind_color(text_color);
@@ -622,8 +651,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None);
         let cb = tree.add(
-            ComboBox::new(vec!["Apple", "Banana", "Cherry"], selected.clone())
-                .placeholder("Select..."),
+            ComboBox::new_literal(vec!["Apple", "Banana", "Cherry"], selected.clone())
+                .placeholder_literal("Select..."),
         );
         tree.layout(SizeProposal::exact(300.0, 50.0));
         let bounds = tree.bounds(cb);
@@ -635,7 +664,7 @@ mod tests {
     fn combo_box_accessibility_role() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None);
-        let cb = tree.add(ComboBox::new(vec!["A", "B"], selected.clone()));
+        let cb = tree.add(ComboBox::new_literal(vec!["A", "B"], selected.clone()));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(cb);
         assert_eq!(info.role(), fern_core::accesskit::Role::ComboBox);
@@ -645,7 +674,7 @@ mod tests {
     fn arrow_keys_cycle_selection() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -668,7 +697,7 @@ mod tests {
     fn selected_updates_label() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(Some(1_usize));
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -680,7 +709,7 @@ mod tests {
     fn click_opens_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -701,7 +730,7 @@ mod tests {
     fn type_ahead_jumps_to_matching_item() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry", "Blueberry"],
             selected.clone(),
         ));
@@ -722,7 +751,7 @@ mod tests {
         // Key::Character is used for non-letter characters (numbers, symbols)
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["100px", "200px", "300px"],
             selected.clone(),
         ));
@@ -737,7 +766,7 @@ mod tests {
     fn type_ahead_case_insensitive() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -757,7 +786,7 @@ mod tests {
     fn type_ahead_no_match_keeps_selection() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(Some(1_usize));
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -777,7 +806,7 @@ mod tests {
     fn below_preferred_opens_above_when_no_space() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -808,7 +837,7 @@ mod tests {
     fn enter_toggles_dropdown_open_close() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -841,7 +870,7 @@ mod tests {
     fn escape_closes_dropdown() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -865,7 +894,7 @@ mod tests {
     fn arrow_down_opens_dropdown_when_closed() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));
@@ -887,7 +916,7 @@ mod tests {
     fn type_ahead_highlights_in_open_dropdown() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new(
+        let cb = tree.add(ComboBox::new_literal(
             vec!["Apple", "Banana", "Cherry"],
             selected.clone(),
         ));

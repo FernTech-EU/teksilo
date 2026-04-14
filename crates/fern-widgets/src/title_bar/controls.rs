@@ -108,7 +108,7 @@ impl Widget for ControlButton {
 
         let bg_rect = ctx.add(RectWidget::new().bind_background(bg_signal.clone()));
 
-        let glyph_text = TextWidget::new(self.glyph)
+        let glyph_text = TextWidget::new_literal(self.glyph)
             .style(theme.typography.body.clone())
             .color(self.fg);
         let centred_glyph = ctx.add(Center::new().child(glyph_text));

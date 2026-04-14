@@ -4,6 +4,7 @@
 //! it along with a `CommandContext` that identifies which window the command
 //! came from and allows the handler to create/close windows and switch themes.
 
+use fern_i18n::LanguageIdentifier;
 use fern_tokens::Theme;
 
 use crate::window_config::{FernWindowId, WindowConfig};
@@ -18,6 +19,7 @@ pub struct CommandContext {
     pending_creates: Vec<WindowConfig>,
     pending_closes: Vec<FernWindowId>,
     pending_theme: Option<Theme>,
+    pending_locale: Option<LanguageIdentifier>,
 }
 
 impl CommandContext {
@@ -28,6 +30,7 @@ impl CommandContext {
             pending_creates: Vec::new(),
             pending_closes: Vec::new(),
             pending_theme: None,
+            pending_locale: None,
         }
     }
 
@@ -70,6 +73,18 @@ impl CommandContext {
     /// Drain pending theme change.
     pub(crate) fn take_theme(&mut self) -> Option<Theme> {
         self.pending_theme.take()
+    }
+
+    /// Queue a locale switch (architecture §12). Applied after the command
+    /// handler returns; triggers a composite rebuild and, when the layout
+    /// direction changes, a layout flip.
+    pub fn set_locale(&mut self, locale: LanguageIdentifier) {
+        self.pending_locale = Some(locale);
+    }
+
+    /// Drain pending locale change.
+    pub(crate) fn take_locale(&mut self) -> Option<LanguageIdentifier> {
+        self.pending_locale.take()
     }
 }
 
