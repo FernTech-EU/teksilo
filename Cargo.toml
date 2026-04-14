@@ -22,7 +22,7 @@ fluent-bundle = "0.16.0"
 fluent-syntax = "0.12"
 unic-langid = "0.9"
 sys-locale = "0.3"
-notify = "6"
+notify = "8.2.0"
 serde = { version = "1", features = ["derive"] }
 
 # Internal crates

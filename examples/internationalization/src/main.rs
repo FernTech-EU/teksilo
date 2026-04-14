@@ -231,7 +231,7 @@ fn direction_note_label_for(
 // ---------------------------------------------------------------------------
 // Entry point.
 // ---------------------------------------------------------------------------
-
+ 
 /// Parse `--translation-dev LOCALE=PATH` flags from the command line.
 ///
 /// Architecture §12.6: translator hot-reload is an application-layer
