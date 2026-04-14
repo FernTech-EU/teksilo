@@ -32,9 +32,9 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
-    FixedSize, Grid, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel,
-    ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar, TabItem,
-    TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
+    FixedSize, Grid, GroupBox, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding,
+    Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, StatusBar,
+    TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
 
 // ---------------------------------------------------------------------------
@@ -90,6 +90,7 @@ impl Widget for WidgetCatalog {
         let segment_selected = ctx.signal(0_usize);
         let accordion_expanded = ctx.signal(false);
         let accordion2_expanded = ctx.signal(true);
+        let group_box_notifications_on = ctx.signal(true);
 
         // =====================================================================
         // Section 0: Theme Palette
@@ -981,6 +982,47 @@ impl Widget for WidgetCatalog {
                 .child(
                     Accordion::new_literal("Already expanded", accordion2_expanded.clone())
                         .set_content(acc_content2),
+                )
+                .child(Divider::new())
+                .child(
+                    TextWidget::new_literal("GroupBox")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    GroupBox::new_literal("Appearance").child(
+                        VStack::new()
+                            .spacing(4.0)
+                            .child(
+                                TextWidget::new_literal("Indented content under a bold title.")
+                                    .style(t.body.clone())
+                                    .color(c.text_primary),
+                            )
+                            .child(
+                                TextWidget::new_literal("No border, no frame — Int UI style.")
+                                    .style(t.body.clone())
+                                    .color(c.text_secondary),
+                            ),
+                    ),
+                )
+                .child(
+                    GroupBox::new_literal("Notifications")
+                        .checkable(group_box_notifications_on.clone())
+                        .child(
+                            VStack::new()
+                                .spacing(4.0)
+                                .child(
+                                    TextWidget::new_literal(
+                                        "Uncheck the title to disable this whole subtree.",
+                                    )
+                                    .style(t.body.clone())
+                                    .color(c.text_primary),
+                                )
+                                .child(
+                                    Button::new_literal("Inside — tap me")
+                                        .style(ButtonVariant::Default),
+                                ),
+                        ),
                 ),
         );
 

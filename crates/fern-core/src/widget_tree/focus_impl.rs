@@ -161,6 +161,14 @@ impl WidgetTree {
             return;
         }
         if let Some(node) = self.arena.get(id) {
+            if node
+                .enabled_state
+                .as_ref()
+                .map(|s| !s.get())
+                .unwrap_or(false)
+            {
+                return;
+            }
             if self.is_node_focusable(node) {
                 out.push(id);
             }
@@ -276,6 +284,30 @@ mod tests {
         assert_eq!(
             tree.focus_origin(),
             Some(crate::focus::FocusOrigin::Keyboard)
+        );
+    }
+
+    #[test]
+    fn tab_skips_focusable_inside_disabled_ancestor() {
+        use crate::signal::Signal;
+        use crate::test_widgets::StackWidget;
+
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let inner = tree.add(FillWidget::new().focusable());
+        let disabled_container = tree.add(StackWidget::new().add_child(inner));
+        let c = tree.add(FillWidget::new().focusable());
+        tree.enabled_when(disabled_container, Signal::new(false));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            tree.focused(),
+            Some(c),
+            "tab should skip the focusable widget nested inside the disabled container"
         );
     }
 

@@ -1090,8 +1090,10 @@ impl WidgetTree {
     }
 
     /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
-    /// When false, the widget ignores all events but remains visible.
-    /// Accepts `Signal<bool>`, `Prop<bool>`, compatibility state bindings, or plain `bool`.
+    /// When false, the widget and its entire subtree ignore all events but remain
+    /// visible. Focus traversal skips disabled subtrees and AccessKit marks their
+    /// nodes as disabled. Accepts `Signal<bool>`, `Prop<bool>`, compatibility state
+    /// bindings, or plain `bool`.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         let prop = state.into();
         prop.register_if_bound(
@@ -1104,7 +1106,8 @@ impl WidgetTree {
         }
     }
 
-    /// Whether a widget is currently enabled (no enabled_state or state is true).
+    /// Whether a widget is effectively enabled. Returns `false` if the widget
+    /// itself or any ancestor has `enabled_state` bound to `false`.
     pub fn is_enabled(&self, id: WidgetId) -> bool {
         self.arena.is_enabled(id)
     }

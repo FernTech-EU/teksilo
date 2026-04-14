@@ -1020,6 +1020,34 @@ mod tests {
     }
 
     #[test]
+    fn disabled_ancestor_blocks_event_to_descendant() {
+        use crate::signal::Signal;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let tapped = Rc::new(Cell::new(false));
+        let flag = tapped.clone();
+        let enabled = Signal::new(true);
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().on_tap(move |_pos, _ctx| {
+            flag.set(true);
+        }));
+        let parent = tree.add(StackWidget::new().add_child(child));
+        tree.enabled_when(parent, enabled.clone());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        enabled.set(false);
+        tree.click(child);
+        assert!(!tapped.get(), "disabled ancestor should block descendant tap");
+
+        enabled.set(true);
+        tree.click(child);
+        assert!(tapped.get(), "re-enabling should restore dispatch");
+    }
+
+    #[test]
     fn dormant_widget_not_hit_tested() {
         let mut tree = WidgetTree::new();
         let widget = tree.add(FillWidget::new());

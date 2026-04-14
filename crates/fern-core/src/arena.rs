@@ -410,12 +410,26 @@ impl WidgetArena {
         checks
     }
 
-    /// Check if a widget is enabled (no enabled_state binding or state is true).
+    /// Check if a widget is effectively enabled, walking up the parent chain.
+    ///
+    /// Returns `false` if the widget itself or any ancestor has `enabled_state`
+    /// bound to `false`. This lets containers like `GroupBox` disable a whole
+    /// subtree by binding a single signal on their content wrapper.
     pub fn is_enabled(&self, id: WidgetId) -> bool {
-        self.nodes
-            .get(id)
-            .map(|n| n.enabled_state.as_ref().map(|s| s.get()).unwrap_or(true))
-            .unwrap_or(true)
+        let mut current = Some(id);
+        while let Some(node_id) = current {
+            if let Some(node) = self.nodes.get(node_id) {
+                if let Some(ref state) = node.enabled_state
+                    && !state.get()
+                {
+                    return false;
+                }
+                current = node.parent;
+            } else {
+                return true;
+            }
+        }
+        true
     }
 
     /// Set a per-child alignment override on a widget.

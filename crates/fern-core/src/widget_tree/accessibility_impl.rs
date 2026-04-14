@@ -84,6 +84,10 @@ impl WidgetTree {
             y1: (bounds.y + bounds.height) as f64,
         });
 
+        if !self.arena.is_enabled(id) {
+            builder.set_disabled();
+        }
+
         if let Some(tooltip) = self
             .tooltips
             .iter()
@@ -115,6 +119,9 @@ impl WidgetTree {
         }
         if let Some(expanded) = builder.expanded() {
             info = info.with_expanded(expanded);
+        }
+        if !self.arena.is_enabled(id) {
+            info = info.with_disabled(true);
         }
         info
     }
@@ -344,6 +351,22 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         assert_eq!(tree.text_content(widget), None);
+    }
+
+    #[test]
+    fn descendant_of_disabled_ancestor_reports_disabled() {
+        use crate::signal::Signal;
+
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().label("Child"));
+        let parent = tree.add(StackWidget::new().add_child(child));
+        tree.enabled_when(parent, Signal::new(false));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert!(
+            tree.accessibility_node(child).is_disabled(),
+            "descendant should report disabled when ancestor is disabled"
+        );
     }
 
     #[test]

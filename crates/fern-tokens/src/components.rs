@@ -448,6 +448,27 @@ impl Default for PopoverStyle {
 // ─── Display widgets ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GroupBoxStyle {
+    /// Leading indent applied to the content area so it aligns under the
+    /// title text (not under the checkbox box).
+    pub content_indent: f32,
+    /// Vertical space between the title row and the content.
+    pub title_content_spacing: f32,
+    /// Horizontal gap between the optional checkbox and the title text.
+    pub checkbox_gap: f32,
+}
+
+impl Default for GroupBoxStyle {
+    fn default() -> Self {
+        Self {
+            content_indent: 24.0,
+            title_content_spacing: 8.0,
+            checkbox_gap: 6.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AccordionStyle {
     pub header_height: f32,
     pub header_padding_horizontal: f32,
@@ -654,6 +675,7 @@ pub struct ComponentStyles {
     pub card: CardStyle,
     pub popover: PopoverStyle,
     pub accordion: AccordionStyle,
+    pub group_box: GroupBoxStyle,
     pub badge: BadgeStyle,
     pub progress_bar: ProgressBarStyle,
     pub segmented_control: SegmentedControlStyle,

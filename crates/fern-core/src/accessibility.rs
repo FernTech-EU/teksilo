@@ -192,6 +192,7 @@ pub struct AccessibilityInfo {
     actions: Vec<Action>,
     toggled: Option<bool>,
     expanded: Option<bool>,
+    disabled: bool,
 }
 
 impl AccessibilityInfo {
@@ -202,6 +203,7 @@ impl AccessibilityInfo {
             actions,
             toggled: None,
             expanded: None,
+            disabled: false,
         }
     }
 
@@ -212,6 +214,11 @@ impl AccessibilityInfo {
 
     pub fn with_expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
+        self
+    }
+
+    pub fn with_disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -233,5 +240,9 @@ impl AccessibilityInfo {
 
     pub fn is_expanded(&self) -> bool {
         self.expanded.unwrap_or(false)
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        self.disabled
     }
 }
