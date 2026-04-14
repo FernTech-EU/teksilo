@@ -1165,14 +1165,21 @@ pub trait GestureRecognizer {
     fn process(&mut self, event: &RawPointerEvent) -> GestureResult;
     fn reset(&mut self);
     fn priority(&self) -> u32;
+    // Time-driven recognizers (e.g. long-press) override these:
+    fn tick(&mut self, now: Instant) -> GestureResult { GestureResult::Pending }
+    fn next_deadline(&self) -> Option<Instant> { None }
 }
 ```
 
-Built-in recognizers include tap, double-tap, long-press, drag, pinch, and swipe. When multiple recognizers could match the same input (tap vs. drag vs. long-press), they run in parallel with priority-based arbitration. When one commits, the others reset.
+Built-in recognizers: tap, double-tap, long-press, drag, and swipe. Priorities: tap=10, double-tap=15, drag=20, long-press=25, swipe=30 — higher priorities win arbitration, so a long-press beats a drag that would otherwise start at the same threshold.
 
-On desktop, most trackpad gestures arrive as already-recognized events from the OS (winit's `TouchpadMagnify`, `TouchpadRotate`). The recognizer pipeline becomes essential for touch targets.
+**Arbitration.** When multiple recognizers compete on the same widget they run in parallel. On a new `Down` each recognizer gets a fresh chance (the per-arena `failed` flag clears), but per-sequence state is left alone so cross-sequence recognizers such as `DoubleTapRecognizer` (which must remember the first tap across a full `Down → Up → Down → Up`) keep working. When one recognizer commits, the others are reset; the winner keeps its state so multi-event gestures like drag can continue emitting `Moved` / `Ended`.
 
-Gesture recognizers are pure state machines with no platform dependencies, making them trivially unit-testable.
+**Time-driven recognizers.** `LongPressRecognizer` cannot fire from a single pointer event — it needs the event loop to wake it after the press threshold. The recognizer stores `down_time` on `Down` and exposes `next_deadline()`; the tree surfaces the earliest pending deadline through `WidgetTree::next_gesture_deadline`, and `fern-app` folds it into the global `next_timer_deadline` so winit's `ControlFlow::WaitUntil` wakes the loop in time. On wake-up `fern-app` calls `WidgetTree::tick_gestures(Instant::now())`, which walks every arena, calls `tick` on the recognizers, and dispatches the recognized gesture through the same handler routing as a pointer-driven recognition.
+
+**Pinch and rotation.** Desktop trackpad pinch and rotation arrive as already-recognized events from the OS (winit's `TouchpadMagnify`, `RotationGesture`). `fern-platform` translates them into `WidgetEvent::Gesture { gesture: PinchStarted/Changed/Ended }`, which the event dispatcher routes directly to the hovered widget's `on_pinch` handler. No pinch recognizer runs on the raw pointer stream on desktop — that path is reserved for touch targets, which the framework does not target yet.
+
+Gesture recognizers are pure state machines with no platform dependencies, making them trivially unit-testable. Time-driven ones are tested via the explicit `Instant` parameter on `tick`.
 
 ---
 
@@ -3499,6 +3506,11 @@ pub trait WidgetBuilder: Widget + Sized {
     fn on_double_tap(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
     fn on_long_press(self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self;
     fn on_drag(self, f: impl FnMut(DragPhase, &mut EventContext) + 'static) -> Self;
+    fn on_swipe(
+        self,
+        f: impl FnMut(SwipeDirection, f32, &mut EventContext) + 'static,
+    ) -> Self;
+    fn on_pinch(self, f: impl FnMut(PinchPhase, &mut EventContext) + 'static) -> Self;
 
     // Focus and keyboard
     fn on_focus(self, f: impl FnMut(bool, &mut EventContext) + 'static) -> Self;
@@ -3526,7 +3538,7 @@ pub trait WidgetBuilder: Widget + Sized {
 
 Handler attachment works by storing closures temporarily on the widget value (via a generic metadata wrapper or a separate `HandlerSet` struct stored alongside the widget). When `BuildContext::add()` or `WidgetTree::add()` inserts the widget into the arena, the handlers are transferred to the `WidgetNode`. This is the same mechanism currently used for `take_visible_when()` and `take_pending_children()`, generalized to all node metadata.
 
-**How dispatch works.** The framework's event dispatch path (preview pass root → target, bubble pass target → root) is unchanged. At each node, instead of calling `node.widget.event(event, ctx)`, the framework checks which handler is relevant for the event type and calls it. A `PointerDown`/`PointerUp` sequence on a node with `on_tap` feeds through a `TapRecognizer` (attached automatically when `on_tap` is called) and invokes the handler when the recognizer reports a recognized tap. A `PointerEnter`/`PointerLeave` on a node with `on_hover` invokes the hover handler. The gesture recognizer infrastructure (`TapRecognizer`, `DragRecognizer`, `GestureArena`) is used internally — the widget author never instantiates a recognizer.
+**How dispatch works.** The framework's event dispatch path (preview pass root → target, bubble pass target → root) is unchanged. At each node, instead of calling `node.widget.event(event, ctx)`, the framework checks which handler is relevant for the event type and calls it. A `PointerDown`/`PointerUp` sequence on a node with `on_tap` feeds through a `TapRecognizer` (attached automatically when `on_tap` is called) and invokes the handler when the recognizer reports a recognized tap. A `PointerEnter`/`PointerLeave` on a node with `on_hover` invokes the hover handler. The gesture recognizer infrastructure (`TapRecognizer`, `DragRecognizer`, `GestureArena`) is used internally — the widget author never instantiates a recognizer. `on_pinch` and `on_swipe` receive pre-recognized `WidgetEvent::Gesture` values dispatched from the OS trackpad stream (see §10) without running any recognizer on the raw pointer events. `on_drag`'s closure receives a `DragPhase` (`Started { position, button }`, `Moved { position, delta }`, `Ended { position }`); the raw `GestureEvent::Drag*` variants are an implementation detail of the recognizer pipeline.
 
 **Low-level escape hatch.** For widgets that need raw pointer events (a color wheel, a node graph editor, a custom drawing canvas), `on_pointer_event` provides unprocessed `PointerEvent::Down`, `PointerEvent::Move`, `PointerEvent::Up` with full position and button information.
 

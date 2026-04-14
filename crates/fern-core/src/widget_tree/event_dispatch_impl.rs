@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::gesture::{GestureArena, GestureEvent, RawPointerEvent};
+
 impl WidgetTree {
     /// Dispatch an event into the widget tree.
     ///
@@ -63,22 +65,6 @@ impl WidgetTree {
             self.pending_commands.push(cmd);
             self.flush_commands();
             return;
-        }
-
-        if let Some(raw) = to_raw_pointer_event(&event) {
-            let target = if self.pointer_captured_by.is_some() {
-                self.pointer_captured_by
-            } else {
-                match &event {
-                    WidgetEvent::PointerDown { position, .. }
-                    | WidgetEvent::PointerUp { position, .. } => self.hit_test(*position),
-                    WidgetEvent::PointerMove { position } => self.hit_test(*position),
-                    _ => None,
-                }
-            };
-            if let Some(target_id) = target {
-                self.feed_gesture_recognizers(target_id, &raw);
-            }
         }
 
         // --- Active drag session handling ---
@@ -396,6 +382,37 @@ impl WidgetTree {
                 .on_access_action
                 .as_mut()
                 .map(|handler| handler(*action, ctx)),
+            WidgetEvent::Gesture { gesture } => {
+                // Pre-recognized gestures from the platform (OS trackpad
+                // pinch/rotation, double-tap, …) bypass the gesture arena
+                // and go straight to the matching handler. See §10.
+                let matched = matches!(
+                    gesture,
+                    GestureEvent::PinchStarted { .. }
+                        | GestureEvent::PinchChanged { .. }
+                        | GestureEvent::PinchEnded
+                        | GestureEvent::Swipe { .. }
+                        | GestureEvent::DoubleTap { .. }
+                ) && {
+                    let has_handler = match gesture {
+                        GestureEvent::PinchStarted { .. }
+                        | GestureEvent::PinchChanged { .. }
+                        | GestureEvent::PinchEnded => node.handlers.on_pinch.is_some(),
+                        GestureEvent::Swipe { .. } => node.handlers.on_swipe.is_some(),
+                        GestureEvent::DoubleTap { .. } => node.handlers.on_double_tap.is_some(),
+                        _ => false,
+                    };
+                    if has_handler {
+                        Self::dispatch_recognized_gesture(node, gesture.clone(), ctx);
+                    }
+                    has_handler
+                };
+                if matched {
+                    Some(EventResponse::Handled)
+                } else {
+                    None
+                }
+            }
             WidgetEvent::PointerDown {
                 position, button, ..
             } => {
@@ -466,7 +483,7 @@ impl WidgetTree {
     /// the widget's handler set actually needs. Without this, a widget
     /// that wires `on_drag` or `on_double_tap` (but not `on_tap`) would
     /// never get a gesture arena and the handlers would never fire.
-    fn ensure_gesture_arena(node: &mut crate::arena::WidgetNode) {
+    pub(crate) fn ensure_gesture_arena(node: &mut crate::arena::WidgetNode) {
         if node.handlers.gesture_arena.is_some() {
             return;
         }
@@ -474,8 +491,9 @@ impl WidgetTree {
         let has_double_tap = node.handlers.on_double_tap.is_some();
         let has_drag = node.handlers.on_drag.is_some();
         let has_long_press = node.handlers.on_long_press.is_some();
+        let has_swipe = node.handlers.on_swipe.is_some();
 
-        if !(has_tap || has_double_tap || has_drag || has_long_press) {
+        if !(has_tap || has_double_tap || has_drag || has_long_press || has_swipe) {
             return;
         }
 
@@ -499,15 +517,20 @@ impl WidgetTree {
         if has_long_press {
             arena.add(crate::gesture::LongPressRecognizer::new());
         }
+        if has_swipe {
+            arena.add(crate::gesture::SwipeRecognizer::new());
+        }
         node.handlers.gesture_arena = Some(arena);
     }
 
-    /// Route a gesture recognized by the arena to the matching handler.
-    fn dispatch_recognized_gesture(
+    /// Route a gesture recognized by the arena (or the OS pinch/rotate
+    /// stream) to the matching handler on the node.
+    pub(crate) fn dispatch_recognized_gesture(
         node: &mut crate::arena::WidgetNode,
         gesture: GestureEvent,
         ctx: &mut EventContext,
     ) {
+        use crate::gesture::{DragPhase, PinchPhase};
         match gesture {
             GestureEvent::Tap { .. } => {
                 if let Some(handler) = node.handlers.on_tap.as_mut() {
@@ -524,25 +547,59 @@ impl WidgetTree {
                     handler(position, ctx);
                 }
             }
-            GestureEvent::DragStarted { .. }
-            | GestureEvent::DragMoved { .. }
-            | GestureEvent::DragEnded { .. } => {
+            GestureEvent::DragStarted { position, button } => {
                 if let Some(handler) = node.handlers.on_drag.as_mut() {
-                    handler(gesture, ctx);
+                    handler(DragPhase::Started { position, button }, ctx);
                 }
             }
-            GestureEvent::PinchStarted { .. }
-            | GestureEvent::PinchChanged { .. }
-            | GestureEvent::PinchEnded
-            | GestureEvent::Swipe { .. } => {
-                // Pinch / swipe recognizers are not auto-installed by the
-                // V2 attached-handler API; they're only reachable via the
-                // explicit `attach_gesture` route.
+            GestureEvent::DragMoved { position, delta } => {
+                if let Some(handler) = node.handlers.on_drag.as_mut() {
+                    handler(DragPhase::Moved { position, delta }, ctx);
+                }
+            }
+            GestureEvent::DragEnded { position } => {
+                if let Some(handler) = node.handlers.on_drag.as_mut() {
+                    handler(DragPhase::Ended { position }, ctx);
+                }
+            }
+            GestureEvent::Swipe {
+                direction,
+                velocity,
+            } => {
+                if let Some(handler) = node.handlers.on_swipe.as_mut() {
+                    handler(direction, velocity, ctx);
+                }
+            }
+            GestureEvent::PinchStarted { center } => {
+                if let Some(handler) = node.handlers.on_pinch.as_mut() {
+                    handler(PinchPhase::Started { center }, ctx);
+                }
+            }
+            GestureEvent::PinchChanged {
+                center,
+                scale,
+                rotation,
+            } => {
+                if let Some(handler) = node.handlers.on_pinch.as_mut() {
+                    handler(
+                        PinchPhase::Changed {
+                            center,
+                            scale,
+                            rotation,
+                        },
+                        ctx,
+                    );
+                }
+            }
+            GestureEvent::PinchEnded => {
+                if let Some(handler) = node.handlers.on_pinch.as_mut() {
+                    handler(PinchPhase::Ended, ctx);
+                }
             }
         }
     }
 
-    fn collect_from_ctx(&mut self, ctx: EventContext, source_widget: WidgetId) {
+    pub(super) fn collect_from_ctx(&mut self, ctx: EventContext, source_widget: WidgetId) {
         if let Some(cursor) = ctx.cursor_request {
             self.current_cursor = cursor;
         }
@@ -837,28 +894,6 @@ impl WidgetTree {
         None
     }
 
-    fn feed_gesture_recognizers(&mut self, target: WidgetId, raw: &RawPointerEvent) {
-        let mut chain = vec![target];
-        let mut current = self.arena.parent(target);
-        while let Some(id) = current {
-            chain.push(id);
-            current = self.arena.parent(id);
-        }
-
-        for id in chain {
-            if let Some(node) = self.arena.get_mut(id)
-                && let Some(binding) = &mut node.gesture_binding
-                && let Some(gesture) = binding.arena.process(raw)
-            {
-                let mut ctx = EventContext::new();
-                (binding.handler)(gesture.clone(), &mut ctx);
-                self.collect_from_ctx(ctx, id);
-                self.dispatch_to_widget(id, &WidgetEvent::Gesture { gesture });
-                return;
-            }
-        }
-    }
-
     fn apply_tree_mutations(&mut self, mutations: &[crate::widget::TreeMutation]) {
         use crate::widget::TreeMutation;
 
@@ -1026,7 +1061,6 @@ mod tests {
 
     #[test]
     fn gesture_tap_recognized_on_click() {
-        use crate::gesture::TapRecognizer;
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -1034,14 +1068,10 @@ mod tests {
         let tapped_flag = tapped.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new());
+        let widget = tree.add(FillWidget::new().on_tap(move |_ctx| {
+            tapped_flag.set(true);
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.attach_gesture(widget, TapRecognizer::new(), move |gesture, _ctx| {
-            if matches!(gesture, crate::gesture::GestureEvent::Tap { .. }) {
-                tapped_flag.set(true);
-            }
-        });
 
         tree.click(widget);
         assert!(tapped.get());
@@ -1049,7 +1079,7 @@ mod tests {
 
     #[test]
     fn gesture_drag_recognized_on_drag() {
-        use crate::gesture::DragRecognizer;
+        use crate::gesture::DragPhase;
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -1059,18 +1089,12 @@ mod tests {
         let end_flag = drag_ended.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new());
+        let widget = tree.add(FillWidget::new().on_drag(move |phase, _ctx| match phase {
+            DragPhase::Started { .. } => start_flag.set(true),
+            DragPhase::Ended { .. } => end_flag.set(true),
+            _ => {}
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.attach_gesture(
-            widget,
-            DragRecognizer::new().threshold(5.0),
-            move |gesture, _ctx| match gesture {
-                crate::gesture::GestureEvent::DragStarted { .. } => start_flag.set(true),
-                crate::gesture::GestureEvent::DragEnded { .. } => end_flag.set(true),
-                _ => {}
-            },
-        );
 
         tree.drag(Point::new(50.0, 25.0), Point::new(80.0, 25.0));
 
@@ -1080,7 +1104,6 @@ mod tests {
 
     #[test]
     fn gesture_handler_can_emit_commands() {
-        use crate::gesture::TapRecognizer;
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -1088,12 +1111,10 @@ mod tests {
         let received_flag = cmd_received.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new());
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.attach_gesture(widget, TapRecognizer::new(), |_gesture, ctx| {
+        let widget = tree.add(FillWidget::new().on_tap(|ctx| {
             ctx.emit(TestCmd::Save);
-        });
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.on_command(move |cmd: &TestCmd| {
             if *cmd == TestCmd::Save {
@@ -1107,7 +1128,6 @@ mod tests {
 
     #[test]
     fn gesture_handler_called_on_tap() {
-        use crate::gesture::TapRecognizer;
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -1115,20 +1135,124 @@ mod tests {
         let handler_flag = handler_called.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new());
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.attach_gesture(widget, TapRecognizer::new(), move |_, _| {
+        let widget = tree.add(FillWidget::new().on_tap(move |_ctx| {
             handler_flag.set(true);
-        });
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.click(widget);
         assert!(handler_called.get());
     }
 
     #[test]
+    fn on_swipe_fires_from_platform_gesture_event() {
+        use crate::gesture::{GestureEvent, SwipeDirection};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let observed: Rc<Cell<Option<(SwipeDirection, i32)>>> = Rc::new(Cell::new(None));
+        let flag = observed.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_swipe(move |direction, velocity, _ctx| {
+            flag.set(Some((direction, velocity as i32)));
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        tree.dispatch_event(WidgetEvent::Gesture {
+            gesture: GestureEvent::Swipe {
+                direction: SwipeDirection::Left,
+                velocity: 450.0,
+            },
+        });
+
+        let got = observed.get();
+        assert!(matches!(got, Some((SwipeDirection::Left, 450))));
+    }
+
+    #[test]
+    fn on_pinch_fires_from_platform_gesture_event() {
+        use crate::gesture::{GestureEvent, PinchPhase};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let started = Rc::new(Cell::new(false));
+        let scale_seen = Rc::new(Cell::new(0.0_f32));
+        let ended = Rc::new(Cell::new(false));
+        let started_flag = started.clone();
+        let scale_flag = scale_seen.clone();
+        let ended_flag = ended.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(
+            FillWidget::new().on_pinch(move |phase, _ctx| match phase {
+                PinchPhase::Started { .. } => started_flag.set(true),
+                PinchPhase::Changed { scale, .. } => scale_flag.set(scale),
+                PinchPhase::Ended => ended_flag.set(true),
+            }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        tree.dispatch_event(WidgetEvent::Gesture {
+            gesture: GestureEvent::PinchStarted {
+                center: Point::new(50.0, 25.0),
+            },
+        });
+        tree.dispatch_event(WidgetEvent::Gesture {
+            gesture: GestureEvent::PinchChanged {
+                center: Point::new(50.0, 25.0),
+                scale: 1.5,
+                rotation: 0.0,
+            },
+        });
+        tree.dispatch_event(WidgetEvent::Gesture {
+            gesture: GestureEvent::PinchEnded,
+        });
+
+        assert!(started.get());
+        assert!((scale_seen.get() - 1.5).abs() < 0.001);
+        assert!(ended.get());
+    }
+
+    #[test]
+    fn on_long_press_fires_from_tick_gestures() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use std::time::{Duration, Instant};
+
+        let pressed = Rc::new(Cell::new(false));
+        let pressed_flag = pressed.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().on_long_press(move |_pos, _ctx| {
+            pressed_flag.set(true);
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let center = tree.bounds(widget).center();
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: center,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        // Before the timeout, tick does nothing.
+        tree.tick_gestures(Instant::now());
+        assert!(!pressed.get());
+
+        // After the configured 500ms, tick fires the handler.
+        tree.tick_gestures(Instant::now() + Duration::from_millis(600));
+        assert!(pressed.get());
+
+        // After firing there is no remaining deadline.
+        assert!(tree.next_gesture_deadline().is_none());
+    }
+
+    #[test]
     fn multiple_recognizers_on_same_widget() {
-        use crate::gesture::{DragRecognizer, TapRecognizer};
+        use crate::gesture::DragPhase;
         use std::cell::Cell;
         use std::rc::Rc;
 
@@ -1138,23 +1262,18 @@ mod tests {
         let dragged_flag = dragged.clone();
 
         let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new());
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.attach_gesture(widget, TapRecognizer::new(), move |gesture, _ctx| {
-            if matches!(gesture, crate::gesture::GestureEvent::Tap { .. }) {
-                tapped_flag.set(true);
-            }
-        });
-        tree.attach_gesture(
-            widget,
-            DragRecognizer::new().threshold(5.0),
-            move |gesture, _ctx| {
-                if matches!(gesture, crate::gesture::GestureEvent::DragStarted { .. }) {
-                    dragged_flag.set(true);
-                }
-            },
+        let widget = tree.add(
+            FillWidget::new()
+                .on_tap(move |_ctx| {
+                    tapped_flag.set(true);
+                })
+                .on_drag(move |phase, _ctx| {
+                    if matches!(phase, DragPhase::Started { .. }) {
+                        dragged_flag.set(true);
+                    }
+                }),
         );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.click(widget);
         assert!(tapped.get());

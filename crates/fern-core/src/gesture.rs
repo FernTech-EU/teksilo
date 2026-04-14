@@ -89,6 +89,44 @@ pub enum SwipeDirection {
     Down,
 }
 
+/// Phase of a drag gesture, as delivered to an `on_drag` handler.
+///
+/// This is the public API for drag handlers — the raw `GestureEvent::Drag*`
+/// variants are an implementation detail of the recognizer pipeline. A
+/// handler only ever receives `Started` once, followed by zero or more
+/// `Moved`, then exactly one `Ended`.
+#[derive(Debug, Clone, Copy)]
+pub enum DragPhase {
+    Started {
+        position: Point,
+        button: PointerButton,
+    },
+    Moved {
+        position: Point,
+        delta: Vec2,
+    },
+    Ended {
+        position: Point,
+    },
+}
+
+/// Phase of a pinch (or rotation) gesture, as delivered to an `on_pinch`
+/// handler. On desktop these are produced by OS trackpad gestures
+/// (`TouchpadMagnify` / `RotationGesture`); on touch they come from a
+/// dedicated recognizer.
+#[derive(Debug, Clone, Copy)]
+pub enum PinchPhase {
+    Started {
+        center: Point,
+    },
+    Changed {
+        center: Point,
+        scale: f32,
+        rotation: f32,
+    },
+    Ended,
+}
+
 /// Trait for gesture recognizers. Each is a composable state machine.
 pub trait GestureRecognizer {
     /// Feed a raw pointer event and return the recognition result.
@@ -100,6 +138,21 @@ pub trait GestureRecognizer {
     /// Priority for arbitration when multiple recognizers compete.
     /// Higher priority wins.
     fn priority(&self) -> u32;
+
+    /// Advance any time-driven state (e.g. long-press elapsed timer).
+    /// Default is a no-op — only recognizers that depend on wall-clock
+    /// time (like [`LongPressRecognizer`]) override this.
+    fn tick(&mut self, _now: Instant) -> GestureResult {
+        GestureResult::Pending
+    }
+
+    /// Earliest future `Instant` at which calling [`GestureRecognizer::tick`]
+    /// could transition the recognizer into `Recognized` or `Failed`.
+    /// Returns `None` when the recognizer is idle or not time-driven. Used
+    /// by the event loop to schedule a wake-up before a long-press fires.
+    fn next_deadline(&self) -> Option<Instant> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -291,8 +344,10 @@ impl GestureRecognizer for DoubleTapRecognizer {
 /// Recognizes a long press (pointer held down beyond a duration without movement).
 ///
 /// Because recognizers are pure state machines, the caller must drive time
-/// by calling [`check_timeout`] when the timer fires (e.g. from an event-loop
-/// timer). The recognizer itself does not spawn timers.
+/// by calling [`GestureRecognizer::tick`] when the timer fires (e.g. from
+/// an event-loop deadline). The recognizer itself does not spawn timers.
+/// The [`GestureRecognizer::next_deadline`] method exposes when the next
+/// tick is needed so the event loop can wake up in time.
 #[derive(Debug)]
 pub struct LongPressRecognizer {
     max_distance: f32,
@@ -323,19 +378,9 @@ impl LongPressRecognizer {
         self
     }
 
-    /// Check if the long press timer has expired. Called externally
-    /// (e.g. from the event loop timer callback).
-    pub fn check_timeout(&mut self, now: Instant) -> GestureResult {
-        if self.recognized {
-            return GestureResult::Pending;
-        }
-        if let (Some(pos), Some(time)) = (self.down_position, self.down_time)
-            && now.duration_since(time) >= self.min_duration
-        {
-            self.recognized = true;
-            return GestureResult::Recognized(GestureEvent::LongPress { position: pos });
-        }
-        GestureResult::Pending
+    #[cfg(test)]
+    fn check_timeout(&mut self, now: Instant) -> GestureResult {
+        self.tick(now)
     }
 }
 
@@ -382,6 +427,26 @@ impl GestureRecognizer for LongPressRecognizer {
 
     fn priority(&self) -> u32 {
         25 // Higher than drag — long press wins over drag
+    }
+
+    fn tick(&mut self, now: Instant) -> GestureResult {
+        if self.recognized {
+            return GestureResult::Pending;
+        }
+        if let (Some(pos), Some(time)) = (self.down_position, self.down_time)
+            && now.duration_since(time) >= self.min_duration
+        {
+            self.recognized = true;
+            return GestureResult::Recognized(GestureEvent::LongPress { position: pos });
+        }
+        GestureResult::Pending
+    }
+
+    fn next_deadline(&self) -> Option<Instant> {
+        if self.recognized {
+            return None;
+        }
+        self.down_time.map(|t| t + self.min_duration)
     }
 }
 
@@ -691,6 +756,54 @@ impl GestureArena {
         }
 
         best.map(|(_, _, gesture)| gesture)
+    }
+
+    /// Advance time-driven recognizers (notably `LongPressRecognizer`) and
+    /// return the highest-priority gesture that just transitioned to
+    /// `Recognized`, if any. Must be called by the event loop on each wake
+    /// so long-press fires without requiring further pointer traffic.
+    pub fn tick(&mut self, now: Instant) -> Option<GestureEvent> {
+        let mut best: Option<(usize, u32, GestureEvent)> = None;
+
+        for (i, entry) in self.entries.iter_mut().enumerate() {
+            if entry.failed {
+                continue;
+            }
+            match entry.recognizer.tick(now) {
+                GestureResult::Recognized(gesture) => {
+                    let prio = entry.recognizer.priority();
+                    if best.as_ref().is_none_or(|(_, bp, _)| prio > *bp) {
+                        best = Some((i, prio, gesture));
+                    }
+                }
+                GestureResult::Failed => {
+                    entry.failed = true;
+                }
+                GestureResult::Pending => {}
+            }
+        }
+
+        if let Some((winner_idx, _, _)) = &best {
+            for (i, entry) in self.entries.iter_mut().enumerate() {
+                if i != *winner_idx && !entry.failed {
+                    entry.recognizer.reset();
+                    entry.failed = false;
+                }
+            }
+        }
+
+        best.map(|(_, _, gesture)| gesture)
+    }
+
+    /// Earliest wall-clock instant at which any recognizer in this arena
+    /// would like `tick()` to be called. Returns `None` if no recognizer
+    /// has a pending time-driven transition.
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.entries
+            .iter()
+            .filter(|entry| !entry.failed)
+            .filter_map(|entry| entry.recognizer.next_deadline())
+            .min()
     }
 
     /// Reset all recognizers in the arena.

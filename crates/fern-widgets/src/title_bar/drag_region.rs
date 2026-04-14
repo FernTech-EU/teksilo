@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
-use fern_core::gesture::GestureEvent;
+use fern_core::gesture::DragPhase;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -71,11 +71,11 @@ impl Widget for DragRegion {
         let host_pointer = self.host.clone();
 
         let handlers = HandlerSet::new()
-            .on_drag(move |evt, _ctx| {
-                if let GestureEvent::DragStarted {
+            .on_drag(move |phase, _ctx| {
+                if let DragPhase::Started {
                     button: PointerButton::Primary,
                     ..
-                } = evt
+                } = phase
                 {
                     let _ = host_drag.begin_drag();
                 }

@@ -407,6 +407,20 @@ impl FernAppHandler {
     }
 
     fn update_control_flow(&mut self, event_loop: &ActiveEventLoop) {
+        // Tick time-driven gesture recognizers (long-press) on every tree
+        // before computing the next deadline. Without this, a long-press
+        // that expired between frames would never fire until the next
+        // unrelated pointer event. Handlers that run may emit commands
+        // and mark nodes dirty — request a redraw on those windows.
+        let now = Instant::now();
+        for managed in self.wm.iter_mut() {
+            let before = managed.tree.has_idle_work();
+            managed.tree.tick_gestures(now);
+            if managed.tree.has_idle_work() != before {
+                managed.platform_window.request_redraw();
+            }
+        }
+
         let mut earliest_deadline: Option<Instant> = None;
         let mut timer_windows = 0_usize;
         let mut animation_timers = 0_usize;

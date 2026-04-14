@@ -454,6 +454,11 @@ impl WindowManager {
         self.windows.values()
     }
 
+    /// Mutably iterate over all managed windows.
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut ManagedWindow> {
+        self.windows.values_mut()
+    }
+
     /// Get the winit WindowId for a FernWindowId.
     pub fn winit_id_for_fern(&self, fern_id: FernWindowId) -> Option<winit::window::WindowId> {
         self.fern_to_winit.get(&fern_id).copied()

@@ -5,9 +5,8 @@ use fern_canvas::{Canvas, Point, Rect, RenderFrame, SizeProposal};
 use fern_tokens::Theme;
 
 use crate::app_command::{AppCommand, ErasedCommand};
-use crate::arena::{GestureBinding, WidgetArena};
+use crate::arena::WidgetArena;
 use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
-use crate::gesture::{GestureArena, GestureEvent, GestureRecognizer, RawPointerEvent};
 use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use crate::widget_id::WidgetId;
 
@@ -510,6 +509,50 @@ impl WidgetTree {
                 now,
             );
         }
+    }
+
+    /// Advance time-driven gesture recognizers (currently only
+    /// [`crate::gesture::LongPressRecognizer`]) across every widget that
+    /// has a gesture arena. Must be called by the event loop on each
+    /// wake-up; otherwise long-press will never fire during an idle hold.
+    ///
+    /// When a recognizer transitions to `Recognized`, the corresponding
+    /// handler on the owning widget is invoked with a fresh
+    /// [`EventContext`], and any commands / overlay requests it emits are
+    /// collected through the normal post-event path.
+    pub fn tick_gestures(&mut self, now: std::time::Instant) {
+        let ids = self.arena.active_ids();
+        for id in ids {
+            let gesture = match self.arena.get_mut(id) {
+                Some(node) => node
+                    .handlers
+                    .gesture_arena
+                    .as_mut()
+                    .and_then(|arena| arena.tick(now)),
+                None => None,
+            };
+            let Some(gesture) = gesture else { continue };
+
+            let mut ctx = EventContext::new();
+            if let Some(node) = self.arena.get_mut(id) {
+                Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
+            }
+            self.collect_from_ctx(ctx, id);
+            self.arena.mark_needs_paint(id);
+        }
+    }
+
+    /// Earliest wall-clock deadline at which any active gesture arena
+    /// needs [`WidgetTree::tick_gestures`] called — typically a pending
+    /// long-press timeout. Returns `None` when no recognizer is waiting.
+    pub fn next_gesture_deadline(&self) -> Option<std::time::Instant> {
+        self.arena
+            .active_ids()
+            .into_iter()
+            .filter_map(|id| self.arena.get(id))
+            .filter_map(|node| node.handlers.gesture_arena.as_ref())
+            .filter_map(|arena| arena.next_deadline())
+            .min()
     }
 
     /// Advance animations by simulated time (for deterministic testing).
@@ -1016,42 +1059,6 @@ impl WidgetTree {
         self.arena.resolve_theme(id, &self.theme)
     }
 
-    // --- Gesture attachment ---
-
-    /// Attach a gesture recognizer to a widget with a handler callback.
-    /// Multiple recognizers can be attached by calling this multiple times;
-    /// they compete via a [`GestureArena`].
-    ///
-    /// ```ignore
-    /// tree.attach_gesture(widget_id, DragRecognizer::new(), |gesture, ctx| {
-    ///     // handle drag
-    /// });
-    /// ```
-    pub fn attach_gesture(
-        &mut self,
-        id: WidgetId,
-        recognizer: impl GestureRecognizer + 'static,
-        mut handler: impl FnMut(GestureEvent, &mut EventContext) + 'static,
-    ) {
-        if let Some(node) = self.arena.get_mut(id) {
-            if let Some(binding) = &mut node.gesture_binding {
-                // Already has gestures — wrap existing handler to also call new one
-                let mut old_handler = std::mem::replace(&mut binding.handler, Box::new(|_, _| {}));
-                binding.arena.add(recognizer);
-                binding.handler = Box::new(move |gesture, ctx| {
-                    old_handler(gesture.clone(), ctx);
-                    handler(gesture, ctx);
-                });
-            } else {
-                let mut arena = GestureArena::new();
-                arena.add(recognizer);
-                node.gesture_binding = Some(GestureBinding {
-                    arena,
-                    handler: Box::new(handler),
-                });
-            }
-        }
-    }
 }
 
 impl Default for WidgetTree {
@@ -1060,24 +1067,3 @@ impl Default for WidgetTree {
     }
 }
 
-/// Convert a `WidgetEvent` to a `RawPointerEvent` if applicable.
-fn to_raw_pointer_event(event: &WidgetEvent) -> Option<RawPointerEvent> {
-    match event {
-        WidgetEvent::PointerDown {
-            position, button, ..
-        } => Some(RawPointerEvent::Down {
-            position: *position,
-            button: *button,
-        }),
-        WidgetEvent::PointerMove { position } => Some(RawPointerEvent::Move {
-            position: *position,
-        }),
-        WidgetEvent::PointerUp {
-            position, button, ..
-        } => Some(RawPointerEvent::Up {
-            position: *position,
-            button: *button,
-        }),
-        _ => None,
-    }
-}

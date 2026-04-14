@@ -3,7 +3,6 @@ use slotmap::SlotMap;
 use crate::environment::ThemeOverride;
 use crate::event_handlers::EventHandlers;
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
-use crate::gesture::{GestureArena, GestureEvent};
 use crate::signal::{ObserverHandle, Prop};
 use crate::widget::{CursorIcon, Widget};
 use crate::widget_id::WidgetId;
@@ -41,13 +40,6 @@ pub struct DirtyFlags {
     pub needs_rebuild: bool,
 }
 
-/// A gesture binding: arena of recognizers + callback for when gestures fire.
-#[allow(clippy::type_complexity)]
-pub(crate) struct GestureBinding {
-    pub arena: GestureArena,
-    pub handler: Box<dyn FnMut(GestureEvent, &mut crate::widget::EventContext)>,
-}
-
 /// A node in the widget arena storing a widget and its metadata.
 pub struct WidgetNode {
     pub widget: Box<dyn Widget>,
@@ -56,7 +48,6 @@ pub struct WidgetNode {
     pub activation: ActivationState,
     pub dirty: DirtyFlags,
     pub bounds: fern_canvas::Rect,
-    pub(crate) gesture_binding: Option<GestureBinding>,
     pub(crate) theme_override: Option<ThemeOverride>,
     pub(crate) visible_state: Option<Prop<bool>>,
     pub(crate) enabled_state: Option<Prop<bool>>,
@@ -103,7 +94,10 @@ impl std::fmt::Debug for WidgetNode {
             .field("activation", &self.activation)
             .field("dirty", &self.dirty)
             .field("bounds", &self.bounds)
-            .field("has_gestures", &self.gesture_binding.is_some())
+            .field(
+                "has_gesture_arena",
+                &self.handlers.gesture_arena.is_some(),
+            )
             .field("has_theme_override", &self.theme_override.is_some())
             .field("has_visible_state", &self.visible_state.is_some())
             .field("has_enabled_state", &self.enabled_state.is_some())
@@ -147,7 +141,6 @@ impl WidgetArena {
                 needs_rebuild: false,
             },
             bounds: fern_canvas::Rect::ZERO,
-            gesture_binding: None,
             theme_override: None,
             visible_state: None,
             enabled_state: None,
@@ -195,7 +188,6 @@ impl WidgetArena {
                 needs_rebuild: false,
             },
             bounds: fern_canvas::Rect::ZERO,
-            gesture_binding: None,
             theme_override: None,
             visible_state: None,
             enabled_state: None,

@@ -10,7 +10,7 @@ use fern_canvas::Point;
 
 use crate::event::{EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
-use crate::gesture::GestureEvent;
+use crate::gesture::{DragPhase, PinchPhase, SwipeDirection};
 use crate::widget::{CursorIcon, EventContext, Widget};
 
 // ---------------------------------------------------------------------------
@@ -82,12 +82,28 @@ impl HandlerSet {
         self
     }
 
-    /// Set the on_drag handler (gesture-based drag).
-    pub fn on_drag(
-        mut self,
-        f: impl FnMut(crate::gesture::GestureEvent, &mut EventContext) + 'static,
-    ) -> Self {
+    /// Set the on_drag handler (gesture-based drag). The closure receives
+    /// a [`DragPhase`] per architecture §28.3 — `Started`, then zero or
+    /// more `Moved`, then `Ended`.
+    pub fn on_drag(mut self, f: impl FnMut(DragPhase, &mut EventContext) + 'static) -> Self {
         self.handlers.on_drag = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_swipe handler. Fires once per swipe with the direction
+    /// and velocity (pixels/second).
+    pub fn on_swipe(
+        mut self,
+        f: impl FnMut(SwipeDirection, f32, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handlers.on_swipe = Some(Box::new(f));
+        self
+    }
+
+    /// Set the on_pinch handler. On desktop the phases are produced from
+    /// OS trackpad gestures (winit `TouchpadMagnify` / `RotationGesture`).
+    pub fn on_pinch(mut self, f: impl FnMut(PinchPhase, &mut EventContext) + 'static) -> Self {
+        self.handlers.on_pinch = Some(Box::new(f));
         self
     }
 
@@ -235,8 +251,21 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    pub fn on_drag(mut self, f: impl FnMut(GestureEvent, &mut EventContext) + 'static) -> Self {
+    pub fn on_drag(mut self, f: impl FnMut(DragPhase, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_drag = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_swipe(
+        mut self,
+        f: impl FnMut(SwipeDirection, f32, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_swipe = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_pinch(mut self, f: impl FnMut(PinchPhase, &mut EventContext) + 'static) -> Self {
+        self.handler_set.handlers.on_pinch = Some(Box::new(f));
         self
     }
 
@@ -495,9 +524,23 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     fn on_drag(
         self,
-        f: impl FnMut(GestureEvent, &mut EventContext) + 'static,
+        f: impl FnMut(DragPhase, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drag(f)
+    }
+
+    fn on_swipe(
+        self,
+        f: impl FnMut(SwipeDirection, f32, &mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_swipe(f)
+    }
+
+    fn on_pinch(
+        self,
+        f: impl FnMut(PinchPhase, &mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_pinch(f)
     }
 
     fn on_focus(

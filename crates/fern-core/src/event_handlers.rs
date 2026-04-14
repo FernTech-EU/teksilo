@@ -9,7 +9,7 @@ use fern_canvas::Point;
 use crate::drag_payload::DragPayload;
 use crate::drag_state::DropFeedback;
 use crate::event::{EventResponse, WidgetEvent};
-use crate::gesture::{GestureArena, GestureEvent};
+use crate::gesture::{DragPhase, GestureArena, PinchPhase, SwipeDirection};
 use crate::widget::EventContext;
 
 /// Event handlers attached to a widget node. Each field is an optional
@@ -19,7 +19,9 @@ pub(crate) struct EventHandlers {
     pub on_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
     pub on_double_tap: Option<Box<dyn FnMut(&mut EventContext)>>,
     pub on_long_press: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
-    pub on_drag: Option<Box<dyn FnMut(GestureEvent, &mut EventContext)>>,
+    pub on_drag: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
+    pub on_swipe: Option<Box<dyn FnMut(SwipeDirection, f32, &mut EventContext)>>,
+    pub on_pinch: Option<Box<dyn FnMut(PinchPhase, &mut EventContext)>>,
     pub on_hover: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
     pub on_key: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
@@ -47,6 +49,8 @@ impl EventHandlers {
             on_double_tap: None,
             on_long_press: None,
             on_drag: None,
+            on_swipe: None,
+            on_pinch: None,
             on_hover: None,
             on_key: None,
             on_focus: None,
@@ -66,6 +70,8 @@ impl EventHandlers {
             || self.on_double_tap.is_some()
             || self.on_long_press.is_some()
             || self.on_drag.is_some()
+            || self.on_swipe.is_some()
+            || self.on_pinch.is_some()
             || self.on_hover.is_some()
             || self.on_key.is_some()
             || self.on_focus.is_some()
@@ -81,7 +87,9 @@ impl EventHandlers {
             on_tap: merge_void_handler(self.on_tap, other.on_tap),
             on_double_tap: merge_void_handler(self.on_double_tap, other.on_double_tap),
             on_long_press: merge_point_handler(self.on_long_press, other.on_long_press),
-            on_drag: merge_gesture_handler(self.on_drag, other.on_drag),
+            on_drag: merge_drag_handler(self.on_drag, other.on_drag),
+            on_swipe: merge_swipe_handler(self.on_swipe, other.on_swipe),
+            on_pinch: merge_pinch_handler(self.on_pinch, other.on_pinch),
             on_hover: merge_hover_handler(self.on_hover, other.on_hover),
             on_key: merge_event_handler(self.on_key, other.on_key),
             on_focus: merge_focus_handler(self.on_focus, other.on_focus),
@@ -125,14 +133,44 @@ fn merge_point_handler(
     }
 }
 
-fn merge_gesture_handler(
-    existing: Option<Box<dyn FnMut(GestureEvent, &mut EventContext)>>,
-    incoming: Option<Box<dyn FnMut(GestureEvent, &mut EventContext)>>,
-) -> Option<Box<dyn FnMut(GestureEvent, &mut EventContext)>> {
+fn merge_drag_handler(
+    existing: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(DragPhase, &mut EventContext)>> {
     match (existing, incoming) {
-        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |event, ctx| {
-            existing(event.clone(), ctx);
-            incoming(event, ctx);
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |phase, ctx| {
+            existing(phase, ctx);
+            incoming(phase, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_swipe_handler(
+    existing: Option<Box<dyn FnMut(SwipeDirection, f32, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(SwipeDirection, f32, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(SwipeDirection, f32, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |dir, velocity, ctx| {
+            existing(dir, velocity, ctx);
+            incoming(dir, velocity, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_pinch_handler(
+    existing: Option<Box<dyn FnMut(PinchPhase, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(PinchPhase, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(PinchPhase, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |phase, ctx| {
+            existing(phase, ctx);
+            incoming(phase, ctx);
         })),
         (Some(existing), None) => Some(existing),
         (None, Some(incoming)) => Some(incoming),
@@ -223,6 +261,8 @@ impl std::fmt::Debug for EventHandlers {
             .field("on_double_tap", &self.on_double_tap.is_some())
             .field("on_long_press", &self.on_long_press.is_some())
             .field("on_drag", &self.on_drag.is_some())
+            .field("on_swipe", &self.on_swipe.is_some())
+            .field("on_pinch", &self.on_pinch.is_some())
             .field("on_hover", &self.on_hover.is_some())
             .field("on_key", &self.on_key.is_some())
             .field("on_focus", &self.on_focus.is_some())

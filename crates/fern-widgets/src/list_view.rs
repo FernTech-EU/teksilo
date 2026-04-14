@@ -618,10 +618,8 @@ impl<T: 'static> Widget for ListView<T> {
                     let drag_self_id = self_id;
                     ctx.apply_handlers(
                         child_id,
-                        HandlerSet::new().on_drag(move |gesture_event, ctx| {
-                            if let fern_core::gesture::GestureEvent::DragStarted { .. } =
-                                gesture_event
-                            {
+                        HandlerSet::new().on_drag(move |phase, ctx| {
+                            if let fern_core::gesture::DragPhase::Started { .. } = phase {
                                 ctx.start_drag(
                                     drag_self_id,
                                     DragPayload::typed(ListViewDragData {
