@@ -58,6 +58,16 @@ pub struct SplitButton {
     style: ButtonVariant,
     enabled: bool,
     initial_selected: usize,
+    /// Whether picking an item from the dropdown promotes it to the new
+    /// session default (IntelliJ's "remember last used"). `true` for
+    /// [`SplitButton::new`], `false` for [`SplitButton::new_static`].
+    promote_on_select: bool,
+    /// Tooltip shown on hover over the main (default-action) region.
+    tooltip_text: Option<String>,
+    /// Tooltip shown on hover over the trailing chevron region. Falls
+    /// back to a generic "Show dropdown menu" label when not explicitly
+    /// set, since the chevron region has no label of its own.
+    chevron_tooltip_text: Option<String>,
     // Build state
     interaction: Signal<InteractionState>,
     selected: Signal<usize>,
@@ -67,17 +77,40 @@ pub struct SplitButton {
 }
 
 impl SplitButton {
+    /// Standard SplitButton: picking an item from the dropdown both
+    /// **fires** the item's action and **promotes** it to become the new
+    /// default for the session. The main region's label and click action
+    /// update to match the most recently picked item.
     pub fn new() -> Self {
         Self {
             rows: Vec::new(),
             style: ButtonVariant::Regular,
             enabled: true,
             initial_selected: 0,
+            promote_on_select: true,
+            tooltip_text: None,
+            chevron_tooltip_text: None,
             interaction: Signal::new(InteractionState::Idle),
             selected: Signal::new(0),
             labels: Rc::new(Vec::new()),
             menu_content_id: None,
             root_child_id: None,
+        }
+    }
+
+    /// Static-default SplitButton: the main region is pinned to
+    /// `initial_selected` (default 0) and **never** changes after the
+    /// user picks something from the dropdown. Picking an item still
+    /// fires that item's action — only the promotion is skipped.
+    ///
+    /// Use this when the main region represents a semantically fixed
+    /// primary action (e.g. "Commit") and the dropdown offers related
+    /// variants ("Commit and Push", "Commit and Push to…") that should
+    /// not displace the primary.
+    pub fn new_static() -> Self {
+        Self {
+            promote_on_select: false,
+            ..Self::new()
         }
     }
 
@@ -110,6 +143,37 @@ impl SplitButton {
     /// the initial default. Defaults to 0.
     pub fn initial_selected(mut self, index: usize) -> Self {
         self.initial_selected = index;
+        self
+    }
+
+    /// Attach a tooltip to the main (default-action) region. Same hover
+    /// delay as [`Button::tooltip`](crate::button::Button::tooltip).
+    pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.tooltip_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self
+    }
+
+    /// Override the tooltip shown on hover over the trailing chevron
+    /// region. When unset, the chevron gets a default "Show dropdown
+    /// menu" tooltip so its affordance isn't silent.
+    pub fn chevron_tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.chevron_tooltip_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `chevron_tooltip(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn chevron_tooltip_literal(mut self, text: impl Into<String>) -> Self {
+        self.chevron_tooltip_text = Some(text.into());
         self
     }
 }
@@ -195,6 +259,7 @@ impl Widget for SplitButton {
         // capture it.
         let initial = self.initial_selected;
         let selected: Signal<usize> = ctx.signal(initial);
+        let promote_on_select = self.promote_on_select;
 
         for row in self.rows.drain(..) {
             match row {
@@ -206,14 +271,22 @@ impl Widget for SplitButton {
                     labels_vec.push(label);
                     actions_vec.push(action.clone());
 
-                    let prev_action = action.clone();
-                    let promote = selected.clone();
-                    item = item.on_activate_fn(move |ctx: &mut EventContext| {
-                        if let Some(ref a) = prev_action {
-                            a(ctx);
-                        }
-                        promote.set(my_index);
-                    });
+                    // Only wrap the item's activation when we need to
+                    // promote the selected index. In static mode we hand
+                    // the MenuItem through untouched so its original
+                    // action runs as-is — no redirection, no extra Rc
+                    // churn, and the MenuItem's existing tests still
+                    // hold for the inner behavior.
+                    if promote_on_select {
+                        let prev_action = action.clone();
+                        let promote = selected.clone();
+                        item = item.on_activate_fn(move |ctx: &mut EventContext| {
+                            if let Some(ref a) = prev_action {
+                                a(ctx);
+                            }
+                            promote.set(my_index);
+                        });
+                    }
                     menu = menu.item(item);
                 }
                 Row::Separator => {
@@ -319,6 +392,18 @@ impl Widget for SplitButton {
         };
         let main_region_id = ctx.add(main_region);
 
+        // Attach the main-region tooltip if the caller set one. Uses the
+        // same 500 ms delay as Button.
+        if let Some(ref text) = self.tooltip_text {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            ctx.attach_tooltip(
+                main_region_id,
+                tooltip_id,
+                std::time::Duration::from_millis(500),
+            );
+        }
+
         // ---- Divider between main and chevron regions ----
         let divider_fill_id = ctx.add(RectWidget::new().background(divider_color));
         let divider_id = ctx.add(
@@ -375,6 +460,23 @@ impl Widget for SplitButton {
                 .cursor(CursorIcon::Pointer)
         };
         let chevron_region_id = ctx.add(chevron_region);
+
+        // Attach the chevron tooltip. Defaults to "Show dropdown menu"
+        // so the bare ▾ affordance is never silent — the caller can
+        // override via `.chevron_tooltip(...)`.
+        {
+            let chevron_text = self
+                .chevron_tooltip_text
+                .clone()
+                .unwrap_or_else(|| "Show dropdown menu".to_string());
+            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(&chevron_text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            ctx.attach_tooltip(
+                chevron_region_id,
+                tooltip_id,
+                std::time::Duration::from_millis(500),
+            );
+        }
 
         // ---- Row: main | divider | chevron ----
         let row_id = ctx.add(
@@ -902,6 +1004,156 @@ mod tests {
             width: None,
             height: None,
         });
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn static_mode_does_not_promote_on_selection() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let sb = tree.add(
+            SplitButton::new_static()
+                .item(MenuItem::new_literal("Run").on_activate(TestCmd::Run))
+                .item(MenuItem::new_literal("Debug").on_activate(TestCmd::Debug)),
+        );
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+        let commands = capture_commands(&mut tree);
+
+        // Open menu via chevron click and pick "Debug".
+        let cp = chevron_region_point(&tree, sb);
+        tree.pointer_move(cp);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: cp,
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: cp,
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+
+        let overlay_root = tree.overlay_manager().active_content_ids()[0];
+        let debug_id = descendants(&tree, overlay_root)
+            .into_iter()
+            .find(|&id| {
+                let info = tree.accessibility_node(id);
+                info.role() == fern_core::accesskit::Role::MenuItem && info.name() == Some("Debug")
+            })
+            .unwrap();
+        tree.click(debug_id);
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+
+        // The menu selection still fires the picked item's command.
+        assert_eq!(&*commands.borrow(), &[TestCmd::Debug]);
+
+        // …but the main region is still pinned to "Run" (index 0): a
+        // subsequent main click must fire Run, not Debug.
+        let mp = main_region_point(&tree, sb);
+        tree.pointer_move(mp);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: mp,
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: mp,
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(&*commands.borrow(), &[TestCmd::Debug, TestCmd::Run]);
+
+        // Accessibility name also remains the initial default.
+        let info = tree.accessibility_node(sb);
+        assert_eq!(info.name(), Some("Run"));
+    }
+
+    #[test]
+    fn main_region_tooltip_appears_after_hover_delay() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let sb = tree.add(
+            SplitButton::new()
+                .item(MenuItem::new_literal("Run").on_activate(TestCmd::Run))
+                .tooltip_literal("Run the current configuration"),
+        );
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+
+        assert!(tree.active_overlays().is_empty());
+        let mp = main_region_point(&tree, sb);
+        tree.pointer_move(mp);
+        tree.advance_time(std::time::Duration::from_millis(600));
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn chevron_has_default_tooltip_when_unset() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let sb = tree.add(
+            SplitButton::new()
+                .item(MenuItem::new_literal("Run").on_activate(TestCmd::Run)),
+        );
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+
+        let cp = chevron_region_point(&tree, sb);
+        tree.pointer_move(cp);
+        tree.advance_time(std::time::Duration::from_millis(600));
+        // Exactly one overlay: the chevron tooltip.
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn chevron_tooltip_can_be_overridden() {
+        // Just make sure setting a custom chevron tooltip still shows one.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let sb = tree.add(
+            SplitButton::new()
+                .item(MenuItem::new_literal("Run").on_activate(TestCmd::Run))
+                .chevron_tooltip_literal("More run configurations…"),
+        );
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+        let cp = chevron_region_point(&tree, sb);
+        tree.pointer_move(cp);
+        tree.advance_time(std::time::Duration::from_millis(600));
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    #[test]
+    fn menu_item_tooltip_appears_after_hover_delay() {
+        // Standalone MenuItem tooltip test — exercises the new MenuItem
+        // tooltip plumbing from split_button.rs's side so the feature
+        // stays covered even if menu_item.rs's own test block doesn't
+        // grow one immediately.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(
+            MenuItem::new_literal("Cut")
+                .on_activate(TestCmd::Run)
+                .tooltip_literal("Cut the selection (Ctrl+X)"),
+        );
+        tree.layout(SizeProposal {
+            width: None,
+            height: None,
+        });
+        assert!(tree.active_overlays().is_empty());
+        tree.pointer_move(tree.bounds(item).center());
+        tree.advance_time(std::time::Duration::from_millis(600));
         assert_eq!(tree.active_overlays().len(), 1);
     }
 
