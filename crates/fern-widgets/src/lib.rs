@@ -21,6 +21,7 @@ pub mod popover;
 pub mod primitives;
 pub mod progress_bar;
 pub mod radio_button;
+pub mod radio_group;
 pub mod repeater;
 #[cfg(feature = "rich-text")]
 pub mod rich_text;
@@ -65,6 +66,7 @@ pub use primitives::{
 };
 pub use progress_bar::ProgressBar;
 pub use radio_button::RadioButton;
+pub use radio_group::RadioGroup;
 pub use repeater::Repeater;
 pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarMode};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
