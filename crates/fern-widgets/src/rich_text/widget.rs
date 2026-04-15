@@ -378,6 +378,7 @@ impl Widget for RichTextEditor {
         {
             let mut st = self.state.borrow_mut();
             st.frame_request = Some(ctx.frame_request_handle());
+            st.frame_wake_at = Some(ctx.wake_at_handle());
         }
 
         // Ask for one frame so the initial layout / paint runs through

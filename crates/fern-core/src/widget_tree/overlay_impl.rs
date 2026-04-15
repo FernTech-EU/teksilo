@@ -312,6 +312,7 @@ impl WidgetTree {
         let auto_dismiss_deadline = self.overlay_manager.next_auto_dismiss_deadline();
         let animation_deadline = self.animation_scheduler.next_deadline();
         let gesture_deadline = self.next_gesture_deadline();
+        let wake_at_deadline = self.pending_wake_at.get();
 
         [
             tooltip_deadline,
@@ -319,6 +320,7 @@ impl WidgetTree {
             auto_dismiss_deadline,
             animation_deadline,
             gesture_deadline,
+            wake_at_deadline,
         ]
         .into_iter()
         .flatten()

@@ -96,6 +96,17 @@ impl<'a> BuildContext<'a> {
         self.tree.frame_request_handle()
     }
 
+    /// Clone the shared wake-at deadline cell. Stash it on widget
+    /// state and set `Some(instant)` from a frame-tick effect to
+    /// schedule a one-shot deadline wake-up without keeping the event
+    /// loop in `Poll` mode. See [`WidgetTree::wake_at_handle`] for
+    /// the underlying mechanism.
+    pub fn wake_at_handle(
+        &self,
+    ) -> std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>> {
+        self.tree.wake_at_handle()
+    }
+
     /// Register a scoped effect tied to this build cycle.
     /// The effect fires whenever the signal changes. It is automatically
     /// cleaned up on rebuild or widget destruction.

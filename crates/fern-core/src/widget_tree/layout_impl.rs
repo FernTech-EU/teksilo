@@ -64,6 +64,17 @@ impl WidgetTree {
         self.process_pending_animations();
 
         let now = std::time::Instant::now();
+        // Deadline-driven wake-up: if a widget requested a future
+        // frame via `wake_at_handle()` and that deadline is now past,
+        // arm the frame tick so its effect runs on this layout pass.
+        // Used by the rich text editor's caret blink to avoid
+        // keeping winit in Poll mode.
+        if let Some(deadline) = self.pending_wake_at.get()
+            && deadline <= now
+        {
+            self.pending_wake_at.set(None);
+            self.frame_tick_requested.set(true);
+        }
         self.advance_frame_tick(now);
         self.animation_scheduler.tick(now);
 

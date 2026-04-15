@@ -91,6 +91,11 @@ pub(crate) struct EditorState {
     /// the tree.
     pub frame_request: Option<Rc<std::cell::Cell<bool>>>,
 
+    /// Shared handle into `WidgetTree::pending_wake_at`. Used by the
+    /// caret blink path to schedule a one-shot 500 ms wake-up instead
+    /// of keeping the frame loop pumping at the OS's max rate.
+    pub frame_wake_at: Option<Rc<std::cell::Cell<Option<std::time::Instant>>>>,
+
     // Shared-document event routing. See gap 10 of the plan: each
     // editor subscribes via `on_change` and buffers events in its own
     // queue. The `_event_subscription` field is kept alive by the
@@ -295,6 +300,7 @@ impl EditorState {
             preferred_x: None,
             blink_last_toggle: None,
             frame_request: None,
+            frame_wake_at: None,
             pending_chars: String::new(),
             // Godot reference starts `debounce_timer` at 1.0 (already
             // expired, > 0.15 s window) so the first tick flushes the

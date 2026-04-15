@@ -79,6 +79,20 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
             }
             _ => {}
         }
+        // Schedule a one-shot wake-up at the next blink toggle so the
+        // event loop can idle in `WaitUntil` between toggles instead
+        // of being forced into `Poll` mode. Without this, returning
+        // `true` from this tick keeps `any_frame_requested=true` which
+        // burns CPU pumping frames at the OS's max rate (observed
+        // ~90 fps) between the 500 ms toggle events.
+        if let (Some(last), Some(wake)) = (state.blink_last_toggle, &state.frame_wake_at) {
+            let next = last + interval;
+            let merged = match wake.get() {
+                Some(existing) if existing <= next => existing,
+                _ => next,
+            };
+            wake.set(Some(merged));
+        }
     } else {
         state.blink_last_toggle = None;
         if matches!(state.policy.caret_policy, CaretPolicy::Blinking) && !state.has_focus {
@@ -269,12 +283,16 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
         || state.pending_format_changed
         || state.pending_undo_redo.is_some();
 
-    // Step 9: return whether more work is pending. Blinking keeps
-    // the loop running for as long as the widget is focused; a rapid
-    // burst of document changes keeps pumping until the queue drains;
+    // Step 9: return whether more work is pending. A rapid burst of
+    // document changes keeps pumping until the queue drains;
     // debounced signals in flight keep pumping until they publish;
     // an active drag-select auto-scroll keeps the loop pumping so
     // the scroll rate is delta-based and independent of the user's
     // mouse motion; otherwise the tree goes idle.
-    had_events || blinking_active || debounce_work_pending || drag_active
+    //
+    // Blinking is deliberately NOT in this list. The blink path
+    // above schedules a one-shot wake-up via `frame_wake_at` so the
+    // event loop can idle in `WaitUntil` between 500 ms toggles
+    // instead of pumping at the OS's max rate.
+    had_events || debounce_work_pending || drag_active
 }

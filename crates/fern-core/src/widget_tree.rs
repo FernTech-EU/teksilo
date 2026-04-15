@@ -138,6 +138,14 @@ pub struct WidgetTree {
     /// `frame_tick`) can chain-request without needing &mut access
     /// to the tree — see [`FrameRequestHandle`].
     pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Delayed frame wake-up deadline. Widgets that need to schedule
+    /// a future frame without pumping at full framerate (caret blink,
+    /// etc.) store the target instant here via
+    /// [`wake_at_handle`](Self::wake_at_handle). `next_timer_deadline`
+    /// rolls it into the event loop's WaitUntil; when reached, the
+    /// next `layout()` automatically re-arms `frame_tick_requested`
+    /// so the frame-tick effects run on the wake-up pass.
+    pub(crate) pending_wake_at: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
     /// Wall-clock time of the previous `layout()` call (for delta computation).
     pub(crate) last_frame_time: Option<std::time::Instant>,
 }
@@ -205,6 +213,7 @@ impl WidgetTree {
             locale: None,
             frame_tick: crate::signal::Signal::new(0.0_f32),
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
+            pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
             last_frame_time: None,
         }
     }
@@ -216,6 +225,29 @@ impl WidgetTree {
     /// canonical use (caret blink, drag-select auto-scroll).
     pub fn frame_request_handle(&self) -> std::rc::Rc<std::cell::Cell<bool>> {
         self.frame_tick_requested.clone()
+    }
+
+    /// Clone the shared wake-at deadline cell. Widgets stash this in
+    /// their state and call [`request_wake_at`] from frame-tick effects
+    /// to schedule a one-shot deadline without keeping the event loop
+    /// in `Poll` mode. On the next `layout()` at or past the deadline,
+    /// the tree auto-arms `frame_tick_requested` so the effect runs on
+    /// the wake-up pass. Canonical use: the rich text editor's caret
+    /// blink schedules a 500 ms wake instead of pumping every frame.
+    pub fn wake_at_handle(&self) -> std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>> {
+        self.pending_wake_at.clone()
+    }
+
+    /// Schedule a one-shot frame wake at `at`. Merges with any existing
+    /// deadline — keeps the earlier instant so the most urgent wake
+    /// wins.
+    pub fn request_wake_at(&self, at: std::time::Instant) {
+        let current = self.pending_wake_at.get();
+        let merged = match current {
+            Some(existing) if existing <= at => existing,
+            _ => at,
+        };
+        self.pending_wake_at.set(Some(merged));
     }
 
     /// The per-frame delta-seconds signal. Observers fire **only on frames
