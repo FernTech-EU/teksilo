@@ -25,6 +25,11 @@ widgets = ["dep:fern-widgets"]
 text = ["dep:fern-text", "fern-app/text"]
 i18n = ["dep:fern-i18n"]
 rich-text = ["widgets", "fern-widgets/rich-text"]
+# Forwards clipboard support through fern-app so `RichTextEditor::editor`
+# can copy/cut/paste via the system clipboard. Without this feature the
+# editor silently no-ops clipboard commands (they are filtered at the
+# command level; `arboard` is not pulled into the build).
+clipboard = ["fern-app/clipboard"]
 
 # Font bundle features — forwarded to `fern-text`'s own feature set
 # via the `fern-text?/...` optional-dep syntax. The `?` means the

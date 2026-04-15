@@ -612,7 +612,7 @@ impl WidgetTree {
             };
             let Some(gesture) = gesture else { continue };
 
-            let mut ctx = EventContext::new();
+            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
             if let Some(node) = self.arena.get_mut(id) {
                 Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
             }

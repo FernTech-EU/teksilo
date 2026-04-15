@@ -39,9 +39,9 @@ live target of Milestone 8a of §27.10 of the FernUI architecture.
   Ctrl+A to select everything.
 - Up and Down use a sticky preferred column so they keep trying
   to land on the same visual X across short lines.
-- The caret blinks while the widget has focus. This blink is a
-  temporary affordance — view-only widgets will ship with no
-  caret at all once Milestone 8b lands the editable preset.
+- No caret: view-only widgets don't expose one. The editable
+  preset (`RichTextEditor::editor`) is the one with a blinking
+  caret, reached by M8b and not yet usable from this example.
 - Multiple editors can bind to one `TextDocument`: each one
   subscribes to `on_change` independently, so edits propagate to
   every view.
@@ -59,13 +59,13 @@ live target of Milestone 8a of §27.10 of the FernUI architecture.
 
 ## Try it
 
-Scroll with the mouse wheel. Click anywhere to place the caret
-and watch it blink. Hold the arrow keys to see the cursor glide
-through the text. Try Ctrl+A, then Home, then End. Press Page
-Down to jump by a viewport. None of the keys that would mutate
-the document (typing, Enter, Delete) do anything — the
-`CommandFilter::ReadOnly` rejects them before they reach the
-cursor.
+Scroll with the mouse wheel. Click anywhere to place the (invisible)
+caret. Hold the arrow keys to move the selection anchor through the
+text — Shift+click and Shift+arrows extend a visible selection you
+can then Ctrl+C (no-op until M8b) or Ctrl+A to select everything.
+None of the keys that would mutate the document (typing, Enter,
+Delete) do anything — the `CommandFilter::ReadOnly` rejects them
+before they reach the cursor.
 
 Tables and sub-frames aren't exercised here yet — the HiDPI
 scaling path covers blocks only in M8a, and a verified fix for

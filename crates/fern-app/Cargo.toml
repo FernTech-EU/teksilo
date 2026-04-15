@@ -9,6 +9,11 @@ repository.workspace = true
 [features]
 default = ["text"]
 text = ["dep:fern-text"]
+# Enables system clipboard access by forwarding to fern-platform and
+# auto-installing a `ClipboardHandle` into the app_state registry
+# during `FernAppBuilder::run`. Widgets pick it up via
+# `EventContext::app_state::<ClipboardHandle>()`.
+clipboard = ["fern-platform/clipboard"]
 
 [dependencies]
 fern-core = { workspace = true }

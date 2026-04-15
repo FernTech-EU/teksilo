@@ -1240,6 +1240,25 @@ impl FernAppBuilder {
             );
         }
 
+        // Auto-install a system clipboard handle so `RichTextEditor::editor`
+        // (and any future clipboard-aware widget) can reach it via
+        // `EventContext::app_state::<ClipboardHandle>()`. Behind the
+        // `clipboard` feature because it pulls `arboard` into the build.
+        // Falls back to `MemoryClipboard` if the OS backend fails to
+        // initialize (headless CI, missing display, …) so the editor
+        // still works in-process.
+        #[cfg(feature = "clipboard")]
+        {
+            use std::any::TypeId;
+            use fern_platform::clipboard::{ArboardClipboard, ClipboardHandle, MemoryClipboard};
+            let handle = match ArboardClipboard::new() {
+                Ok(backend) => ClipboardHandle::new(backend),
+                Err(_) => ClipboardHandle::new(MemoryClipboard::new()),
+            };
+            self.app_state_registry
+                .insert(TypeId::of::<ClipboardHandle>(), Box::new(handle));
+        }
+
         // If an event source OR an app-state registry is present, build
         // the per-tree app context that carries them. This single context
         // is shared with every window the WindowManager creates.

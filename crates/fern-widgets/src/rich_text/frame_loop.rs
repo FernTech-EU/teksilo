@@ -25,7 +25,28 @@ pub(crate) const CARET_BLINK_INTERVAL: f32 = 0.5;
 /// Run one frame-tick step. `delta` is the time since the previous
 /// tick in seconds (clamped by the tree). Returns `true` when another
 /// frame is needed (the editor has ongoing work).
-pub(crate) fn tick(state: &mut EditorState, _delta: f32) -> bool {
+/// Debounce window for coalesced signal emission (text_changed,
+/// format_changed, undo_redo_changed). Matches the godot reference
+/// (rich_text_edit.rs:401). Non-debounced events — document_loaded,
+/// selection_changed, caret_changed — fire immediately.
+pub(crate) const DEBOUNCE_WINDOW_SECS: f32 = 0.150;
+
+pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
+    // Step 1 (NEW for M8b): flush pending_chars BEFORE draining events.
+    // Batching keystrokes into a single `insert_text` makes the
+    // subsequent `drain_events` see one `ContentsChanged` instead of
+    // N, which matters for the incremental-relayout code path and
+    // for debounced `text_changed` coalescing.
+    if !state.pending_chars.is_empty() {
+        let batch = std::mem::take(&mut state.pending_chars);
+        // Replacing an active selection with typed input is the
+        // expected editor behaviour (QTextEdit / every major editor).
+        // `insert_text` already removes the selection first when
+        // one exists.
+        let _ = state.cursor.insert_text(&batch);
+        state.pending_text_changed = true;
+    }
+
     // Step 2: drain the per-widget event queue populated by on_change.
     let (had_events, single_pos) = state.drain_events();
 
@@ -181,9 +202,47 @@ pub(crate) fn tick(state: &mut EditorState, _delta: f32) -> bool {
         state.scroll_x.set(clamped_x);
     }
 
+    // Step 8 (NEW for M8b): debounce drain. Coalesces rapid bursts
+    // of text/format/undo-redo change notifications into one
+    // application-visible command per 150 ms window.
+    //
+    // Command emission from within the frame-tick effect is currently
+    // out of reach — the effect closure only receives `&delta`, not
+    // an `EventContext`. So we publish the debounced state through
+    // the reactive signals (`can_undo`, `can_redo`, `document_version`)
+    // and let toolbars observe those directly. The typed-command
+    // emission (`on_text_changed`, `on_format_changed`,
+    // `on_undo_redo_changed`) is Phase B and will thread a
+    // command queue through the effect.
+    state.debounce_timer += delta;
+    let debounce_ready = state.debounce_timer >= DEBOUNCE_WINDOW_SECS;
+    if debounce_ready {
+        if state.pending_text_changed || state.pending_format_changed {
+            // The `document_version` signal was bumped inside
+            // `drain_events` already — toolbars bound to that get
+            // their update. Just clear the flags here so the next
+            // window starts fresh.
+            state.pending_text_changed = false;
+            state.pending_format_changed = false;
+        }
+        if let Some((cu, cr)) = state.pending_undo_redo.take() {
+            if state.can_undo.get() != cu {
+                state.can_undo.set(cu);
+            }
+            if state.can_redo.get() != cr {
+                state.can_redo.set(cr);
+            }
+        }
+        state.debounce_timer = 0.0;
+    }
+    let debounce_work_pending = state.pending_text_changed
+        || state.pending_format_changed
+        || state.pending_undo_redo.is_some();
+
     // Step 9: return whether more work is pending. Blinking keeps
     // the loop running for as long as the widget is focused; a rapid
     // burst of document changes keeps pumping until the queue drains;
+    // debounced signals in flight keep pumping until they publish;
     // otherwise the tree goes idle.
-    had_events || blinking_active
+    had_events || blinking_active || debounce_work_pending
 }

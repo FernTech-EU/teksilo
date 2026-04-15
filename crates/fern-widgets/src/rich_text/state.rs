@@ -34,6 +34,11 @@ pub(crate) struct EditorState {
     pub caret_visible: Signal<bool>,
     pub cursor_position: Signal<usize>,
     pub cursor_anchor: Signal<usize>,
+    /// Reactive undo availability — bound by toolbars, updated by the
+    /// frame loop when `DocumentEvent::UndoRedoChanged` arrives via
+    /// the per-widget event queue.
+    pub can_undo: Signal<bool>,
+    pub can_redo: Signal<bool>,
 
     // Scroll state — NOT inside a ScrollArea (§27.10.5).
     pub scroll_x: Signal<f32>,
@@ -95,6 +100,36 @@ pub(crate) struct EditorState {
 
     // Resource caches.
     pub image_cache: ImageCache,
+
+    // --- M8b editor preset state (unused by read-only preset) ----------
+
+    /// Accumulates typed characters within a single frame, flushed as
+    /// one `cursor.insert_text(batch)` at the start of the next
+    /// `frame_loop::tick`. Batching matches the godot reference
+    /// (rich_text_edit.rs:296) and collapses a burst of keystrokes
+    /// into a single `ContentsChanged` event so incremental relayout
+    /// and debounced `text_changed` emission stay O(burst) instead of
+    /// O(keystrokes).
+    pub pending_chars: String,
+
+    /// Seconds since the last debounce drain. Starts at `1.0`
+    /// (already expired) so the very first frame after construction
+    /// publishes `can_undo`/`can_redo` immediately without having to
+    /// wait 150 ms.
+    pub debounce_timer: f32,
+
+    /// Set whenever the document mutated this frame (insert, delete,
+    /// format). Drained and emitted as `on_text_changed` command once
+    /// the debounce timer crosses 150 ms. Distinct from
+    /// `pending_format_changed` so a pure-format edit doesn't pretend
+    /// text changed.
+    pub pending_text_changed: bool,
+    pub pending_format_changed: bool,
+
+    /// Latest `(can_undo, can_redo)` pair from a `DocumentEvent::UndoRedoChanged`
+    /// arriving during `drain_events`. Debounced alongside text/format
+    /// changes so rapid typing doesn't hammer toolbar observers.
+    pub pending_undo_redo: Option<(bool, bool)>,
 }
 
 impl EditorState {
@@ -122,6 +157,12 @@ impl EditorState {
             CaretPolicy::Blinking => Signal::new(true),
         };
 
+        // Seed can_undo/can_redo with the document's current state so
+        // toolbars wired via `bind_to` see the correct value before the
+        // first debounce drain fires.
+        let initial_can_undo = document.can_undo();
+        let initial_can_redo = document.can_redo();
+
         Rc::new(RefCell::new(Self {
             document,
             engine,
@@ -132,6 +173,8 @@ impl EditorState {
             caret_visible,
             cursor_position: Signal::new(0),
             cursor_anchor: Signal::new(0),
+            can_undo: Signal::new(initial_can_undo),
+            can_redo: Signal::new(initial_can_redo),
             scroll_x: Signal::new(0.0),
             scroll_y: Signal::new(0.0),
             max_scroll_x: Signal::new(0.0),
@@ -152,6 +195,15 @@ impl EditorState {
             preferred_x: None,
             blink_last_toggle: None,
             frame_request: None,
+            pending_chars: String::new(),
+            // Godot reference starts `debounce_timer` at 1.0 (already
+            // expired, > 0.15 s window) so the first tick flushes the
+            // initial state immediately instead of waiting 150 ms for
+            // the first visible update.
+            debounce_timer: 1.0,
+            pending_text_changed: false,
+            pending_format_changed: false,
+            pending_undo_redo: None,
         }))
     }
 
@@ -178,6 +230,7 @@ impl EditorState {
                     blocks_affected,
                     ..
                 } => {
+                    self.pending_text_changed = true;
                     if blocks_affected <= 1 && !self.needs_full_layout {
                         single_pos = Some(position);
                     } else {
@@ -185,16 +238,27 @@ impl EditorState {
                         single_pos = None;
                     }
                 }
-                DocumentEvent::FormatChanged { .. }
-                | DocumentEvent::DocumentReset
-                | DocumentEvent::FlowElementsInserted { .. }
-                | DocumentEvent::FlowElementsRemoved { .. }
-                | DocumentEvent::BlockCountChanged(_) => {
+                DocumentEvent::FormatChanged { .. } => {
+                    self.pending_format_changed = true;
                     self.needs_full_layout = true;
                     single_pos = None;
                 }
-                DocumentEvent::UndoRedoChanged { .. }
-                | DocumentEvent::ModificationChanged(_)
+                DocumentEvent::DocumentReset
+                | DocumentEvent::FlowElementsInserted { .. }
+                | DocumentEvent::FlowElementsRemoved { .. }
+                | DocumentEvent::BlockCountChanged(_) => {
+                    self.pending_text_changed = true;
+                    self.needs_full_layout = true;
+                    single_pos = None;
+                }
+                DocumentEvent::UndoRedoChanged { can_undo, can_redo } => {
+                    // Stash for the frame loop's debounce drain — don't
+                    // fire the signal mid-event so a burst of edits
+                    // emits one `undo_redo_changed` per debounce window,
+                    // not per keystroke.
+                    self.pending_undo_redo = Some((can_undo, can_redo));
+                }
+                DocumentEvent::ModificationChanged(_)
                 | DocumentEvent::LongOperationProgress { .. }
                 | DocumentEvent::LongOperationFinished { .. } => {}
             }

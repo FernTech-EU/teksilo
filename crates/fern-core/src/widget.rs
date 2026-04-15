@@ -230,6 +230,11 @@ pub struct EventContext {
     /// forwards it to `WidgetTree::request_frame()` so the next layout
     /// pass advances the per-frame tick signal.
     pub(crate) frame_requested: bool,
+    /// Optional reference to the tree's app-state registry, so handlers
+    /// can look up application-scoped values via `app_state::<T>()`.
+    /// Populated by the dispatcher before running each handler; `None`
+    /// for hand-constructed contexts in tests.
+    pub(crate) app_context: Option<std::rc::Rc<crate::event_source::TreeAppContext>>,
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -266,7 +271,27 @@ impl EventContext {
             theme_request: None,
             locale_request: None,
             frame_requested: false,
+            app_context: None,
         }
+    }
+
+    /// Attach the tree's app-state registry so handlers can look up
+    /// application-scoped values (`ClipboardHandle`, `SharedTypesetter`,
+    /// …). Called by the dispatcher once per event batch.
+    pub(crate) fn with_app_context(
+        mut self,
+        ctx: std::rc::Rc<crate::event_source::TreeAppContext>,
+    ) -> Self {
+        self.app_context = Some(ctx);
+        self
+    }
+
+    /// Look up an application-scoped value by type. Mirrors
+    /// `BuildContext::app_state`. Returns `None` when the handler was
+    /// invoked without a registry (hand-constructed `EventContext` in
+    /// tests, or when no value of that type was registered).
+    pub fn app_state<T: 'static>(&self) -> Option<&T> {
+        self.app_context.as_ref().and_then(|ctx| ctx.app_state::<T>())
     }
 
     /// Ask the tree to pump one more frame after this handler returns.

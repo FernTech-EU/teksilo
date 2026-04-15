@@ -19,13 +19,10 @@ arboard = { workspace = true, optional = true }
 
 [features]
 default = []
-# M8a: the `clipboard` feature is declared but not chained to any
-# other crate yet. M8b will wire it into `fern-widgets/rich-text`
-# and `fern-app/rich-text` so the editor preset's cut/paste
-# command dispatch receives a real `ClipboardHandle` instead of
-# the M8a no-op. Until then, enabling it by itself pulls in
-# `arboard` and exposes `ArboardClipboard` for apps that want
-# the system clipboard for other widgets.
+# Chains through `fern-app/clipboard` → `fern-ui/clipboard`. Apps
+# enabling this feature get `ClipboardHandle` auto-installed into
+# the app-state registry during `FernAppBuilder::run`, reachable
+# from widgets via `EventContext::app_state::<ClipboardHandle>()`.
 clipboard = ["dep:arboard"]
 
 [target.'cfg(target_os = "macos")'.dependencies]

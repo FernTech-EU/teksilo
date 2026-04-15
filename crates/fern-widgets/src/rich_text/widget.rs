@@ -22,8 +22,9 @@ use fern_text::text_document::{MoveMode, MoveOperation, SelectionType, TextDocum
 use super::frame_loop;
 use super::hit_test;
 use super::paint::{paint_frame, PaintParams};
-use super::policy::{CaretPolicy, PolicyBundle, READ_ONLY_PRESET};
+use super::policy::{CaretPolicy, EditCommandKind, PolicyBundle, EDITOR_PRESET, READ_ONLY_PRESET};
 use super::state::{EditorState, SharedState};
+use fern_text::text_document::TextFormat;
 
 /// Scrollbar visibility policy, applied independently per axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,11 +70,14 @@ impl RichTextEditor {
         Self::construct(document, READ_ONLY_PRESET)
     }
 
-    /// Construct an editable rich text editor. **M8a stub** — the
-    /// editor preset layers on the same shared core in M8b and is not
-    /// yet usable. Calling this function today panics at construction.
-    pub fn editor(_document: TextDocument) -> Self {
-        unimplemented!("RichTextEditor::editor is scheduled for M8b");
+    /// Construct an editable rich text editor bound to `document`.
+    /// Uses the full editor preset: every command accepted, caret
+    /// blinks, `MultilineTextInput` accessibility role, full clipboard
+    /// support. Multiple editors on the same document share live edits
+    /// via per-widget `on_change` subscriptions — see §27.10.1 of the
+    /// architecture doc.
+    pub fn editor(document: TextDocument) -> Self {
+        Self::construct(document, EDITOR_PRESET)
     }
 
     fn construct(document: TextDocument, policy: PolicyBundle) -> Self {
@@ -205,6 +209,43 @@ impl RichTextEditor {
         self.state.borrow().has_selection.clone()
     }
 
+    /// Reactive undo-availability signal, suitable for toolbar button
+    /// enable-state. Updated through the frame loop's debounce drain
+    /// so toolbars don't flicker during rapid editing.
+    pub fn can_undo(&self) -> Signal<bool> {
+        self.state.borrow().can_undo.clone()
+    }
+
+    /// Reactive redo-availability signal.
+    pub fn can_redo(&self) -> Signal<bool> {
+        self.state.borrow().can_redo.clone()
+    }
+
+    /// Read the current character format at the widget's caret.
+    /// Used by toolbars that mirror bold/italic/underline state, and
+    /// by tests — `TextDocument::cursor()` creates a fresh cursor
+    /// each call, so reading format through the document would miss
+    /// the widget's internal caret position.
+    pub fn caret_char_format(&self) -> TextFormat {
+        self.state
+            .borrow()
+            .cursor
+            .char_format()
+            .unwrap_or_default()
+    }
+
+    /// Clone the internal shared state handle for test observation.
+    /// Tests take this before `tree.add(editor)` moves the widget
+    /// into the arena, so they can read the widget's live cursor,
+    /// signal state, and debounce fields through the very same
+    /// `Rc<RefCell<EditorState>>` that the arena-stored editor is
+    /// mutating.
+    #[cfg(test)]
+    #[doc(hidden)]
+    pub(crate) fn state_handle(&self) -> SharedState {
+        self.state.clone()
+    }
+
     pub fn scroll_y(&self) -> Signal<f32> {
         self.state.borrow().scroll_y.clone()
     }
@@ -278,16 +319,21 @@ impl Widget for RichTextEditor {
         // widget `needs_paint`. Without this the cached paint frame
         // is reused on subsequent redraws and the caret never
         // visibly changes state even though the Signal flips.
+        // Skipped for `CaretPolicy::Hidden` — no caret means no
+        // repaint reason and we save per-frame work on pure viewers.
         {
             let st = self.state.borrow();
+            let caret_policy = st.policy.caret_policy;
             let caret_visible = st.caret_visible.clone();
             drop(st);
-            let self_id = ctx.self_id();
-            caret_visible.bind_to(
-                self_id,
-                ctx.binding_registry(),
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
+            if caret_policy != CaretPolicy::Hidden {
+                let self_id = ctx.self_id();
+                caret_visible.bind_to(
+                    self_id,
+                    ctx.binding_registry(),
+                    fern_core::binding::BindingLevel::RepaintOnly,
+                );
+            }
         }
 
         // Stash the tree's frame-request handle on the state so the
@@ -629,11 +675,16 @@ fn on_key(
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+    // IME commit — one string per composition, already a finalized
+    // grapheme cluster. Treated identically to a KeyDown with printable
+    // text: batched into `pending_chars`, flushed next frame.
+    if let WidgetEvent::ImeCommit { text } = event {
+        return push_pending_chars(state, ctx, text);
+    }
+
+    let WidgetEvent::KeyDown { key, modifiers, text, .. } = event else {
         return EventResponse::Ignored;
     };
-
-    use super::policy::EditCommandKind;
 
     let shift = modifiers.shift();
     let ctrl = modifiers.ctrl() || modifiers.super_key();
@@ -717,13 +768,102 @@ fn on_key(
                 KeyAction::ClearPreferredX
             }
             Key::C if ctrl && filter.accepts(EditCommandKind::Copy) => {
-                // Copy is a no-op here until M8b wires a
-                // ClipboardHandle through the event context. The
-                // selection remains readable via
+                // Copy is a no-op here until Phase B wires
+                // `clipboard::copy` through `EventContext::app_state`.
+                // The selection remains readable via
                 // `RichTextEditor::selected_text()`.
                 KeyAction::ClearPreferredX
             }
-            _ => KeyAction::Unhandled,
+            // --- Editor-preset mutating commands ---
+            Key::Backspace if filter.accepts(EditCommandKind::DeletePrev) => {
+                if ctrl {
+                    // Ctrl+Backspace = delete word to the left.
+                    // Select the word, then delete the selection —
+                    // matches godot rich_text_edit.rs:580 (there is
+                    // no dedicated delete-word API on TextCursor).
+                    if !st.cursor.has_selection() {
+                        st.cursor.move_position(MoveOperation::WordLeft, MoveMode::KeepAnchor, 1);
+                    }
+                    let _ = st.cursor.remove_selected_text();
+                } else if st.cursor.has_selection() {
+                    let _ = st.cursor.remove_selected_text();
+                } else {
+                    let _ = st.cursor.delete_previous_char();
+                }
+                KeyAction::ClearPreferredX
+            }
+            Key::Delete if filter.accepts(EditCommandKind::DeleteNext) => {
+                if ctrl {
+                    if !st.cursor.has_selection() {
+                        st.cursor.move_position(MoveOperation::WordRight, MoveMode::KeepAnchor, 1);
+                    }
+                    let _ = st.cursor.remove_selected_text();
+                } else if st.cursor.has_selection() {
+                    let _ = st.cursor.remove_selected_text();
+                } else {
+                    let _ = st.cursor.delete_char();
+                }
+                KeyAction::ClearPreferredX
+            }
+            Key::Enter if filter.accepts(EditCommandKind::InsertBlock) => {
+                // Phase A: always insert a new block. Phase B will
+                // add table-cell-aware navigation (Enter inside a
+                // table cell navigates to the next row).
+                let _ = st.cursor.insert_block();
+                KeyAction::ClearPreferredX
+            }
+            Key::B if ctrl && filter.accepts(EditCommandKind::ToggleBold) => {
+                toggle_char_format(&mut st, FormatBit::Bold);
+                KeyAction::ClearPreferredX
+            }
+            Key::I if ctrl && filter.accepts(EditCommandKind::ToggleItalic) => {
+                toggle_char_format(&mut st, FormatBit::Italic);
+                KeyAction::ClearPreferredX
+            }
+            Key::U if ctrl && filter.accepts(EditCommandKind::ToggleUnderline) => {
+                toggle_char_format(&mut st, FormatBit::Underline);
+                KeyAction::ClearPreferredX
+            }
+            Key::Z if ctrl && !shift && filter.accepts(EditCommandKind::Undo) => {
+                let _ = st.document.undo();
+                KeyAction::ClearPreferredX
+            }
+            Key::Y if ctrl && filter.accepts(EditCommandKind::Redo) => {
+                let _ = st.document.redo();
+                KeyAction::ClearPreferredX
+            }
+            Key::Z if ctrl && shift && filter.accepts(EditCommandKind::Redo) => {
+                let _ = st.document.redo();
+                KeyAction::ClearPreferredX
+            }
+            _ => {
+                // Printable character fallback: winit populates
+                // `KeyDown::text` with the character produced by the
+                // key (post-layout mapping, so Shift / dead keys /
+                // layout translations are already applied). Only
+                // accepted under `All` filter.
+                if let Some(t) = text.as_deref() {
+                    if filter.accepts(EditCommandKind::InsertChar) {
+                        let clean: String = t
+                            .chars()
+                            .filter(|c| !c.is_control())
+                            .collect();
+                        if !clean.is_empty() {
+                            st.pending_chars.push_str(&clean);
+                            // Fall through the outer match arm's
+                            // post-processing — we want preferred_x
+                            // cleared and a frame request.
+                            KeyAction::ClearPreferredX
+                        } else {
+                            KeyAction::Unhandled
+                        }
+                    } else {
+                        KeyAction::Unhandled
+                    }
+                } else {
+                    KeyAction::Unhandled
+                }
+            }
         }
     };
 
@@ -746,6 +886,93 @@ fn on_key(
             EventResponse::Handled
         }
     }
+}
+
+/// Which `TextFormat` bit a Ctrl+B/I/U toggle flips.
+#[derive(Copy, Clone)]
+enum FormatBit {
+    Bold,
+    Italic,
+    Underline,
+}
+
+/// Toggle a single character-format bit at the caret, mirroring the
+/// godot reference (rich_text_edit.rs:2089-2117): the decision to
+/// turn a format on or off is read from the current caret format
+/// (`char_format()`), not from a selection-wide consensus. If the
+/// caret sits in bold text the toggle turns bold off for the whole
+/// selection (or, with no selection, for subsequent inserts at
+/// the caret position); if the caret sits in plain text with a
+/// mixed-bold selection, Ctrl+B bolds the whole selection.
+///
+/// **Read-position subtlety**: `TextCursor::char_format()` reads
+/// the inline element at `position()`. After a select-all the
+/// caret sits at the *end* of the selection, which may be past the
+/// last character (an empty "virtual" element with default format).
+/// To get a meaningful read for the toggle decision we use
+/// `selection_start()` when a selection is active — that position
+/// is always the actual first character of the selected range.
+fn toggle_char_format(st: &mut EditorState, bit: FormatBit) {
+    let probe = st.document.cursor();
+    if st.cursor.has_selection() {
+        let start = st.cursor.selection_start();
+        probe.set_position(start, fern_text::text_document::MoveMode::MoveAnchor);
+    } else {
+        probe.set_position(
+            st.cursor.position(),
+            fern_text::text_document::MoveMode::MoveAnchor,
+        );
+    }
+    let current = probe.char_format().unwrap_or_default();
+    let new_value = !match bit {
+        FormatBit::Bold => current.font_bold.unwrap_or(false),
+        FormatBit::Italic => current.font_italic.unwrap_or(false),
+        FormatBit::Underline => current.font_underline.unwrap_or(false),
+    };
+    let fmt = match bit {
+        FormatBit::Bold => TextFormat {
+            font_bold: Some(new_value),
+            ..Default::default()
+        },
+        FormatBit::Italic => TextFormat {
+            font_italic: Some(new_value),
+            ..Default::default()
+        },
+        FormatBit::Underline => TextFormat {
+            font_underline: Some(new_value),
+            ..Default::default()
+        },
+    };
+    let _ = st.cursor.merge_char_format(&fmt);
+    st.pending_format_changed = true;
+}
+
+/// Shared helper for printable-character ingestion: push the text
+/// into `pending_chars`, clear sticky `preferred_x`, request a frame.
+/// Reused by the IME commit path.
+fn push_pending_chars(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+) -> EventResponse {
+    if text.is_empty() {
+        return EventResponse::Ignored;
+    }
+    let filter = state.borrow().policy.command_filter;
+    if !filter.accepts(EditCommandKind::InsertChar) {
+        return EventResponse::Ignored;
+    }
+    let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+    if clean.is_empty() {
+        return EventResponse::Ignored;
+    }
+    {
+        let mut st = state.borrow_mut();
+        st.pending_chars.push_str(&clean);
+        st.preferred_x = None;
+    }
+    ctx.request_frame();
+    EventResponse::Handled
 }
 
 /// Ask the typesetter to compute a scroll offset that keeps the

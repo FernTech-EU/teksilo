@@ -179,18 +179,13 @@ pub const EDITOR_PRESET: PolicyBundle = PolicyBundle {
 };
 
 /// The read-only preset: only navigation + copy/select-all,
-/// `Document` role, no cut/paste.
-///
-/// **M8a temporary behaviour.** The final design shows no caret at
-/// all on view-only widgets (§27.10.1), so production code will
-/// switch this to `CaretPolicy::Hidden` in M8b. For now, while the
-/// read-only preset is the only way to exercise the editor's
-/// navigation, the caret is `Blinking` so users can see where click
-/// and arrow-key navigation lands. Remove the blink (or hide the
-/// caret outright) once `editor()` ships.
+/// `Document` role, no cut/paste. The caret is hidden entirely —
+/// view-only widgets ship without any caret affordance (§27.10.1).
+/// Applications that need a focusable read-only surface with a
+/// visible caret can construct a custom preset via `PolicyBundle`.
 pub const READ_ONLY_PRESET: PolicyBundle = PolicyBundle {
     command_filter: CommandFilter::ReadOnly,
-    caret_policy: CaretPolicy::Blinking,
+    caret_policy: CaretPolicy::Hidden,
     access_role: AccessibilityRole::Document,
     clipboard_policy: ClipboardPolicy::CopyAndSelectAllOnly,
 };

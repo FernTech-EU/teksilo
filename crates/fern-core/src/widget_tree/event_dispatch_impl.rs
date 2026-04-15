@@ -256,7 +256,7 @@ impl WidgetTree {
         ancestors.reverse();
 
         for &id in &ancestors {
-            let mut ctx = EventContext::new();
+            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
             let response = if let Some(node) = self.arena.get_mut(id) {
                 Self::try_handler_preview(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
             } else {
@@ -275,7 +275,7 @@ impl WidgetTree {
         );
         let mut current = Some(target);
         while let Some(id) = current {
-            let mut ctx = EventContext::new();
+            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
             let response = if let Some(node) = self.arena.get_mut(id) {
                 Self::try_handler_bubble(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
             } else {
@@ -299,7 +299,7 @@ impl WidgetTree {
             return;
         }
 
-        let mut ctx = EventContext::new();
+        let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
         let response = if let Some(node) = self.arena.get_mut(target) {
             Self::try_handler_bubble(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
         } else {
@@ -849,7 +849,8 @@ impl WidgetTree {
             if let Some(node) = self.arena.get_mut(target_id) {
                 if let Some(mut handler) = node.handlers.on_drag_hover.take() {
                     // Temporarily read position and create a minimal event context
-                    let mut ctx = crate::widget::EventContext::new();
+                    let mut ctx = crate::widget::EventContext::new()
+                        .with_app_context(self.app_context.clone());
 
                     // We need access to the payload — borrow from active_drag
                     if let Some(ref drag) = self.active_drag {
@@ -894,7 +895,8 @@ impl WidgetTree {
         if let Some(target_id) = drop_target {
             if let Some(node) = self.arena.get_mut(target_id) {
                 if let Some(mut handler) = node.handlers.on_drop.take() {
-                    let mut ctx = crate::widget::EventContext::new();
+                    let mut ctx = crate::widget::EventContext::new()
+                        .with_app_context(self.app_context.clone());
                     let _accepted = handler(drag.payload, position, &mut ctx);
                     // Put handler back
                     if let Some(node) = self.arena.get_mut(target_id) {
