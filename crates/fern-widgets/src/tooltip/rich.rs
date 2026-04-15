@@ -232,18 +232,22 @@ impl Widget for RichTooltipWidget {
             });
 
         // Body row: text + optional shortcut chip.
+        // a11y_hidden: the tooltip root owns `set_name(body_text)`, so the
+        // body TextWidget would duplicate it as a child Label node.
         let body_widget = TextWidget::new_literal(body_source)
             .style(theme.typography.small.clone())
             .color(theme.colors.tooltip_text)
             .markup(true)
-            .on_link_click(make_link_click_handler(nested_map.clone(), self_id));
+            .on_link_click(make_link_click_handler(nested_map.clone(), self_id))
+            .a11y_hidden();
         let body_id = ctx.add(body_widget);
 
         let header: WidgetId = if let Some(shortcut) = shortcut_text {
             let shortcut_widget = TextWidget::new_literal(shortcut)
                 .style(theme.typography.small.clone())
                 .color(theme.colors.tooltip_shortcut)
-                .single_line();
+                .single_line()
+                .a11y_hidden();
             let shortcut_id = ctx.add(shortcut_widget);
             // Grid is used here (not HStack + Spacer) because the body
             // text needs a width proposal that excludes the shortcut

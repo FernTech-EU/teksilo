@@ -65,7 +65,8 @@ impl Widget for Badge {
         let text_widget = TextWidget::new_literal(&self.label)
             .style(theme.typography.tiny.clone())
             .color(text)
-            .single_line();
+            .single_line()
+            .a11y_hidden();
         let bg_rect = RectWidget::new()
             .background(bg)
             .corner_radius(CornerRadius::uniform(badge_style.corner_radius));

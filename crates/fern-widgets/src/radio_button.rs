@@ -190,13 +190,15 @@ impl Widget for RadioButton {
             let label_widget = TextWidget::new_literal(label)
                 .style(theme.typography.body.clone())
                 .color(theme.colors.text_primary)
-                .single_line();
+                .single_line()
+                .a11y_hidden();
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
                 let caption_widget = TextWidget::new_literal(caption)
                     .style(theme.typography.small.clone())
-                    .color(theme.colors.text_secondary);
+                    .color(theme.colors.text_secondary)
+                    .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
                 ctx.add(
                     VStack::new()
@@ -338,6 +340,9 @@ impl Widget for RadioButton {
         builder.set_role(fern_core::accesskit::Role::RadioButton);
         if let Some(ref label) = self.label {
             builder.set_name(label);
+        }
+        if let Some(ref caption) = self.caption {
+            builder.set_description(caption);
         }
         builder.set_toggled(self.is_selected());
         if !self.enabled {

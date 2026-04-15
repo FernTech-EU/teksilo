@@ -343,7 +343,8 @@ impl Widget for MenuItem {
         let label = TextWidget::new_literal(&self.label)
             .style(theme.typography.body.clone())
             .bind_color(text_color.clone())
-            .single_line();
+            .single_line()
+            .a11y_hidden();
         row = row.child(label);
 
         // Stretch spacer — pushes trailing content to the right edge.
@@ -383,7 +384,8 @@ impl Widget for MenuItem {
             let shortcut = TextWidget::new_literal(shortcut_text)
                 .style(theme.typography.body.clone())
                 .bind_color(shortcut_color)
-                .single_line();
+                .single_line()
+                .a11y_hidden();
             row = row.child(shortcut);
         }
 

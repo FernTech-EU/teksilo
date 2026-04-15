@@ -289,7 +289,8 @@ impl fern_core::widget::Widget for Button {
         // Build the widget subtree
         let text = TextWidget::new_literal(&self.label)
             .bind_color(text_color)
-            .single_line();
+            .single_line()
+            .a11y_hidden();
         let text_id = ctx.add(text);
 
         let button_style = theme.components.button;
@@ -583,6 +584,19 @@ mod tests {
         assert!(
             info.actions()
                 .contains(&fern_core::accesskit::Action::Click)
+        );
+    }
+
+    #[test]
+    fn label_text_widget_is_hidden_from_a11y_tree() {
+        // Regression guard: the TextWidget child that paints the button
+        // label used to emit its own `Role::Label` node with the same
+        // string, producing a duplicate in the a11y tree. `.a11y_hidden()`
+        // on the label child suppresses that.
+        let (tree, _btn) = setup();
+        assert!(
+            tree.find_by_role(fern_core::accesskit::Role::Label).is_none(),
+            "button label TextWidget must not emit a Role::Label node"
         );
     }
 

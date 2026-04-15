@@ -86,7 +86,8 @@ impl Widget for GroupBox {
         let title_label = TextWidget::new_literal(&self.title)
             .style(theme.typography.body_bold.clone())
             .color(theme.colors.text_primary)
-            .single_line();
+            .single_line()
+            .a11y_hidden();
 
         let title_row_id = if let Some(ref checked) = self.checked {
             let checkbox = Checkbox::new(checked.clone());

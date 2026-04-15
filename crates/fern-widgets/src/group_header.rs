@@ -100,7 +100,8 @@ impl Widget for GroupHeader {
         let label = TextWidget::new_literal(&self.label)
             .style(style)
             .color(color)
-            .single_line();
+            .single_line()
+            .a11y_hidden();
         let label_id = ctx.add(label);
 
         // Fill the remaining horizontal space with a horizontal Divider.

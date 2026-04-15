@@ -55,6 +55,12 @@ pub struct TextWidget {
     /// closure). Used to detect enter/leave transitions between link
     /// spans inside a single widget.
     hovered_link: Rc<RefCell<Option<String>>>,
+    /// When true, this TextWidget emits no accessibility node at all
+    /// (no role, no name, no synthetic link children). Controls that
+    /// own their accessible name — Button, Checkbox, MenuItem, etc. —
+    /// hide their label children so the text doesn't duplicate the
+    /// parent's announced name in the a11y tree.
+    a11y_hidden: bool,
 }
 
 impl std::fmt::Debug for TextWidget {
@@ -83,6 +89,7 @@ impl TextWidget {
             last_layout: Rc::new(RefCell::new(None)),
             last_bounds: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
             hovered_link: Rc::new(RefCell::new(None)),
+            a11y_hidden: false,
         }
     }
 
@@ -185,6 +192,20 @@ impl TextWidget {
     {
         self.on_link_hover = Some(Rc::new(handler));
         self.markup = true;
+        self
+    }
+
+    /// Hide this text from the accessibility tree. Use this when the
+    /// TextWidget is a visual label fragment inside another control
+    /// that already owns its accessible name via `set_name` —
+    /// otherwise screen readers announce the same string twice
+    /// (once for the control, once for the embedded Label node).
+    ///
+    /// Standalone body text (dialog descriptions, form instructions,
+    /// read-only display values) should NOT set this — it stays as a
+    /// `Role::Label` node.
+    pub fn a11y_hidden(mut self) -> Self {
+        self.a11y_hidden = true;
         self
     }
 }
@@ -468,6 +489,9 @@ impl Widget for TextWidget {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.a11y_hidden {
+            return;
+        }
         let text = self.text.get();
         builder.set_role(fern_core::accesskit::Role::Label);
         builder.set_name(&text);

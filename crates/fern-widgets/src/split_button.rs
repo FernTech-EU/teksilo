@@ -353,7 +353,8 @@ impl Widget for SplitButton {
         let label_widget = TextWidget::new_literal("")
             .bind_text(main_label_text)
             .bind_color(text_color.clone())
-            .single_line();
+            .single_line()
+            .a11y_hidden();
         let label_id = ctx.add(label_widget);
 
         let main_padding_id = ctx.add(

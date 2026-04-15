@@ -135,7 +135,8 @@ impl Widget for Accordion {
         let title_widget = TextWidget::new_literal(&self.title)
             .style(title_style)
             .color(header_fg)
-            .single_line();
+            .single_line()
+            .a11y_hidden();
         let title_id = ctx.add(title_widget);
         let spacer_id = ctx.add(Spacer::new());
 
