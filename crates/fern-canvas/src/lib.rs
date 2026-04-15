@@ -15,5 +15,6 @@ pub use render_frame::{
     PathEntry, RasterizedQuad, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 pub use text_backend::{
-    AtlasInfo, EllipsisMode, MockTextBackend, TextBackend, TextLayout, TextOverflow,
+    AtlasInfo, EllipsisMode, HitTarget, MockTextBackend, TextBackend, TextLayout, TextLayoutSpan,
+    TextOverflow, TextSpanKind,
 };

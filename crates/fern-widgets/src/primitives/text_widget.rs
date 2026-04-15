@@ -1,12 +1,14 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, EllipsisMode, Rect, Size, SizeProposal, TextOverflow};
+use fern_canvas::text_backend::{HitTarget, TextLayout};
+use fern_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOverflow};
 use fern_tokens::{Color, TextStyle};
 
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::signal::Prop;
-use fern_core::widget::{LayoutContext, PaintContext, Widget};
+use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget};
+use fern_core::widget_builder::HandlerSet;
 use fern_i18n::LocalizedString;
 
 /// A leaf widget that renders text via the TextBackend.
@@ -17,6 +19,10 @@ use fern_i18n::LocalizedString;
 /// `.overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing))`.
 ///
 /// Text and color can be static or bound to reactive state.
+/// Closure type for link click/hover dispatch.
+type LinkClickHandler = Rc<dyn Fn(&str, &mut EventContext)>;
+type LinkHoverHandler = Rc<dyn Fn(&str, bool, Rect, &mut EventContext)>;
+
 pub struct TextWidget {
     text: Prop<String>,
     color: Prop<Color>,
@@ -24,6 +30,31 @@ pub struct TextWidget {
     overflow: TextOverflow,
     max_lines: Option<usize>,
     text_backend: Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
+    /// When enabled, text is parsed as inline markup
+    /// (`[label](url)`, `*italic*`, `**bold**`) and link metadata is
+    /// emitted into the layout for hit-testing and per-span coloring.
+    markup: bool,
+    on_link_click: Option<LinkClickHandler>,
+    on_link_hover: Option<LinkHoverHandler>,
+    /// Last laid-out markup layout. Shared with the event handler
+    /// closures via `Rc<RefCell<..>>` so taps can hit-test against the
+    /// most recently measured spans.
+    last_layout: Rc<RefCell<Option<TextLayout>>>,
+    /// Last paint bounds in window-local coordinates. Updated from
+    /// `paint()` (the only hook with access to bounds) and read from
+    /// the `on_tap` / `on_pointer_event` closures to convert the
+    /// window-local event position into widget-local before
+    /// hit-testing the layout spans.
+    ///
+    /// Necessary because the framework's tap/pointer handlers are
+    /// documented as receiving widget-local positions but actually
+    /// receive window-local — there is no transformation in
+    /// `dispatch_recognized_gesture` or `dispatch_to_widget`.
+    last_bounds: Rc<Cell<Rect>>,
+    /// Currently-hovered link URL (shared with the pointer-event
+    /// closure). Used to detect enter/leave transitions between link
+    /// spans inside a single widget.
+    hovered_link: Rc<RefCell<Option<String>>>,
 }
 
 impl std::fmt::Debug for TextWidget {
@@ -46,6 +77,12 @@ impl TextWidget {
             overflow: TextOverflow::default(),
             max_lines: None,
             text_backend: None,
+            markup: false,
+            on_link_click: None,
+            on_link_hover: None,
+            last_layout: Rc::new(RefCell::new(None)),
+            last_bounds: Rc::new(Cell::new(Rect::new(0.0, 0.0, 0.0, 0.0))),
+            hovered_link: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -113,7 +150,45 @@ impl TextWidget {
     pub fn text(&self) -> String {
         self.text.get()
     }
+
+    /// Enable inline markup parsing. When enabled, the text is parsed
+    /// as a minimal markdown subset:
+    /// - `[label](url)` — inline link
+    /// - `*italic*`     — italic run
+    /// - `**bold**`     — bold run
+    ///
+    /// Links are dispatched via [`on_link_click`](Self::on_link_click)
+    /// and colored using `theme.colors.text_link`.
+    pub fn markup(mut self, enabled: bool) -> Self {
+        self.markup = enabled;
+        self
+    }
+
+    /// Called when an inline link is tapped. Enables markup automatically.
+    pub fn on_link_click<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&str, &mut EventContext) + 'static,
+    {
+        self.on_link_click = Some(Rc::new(handler));
+        self.markup = true;
+        self
+    }
+
+    /// Called when an inline link is hovered (enter/leave). Receives
+    /// the URL, a `bool` indicating whether the pointer entered (`true`)
+    /// or left (`false`), and the widget-local rect of the link span
+    /// (so anchoring popups next to the link is cheap). Enables markup
+    /// automatically.
+    pub fn on_link_hover<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&str, bool, Rect, &mut EventContext) + 'static,
+    {
+        self.on_link_hover = Some(Rc::new(handler));
+        self.markup = true;
+        self
+    }
 }
+
 
 impl Widget for TextWidget {
     fn build(
@@ -132,6 +207,124 @@ impl Widget for TextWidget {
             registry,
             fern_core::binding::BindingLevel::RepaintOnly,
         );
+
+        // Wire link dispatch when markup is enabled and at least one
+        // link handler is registered. Shares the last_layout cell with
+        // the closures so taps can hit-test against the most recently
+        // measured spans.
+        if self.markup && (self.on_link_click.is_some() || self.on_link_hover.is_some()) {
+            let mut handler_set = HandlerSet::new();
+            if let Some(on_click) = self.on_link_click.clone() {
+                let last_layout = self.last_layout.clone();
+                let last_bounds = self.last_bounds.clone();
+                handler_set = handler_set.on_tap(move |pt, ctx| {
+                    let bounds = last_bounds.get();
+                    let local = Point::new(pt.x - bounds.x, pt.y - bounds.y);
+                    if let Some(layout) = last_layout.borrow().as_ref()
+                        && let Some(HitTarget::Link { url }) = layout.hit_test(local)
+                    {
+                        on_click(&url, ctx);
+                    }
+                });
+            }
+
+            // Pointer-move handler — wired *unconditionally* when
+            // markup is enabled with any link handler. It does two
+            // jobs:
+            //
+            // 1. Updates the cursor to `Pointer` while the pointer is
+            //    over a link span, restoring `Default` otherwise. This
+            //    is the visual affordance the catalog was missing.
+            // 2. Drives `on_link_hover` enter/leave transitions when
+            //    that handler is wired, comparing the current
+            //    hit-test URL against `hovered_link`.
+            //
+            // Returns `Ignored` so the gesture arena still receives
+            // PointerDown/Up and the on_tap handler keeps firing.
+            let last_layout_for_pointer = self.last_layout.clone();
+            let last_bounds_for_pointer = self.last_bounds.clone();
+            let hovered = self.hovered_link.clone();
+            let on_hover = self.on_link_hover.clone();
+            handler_set = handler_set.on_pointer_event(move |event, ctx| {
+                use fern_core::event::{EventResponse, WidgetEvent};
+                match event {
+                    WidgetEvent::PointerMove { position } => {
+                        let bounds = last_bounds_for_pointer.get();
+                        let local =
+                            Point::new(position.x - bounds.x, position.y - bounds.y);
+                        let layout_ref = last_layout_for_pointer.borrow();
+                        let hit = layout_ref.as_ref().and_then(|l| l.hit_test(local));
+                        let new_url = match &hit {
+                            Some(HitTarget::Link { url }) => Some(url.clone()),
+                            _ => None,
+                        };
+
+                        // Update cursor based on link hit.
+                        if new_url.is_some() {
+                            ctx.set_cursor(CursorIcon::Pointer);
+                        } else {
+                            ctx.set_cursor(CursorIcon::Default);
+                        }
+
+                        // Drive enter/leave transitions when an
+                        // on_link_hover handler is wired.
+                        if let Some(handler) = on_hover.as_ref() {
+                            let new_rect = if let Some(url) = new_url.as_ref() {
+                                layout_ref
+                                    .as_ref()
+                                    .and_then(|l| {
+                                        l.spans.iter().find_map(|sp| {
+                                            if let fern_canvas::text_backend::TextSpanKind::Link { url: u } = &sp.kind
+                                                && u == url
+                                            {
+                                                Some(Rect::new(
+                                                    sp.rect[0],
+                                                    sp.rect[1],
+                                                    sp.rect[2],
+                                                    sp.rect[3],
+                                                ))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                    })
+                                    .unwrap_or_else(|| Rect::new(0.0, 0.0, 0.0, 0.0))
+                            } else {
+                                Rect::new(0.0, 0.0, 0.0, 0.0)
+                            };
+
+                            drop(layout_ref);
+
+                            let mut slot = hovered.borrow_mut();
+                            if slot.as_deref() != new_url.as_deref() {
+                                if let Some(old) = slot.take() {
+                                    handler(&old, false, Rect::new(0.0, 0.0, 0.0, 0.0), ctx);
+                                }
+                                if let Some(u) = new_url {
+                                    handler(&u, true, new_rect, ctx);
+                                    *slot = Some(u);
+                                }
+                            }
+                        }
+                        EventResponse::Ignored
+                    }
+                    WidgetEvent::PointerLeave => {
+                        ctx.set_cursor(CursorIcon::Default);
+                        if let Some(handler) = on_hover.as_ref() {
+                            let mut slot = hovered.borrow_mut();
+                            if let Some(old) = slot.take() {
+                                handler(&old, false, Rect::new(0.0, 0.0, 0.0, 0.0), ctx);
+                            }
+                        }
+                        EventResponse::Ignored
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+
+            ctx.apply_self_handlers(handler_set);
+        }
+
         Vec::new()
     }
 
@@ -149,6 +342,20 @@ impl Widget for TextWidget {
             return Size::new(w, height);
         };
         let mut backend = backend.borrow_mut();
+
+        // Markup path: only reachable in Wrap mode. The backend parses
+        // the source internally and returns a TextLayout whose `spans`
+        // field carries per-run rects (including links) that we stash
+        // for hit-testing during event dispatch.
+        if self.markup {
+            let layout = match proposal.width {
+                Some(w) => backend.layout_paragraph_markup(&text, &self.style, w, self.max_lines),
+                None => backend.layout_single_line_markup(&text, &self.style, None),
+            };
+            let size = Size::new(layout.width, layout.height);
+            *self.last_layout.borrow_mut() = Some(layout);
+            return size;
+        }
 
         match self.overflow {
             TextOverflow::Wrap => match proposal.width {
@@ -189,9 +396,52 @@ impl Widget for TextWidget {
         }
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        // Stash bounds so the on_tap / on_pointer_event closures can
+        // convert window-local event positions into widget-local
+        // before hit-testing against the layout's spans.
+        self.last_bounds.set(bounds);
+
         let text = self.text.get();
         let color = self.color.get();
+
+        // Markup path: re-measure through the markup pipeline (the
+        // backend's cache makes this a no-op after the size pass) and
+        // draw with per-span coloring so link glyphs pick up the
+        // theme's `text_link` token.
+        if self.markup {
+            let Some(backend_rc) = canvas.text_backend() else {
+                return;
+            };
+            let layout = {
+                let mut backend = backend_rc.borrow_mut();
+                match self.overflow {
+                    TextOverflow::Wrap => backend.layout_paragraph_markup(
+                        &text,
+                        &self.style,
+                        (bounds.width + 0.5).max(0.0),
+                        self.max_lines,
+                    ),
+                    _ => backend.layout_single_line_markup(
+                        &text,
+                        &self.style,
+                        Some(bounds.width + 0.5),
+                    ),
+                }
+            };
+            let link_color = ctx.theme.colors.text_link;
+            canvas.draw_text_layout_markup(
+                &layout,
+                fern_canvas::Point::new(bounds.x, bounds.y),
+                color,
+                link_color,
+            );
+            // Keep the cached layout in sync so tap hit-testing sees
+            // the same rects that were painted.
+            *self.last_layout.borrow_mut() = Some(layout);
+            return;
+        }
+
         match self.overflow {
             TextOverflow::Wrap => {
                 canvas.draw_paragraph(&text, bounds, &self.style, color, self.max_lines);
@@ -221,6 +471,37 @@ impl Widget for TextWidget {
         let text = self.text.get();
         builder.set_role(fern_core::accesskit::Role::Label);
         builder.set_name(&text);
+
+        // Markup mode: surface inline links as synthetic `Role::Link`
+        // children so screen readers can focus them individually. The
+        // rects from `last_layout` are in widget-local space and carry
+        // enough information to identify each unique URL.
+        if self.markup
+            && let Some(layout) = self.last_layout.borrow().as_ref()
+        {
+            // Dedupe by (url, byte_range.start): a link that wraps
+            // across two lines produces two LaidOutSpan entries sharing
+            // the same URL and byte range, but we only want one
+            // accessible node per source link.
+            let mut seen: Vec<(String, usize)> = Vec::new();
+            for span in &layout.spans {
+                if let fern_canvas::text_backend::TextSpanKind::Link { url } = &span.kind {
+                    let key = (url.clone(), span.byte_range.start);
+                    if seen.iter().any(|k| k == &key) {
+                        continue;
+                    }
+                    seen.push(key.clone());
+                    // Use the byte offset as the element_id so the
+                    // synthetic NodeId is stable across re-layouts.
+                    let element_id = span.byte_range.start as u64;
+                    let label = text
+                        .get(span.byte_range.clone())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| url.clone());
+                    builder.push_link_child(element_id, label, url.clone());
+                }
+            }
+        }
     }
 }
 

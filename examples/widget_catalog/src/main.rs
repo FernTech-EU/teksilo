@@ -37,6 +37,7 @@ use fern_ui::widgets::{
     SplitButton, StatusBar, TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack,
     Wrap,
 };
+use fern_ui::widgets::tooltip::TooltipContent;
 
 // ---------------------------------------------------------------------------
 // Application commands
@@ -1345,6 +1346,52 @@ impl Widget for WidgetCatalog {
         );
 
         // =====================================================================
+        // Section 6.5: Rich Tooltips
+        //
+        // Hover any of the buttons below for ~500ms to see a registered
+        // tooltip appear. Body text supports inline markup
+        // (`[label](url)`, `*italic*`, `**bold**`); links to `:key` URLs
+        // open nested tooltips, and links to `https://` URLs hand off
+        // to the OS default browser via the `open` crate. Shortcut
+        // chips and "more" long-form bodies are pulled from each
+        // entry's `TooltipContent` registered at app boot.
+        // =====================================================================
+
+        let rich_tooltips_section = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new_literal("Rich Tooltips")
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Hover the buttons below. Inline `[label](:key)` links \
+                         open nested tooltips; `https://` links open in the browser.",
+                    )
+                    .style(t.small.clone())
+                    .color(c.text_secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(12.0)
+                        .child(
+                            Button::new_literal("Save As…")
+                                .rich_tooltip("save-as"),
+                        )
+                        .child(
+                            Button::new_literal("Autosave info")
+                                .rich_tooltip("autosave"),
+                        )
+                        .child(
+                            Button::new_literal("Compile")
+                                .rich_tooltip("compile"),
+                        ),
+                ),
+        );
+
+        // =====================================================================
         // Section 7: Menus & Dropdowns (Milestone 4)
         // =====================================================================
 
@@ -1456,6 +1503,8 @@ impl Widget for WidgetCatalog {
                 .child(Divider::new())
                 .add_child(nav_section)
                 .child(Divider::new())
+                .add_child(rich_tooltips_section)
+                .child(Divider::new())
                 .add_child(menus_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
@@ -1522,6 +1571,67 @@ fn main() {
         .theme(Theme::light_default())
         .window_title("FernUI -- Widget Catalog (Milestone 3)")
         .window_size(900, 700)
+        .register_tooltips(vec![
+            // Plain registered entry — body is a single line, no markup.
+            TooltipContent::new(
+                "save-as",
+                LocalizedString::literal(
+                    "Save the current file under a new name",
+                ),
+            )
+            .with_shortcut_label("Ctrl+Shift+S"),
+
+            // Rich body with *italic*, **bold**, an `https://` link
+            // (delegated to the OS via the `open` crate on click) and a
+            // nested `:key` link that opens another tooltip.
+            TooltipContent::new(
+                "autosave",
+                LocalizedString::literal(
+                    "FernUI **autosaves** your work every *2 minutes*. \
+                     Click [here](:autosave-details) for details, or \
+                     read the [full docs](https://github.com/jacquetc/fern-ui).",
+                ),
+            )
+            .with_more(LocalizedString::literal(
+                "Autosave uses **debounced writes** so bursts of edits \
+                 only hit disk once. Disable it in [Preferences](:prefs-general).",
+            )),
+
+            // Nested entry reachable from `autosave`'s body via the
+            // `:autosave-details` link.
+            TooltipContent::new(
+                "autosave-details",
+                LocalizedString::literal(
+                    "Autosave runs on a debounced timer: it only writes \
+                     to disk after typing pauses for 500ms.",
+                ),
+            ),
+
+            // Nested entry reachable from `autosave`'s "more" body via
+            // the `:prefs-general` link.
+            TooltipContent::new(
+                "prefs-general",
+                LocalizedString::literal(
+                    "Open Preferences → General to toggle autosave and \
+                     change its interval.",
+                ),
+            ),
+
+            // Inline-content path: bound with a shortcut hint and a
+            // trailing "more" disclosure.
+            TooltipContent::new(
+                "compile",
+                LocalizedString::literal(
+                    "**Compile** the current project. Uses incremental \
+                     builds when possible.",
+                ),
+            )
+            .with_more(LocalizedString::literal(
+                "The compile step runs `cargo build` under the hood. \
+                 Output lands in the Build tab.",
+            ))
+            .with_shortcut_label("F9"),
+        ])
         .on_command(move |cmd: &Cmd, ctx| match cmd {
             Cmd::ToggleDarkMode => {
                 let dark = !is_dark_clone.get();

@@ -22,9 +22,10 @@ fern-tokens = { workspace = true }
 fern-i18n = { workspace = true }
 fern-render = { workspace = true }
 fern-platform = { workspace = true }
+# fern-widgets is needed for the tooltip registry type surface
+# (`FernAppBuilder::register_tooltips` takes `Vec<TooltipContent>`).
+# Registration wiring only — no widget constructors used here.
+fern-widgets = { workspace = true }
 fern-text = { workspace = true, optional = true }
 winit = { workspace = true }
 pollster = "0.4"
-
-[dev-dependencies]
-fern-widgets = { workspace = true }

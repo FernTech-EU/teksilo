@@ -77,6 +77,10 @@ pub struct Button {
     action: Option<CommandFactory>,
     enabled: bool,
     tooltip_text: Option<String>,
+    /// Optional rich tooltip source (registry key or inline content).
+    /// Takes precedence over `tooltip_text` when both are set — last
+    /// call wins because the setters clear the other field.
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     /// Interaction state signal — set during build().
     interaction: Signal<InteractionState>,
     /// Root child ID — set during build().
@@ -100,6 +104,7 @@ impl Button {
             action: None,
             enabled: true,
             tooltip_text: None,
+            rich_tooltip_source: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
@@ -143,6 +148,7 @@ impl Button {
     pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -150,6 +156,31 @@ impl Button {
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip registry.
+    /// The `key` is looked up via
+    /// [`TooltipRegistry`](crate::tooltip::TooltipRegistry) at build
+    /// time; the resolved body text supports inline markup
+    /// (`[label](url)`, `*italic*`, `**bold**`) and the entry's
+    /// shortcut / long-form "more" fields are rendered automatically.
+    ///
+    /// Overrides any previously set plain `.tooltip(...)` text.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline
+    /// [`TooltipContent`](crate::tooltip::TooltipContent) — for
+    /// one-off tooltips that aren't worth registering in the central
+    /// catalog. Overrides any previously set plain `.tooltip(...)`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
         self
     }
 
@@ -297,8 +328,17 @@ impl fern_core::widget::Widget for Button {
                 .set_child(sized_id),
         );
 
-        // Attach tooltip if configured
-        if let Some(ref tooltip_text) = self.tooltip_text {
+        // Attach tooltip if configured. Rich-tooltip source takes
+        // precedence — both setters clear the other, so at most one
+        // branch runs.
+        if let Some(source) = self.rich_tooltip_source.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                root_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else if let Some(ref tooltip_text) = self.tooltip_text {
             let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);

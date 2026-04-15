@@ -25,6 +25,7 @@ pub struct Link {
     url: Option<String>,
     action: Option<CommandFactory>,
     tooltip_text: Option<String>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     interaction: Option<Signal<InteractionState>>,
     root_child_id: Option<WidgetId>,
 }
@@ -37,6 +38,7 @@ impl Link {
             url: None,
             action: None,
             tooltip_text: None,
+            rich_tooltip_source: None,
             interaction: None,
             root_child_id: None,
         }
@@ -71,6 +73,7 @@ impl Link {
     pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -78,6 +81,22 @@ impl Link {
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip
+    /// registry. See [`Button::rich_tooltip`](crate::button::Button::rich_tooltip).
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline `TooltipContent`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
         self
     }
 
@@ -147,7 +166,14 @@ impl Widget for Link {
                 .set_child(content_id),
         );
 
-        if let Some(ref tooltip_text) = self.tooltip_text {
+        if let Some(source) = self.rich_tooltip_source.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                root_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else if let Some(ref tooltip_text) = self.tooltip_text {
             let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tid = ctx.add(tw);
             ctx.attach_tooltip(root_id, tid, std::time::Duration::from_millis(500));

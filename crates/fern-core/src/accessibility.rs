@@ -45,6 +45,12 @@ pub enum SyntheticKind {
     Paragraph = 1,
     TextRun = 2,
     ImageRun = 3,
+    /// An inline link span inside a label-style widget's text
+    /// (e.g. `[docs](url)` inside a TextWidget with `.markup(true)`
+    /// enabled). Each link span becomes one synthetic child of the
+    /// hosting widget's own node, with `Role::Link` and the link label
+    /// as its name.
+    Link = 4,
 }
 
 /// Top bit of the u64 NodeId encoding. Set for synthetic (widget-
@@ -319,6 +325,47 @@ impl AccessNodeBuilder {
         };
         let node_id = synthetic_node_id(owner, element_id, SyntheticKind::Paragraph);
         let node = Node::new(Role::Paragraph);
+        self.children_collected.push((node_id, node));
+        self.inner.push_child(node_id);
+        node_id
+    }
+
+    /// Push a `Role::Link` child on the current node. Used by label
+    /// widgets (e.g. `TextWidget` with `.markup(true)` enabled) to
+    /// expose inline `[label](url)` links as individual accessible
+    /// nodes alongside the parent's own text.
+    ///
+    /// `element_id` should be a stable identifier for the link inside
+    /// the parent widget (typically the byte offset of the `[` in the
+    /// original markup source, so the NodeId survives identical
+    /// re-layouts).
+    ///
+    /// The returned `NodeId` is synthetic (bit 63 set) and deterministic
+    /// given `(owner, element_id)`.
+    pub fn push_link_child(
+        &mut self,
+        element_id: u64,
+        label: impl Into<String>,
+        url: impl Into<String>,
+    ) -> NodeId {
+        let Some(owner) = self.owner else {
+            debug_assert!(
+                false,
+                "push_link_child called on a builder with no owner — \
+                 widgets must only call this from Widget::accessibility"
+            );
+            return NodeId(0);
+        };
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::Link);
+        let mut node = Node::new(Role::Link);
+        let label: String = label.into();
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+        // AccessKit exposes the link target through the `Value` property
+        // on a `Role::Link` node — same convention the standalone
+        // `Link` widget uses via `set_value(...)`.
+        node.set_value(url.into());
         self.children_collected.push((node_id, node));
         self.inner.push_child(node_id);
         node_id

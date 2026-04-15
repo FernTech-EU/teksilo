@@ -25,6 +25,7 @@ sys-locale = "0.3"
 notify = "8.2.0"
 serde = { version = "1", features = ["derive"] }
 arboard = "3.4"
+open = "5"
 text-document = { path = "../text-document/crates/public_api" }
 text-typeset = { path = "../text-typeset" }
 

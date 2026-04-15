@@ -1,5 +1,6 @@
 use fern_tokens::TextStyle;
 
+use crate::geometry::Point;
 use crate::render_frame::GlyphQuad;
 
 /// How a [`TextWidget`](../fern_widgets/primitives/struct.TextWidget.html)
@@ -45,6 +46,58 @@ pub struct TextLayout {
     pub layout_key: u64,
     /// Number of lines (1 for single-line, ≥1 for paragraph).
     pub line_count: usize,
+    /// Per-span rectangles produced by the markup-aware layout path.
+    /// Empty for plain-text layouts.
+    pub spans: Vec<TextLayoutSpan>,
+}
+
+/// One laid-out span inside a [`TextLayout`]. Populated by
+/// `layout_*_markup` calls; each span carries its bounding rectangle in
+/// the layout's local coordinate space (origin at top-left of the
+/// widget's text region).
+#[derive(Debug, Clone)]
+pub struct TextLayoutSpan {
+    pub kind: TextSpanKind,
+    pub line_index: usize,
+    /// Local-space rectangle: `[x, y, width, height]`.
+    pub rect: [f32; 4],
+    /// Byte range into the original markup source string.
+    pub byte_range: std::ops::Range<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextSpanKind {
+    Text,
+    Link { url: String },
+}
+
+/// What the hit-test found at a particular point inside a [`TextLayout`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HitTarget {
+    Text,
+    Link { url: String },
+}
+
+impl TextLayout {
+    /// Hit-test a point against the per-span rectangles. The point is in
+    /// the same local coordinate space as `rect` — the caller must
+    /// translate window-space into the text region before calling.
+    ///
+    /// Returns `None` if the point is outside every span.
+    pub fn hit_test(&self, point: Point) -> Option<HitTarget> {
+        for sp in self.spans.iter().rev() {
+            // Walk in reverse so the last-emitted span (visually on top)
+            // wins in the edge case of overlapping rects.
+            let [x, y, w, h] = sp.rect;
+            if point.x >= x && point.x < x + w && point.y >= y && point.y < y + h {
+                return Some(match &sp.kind {
+                    TextSpanKind::Link { url } => HitTarget::Link { url: url.clone() },
+                    TextSpanKind::Text => HitTarget::Text,
+                });
+            }
+        }
+        None
+    }
 }
 
 /// Trait for text layout and glyph rasterization backends.
@@ -74,6 +127,37 @@ pub trait TextBackend {
         _max_lines: Option<usize>,
     ) -> TextLayout {
         self.layout_single_line(text, style, Some(max_width))
+    }
+
+    /// Single-line layout for minimal-markdown source text.
+    ///
+    /// `source` is a raw string containing the supported subset
+    /// (`[label](url)`, `*italic*`, `**bold**`). The backend parses the
+    /// markup internally and returns a `TextLayout` whose `spans` field
+    /// is populated with per-run rectangles (including link positions)
+    /// for hit-testing.
+    ///
+    /// Default implementation falls back to the plain path, dropping
+    /// span metadata — override in real backends.
+    fn layout_single_line_markup(
+        &mut self,
+        source: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+    ) -> TextLayout {
+        self.layout_single_line(source, style, max_width)
+    }
+
+    /// Paragraph layout for minimal-markdown source text. See
+    /// [`layout_single_line_markup`](Self::layout_single_line_markup).
+    fn layout_paragraph_markup(
+        &mut self,
+        source: &str,
+        style: &TextStyle,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> TextLayout {
+        self.layout_paragraph(source, style, max_width, max_lines)
     }
 
     /// Produce GPU-ready glyph quads for a previously laid-out text.
@@ -135,6 +219,7 @@ impl TextBackend for MockTextBackend {
             descent: self.line_height * 0.25,
             layout_key: 0,
             line_count: 1,
+            spans: Vec::new(),
         }
     }
 
@@ -154,6 +239,7 @@ impl TextBackend for MockTextBackend {
                 descent: self.line_height * 0.25,
                 layout_key: 0,
                 line_count: 1,
+                spans: Vec::new(),
             };
         }
 
@@ -197,6 +283,7 @@ impl TextBackend for MockTextBackend {
             descent: self.line_height * 0.25,
             layout_key: 0,
             line_count,
+            spans: Vec::new(),
         }
     }
 

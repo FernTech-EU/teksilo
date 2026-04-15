@@ -532,27 +532,18 @@ impl Widget for RichTextEditor {
         if viewport_changed {
             st.viewport_width = bounds.width;
             st.viewport_height = bounds.height;
+            st.engine.set_viewport(bounds.width, bounds.height);
             st.needs_full_layout = true;
         }
-        // Always push this widget's viewport to the shared
-        // `TypesetterBridge`. Two rich-text widgets sharing one
-        // bridge each own independent viewports, but the bridge
-        // stores only one — whichever widget called `set_viewport`
-        // most recently wins. Calling unconditionally here makes
-        // sure a following `layout_full` wraps at this widget's
-        // width, not the other widget's width. Without this, the
-        // ownership-driven relayout below re-lays out with the
-        // other widget's viewport and snaps our rendered geometry
-        // to theirs on every repaint.
-        let vp_w = st.viewport_width;
-        let vp_h = st.viewport_height;
-        st.engine.set_viewport(vp_w, vp_h);
 
-        // First-frame guard + viewport-change guard + ownership
-        // guard: (re)run the full layout so the render call produces
-        // glyphs sized for the current bounds. `has_full_layout()`
-        // returns `false` when another engine has since stolen the
-        // bridge's flow state via its own `layout_full`.
+        // First-frame guard + viewport-change guard: (re)run the
+        // full layout so the render call produces glyphs sized
+        // for the current bounds. With per-widget `DocumentFlow`
+        // state inside the engine, `has_full_layout()` only
+        // reports `false` when this widget has never laid out
+        // or when the shared service's HiDPI scale factor has
+        // changed since the last layout — there is no
+        // cross-widget trampling left to guard against.
         if st.needs_full_layout || !st.engine.has_full_layout() {
             let flow = st.document.snapshot_flow();
             st.engine.layout_full(&flow);

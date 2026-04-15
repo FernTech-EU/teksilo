@@ -356,6 +356,57 @@ impl Canvas {
         true
     }
 
+    /// Draw a pre-measured text layout that contains per-span metadata
+    /// (from a `layout_*_markup` call), applying `text_color` to Text
+    /// spans and `link_color` to Link spans.
+    ///
+    /// Glyphs that don't fall inside any span fall back to `text_color`.
+    pub fn draw_text_layout_markup(
+        &mut self,
+        layout: &crate::text_backend::TextLayout,
+        position: Point,
+        text_color: Color,
+        link_color: Color,
+    ) -> bool {
+        let Some(backend) = self.text_backend.as_ref() else {
+            return false;
+        };
+        let mut backend = backend.borrow_mut();
+        let glyphs = backend.ensure_glyphs(layout);
+        if glyphs.is_empty() {
+            return false;
+        }
+
+        let text_rgba = text_color.to_array();
+        let link_rgba = link_color.to_array();
+
+        for glyph in &glyphs {
+            // Determine the glyph's center point relative to the layout
+            // origin and check it against each span's rect. This is O(G*S)
+            // but S is typically small for tooltip labels.
+            let gx = glyph.screen[0] + glyph.screen[2] * 0.5;
+            let gy = glyph.screen[1] + glyph.screen[3] * 0.5;
+            let mut color_rgba = text_rgba;
+            for sp in &layout.spans {
+                let [sx, sy, sw, sh] = sp.rect;
+                if gx >= sx && gx < sx + sw && gy >= sy && gy < sy + sh {
+                    if matches!(sp.kind, crate::text_backend::TextSpanKind::Link { .. }) {
+                        color_rgba = link_rgba;
+                    }
+                    break;
+                }
+            }
+            let mut offset_glyph = *glyph;
+            offset_glyph.screen[0] += position.x;
+            offset_glyph.screen[1] += position.y;
+            offset_glyph.color = color_rgba;
+            let idx = self.frame.glyphs.len();
+            self.frame.glyphs.push(offset_glyph);
+            self.frame.draw_order.push(DrawCommand::Glyph(idx));
+        }
+        true
+    }
+
     // --- Shadows ---
 
     /// Draw a shadow behind a rounded rectangle.
@@ -927,6 +978,7 @@ mod tests {
             descent: 4.0,
             layout_key: 0,
             line_count: 1,
+            spans: Vec::new(),
         };
         let mut canvas = Canvas::new();
         assert!(!canvas.draw_text_layout(&layout, Point::new(0.0, 0.0), Color::BLACK));

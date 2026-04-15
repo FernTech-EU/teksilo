@@ -20,6 +20,10 @@ fern-data = { workspace = true }
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-i18n = { workspace = true }
+# `open` powers rich-tooltip links that point at real URLs
+# (http, https, mailto, file paths, …). Small, pure-Rust, no deps
+# on GUI toolkits — just spawns the OS default handler.
+open = { workspace = true }
 # text-typeset + text-document come through fern-text's re-exports
 # (`fern_text::text_document`, `fern_text::RichTextEngine`, …) under
 # its own `rich-text` feature. Widgets never name either crate

@@ -11,6 +11,60 @@ impl WidgetTree {
         content_id: WidgetId,
         delay: std::time::Duration,
     ) {
+        self.attach_tooltip_inner(anchor_id, content_id, delay, None, None);
+    }
+
+    /// Attach a tooltip that auto-promotes to "sticky" after
+    /// `sticky_after` elapses post-show. Used by rich tooltips
+    /// implementing the sticky-on-dwell UX (typically 2 seconds).
+    ///
+    /// The tooltip is shown normally after `delay`, then each
+    /// subsequent layout pass checks whether `sticky_after` has
+    /// elapsed since the overlay was shown. When it has, the tree
+    /// calls [`promote_tooltip_to_sticky`](Self::promote_tooltip_to_sticky)
+    /// — the entry is flagged sticky (so pointer-leave no longer
+    /// auto-dismisses) and the overlay's dismiss behavior is
+    /// swapped to `EscapeOrClickOutside`.
+    pub fn attach_tooltip_with_sticky(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        sticky_after: Option<std::time::Duration>,
+    ) {
+        self.attach_tooltip_inner(anchor_id, content_id, delay, sticky_after, None);
+    }
+
+    /// Variant of [`attach_tooltip_with_sticky`](Self::attach_tooltip_with_sticky)
+    /// that also takes a shared `Rc<Cell<Option<Instant>>>` "sink"
+    /// the tree updates whenever the tooltip is shown or dismissed.
+    /// The rich tooltip widget reads from this sink to drive its
+    /// dwell indicator without needing a paint-gap heuristic.
+    pub fn attach_tooltip_with_sticky_sink(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        sticky_after: Option<std::time::Duration>,
+        shown_at_sink: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
+    ) {
+        self.attach_tooltip_inner(
+            anchor_id,
+            content_id,
+            delay,
+            sticky_after,
+            Some(shown_at_sink),
+        );
+    }
+
+    fn attach_tooltip_inner(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        sticky_after: Option<std::time::Duration>,
+        shown_at_sink: Option<std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>>,
+    ) {
         self.arena.set_dormant(content_id);
         self.tooltips.push(TooltipEntry {
             anchor_id,
@@ -19,6 +73,11 @@ impl WidgetTree {
             hover_start: None,
             real_hover_start: None,
             overlay_id: None,
+            sticky_after,
+            is_sticky: false,
+            shown_at_sim: None,
+            shown_at_real: None,
+            shown_at_sink,
         });
     }
 
@@ -60,6 +119,8 @@ impl WidgetTree {
                 entry.real_hover_start = None;
             }
         }
+        let sim_now = self.sim_clock;
+        let real_now = std::time::Instant::now();
         for (anchor_id, content_id) in to_show {
             self.arena.activate(content_id);
             let oid = self.overlay_manager.show(crate::overlay::OverlayRequest {
@@ -80,7 +141,56 @@ impl WidgetTree {
                 .find(|e| e.content_id == content_id)
             {
                 entry.overlay_id = Some(oid);
+                entry.shown_at_sim = Some(sim_now);
+                entry.shown_at_real = Some(real_now);
+                if let Some(sink) = entry.shown_at_sink.as_ref() {
+                    sink.set(Some(real_now));
+                }
             }
+        }
+
+        // Sticky-on-dwell sweep:
+        //   1. Mark every shown rich tooltip's **subtree** needs_paint
+        //      so its `paint()` re-runs each layout pass during the
+        //      dwell window AND its children (notably the
+        //      `DwellIndicator`) repaint with the freshly-set step.
+        //      Marking only the root would leave the indicator's
+        //      cached_paint in place and the visible wedge stale.
+        //   2. Auto-promote any tooltip whose dwell window has
+        //      elapsed: flag the entry sticky and swap the overlay's
+        //      dismiss behavior to `EscapeOrClickOutside`. Marking
+        //      runs even on the promoting frame so `tick_dwell` can
+        //      observe `elapsed >= sticky_after` and flip the
+        //      indicator to its pin variant.
+        let mut to_mark_paint: Vec<WidgetId> = Vec::new();
+        let mut to_promote: Vec<WidgetId> = Vec::new();
+        for entry in &self.tooltips {
+            let Some(sticky_after) = entry.sticky_after else {
+                continue;
+            };
+            if entry.overlay_id.is_none() || entry.is_sticky {
+                continue;
+            }
+            let elapsed = entry
+                .shown_at_real
+                .map(|t| real_now.saturating_duration_since(t));
+            let elapsed = match elapsed {
+                Some(e) => e,
+                None => continue,
+            };
+            // Always mark needs_paint on the dwell window — the
+            // promoting frame still needs the widget to repaint so
+            // tick_dwell can flip the indicator to its pin variant.
+            to_mark_paint.push(entry.content_id);
+            if elapsed >= sticky_after {
+                to_promote.push(entry.content_id);
+            }
+        }
+        for id in to_mark_paint {
+            self.arena.mark_subtree_needs_paint(id);
+        }
+        for content_id in to_promote {
+            self.promote_tooltip_to_sticky(content_id);
         }
     }
 
@@ -274,6 +384,43 @@ impl WidgetTree {
         }
     }
 
+    /// Promote a shown tooltip from "ephemeral hover" to "sticky".
+    ///
+    /// - Flags the tooltip entry as sticky so
+    ///   [`tooltip_pointer_leave`](Self::tooltip_pointer_leave)
+    ///   no longer auto-dismisses it,
+    /// - Swaps the overlay's dismiss behavior to
+    ///   `EscapeOrClickOutside` so clicking anywhere off the tooltip
+    ///   (or pressing Escape) closes it.
+    ///
+    /// The entry is **not** removed: when the user later dismisses
+    /// the sticky overlay, `dormant_dismissed_content` resets the
+    /// entry back to its initial state so a future hover re-shows
+    /// the tooltip from scratch.
+    ///
+    /// Called from `RichTooltipWidget` (or by the auto-promote
+    /// sweep) once the dwell timer reaches its threshold.
+    pub fn promote_tooltip_to_sticky(&mut self, content_id: WidgetId) {
+        let Some(entry) = self
+            .tooltips
+            .iter_mut()
+            .find(|entry| entry.content_id == content_id)
+        else {
+            return;
+        };
+        if entry.is_sticky {
+            return;
+        }
+        entry.is_sticky = true;
+        let overlay_id = entry.overlay_id;
+        if let Some(overlay_id) = overlay_id {
+            self.overlay_manager.set_dismiss(
+                overlay_id,
+                crate::overlay::DismissBehavior::EscapeOrClickOutside,
+            );
+        }
+    }
+
     pub(super) fn tooltip_pointer_leave(&mut self, widget_id: WidgetId) {
         let matching: Vec<usize> = self
             .tooltips
@@ -286,7 +433,18 @@ impl WidgetTree {
         for index in matching {
             self.tooltips[index].hover_start = None;
             self.tooltips[index].real_hover_start = None;
+            // Sticky tooltips (post-dwell-promotion) survive
+            // pointer-leave — the user dismisses them via Escape
+            // or click-outside via the overlay's dismiss behavior.
+            if self.tooltips[index].is_sticky {
+                continue;
+            }
             if let Some(id) = self.tooltips[index].overlay_id.take() {
+                if let Some(sink) = self.tooltips[index].shown_at_sink.as_ref() {
+                    sink.set(None);
+                }
+                self.tooltips[index].shown_at_sim = None;
+                self.tooltips[index].shown_at_real = None;
                 to_dismiss.push((id, self.tooltips[index].content_id));
             }
         }
@@ -304,6 +462,36 @@ impl WidgetTree {
             .filter(|entry| entry.overlay_id.is_none())
             .filter_map(|entry| entry.real_hover_start.map(|start| start + entry.delay))
             .min();
+
+        // Sticky-on-dwell wake-ups: once a rich tooltip has been
+        // shown, the dwell-promotion timer needs to keep ticking
+        // every 500 ms so the visible step indicator advances and the
+        // 2 s promotion eventually fires. Without these deadlines the
+        // framework would only wake on user input, leaving the dwell
+        // counter stuck at 0.
+        let now = std::time::Instant::now();
+        let dwell_step = std::time::Duration::from_millis(500);
+        let dwell_tooltip_deadline = self
+            .tooltips
+            .iter()
+            .filter_map(|entry| {
+                let sticky_after = entry.sticky_after?;
+                let shown_at = entry.shown_at_real?;
+                if entry.overlay_id.is_none() || entry.is_sticky {
+                    return None;
+                }
+                let elapsed = now.saturating_duration_since(shown_at);
+                if elapsed >= sticky_after {
+                    return None;
+                }
+                // Round up to the next step boundary so each
+                // wake-up lands on a 500 ms / 1 s / 1.5 s / 2 s mark.
+                let steps_passed = (elapsed.as_millis() / dwell_step.as_millis()) as u32;
+                let next_step_at =
+                    shown_at + dwell_step * (steps_passed + 1);
+                Some(next_step_at.min(shown_at + sticky_after))
+            })
+            .min();
         let delayed_overlay_deadline = self
             .pending_delayed_overlays
             .iter()
@@ -316,6 +504,7 @@ impl WidgetTree {
 
         [
             tooltip_deadline,
+            dwell_tooltip_deadline,
             delayed_overlay_deadline,
             auto_dismiss_deadline,
             animation_deadline,
@@ -380,6 +569,28 @@ impl WidgetTree {
     }
 
     pub(super) fn dormant_dismissed_content(&mut self, content_ids: &[WidgetId]) {
+        // Reset any tooltip entries that match a dismissed content
+        // id so the next hover starts fresh — without this, sticky
+        // tooltips dismissed via Escape/click-outside would keep
+        // their `is_sticky` flag and stale `overlay_id`, and the
+        // next hover would never re-show them.
+        for &id in content_ids {
+            if let Some(entry) = self
+                .tooltips
+                .iter_mut()
+                .find(|e| e.content_id == id)
+            {
+                entry.overlay_id = None;
+                entry.is_sticky = false;
+                entry.hover_start = None;
+                entry.real_hover_start = None;
+                entry.shown_at_sim = None;
+                entry.shown_at_real = None;
+                if let Some(sink) = entry.shown_at_sink.as_ref() {
+                    sink.set(None);
+                }
+            }
+        }
         for &id in content_ids {
             let focused_in_subtree = self
                 .focused

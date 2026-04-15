@@ -1,9 +1,14 @@
 use std::collections::HashMap;
 
 use fern_canvas::GlyphQuad;
-use fern_canvas::text_backend::{AtlasInfo, TextBackend, TextLayout};
+use fern_canvas::text_backend::{
+    AtlasInfo, TextBackend, TextLayout, TextLayoutSpan, TextSpanKind,
+};
 use fern_tokens::TextStyle;
-use text_typeset::{FontFaceId, ParagraphResult, SingleLineResult, TextFormat, Typesetter};
+use text_typeset::{
+    DocumentFlow, FontFaceId, InlineMarkup, LaidOutSpanKind, ParagraphResult, SingleLineResult,
+    TextFontService, TextFormat,
+};
 
 /// Which layout method produced the cache entry — separates the
 /// single-line and paragraph caches so a single-line truncated result
@@ -13,6 +18,8 @@ enum LayoutMode {
     SingleLine,
     /// `max_lines` cap expressed as `u32::MAX` when unbounded.
     Paragraph(u32),
+    SingleLineMarkup,
+    ParagraphMarkup(u32),
 }
 
 /// Cache key for text layout results.
@@ -66,42 +73,59 @@ impl LayoutCacheKey {
 
 // Only cache the metrics — glyphs are re-generated on demand during paint.
 
-/// Bridge between fern-canvas's TextBackend trait and text-typeset's Typesetter.
+/// Bridge between fern-canvas's `TextBackend` trait and text-typeset.
+///
+/// Holds a shared [`TextFontService`] (font registry + glyph atlas +
+/// shaper cache) plus a dedicated [`DocumentFlow`] used only for the
+/// single-line / paragraph label API exposed via `TextBackend`. Rich
+/// text widgets that need a full-document flow keep their OWN
+/// `DocumentFlow` on the `RichTextEngine` side; they reach through
+/// this bridge to grab a mutable borrow of the shared service when
+/// they layout and render, so every widget's glyphs land in the same
+/// GPU atlas.
 pub struct TypesetterBridge {
-    typesetter: Typesetter,
+    service: TextFontService,
+    /// Dedicated flow used by the `TextBackend` label path
+    /// (`layout_single_line` / `layout_paragraph` / their markup
+    /// variants). Labels do not need a persistent flow-layout state,
+    /// so this single flow is sufficient — every `layout_*` call
+    /// reshapes from scratch through the shared service's atlas.
+    label_flow: DocumentFlow,
     default_font: Option<FontFaceId>,
     next_layout_key: u64,
-    /// Display scale factor for HiDPI rasterization.
-    scale_factor: f32,
-    /// Layout metrics cache: avoids re-shaping text just for size measurement.
+    /// Layout metrics cache: avoids re-shaping text just for size
+    /// measurement.
     layout_cache: HashMap<LayoutCacheKey, TextLayout>,
-    /// Glyph quads stored by opaque layout key so ensure_glyphs can be
-    /// resolved independently for many text widgets in the same frame.
+    /// Glyph quads stored by opaque layout key so ensure_glyphs can
+    /// be resolved independently for many text widgets in the same
+    /// frame.
     glyph_cache: HashMap<u64, Vec<GlyphQuad>>,
-    /// Whether any text work (layout_single_line/ensure_glyphs) happened
-    /// since the last atlas_info() call. When false, we skip advancing
-    /// the eviction generation to avoid aging out idle-but-visible glyphs.
+    /// Whether any text work (`layout_single_line`/`ensure_glyphs`)
+    /// happened since the last `atlas_info()` call. When false we
+    /// skip advancing the eviction generation to avoid aging out
+    /// idle-but-visible glyphs.
     had_text_activity: bool,
     /// Sticky atlas-dirty flag set by rich-text widgets via
-    /// `typesetter_mut()`. Necessary because text-typeset's `render()`
-    /// path clears `typesetter.atlas.dirty` after copying pixels into
-    /// the returned `RenderFrame`. fern-app consumes the atlas through
+    /// `service_mut()`. text-typeset's `render()` path clears
+    /// `atlas.dirty` after copying pixels into the returned
+    /// `RenderFrame`. fern-app consumes the atlas through
     /// `atlas_info()` *after* `tree.render()`, so by then the
     /// typesetter's own dirty flag is already false and the atlas
-    /// would never be uploaded, leaving rich-text glyphs invisible on
-    /// the GPU. This flag closes the gap: anyone who touched the
-    /// typesetter mutably since the last `atlas_info()` call forces
-    /// the bridge to report the atlas as dirty one more time.
+    /// would never be uploaded, leaving rich-text glyphs invisible
+    /// on the GPU. This flag closes the gap: anyone who took a
+    /// mutable borrow of the service since the last `atlas_info()`
+    /// call forces the bridge to report the atlas as dirty one
+    /// more time.
     rich_text_atlas_dirty: bool,
 }
 
 impl TypesetterBridge {
     pub fn new() -> Self {
         Self {
-            typesetter: Typesetter::new(),
+            service: TextFontService::new(),
+            label_flow: DocumentFlow::new(),
             default_font: None,
             next_layout_key: 1,
-            scale_factor: 1.0,
             layout_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             had_text_activity: false,
@@ -117,7 +141,7 @@ impl TypesetterBridge {
     /// asks for via `TypographyTokens::default().family = "Inter"` —
     /// and covers Latin, Cyrillic, Greek, and Vietnamese. The
     /// additional Noto Sans variable fonts are registered into the
-    /// same font registry so that `text-typeset`'s shaper-level
+    /// same font registry so that text-typeset's shaper-level
     /// `.notdef` fallback loop can cover mixed-script text without
     /// any locale awareness at the caller site.
     pub fn new_with_default_font() -> Self {
@@ -126,96 +150,90 @@ impl TypesetterBridge {
         bridge
     }
 
-    /// Register a font from raw TTF/OTF data.
+    /// Register a font from raw TTF/OTF data. Forwards to the
+    /// shared [`TextFontService`].
     pub fn register_font(&mut self, data: &[u8]) -> FontFaceId {
-        self.typesetter.register_font(data)
+        self.service.register_font(data)
     }
 
     /// Register Inter as the primary default, then register every
-    /// feature-gated script-specific fallback font. The feature-gated
-    /// registrations discard their `FontFaceId` because fallback
-    /// eligibility only requires that a font be in the registry —
-    /// `text-typeset`'s `find_fallback_font` iterates every registered
-    /// font and picks the first one whose charmap covers a `.notdef`
-    /// glyph's codepoint.
+    /// feature-gated script-specific fallback font. The
+    /// feature-gated registrations discard their `FontFaceId`
+    /// because fallback eligibility only requires that a font be in
+    /// the registry — text-typeset's `find_fallback_font` iterates
+    /// every registered font and picks the first one whose charmap
+    /// covers a `.notdef` glyph's codepoint.
     fn register_default_font(&mut self) {
-        // Primary default: InterVariable covers Latin, Cyrillic, Greek,
-        // and Vietnamese. Used as the default font in
-        // `TypographyTokens`.
         let inter_data = include_bytes!("../fonts/InterVariable.ttf");
-        let face_id = self.typesetter.register_font(inter_data);
-        self.typesetter.set_default_font(face_id, 14.0);
+        let face_id = self.service.register_font(inter_data);
+        self.service.set_default_font(face_id, 14.0);
         self.default_font = Some(face_id);
 
-        // Script-specific fallback fonts. Each bundle is feature-gated
-        // so a Latin-only app can opt out via `default-features = false`.
-        // The order of registration below is also the order in which
-        // `find_fallback_font` consults fonts when resolving a `.notdef`,
-        // so scripts that commonly co-occur with Latin (Arabic, Hebrew)
-        // go first for minor cache locality.
         #[cfg(feature = "fonts-arabic")]
         {
             let data =
                 include_bytes!("../fonts/NotoSansArabic-VariableFont_wdth,wght.ttf");
-            let _ = self.typesetter.register_font(data);
+            let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-hebrew")]
         {
             let data =
                 include_bytes!("../fonts/NotoSansHebrew-VariableFont_wdth,wght.ttf");
-            let _ = self.typesetter.register_font(data);
+            let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-thai")]
         {
             let data =
                 include_bytes!("../fonts/NotoSansThai-VariableFont_wdth,wght.ttf");
-            let _ = self.typesetter.register_font(data);
+            let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-devanagari")]
         {
             let data =
                 include_bytes!("../fonts/NotoSansDevanagari-VariableFont_wdth,wght.ttf");
-            let _ = self.typesetter.register_font(data);
+            let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-cjk-sc")]
         {
             let data = include_bytes!("../fonts/NotoSansSC-VariableFont_wght.ttf");
-            let _ = self.typesetter.register_font(data);
+            let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-cjk-jp")]
         {
             let data = include_bytes!("../fonts/NotoSansJP-VariableFont_wght.ttf");
-            let _ = self.typesetter.register_font(data);
+            let _ = self.service.register_font(data);
         }
         #[cfg(feature = "fonts-cjk-kr")]
         {
             let data = include_bytes!("../fonts/NotoSansKR-VariableFont_wght.ttf");
-            let _ = self.typesetter.register_font(data);
+            let _ = self.service.register_font(data);
         }
     }
 
-    /// Set the default font and size.
+    /// Set the default font and size. Forwards to the shared
+    /// [`TextFontService`].
     pub fn set_default_font(&mut self, face_id: FontFaceId, size_px: f32) {
-        self.typesetter.set_default_font(face_id, size_px);
+        self.service.set_default_font(face_id, size_px);
         self.default_font = Some(face_id);
     }
 
     /// Get atlas information for GPU upload.
-    /// Only advances the glyph cache generation and runs eviction when
-    /// text work happened since the last call — this prevents aging out
-    /// glyphs that are still visible but cached (idle app scenario).
+    ///
+    /// Only advances the glyph cache generation and runs eviction
+    /// when text work happened since the last call — this prevents
+    /// aging out glyphs that are still visible but cached (idle
+    /// app scenario).
     pub fn atlas_info(&mut self) -> AtlasInfo {
-        let (dirty, width, height, pixels, glyphs_evicted) =
-            self.typesetter.atlas_snapshot(self.had_text_activity);
+        let snapshot = self.service.atlas_snapshot(self.had_text_activity);
         let rich_dirty = self.rich_text_atlas_dirty;
         self.rich_text_atlas_dirty = false;
         self.had_text_activity = false;
         AtlasInfo {
-            dirty: dirty || rich_dirty,
-            width,
-            height,
-            pixels: pixels.to_vec(),
-            glyphs_evicted,
+            dirty: snapshot.dirty || rich_dirty,
+            width: snapshot.width,
+            height: snapshot.height,
+            pixels: snapshot.pixels.to_vec(),
+            glyphs_evicted: snapshot.glyphs_evicted,
         }
     }
 
@@ -237,57 +255,39 @@ impl TypesetterBridge {
         self.glyph_cache.clear();
     }
 
-    /// Mutable access to the underlying `text_typeset::Typesetter`.
+    /// Borrow the underlying [`TextFontService`] immutably.
     ///
-    /// The bridge normally restricts itself to single-line layout for
-    /// labels and similar widgets. Rich-text consumers (the
-    /// `fern_text::RichTextEngine` used by the `RichTextEditor`
-    /// widget) need direct access to the typesetter's full-flow layout
-    /// and render methods, and must share the same instance the bridge
-    /// uses so glyphs end up in the same atlas fern-render uploads to
-    /// the GPU. Exposed behind `#[cfg(feature = "rich-text")]` so the
+    /// Rich-text widgets read this to shape and lay out against
+    /// the shared font registry without taking a mutable borrow.
+    pub fn service(&self) -> &TextFontService {
+        &self.service
+    }
+
+    /// Borrow the underlying [`TextFontService`] mutably.
+    ///
+    /// Rich-text widgets (`fern_text::RichTextEngine` driving the
+    /// `RichTextEditor` widget) keep their own `DocumentFlow` and
+    /// call `flow.layout_full(&bridge.service, ...)` +
+    /// `flow.render(&mut bridge.service, ...)` through this
+    /// accessor, so every widget's glyphs land in the same GPU
+    /// atlas. Marks the atlas as dirty for the next
+    /// [`atlas_info`](Self::atlas_info) call.
+    ///
+    /// Exposed behind `#[cfg(feature = "rich-text")]` so the
     /// default feature set keeps a minimal public surface.
     #[cfg(feature = "rich-text")]
-    pub fn typesetter_mut(&mut self) -> &mut Typesetter {
+    pub fn service_mut(&mut self) -> &mut TextFontService {
         self.had_text_activity = true;
         self.rich_text_atlas_dirty = true;
-        &mut self.typesetter
-    }
-
-    /// Immutable read-only queries on the inner typesetter, used by
-    /// `RichTextEngine` for zoom / content-size getters that must not
-    /// mark the bridge dirty. Kept alongside `typesetter_mut` under
-    /// the `rich-text` feature.
-    #[cfg(feature = "rich-text")]
-    pub fn typesetter_zoom_readonly(&self) -> f32 {
-        self.typesetter.zoom()
-    }
-
-    #[cfg(feature = "rich-text")]
-    pub fn typesetter_layout_width_readonly(&self) -> f32 {
-        self.typesetter.layout_width()
-    }
-
-    #[cfg(feature = "rich-text")]
-    pub fn typesetter_content_height_readonly(&self) -> f32 {
-        self.typesetter.content_height()
-    }
-
-    #[cfg(feature = "rich-text")]
-    pub fn typesetter_max_content_width_readonly(&self) -> f32 {
-        self.typesetter.max_content_width()
+        &mut self.service
     }
 
     /// Current HiDPI display scale factor as last set by
-    /// `TextBackend::set_scale_factor`. The rich-text engine reads
-    /// this on every `layout_full` so glyph rasterization stays
-    /// crisp on HiDPI displays — the widget itself never needs to
-    /// know about it, exactly like `TextWidget`'s label path where
-    /// `layout_single_line` pre-multiplies the font size by
-    /// `self.scale_factor` internally.
+    /// [`TextBackend::set_scale_factor`]. Reads through to the
+    /// shared [`TextFontService`].
     #[cfg(feature = "rich-text")]
     pub fn display_scale_factor(&self) -> f32 {
-        self.scale_factor
+        self.service.scale_factor()
     }
 }
 
@@ -299,15 +299,13 @@ impl Default for TypesetterBridge {
 
 impl TextBackend for TypesetterBridge {
     fn set_scale_factor(&mut self, scale_factor: f32) {
-        if (self.scale_factor - scale_factor).abs() > 0.001 {
-            self.scale_factor = scale_factor;
-            // text-typeset now owns the pre-scale: forward the new
-            // value and let it clear its own caches. Our layout /
-            // glyph caches still need to be dropped because they
-            // key off the scale factor (and the typesetter itself
-            // has evicted every rasterized glyph, so any cached
-            // atlas coords are now stale).
-            self.typesetter.set_scale_factor(scale_factor);
+        if (self.service.scale_factor() - scale_factor).abs() > 0.001 {
+            // Push the new factor to the shared service. The
+            // service clears its glyph cache and atlas in place
+            // and bumps its `scale_generation`. Our own layout +
+            // glyph caches still need to drop because they key
+            // on the scale factor.
+            self.service.set_scale_factor(scale_factor);
             self.layout_cache.clear();
             self.glyph_cache.clear();
         }
@@ -319,20 +317,20 @@ impl TextBackend for TypesetterBridge {
         style: &TextStyle,
         max_width: Option<f32>,
     ) -> TextLayout {
-        let cache_key = LayoutCacheKey::new_single_line(text, style, max_width, self.scale_factor);
+        let cache_key = LayoutCacheKey::new_single_line(text, style, max_width, self.service.scale_factor());
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
         }
 
-        // Full shaping on cache miss. text-typeset handles the
-        // scale-factor pre-multiply internally now, so the caller
-        // supplies logical font sizes and gets logical metrics back.
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
-        let result: SingleLineResult =
-            self.typesetter
-                .layout_single_line(text, &format, max_width);
+        let result: SingleLineResult = self.label_flow.layout_single_line(
+            &mut self.service,
+            text,
+            &format,
+            max_width,
+        );
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -344,6 +342,7 @@ impl TextBackend for TypesetterBridge {
             descent: result.height - result.baseline,
             layout_key: key,
             line_count: 1,
+            spans: Vec::new(),
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
@@ -370,7 +369,7 @@ impl TextBackend for TypesetterBridge {
         max_lines: Option<usize>,
     ) -> TextLayout {
         let cache_key =
-            LayoutCacheKey::new_paragraph(text, style, max_width, max_lines, self.scale_factor);
+            LayoutCacheKey::new_paragraph(text, style, max_width, max_lines, self.service.scale_factor());
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -378,9 +377,13 @@ impl TextBackend for TypesetterBridge {
 
         self.had_text_activity = true;
         let format = Self::to_text_format(style);
-        let result: ParagraphResult =
-            self.typesetter
-                .layout_paragraph(text, &format, max_width, max_lines);
+        let result: ParagraphResult = self.label_flow.layout_paragraph(
+            &mut self.service,
+            text,
+            &format,
+            max_width,
+            max_lines,
+        );
 
         let key = self.next_layout_key;
         self.next_layout_key += 1;
@@ -392,9 +395,153 @@ impl TextBackend for TypesetterBridge {
             descent: (result.height - result.baseline_first).max(0.0),
             layout_key: key,
             line_count: result.line_count.max(1),
+            spans: Vec::new(),
         };
 
         self.layout_cache.insert(cache_key.clone(), layout.clone());
+        self.glyph_cache.insert(
+            key,
+            result
+                .glyphs
+                .iter()
+                .map(|g| GlyphQuad {
+                    screen: g.screen,
+                    atlas: g.atlas,
+                    color: g.color,
+                })
+                .collect(),
+        );
+        layout
+    }
+
+    fn layout_single_line_markup(
+        &mut self,
+        source: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+    ) -> TextLayout {
+        let cache_key = LayoutCacheKey {
+            text: source.to_string(),
+            font_family: style.family.clone(),
+            font_size_bits: (style.size * self.service.scale_factor()).to_bits(),
+            font_weight: style.weight.0 as u32,
+            max_width_bits: max_width.map(|w| (w * self.service.scale_factor()).to_bits()),
+            mode: LayoutMode::SingleLineMarkup,
+        };
+        if let Some(cached) = self.layout_cache.get(&cache_key) {
+            return cached.clone();
+        }
+
+        self.had_text_activity = true;
+        let format = Self::to_text_format(style);
+        let tt_markup = InlineMarkup::parse(source);
+        let result: SingleLineResult = self.label_flow.layout_single_line_markup(
+            &mut self.service,
+            &tt_markup,
+            &format,
+            max_width,
+        );
+
+        let key = self.next_layout_key;
+        self.next_layout_key += 1;
+
+        let layout = TextLayout {
+            width: result.width,
+            height: result.height,
+            ascent: result.baseline,
+            descent: (result.height - result.baseline).max(0.0),
+            layout_key: key,
+            line_count: 1,
+            spans: result
+                .spans
+                .iter()
+                .map(|s| TextLayoutSpan {
+                    kind: match &s.kind {
+                        LaidOutSpanKind::Text => TextSpanKind::Text,
+                        LaidOutSpanKind::Link { url } => TextSpanKind::Link { url: url.clone() },
+                    },
+                    line_index: s.line_index,
+                    rect: s.rect,
+                    byte_range: s.byte_range.clone(),
+                })
+                .collect(),
+        };
+
+        self.layout_cache.insert(cache_key, layout.clone());
+        self.glyph_cache.insert(
+            key,
+            result
+                .glyphs
+                .iter()
+                .map(|g| GlyphQuad {
+                    screen: g.screen,
+                    atlas: g.atlas,
+                    color: g.color,
+                })
+                .collect(),
+        );
+        layout
+    }
+
+    fn layout_paragraph_markup(
+        &mut self,
+        source: &str,
+        style: &TextStyle,
+        max_width: f32,
+        max_lines: Option<usize>,
+    ) -> TextLayout {
+        let cap = max_lines
+            .map(|n| n.min(u32::MAX as usize) as u32)
+            .unwrap_or(u32::MAX);
+        let cache_key = LayoutCacheKey {
+            text: source.to_string(),
+            font_family: style.family.clone(),
+            font_size_bits: (style.size * self.service.scale_factor()).to_bits(),
+            font_weight: style.weight.0 as u32,
+            max_width_bits: Some((max_width * self.service.scale_factor()).to_bits()),
+            mode: LayoutMode::ParagraphMarkup(cap),
+        };
+        if let Some(cached) = self.layout_cache.get(&cache_key) {
+            return cached.clone();
+        }
+
+        self.had_text_activity = true;
+        let format = Self::to_text_format(style);
+        let tt_markup = InlineMarkup::parse(source);
+        let result: ParagraphResult = self.label_flow.layout_paragraph_markup(
+            &mut self.service,
+            &tt_markup,
+            &format,
+            max_width,
+            max_lines,
+        );
+
+        let key = self.next_layout_key;
+        self.next_layout_key += 1;
+
+        let layout = TextLayout {
+            width: result.width,
+            height: result.height,
+            ascent: result.baseline_first,
+            descent: (result.height - result.baseline_first).max(0.0),
+            layout_key: key,
+            line_count: result.line_count.max(1),
+            spans: result
+                .spans
+                .iter()
+                .map(|s| TextLayoutSpan {
+                    kind: match &s.kind {
+                        LaidOutSpanKind::Text => TextSpanKind::Text,
+                        LaidOutSpanKind::Link { url } => TextSpanKind::Link { url: url.clone() },
+                    },
+                    line_index: s.line_index,
+                    rect: s.rect,
+                    byte_range: s.byte_range.clone(),
+                })
+                .collect(),
+        };
+
+        self.layout_cache.insert(cache_key, layout.clone());
         self.glyph_cache.insert(
             key,
             result
@@ -417,6 +564,7 @@ impl TextBackend for TypesetterBridge {
             .unwrap_or_default()
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -495,9 +643,6 @@ mod tests {
             !glyphs.is_empty(),
             "Arabic text should produce at least one glyph"
         );
-        // A `.notdef` glyph has atlas dimensions of exactly 0.0 (the
-        // rasterizer produces an empty rect for missing outlines).
-        // A real shaped glyph has positive atlas width AND height.
         let visible = glyphs
             .iter()
             .any(|g| g.atlas[2] > 0.0 && g.atlas[3] > 0.0);
@@ -509,27 +654,14 @@ mod tests {
         );
     }
 
-    /// Regression test for a text-typeset bidi bug: Latin text embedded in
-    /// an Arabic string must not be visually reversed.
-    ///
-    /// Before the fix, `layout_single_line` passed the whole string to
-    /// rustybuzz as one run with `Direction::Auto`. rustybuzz inferred RTL
-    /// from the first strong Arabic char and reversed the entire buffer,
-    /// so "Alice" embedded in an Arabic string rendered as "ecilA".
-    ///
-    /// After the fix, the layout path splits text into UAX #9 bidi runs
-    /// in visual order and shapes each run with an explicit direction.
-    ///
-    /// This test shapes "Alice" on its own and "مرحبا Alice" together,
-    /// then asserts the Latin glyphs in the mixed string appear in the
-    /// same left-to-right order as the pure-Latin layout.
+    /// Regression test for a text-typeset bidi bug: Latin text
+    /// embedded in an Arabic string must not be visually reversed.
     #[cfg(feature = "fonts-arabic")]
     #[test]
     fn latin_in_arabic_is_not_visually_reversed() {
         let mut bridge = TypesetterBridge::new_with_default_font();
         let style = TextStyle::default();
 
-        // Reference: pure-Latin "Alice" in LTR order.
         let pure = bridge.layout_single_line("Alice", &style, None);
         let pure_glyphs = bridge.ensure_glyphs(&pure);
         assert_eq!(
@@ -540,9 +672,6 @@ mod tests {
         );
         let pure_widths: Vec<f32> = pure_glyphs.iter().map(|g| g.screen[2]).collect();
 
-        // Arabic-first mixed string: paragraph direction is RTL, so under
-        // UAX #9 the Latin embedding ends up visually to the LEFT of the
-        // Arabic. Its internal order must still be LTR (A, l, i, c, e).
         let mixed = bridge.layout_single_line("مرحبا Alice", &style, None);
         let mixed_glyphs = bridge.ensure_glyphs(&mixed);
         assert!(
@@ -550,8 +679,6 @@ mod tests {
             "mixed layout should contain at least the Latin glyphs plus Arabic"
         );
 
-        // The first 5 glyphs in visual order should be the Latin cluster
-        // (leftmost in RTL paragraph). Their widths must match "Alice".
         for (i, (pw, mg)) in pure_widths.iter().zip(mixed_glyphs.iter()).take(5).enumerate() {
             let mw = mg.screen[2];
             assert!(
@@ -565,10 +692,6 @@ mod tests {
         }
     }
 
-    /// Hebrew mirrors the Arabic test — verifies that the
-    /// `fonts-hebrew` default feature actually registers the Noto
-    /// Sans Hebrew font and that the shaper's codepoint fallback
-    /// picks it up.
     #[cfg(feature = "fonts-hebrew")]
     #[test]
     fn hebrew_text_renders_with_visible_glyphs() {
@@ -619,30 +742,25 @@ mod tests {
         let mut bridge = TypesetterBridge::new_with_default_font();
         let wide = bridge.layout_single_line("Hello World", &TextStyle::default(), None);
         let narrow = bridge.layout_single_line("Hello World", &TextStyle::default(), Some(30.0));
-        // They should differ (narrow is constrained)
         assert!(narrow.width < wide.width || narrow.width <= 31.0);
     }
 
-    /// Reproduces the stale-glyph bug: after a layout pass (many layout_single_line
-    /// calls without ensure_glyphs), the first paint call's ensure_glyphs should
-    /// return glyphs for the correct text, not for whatever was last measured.
+    /// Reproduces the stale-glyph bug: after a layout pass (many
+    /// layout_single_line calls without ensure_glyphs), the first
+    /// paint call's ensure_glyphs should return glyphs for the
+    /// correct text, not for whatever was last measured.
     #[test]
     fn ensure_glyphs_after_layout_pass_returns_correct_text() {
         let mut bridge = TypesetterBridge::new_with_default_font();
         let style = TextStyle::default();
 
-        // Simulate layout pass: measure several texts (no ensure_glyphs calls)
         let _l1 = bridge.layout_single_line("First text", &style, None);
         let _l2 = bridge.layout_single_line("Second text", &style, None);
         let _l3 = bridge.layout_single_line("Third text is the last measured", &style, None);
 
-        // Simulate paint for the FIRST text: layout_single_line + ensure_glyphs
         let layout = bridge.layout_single_line("First text", &style, None);
         let glyphs = bridge.ensure_glyphs(&layout);
 
-        // "First text" has 10 characters → should produce ~10 glyphs
-        // "Third text is the last measured" has 31 chars → ~31 glyphs
-        // If we get ~31 glyphs, the bug is present (stale last_result)
         assert!(!glyphs.is_empty(), "should produce glyphs for 'First text'");
         assert!(
             glyphs.len() <= 15,

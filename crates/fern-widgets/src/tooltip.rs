@@ -4,6 +4,20 @@
 //! `TooltipAttachment` stores the tooltip state and is processed by
 //! the tree during event dispatch.
 
+pub mod attach;
+pub(crate) mod dwell_indicator;
+pub mod registry;
+pub mod rich;
+
+pub use attach::{
+    attach_rich_tooltip, attach_rich_tooltip_content, attach_rich_tooltip_source,
+    RichTooltipSource, DEFAULT_RICH_TOOLTIP_DELAY,
+};
+pub use registry::{
+    install_tooltip_registry, with_tooltip_registry, TooltipContent, TooltipRegistry,
+};
+pub use rich::RichTooltipWidget;
+
 use std::time::{Duration, Instant};
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};

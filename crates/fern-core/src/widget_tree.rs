@@ -160,6 +160,28 @@ struct TooltipEntry {
     /// Real hover start (for windowed apps via layout).
     real_hover_start: Option<std::time::Instant>,
     overlay_id: Option<crate::overlay::OverlayId>,
+    /// When set, the tooltip auto-promotes to "sticky" after this
+    /// much elapsed time since it was shown. The entry stays in the
+    /// table and is just flagged sticky — the difference is that
+    /// pointer-leave no longer dismisses it and the overlay's
+    /// dismiss behavior is swapped to `EscapeOrClickOutside`.
+    sticky_after: Option<std::time::Duration>,
+    /// True when the dwell timer reached `sticky_after`. Causes
+    /// `tooltip_pointer_leave` to skip the dismissal and lets the
+    /// overlay survive pointer-leave until the user explicitly
+    /// dismisses it via Escape or a click outside.
+    is_sticky: bool,
+    /// When the overlay was shown (simulated). Together with
+    /// `sticky_after` drives auto-promotion.
+    shown_at_sim: Option<std::time::Instant>,
+    /// When the overlay was shown (real).
+    shown_at_real: Option<std::time::Instant>,
+    /// Optional shared sink the tooltip widget can read from to
+    /// compute its own dwell progress. Mirrors `shown_at_real`:
+    /// set on show, cleared on dismissal. Used by `RichTooltipWidget`
+    /// to drive the dwell indicator without relying on a fragile
+    /// paint-gap heuristic.
+    shown_at_sink: Option<std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>>,
 }
 
 /// A delayed overlay request (e.g., submenu hover-open delay).

@@ -537,6 +537,21 @@ impl OverlayManager {
             .find(|o| o.content_id == content_id)
             .map(|o| o.id)
     }
+
+    /// Change the dismiss behavior of an active overlay in place.
+    ///
+    /// Used by rich tooltips that promote from "ephemeral hover" to
+    /// "sticky panel" after a dwell timer: at t=2s the tooltip calls
+    /// this to swap `PointerLeave` for `EscapeOrClickOutside`, so the
+    /// overlay stops vanishing the moment the pointer leaves the
+    /// anchor. Also cancels any in-flight pointer-leave countdown.
+    pub fn set_dismiss(&mut self, id: OverlayId, behavior: DismissBehavior) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
+            overlay.dismiss = behavior;
+            overlay.pointer_leave_started_real = None;
+            overlay.pointer_leave_started_sim = None;
+        }
+    }
 }
 
 impl Default for OverlayManager {

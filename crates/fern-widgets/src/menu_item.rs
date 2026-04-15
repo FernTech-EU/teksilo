@@ -51,6 +51,7 @@ pub struct MenuItem {
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
     tooltip_text: Option<String>,
+    rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     action: Option<CommandFactory>,
     /// Type-erased command for automatic shortcut label lookup via ShortcutMap.
     command_any: Option<Box<dyn std::any::Any>>,
@@ -71,6 +72,7 @@ impl MenuItem {
             icon: None,
             shortcut_label: None,
             tooltip_text: None,
+            rich_tooltip_source: None,
             action: None,
             command_any: None,
             enabled: true,
@@ -148,6 +150,7 @@ impl MenuItem {
     pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = text.into();
         self.tooltip_text = Some(ls.resolve_now());
+        self.rich_tooltip_source = None;
         self
     }
 
@@ -155,6 +158,24 @@ impl MenuItem {
     #[doc(hidden)]
     pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
         self.tooltip_text = Some(text.into());
+        self.rich_tooltip_source = None;
+        self
+    }
+
+    /// Attach a rich tooltip resolved from the app-wide tooltip
+    /// registry. Body text supports inline markup
+    /// (`[label](url)`, `*italic*`, `**bold**`); the entry's shortcut
+    /// and long-form "more" fields are rendered automatically.
+    pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Key(key.into()));
+        self.tooltip_text = None;
+        self
+    }
+
+    /// Attach a rich tooltip driven by inline `TooltipContent`.
+    pub fn rich_tooltip_content(mut self, content: crate::tooltip::TooltipContent) -> Self {
+        self.rich_tooltip_source = Some(crate::tooltip::RichTooltipSource::Content(content));
+        self.tooltip_text = None;
         self
     }
 
@@ -171,6 +192,7 @@ impl MenuItem {
             icon: None,
             shortcut_label: None,
             tooltip_text: None,
+            rich_tooltip_source: None,
             action: None,
             command_any: None,
             enabled: true,
@@ -418,7 +440,16 @@ impl Widget for MenuItem {
         self.root_child_id = Some(root_id);
 
         // Attach tooltip if configured. Same 500ms delay as Button.
-        if let Some(ref tooltip_text) = self.tooltip_text {
+        // Rich-tooltip source takes precedence — setters clear the
+        // other field, so at most one branch runs.
+        if let Some(source) = self.rich_tooltip_source.take() {
+            crate::tooltip::attach_rich_tooltip_source(
+                ctx,
+                root_id,
+                source,
+                crate::tooltip::DEFAULT_RICH_TOOLTIP_DELAY,
+            );
+        } else if let Some(ref tooltip_text) = self.tooltip_text {
             let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
             let delay = std::time::Duration::from_millis(500);

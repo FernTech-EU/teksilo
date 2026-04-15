@@ -160,6 +160,52 @@ impl<'a> BuildContext<'a> {
         self.tree.attach_tooltip(anchor_id, content_id, delay);
     }
 
+    /// Attach a tooltip that auto-promotes to sticky after a dwell
+    /// timer. Non-None `sticky_after` enables the sticky-on-dwell UX:
+    /// once the tooltip has been shown for `sticky_after`, the tree
+    /// flags the entry sticky and swaps the overlay's dismiss
+    /// behavior to `EscapeOrClickOutside`.
+    pub fn attach_tooltip_with_sticky(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        sticky_after: Option<std::time::Duration>,
+    ) {
+        self.tree
+            .attach_tooltip_with_sticky(anchor_id, content_id, delay, sticky_after);
+    }
+
+    /// Variant of [`attach_tooltip_with_sticky`](Self::attach_tooltip_with_sticky)
+    /// that takes a shared `Rc<Cell<Option<Instant>>>` "sink" the
+    /// tree updates whenever the tooltip is shown / dismissed. The
+    /// tooltip widget reads from this sink to compute its own dwell
+    /// progress reliably, without needing a paint-gap heuristic.
+    pub fn attach_tooltip_with_sticky_sink(
+        &mut self,
+        anchor_id: WidgetId,
+        content_id: WidgetId,
+        delay: std::time::Duration,
+        sticky_after: Option<std::time::Duration>,
+        shown_at_sink: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
+    ) {
+        self.tree.attach_tooltip_with_sticky_sink(
+            anchor_id,
+            content_id,
+            delay,
+            sticky_after,
+            shown_at_sink,
+        );
+    }
+
+    /// Promote a shown tooltip to "sticky": removes its auto-dismiss
+    /// on pointer-leave and swaps the overlay's dismiss behavior to
+    /// `EscapeOrClickOutside`. Used by rich tooltips that implement a
+    /// dwell timer.
+    pub fn promote_tooltip_to_sticky(&mut self, content_id: WidgetId) {
+        self.tree.promote_tooltip_to_sticky(content_id);
+    }
+
     /// Set a widget as dormant (inactive). Used to pre-create overlay content
     /// that will be activated later via `EventContext::activate()`.
     pub fn set_dormant(&mut self, id: WidgetId) {

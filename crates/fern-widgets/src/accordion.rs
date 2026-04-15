@@ -17,6 +17,8 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
 
+use fern_tokens::{Color, TextStyle};
+
 use crate::primitives::{HStack, IconWidget, MaxSize, Spacer, TextWidget, VStack};
 
 /// Large enough to never clip content when fully expanded.
@@ -32,6 +34,15 @@ pub struct Accordion {
     pending_content: Option<Box<dyn Widget>>,
     content_height: Option<Signal<f32>>,
     root_child_id: Option<WidgetId>,
+    /// Optional override for the header foreground color (title text +
+    /// chevron icon). When `None`, the accordion uses
+    /// `theme.colors.text_primary`. Set this when the accordion is
+    /// embedded inside a surface that uses a non-standard text color
+    /// (rich tooltip, dark snackbar, etc.).
+    title_color: Option<Color>,
+    /// Optional override for the header title's text style. Defaults
+    /// to `theme.typography.body` when `None`.
+    title_style: Option<TextStyle>,
 }
 
 impl Accordion {
@@ -44,7 +55,24 @@ impl Accordion {
             pending_content: None,
             content_height: None,
             root_child_id: None,
+            title_color: None,
+            title_style: None,
         }
+    }
+
+    /// Override the header foreground color used for the title text and
+    /// chevron icon. Defaults to `theme.colors.text_primary`.
+    pub fn title_color(mut self, color: Color) -> Self {
+        self.title_color = Some(color);
+        self
+    }
+
+    /// Override the header title's `TextStyle`. Use this to make the
+    /// disclosure label smaller (e.g. inside a tooltip) or to match
+    /// a non-body typography role.
+    pub fn title_style(mut self, style: TextStyle) -> Self {
+        self.title_style = Some(style);
+        self
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
@@ -88,18 +116,25 @@ impl Widget for Accordion {
         // Keyboard focus state for focus ring
         let kb_focused = ctx.signal(false);
 
+        // Header foreground: caller override, otherwise theme primary.
+        let header_fg = self.title_color.unwrap_or(theme.colors.text_primary);
+
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
         let chevron_down_id =
-            ctx.add(IconWidget::chevron_down(16.0).color(theme.colors.text_primary));
+            ctx.add(IconWidget::chevron_down(16.0).color(header_fg));
         let chevron_right_id =
-            ctx.add(IconWidget::chevron_right(16.0).color(theme.colors.text_primary));
+            ctx.add(IconWidget::chevron_right(16.0).color(header_fg));
         ctx.visible_when(chevron_down_id, expanded.clone());
         ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
+        let title_style = self
+            .title_style
+            .clone()
+            .unwrap_or_else(|| theme.typography.body.clone());
         let title_widget = TextWidget::new_literal(&self.title)
-            .style(theme.typography.body.clone())
-            .color(theme.colors.text_primary)
+            .style(title_style)
+            .color(header_fg)
             .single_line();
         let title_id = ctx.add(title_widget);
         let spacer_id = ctx.add(Spacer::new());
@@ -124,7 +159,14 @@ impl Widget for Accordion {
             .spacing(2.0)
             .add_child(header_with_ring);
         if let Some(content_id) = self.content_id {
-            // Wrap content in MaxSize with animated height for smooth expand/collapse
+            // Wrap content in MaxSize with animated height for smooth expand/collapse.
+            // Width is also constrained to a derived signal so the
+            // collapsed wrapper claims **zero** width — without this,
+            // `size_that_fits` pass-through would let the content's
+            // natural single-line width through, ballooning the
+            // accordion's intrinsic width and pushing siblings (e.g.
+            // a sibling dwell indicator inside a tooltip footer) off
+            // the available row.
             let initial_height = if is_expanded {
                 EXPANDED_MAX_HEIGHT
             } else {
@@ -133,8 +175,16 @@ impl Widget for Accordion {
             let height_state = ctx.animated_signal(initial_height);
             self.content_height = Some(height_state.clone());
 
+            // f32::MAX when expanded, 0 when collapsed. Derived from
+            // the same `expanded` signal so the two states stay in
+            // sync without a second observer.
+            let width_state = self
+                .expanded
+                .map(|e| if *e { f32::MAX } else { 0.0 });
+
             let wrapper = ctx.add(
                 MaxSize::new(f32::MAX, EXPANDED_MAX_HEIGHT)
+                    .bind_max_width(width_state)
                     .bind_max_height(height_state)
                     .set_child(content_id),
             );

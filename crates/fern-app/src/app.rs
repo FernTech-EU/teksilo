@@ -980,6 +980,11 @@ pub struct FernAppBuilder {
     /// `build_headless` / `run` time and registered on the thread-local so
     /// `tr!`-expanded code can resolve translations.
     i18n: Option<I18nConfig>,
+    /// Tooltip content entries registered via
+    /// [`register_tooltips`](Self::register_tooltips). Frozen into a
+    /// thread-local registry in `run` / `build_headless` before the
+    /// first frame builds.
+    tooltip_contents: Vec<fern_widgets::tooltip::TooltipContent>,
 }
 
 impl FernAppBuilder {
@@ -1001,7 +1006,43 @@ impl FernAppBuilder {
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
+            tooltip_contents: Vec::new(),
         }
+    }
+
+    /// Register the application's tooltip string catalog.
+    ///
+    /// Each [`TooltipContent`](fern_widgets::tooltip::TooltipContent)
+    /// in the list maps a short stable key (referenced from inline
+    /// markup as `[label](:key)`) to a translatable body, an optional
+    /// long-form "more" body revealed by the Accordion disclosure
+    /// inside a sticky rich tooltip, and an optional keyboard shortcut
+    /// (either as a literal label or bound to an [`AppCommand`] whose
+    /// current binding is looked up in the live `ShortcutMap` at
+    /// render time).
+    ///
+    /// This is a **single-call registration**: the list is the
+    /// application's complete tooltip catalog. Call once at app boot,
+    /// before `run()`. Calling multiple times panics in debug builds.
+    ///
+    /// ```ignore
+    /// use fern_widgets::tooltip::TooltipContent;
+    ///
+    /// FernAppBuilder::new()
+    ///     .register_tooltips(vec![
+    ///         TooltipContent::new("save-as", tr!(save_as_tooltip))
+    ///             .with_command(MyCmd::SaveAs),
+    ///         TooltipContent::new("autosave", tr!(autosave_tooltip))
+    ///             .with_more(tr!(autosave_tooltip_more)),
+    ///     ])
+    ///     // …
+    /// ```
+    pub fn register_tooltips(
+        mut self,
+        contents: Vec<fern_widgets::tooltip::TooltipContent>,
+    ) -> Self {
+        self.tooltip_contents = contents;
+        self
     }
 
     /// Register a backend event source (architecture §9.4). Widgets can
@@ -1125,6 +1166,15 @@ impl FernAppBuilder {
 
     /// Build a headless app for testing (no window, no GPU).
     pub fn build_headless(mut self) -> HeadlessApp {
+        // Install the tooltip registry before anything else — widgets
+        // that read from it during their first build (e.g. rich
+        // tooltips looking up their :key) need it available.
+        if !self.tooltip_contents.is_empty() {
+            fern_widgets::tooltip::install_tooltip_registry(std::mem::take(
+                &mut self.tooltip_contents,
+            ));
+        }
+
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
 
         #[cfg(feature = "text")]
@@ -1174,6 +1224,15 @@ impl FernAppBuilder {
 
     /// Build and run the application with windowed rendering.
     pub fn run(mut self) {
+        // Install the tooltip registry before the window manager
+        // starts building trees — rich tooltips read from it during
+        // their first build.
+        if !self.tooltip_contents.is_empty() {
+            fern_widgets::tooltip::install_tooltip_registry(std::mem::take(
+                &mut self.tooltip_contents,
+            ));
+        }
+
         // Construct the i18n manager (if configured) and install it on
         // the thread-local before any window or widget tree is created.
         // `WindowManager::create_window` seeds every new tree from the

@@ -364,6 +364,21 @@ impl WidgetArena {
         }
     }
 
+    /// Recursively mark a widget and all its descendants needs_paint.
+    /// Used by callers that want a fresh paint of an entire subtree
+    /// — e.g. a rich tooltip whose dwell indicator child would
+    /// otherwise reuse its cached_paint while the parent re-runs
+    /// some per-frame logic.
+    pub fn mark_subtree_needs_paint(&mut self, id: WidgetId) {
+        if let Some(node) = self.nodes.get_mut(id) {
+            node.dirty.needs_paint = true;
+        }
+        let children: Vec<WidgetId> = self.children(id).to_vec();
+        for child in children {
+            self.mark_subtree_needs_paint(child);
+        }
+    }
+
     pub fn mark_needs_layout(&mut self, id: WidgetId) {
         if let Some(node) = self.nodes.get_mut(id) {
             node.dirty.needs_layout = true;
