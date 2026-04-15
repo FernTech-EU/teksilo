@@ -121,8 +121,16 @@ pub struct GlyphQuad {
     pub screen: [f32; 4],
     /// Atlas position and size: [x, y, width, height] in atlas texture coordinates.
     pub atlas: [f32; 4],
-    /// Text color: [r, g, b, a].
+    /// Glyph color: [r, g, b, a]. For monochrome glyphs this is the text
+    /// tint. For color emoji it is `[1, 1, 1, 1]` — the atlas region
+    /// already holds the pre-multiplied RGBA bitmap, so the renderer
+    /// samples `texture.rgb` directly.
     pub color: [f32; 4],
+    /// `true` if the atlas region holds a pre-multiplied RGBA color
+    /// bitmap (color emoji via COLR/CBDT/sbix). When set, the renderer
+    /// must sample `texture.rgb` instead of using the texture as an
+    /// alpha mask.
+    pub is_color: bool,
 }
 
 /// An image quad to render as a textured rectangle.

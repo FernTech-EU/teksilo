@@ -446,13 +446,21 @@ impl Canvas {
         );
     }
 
-    /// Draw a border on the leading (left in LTR) edge of a rectangle.
-    pub fn draw_border_leading(&mut self, rect: Rect, color: Color, width: f32) {
+    /// Draw a border on the left edge of a rectangle.
+    ///
+    /// This is a direction-agnostic primitive. Widgets that need RTL-aware
+    /// borders must resolve leading/trailing into left/right themselves
+    /// before calling this.
+    pub fn draw_border_left(&mut self, rect: Rect, color: Color, width: f32) {
         self.fill_rect(Rect::new(rect.x, rect.y, width, rect.height), color);
     }
 
-    /// Draw a border on the trailing (right in LTR) edge of a rectangle.
-    pub fn draw_border_trailing(&mut self, rect: Rect, color: Color, width: f32) {
+    /// Draw a border on the right edge of a rectangle.
+    ///
+    /// This is a direction-agnostic primitive. Widgets that need RTL-aware
+    /// borders must resolve leading/trailing into left/right themselves
+    /// before calling this.
+    pub fn draw_border_right(&mut self, rect: Rect, color: Color, width: f32) {
         self.fill_rect(
             Rect::new(rect.right() - width, rect.y, width, rect.height),
             color,
@@ -460,14 +468,17 @@ impl Canvas {
     }
 
     /// Draw borders on all four sides with independent widths.
+    ///
+    /// Parameters are direction-agnostic (`left`/`right`, not leading/trailing).
+    /// Widgets that need RTL-aware borders must swap left/right themselves.
     pub fn draw_border(
         &mut self,
         rect: Rect,
         color: Color,
         top: f32,
-        trailing: f32,
+        right: f32,
         bottom: f32,
-        leading: f32,
+        left: f32,
     ) {
         if top > 0.0 {
             self.draw_border_top(rect, color, top);
@@ -475,20 +486,32 @@ impl Canvas {
         if bottom > 0.0 {
             self.draw_border_bottom(rect, color, bottom);
         }
-        if leading > 0.0 {
-            self.draw_border_leading(rect, color, leading);
+        if left > 0.0 {
+            self.draw_border_left(rect, color, left);
         }
-        if trailing > 0.0 {
-            self.draw_border_trailing(rect, color, trailing);
+        if right > 0.0 {
+            self.draw_border_right(rect, color, right);
         }
     }
 
     // --- Text decoration helpers ---
 
     /// Draw an underline below text at the given baseline.
-    pub fn draw_underline(&mut self, rect: Rect, baseline_y: f32, color: Color, width: f32) {
-        let y = rect.y + baseline_y + 2.0; // 2px below baseline
-        self.fill_rect(Rect::new(rect.x, y, rect.width, width), color);
+    ///
+    /// `offset` is the distance from baseline to the top of the underline
+    /// (positive = below baseline), typically sourced from font metrics via
+    /// [`TextLayout::underline_offset`](crate::TextLayout). `thickness` is
+    /// the line height in logical pixels.
+    pub fn draw_underline(
+        &mut self,
+        rect: Rect,
+        baseline_y: f32,
+        offset: f32,
+        color: Color,
+        thickness: f32,
+    ) {
+        let y = rect.y + baseline_y + offset;
+        self.fill_rect(Rect::new(rect.x, y, rect.width, thickness), color);
     }
 
     /// Draw a strikethrough line through text.
@@ -840,6 +863,7 @@ mod tests {
             screen: [10.0, 20.0, 8.0, 16.0],
             atlas: [0.0, 0.0, 0.5, 0.5],
             color: [1.0, 1.0, 1.0, 1.0],
+            is_color: false,
         };
         canvas.append_glyphs(&[glyph]);
         let frame = canvas.into_render_frame();
@@ -976,6 +1000,8 @@ mod tests {
             height: 16.0,
             ascent: 12.0,
             descent: 4.0,
+            underline_offset: 2.0,
+            underline_thickness: 1.0,
             layout_key: 0,
             line_count: 1,
             spans: Vec::new(),
@@ -1162,7 +1188,7 @@ mod tests {
     #[test]
     fn draw_underline_produces_decoration() {
         let mut canvas = Canvas::new();
-        canvas.draw_underline(Rect::new(0.0, 0.0, 100.0, 20.0), 14.0, Color::BLACK, 1.0);
+        canvas.draw_underline(Rect::new(0.0, 0.0, 100.0, 20.0), 14.0, 2.0, Color::BLACK, 1.0);
         let frame = canvas.into_render_frame();
         assert_eq!(frame.decorations.len(), 1);
     }

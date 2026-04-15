@@ -92,6 +92,7 @@ fn paint_glyphs(canvas: &mut Canvas, glyphs: &[GlyphQuad], ox: f32, oy: f32) {
             screen: [g.screen[0] + ox, g.screen[1] + oy, g.screen[2], g.screen[3]],
             atlas: g.atlas,
             color: g.color,
+            is_color: g.is_color,
         };
         canvas.draw_glyph_quad(quad);
     }

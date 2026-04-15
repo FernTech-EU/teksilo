@@ -1,6 +1,7 @@
 pub mod image_manager;
 pub mod path_atlas;
 pub mod renderer;
+pub mod stream_buffer;
 pub mod test_support;
 pub mod vertex;
 

@@ -42,6 +42,13 @@ pub struct TextLayout {
     pub height: f32,
     pub ascent: f32,
     pub descent: f32,
+    /// Distance from baseline to the top of the underline, in logical pixels.
+    /// Positive = below the baseline. Sourced from the primary font's
+    /// `post` table via the underlying shaper.
+    pub underline_offset: f32,
+    /// Underline line thickness in logical pixels. Sourced from the
+    /// primary font's stroke size.
+    pub underline_thickness: f32,
     /// Opaque key for the backend to identify the cached layout.
     pub layout_key: u64,
     /// Number of lines (1 for single-line, ≥1 for paragraph).
@@ -217,6 +224,8 @@ impl TextBackend for MockTextBackend {
             height: self.line_height,
             ascent: self.line_height * 0.75,
             descent: self.line_height * 0.25,
+            underline_offset: 2.0,
+            underline_thickness: 1.0,
             layout_key: 0,
             line_count: 1,
             spans: Vec::new(),
@@ -237,6 +246,8 @@ impl TextBackend for MockTextBackend {
                 height: self.line_height,
                 ascent: self.line_height * 0.75,
                 descent: self.line_height * 0.25,
+                underline_offset: 2.0,
+                underline_thickness: 1.0,
                 layout_key: 0,
                 line_count: 1,
                 spans: Vec::new(),
@@ -281,6 +292,8 @@ impl TextBackend for MockTextBackend {
             height: line_count as f32 * self.line_height,
             ascent: self.line_height * 0.75,
             descent: self.line_height * 0.25,
+            underline_offset: 2.0,
+            underline_thickness: 1.0,
             layout_key: 0,
             line_count,
             spans: Vec::new(),
@@ -299,6 +312,7 @@ impl TextBackend for MockTextBackend {
                 screen: [i as f32 * 8.0, 0.0, 8.0, layout.height],
                 atlas: [0.0, 0.0, 8.0, layout.height],
                 color: [0.0, 0.0, 0.0, 1.0],
+                is_color: false,
             })
             .collect()
     }

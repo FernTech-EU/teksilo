@@ -26,6 +26,10 @@ pub fn srgb_to_linear_rgba(c: [f32; 4]) -> [f32; 4] {
     [srgb_to_linear(c[0]), srgb_to_linear(c[1]), srgb_to_linear(c[2]), c[3]]
 }
 
+/// Per-vertex flag: sample atlas `texture.rgb` directly (color emoji)
+/// instead of using the texture as an alpha mask tinted by vertex color.
+pub const QUAD_FLAG_COLOR_GLYPH: u32 = 1;
+
 /// Vertex for the textured quad pipeline (glyphs, images).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -33,6 +37,12 @@ pub struct QuadVertex {
     pub position: [f32; 2],
     pub tex_coord: [f32; 2],
     pub color: [f32; 4],
+    /// Per-vertex bitfield. Bit 0 ([`QUAD_FLAG_COLOR_GLYPH`]) selects the
+    /// color emoji path in the fragment shader.
+    pub flags: u32,
+    /// Padding so the struct stride stays a multiple of 8 bytes, matching
+    /// wgpu's vertex buffer layout expectations.
+    pub _pad: u32,
 }
 
 impl QuadVertex {
@@ -60,26 +70,45 @@ impl QuadVertex {
         let u1 = (ax + aw) / aw_f;
         let v1 = (ay + ah) / ah_f;
 
+        // Color emoji glyphs carry their RGB in the atlas bitmap. Mark
+        // them with a per-vertex flag so the fragment shader can sample
+        // `texture.rgb` directly instead of applying the alpha-mask path.
+        //
+        // The upstream color for color emoji is already `[1, 1, 1, 1]`
+        // (see text-typeset's `rasterize_glyph_quad`); srgb_to_linear
+        // leaves that unchanged, so the cached value still multiplies
+        // cleanly against the sampled RGB as an opacity factor.
+        let flags = if quad.is_color { QUAD_FLAG_COLOR_GLYPH } else { 0 };
+        let color = srgb_to_linear_rgba(quad.color);
+
         [
             QuadVertex {
                 position: [sx, sy],
                 tex_coord: [u0, v0],
-                color: srgb_to_linear_rgba(quad.color),
+                color,
+                flags,
+                _pad: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy],
                 tex_coord: [u1, v0],
-                color: srgb_to_linear_rgba(quad.color),
+                color,
+                flags,
+                _pad: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy + sh],
                 tex_coord: [u1, v1],
-                color: srgb_to_linear_rgba(quad.color),
+                color,
+                flags,
+                _pad: 0,
             },
             QuadVertex {
                 position: [sx, sy + sh],
                 tex_coord: [u0, v1],
-                color: srgb_to_linear_rgba(quad.color),
+                color,
+                flags,
+                _pad: 0,
             },
         ]
     }
@@ -402,6 +431,7 @@ mod tests {
             screen: [10.0, 20.0, 30.0, 40.0],
             atlas: [0.0, 0.0, 64.0, 64.0],
             color: [1.0, 1.0, 1.0, 1.0],
+            is_color: false,
         };
         let verts = QuadVertex::from_glyph_quad(&quad, 1.0, 256, 256);
         assert_eq!(verts.len(), 4);
@@ -419,6 +449,7 @@ mod tests {
             screen: [10.0, 20.0, 30.0, 40.0],
             atlas: [0.0, 0.0, 128.0, 128.0],
             color: [1.0, 1.0, 1.0, 1.0],
+            is_color: false,
         };
         let verts = QuadVertex::from_glyph_quad(&quad, 2.0, 256, 256);
         assert_eq!(verts[0].position, [20.0, 40.0]);

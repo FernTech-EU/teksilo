@@ -1,11 +1,11 @@
 use wgpu;
-use wgpu::util::DeviceExt;
 
 use fern_canvas::RenderFrame;
 use fern_canvas::geometry::Transform2D;
 
 use crate::image_manager::ImageManager;
 use crate::path_atlas::PathAtlas;
+use crate::stream_buffer::StreamBuffers;
 use crate::vertex::{QuadVertex, RectVertex, SdfVertex, ShadowVertex};
 
 /// GPU renderer that draws a RenderFrame using four shader pipelines.
@@ -20,6 +20,11 @@ pub struct Renderer {
     path_atlas: PathAtlas,
     path_atlas_texture: Option<AtlasTexture>,
     image_manager: ImageManager,
+    /// Persistent per-pipeline streaming buffers. Resized on demand at
+    /// the top of each `render()` call, then reused via `write_buffer`
+    /// for every batch flush in that frame — replaces the historical
+    /// per-flush `create_buffer_init` antipattern.
+    streams: StreamBuffers,
 }
 
 struct AtlasTexture {
@@ -52,6 +57,7 @@ impl Renderer {
             path_atlas: PathAtlas::new(512, 512),
             path_atlas_texture: None,
             image_manager: ImageManager::new(),
+            streams: StreamBuffers::new(),
         }
     }
 
@@ -170,6 +176,50 @@ impl Renderer {
             self.path_atlas.mark_clean();
         }
 
+        // Grow persistent streaming buffers to fit this frame's worst case.
+        // Upper bound per pipeline = `items * 4 vertices` because every
+        // drawable produces exactly 4 vertices. The shared index buffer
+        // sizes to the largest per-pipeline quad count so one index stream
+        // serves all pipelines.
+        let rect_quads = frame.decorations.len();
+        let sdf_quads = frame.shapes.len();
+        let quad_quads = frame.glyphs.len() + frame.paths.len() + frame.images.len();
+        let shadow_quads = frame.shadows.len();
+        let max_quads = rect_quads
+            .max(sdf_quads)
+            .max(quad_quads)
+            .max(shadow_quads);
+
+        self.streams.rect.ensure_capacity(
+            &self.device,
+            (rect_quads * 4 * std::mem::size_of::<RectVertex>()) as u64,
+        );
+        self.streams.sdf.ensure_capacity(
+            &self.device,
+            (sdf_quads * 4 * std::mem::size_of::<SdfVertex>()) as u64,
+        );
+        self.streams.quad.ensure_capacity(
+            &self.device,
+            (quad_quads * 4 * std::mem::size_of::<QuadVertex>()) as u64,
+        );
+        self.streams.shadow.ensure_capacity(
+            &self.device,
+            (shadow_quads * 4 * std::mem::size_of::<ShadowVertex>()) as u64,
+        );
+        self.streams.index.ensure_capacity(
+            &self.device,
+            (max_quads * 6 * std::mem::size_of::<u16>()) as u64,
+        );
+        self.streams.reset();
+
+        // Upload the full quad index pattern once — 6 u16s per quad, shared
+        // across every quad-based pipeline this frame.
+        let index_data: Vec<u16> = crate::vertex::generate_quad_indices(max_quads);
+        let index_binding = self
+            .streams
+            .index
+            .write(&self.queue, bytemuck::cast_slice(&index_data));
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -234,25 +284,30 @@ impl Renderer {
             }
             let mut quad_source: Option<QuadSource> = None;
 
-            // Flush helpers — each creates one buffer pair and one draw call.
-            macro_rules! flush_rect {
-                ($pass:expr, $device:expr, $pipeline:expr, $batch:expr) => {
+            // Flush helpers — each writes one batch into the persistent
+            // stream buffer and issues one draw call. The index buffer was
+            // written once at the top of `render()` and is shared.
+            //
+            // `$index_binding` is `Option<(&Buffer, u64 offset, u64 len)>`
+            // — `None` only if the frame had zero quads, in which case
+            // every batch is also empty and the flush is a no-op anyway.
+            macro_rules! flush_stream {
+                ($pass:expr, $queue:expr, $stream:expr, $pipeline:expr,
+                 $batch:expr, $index_binding:expr) => {
                     if !$batch.is_empty() {
-                        let indices = crate::vertex::generate_quad_indices($batch.len() / 4);
-                        let vb = $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: None,
-                            contents: bytemuck::cast_slice(&$batch),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
-                        let ib = $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: None,
-                            contents: bytemuck::cast_slice(&indices),
-                            usage: wgpu::BufferUsages::INDEX,
-                        });
-                        $pass.set_pipeline($pipeline);
-                        $pass.set_vertex_buffer(0, vb.slice(..));
-                        $pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                        $pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                        let bytes: &[u8] = bytemuck::cast_slice(&$batch);
+                        if let (Some((vb, v_off, v_len)), Some((ib, _, _))) =
+                            ($stream.write($queue, bytes), $index_binding)
+                        {
+                            let quads = ($batch.len() / 4) as u32;
+                            let index_count = quads * 6;
+                            let index_bytes = (index_count as u64) * 2;
+                            $pass.set_pipeline($pipeline);
+                            $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
+                            $pass
+                                .set_index_buffer(ib.slice(0..index_bytes), wgpu::IndexFormat::Uint16);
+                            $pass.draw_indexed(0..index_count, 0, 0..1);
+                        }
                         $batch.clear();
                     }
                 };
@@ -260,11 +315,12 @@ impl Renderer {
 
             // Flush all pending batches (called on state changes).
             macro_rules! flush_all {
-                ($pass:expr, $device:expr, $rp:expr, $sp:expr, $qp:expr, $shp:expr,
+                ($pass:expr, $queue:expr, $streams:expr,
+                 $rp:expr, $sp:expr, $qp:expr, $shp:expr,
                  $rb:expr, $sb:expr, $qb:expr, $shb:expr,
-                 $atlas:expr, $path_atlas:expr, $qs:expr) => {
-                    flush_rect!($pass, $device, $rp, $rb);
-                    flush_rect!($pass, $device, $sp, $sb);
+                 $atlas:expr, $path_atlas:expr, $qs:expr, $index_binding:expr) => {
+                    flush_stream!($pass, $queue, &$streams.rect, $rp, $rb, $index_binding);
+                    flush_stream!($pass, $queue, &$streams.sdf, $sp, $sb, $index_binding);
                     // Quad batch needs bind group
                     if !$qb.is_empty() {
                         let bg = match $qs {
@@ -273,29 +329,27 @@ impl Renderer {
                             }
                             _ => $atlas.as_ref().map(|a: &AtlasTexture| &a.bind_group),
                         };
-                        if let Some(bind_group) = bg {
-                            let indices = crate::vertex::generate_quad_indices($qb.len() / 4);
-                            let vb =
-                                $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: None,
-                                    contents: bytemuck::cast_slice(&$qb),
-                                    usage: wgpu::BufferUsages::VERTEX,
-                                });
-                            let ib =
-                                $device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                    label: None,
-                                    contents: bytemuck::cast_slice(&indices),
-                                    usage: wgpu::BufferUsages::INDEX,
-                                });
-                            $pass.set_pipeline($qp);
-                            $pass.set_bind_group(0, bind_group, &[]);
-                            $pass.set_vertex_buffer(0, vb.slice(..));
-                            $pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint16);
-                            $pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                        if let (Some(bind_group), Some((ib, _, _))) = (bg, $index_binding) {
+                            let bytes: &[u8] = bytemuck::cast_slice(&$qb);
+                            if let Some((vb, v_off, v_len)) =
+                                $streams.quad.write($queue, bytes)
+                            {
+                                let quads = ($qb.len() / 4) as u32;
+                                let index_count = quads * 6;
+                                let index_bytes = (index_count as u64) * 2;
+                                $pass.set_pipeline($qp);
+                                $pass.set_bind_group(0, bind_group, &[]);
+                                $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
+                                $pass.set_index_buffer(
+                                    ib.slice(0..index_bytes),
+                                    wgpu::IndexFormat::Uint16,
+                                );
+                                $pass.draw_indexed(0..index_count, 0, 0..1);
+                            }
                         }
                         $qb.clear();
                     }
-                    flush_rect!($pass, $device, $shp, $shb);
+                    flush_stream!($pass, $queue, &$streams.shadow, $shp, $shb, $index_binding);
                 };
             }
 
@@ -305,7 +359,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::Decoration(idx) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -316,7 +371,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         let Some(rect) = frame.decorations.get(*idx) else {
@@ -339,7 +395,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::Shape(idx) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -350,7 +407,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         let Some(shape) = frame.shapes.get(*idx) else {
@@ -374,7 +432,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::Glyph(idx) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -385,7 +444,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         if let Some(atlas) = &self.atlas_texture {
@@ -418,7 +478,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::Shadow(idx) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -429,7 +490,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         let Some(shadow) = frame.shadows.get(*idx) else {
@@ -454,7 +516,8 @@ impl Renderer {
                         // Images use per-image bind groups — flush and draw individually
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -465,7 +528,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         let Some(image) = frame.images.get(*idx) else {
@@ -479,12 +543,14 @@ impl Renderer {
                             viewport_height,
                             current_opacity,
                             &current_transform,
+                            index_binding,
                         );
                     }
                     fern_canvas::DrawCommand::Path(idx) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -495,7 +561,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         if let Some(Some(region)) = path_regions.get(*idx) {
@@ -532,7 +599,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::SetClip(rect) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -543,7 +611,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         let x = (rect.x * scale_factor).max(0.0) as u32;
@@ -570,7 +639,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::ClearClip => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -581,7 +651,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         clip_stack.pop();
@@ -594,7 +665,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::SetOpacity(opacity) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -605,7 +677,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         opacity_stack.push(current_opacity);
@@ -614,7 +687,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::RestoreOpacity => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -625,7 +699,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         current_opacity = opacity_stack.pop().unwrap_or(1.0);
@@ -641,7 +716,8 @@ impl Renderer {
                     fern_canvas::DrawCommand::SetTransform(t) => {
                         flush_all!(
                             pass,
-                            self.device,
+                            &self.queue,
+                            self.streams,
                             &self.rect_pipeline,
                             &self.sdf_pipeline,
                             &self.quad_pipeline,
@@ -652,7 +728,8 @@ impl Renderer {
                             shadow_batch,
                             self.atlas_texture,
                             self.path_atlas_texture,
-                            quad_source
+                            quad_source,
+                            index_binding
                         );
                         quad_source = None;
                         current_transform = *t;
@@ -663,7 +740,8 @@ impl Renderer {
             // Flush remaining batches
             flush_all!(
                 pass,
-                self.device,
+                &self.queue,
+                self.streams,
                 &self.rect_pipeline,
                 &self.sdf_pipeline,
                 &self.quad_pipeline,
@@ -674,7 +752,8 @@ impl Renderer {
                 shadow_batch,
                 self.atlas_texture,
                 self.path_atlas_texture,
-                quad_source
+                quad_source,
+                index_binding
             );
         }
 
@@ -694,6 +773,7 @@ impl Renderer {
         viewport_height: u32,
         opacity: f32,
         transform: &Transform2D,
+        index_binding: Option<(&wgpu::Buffer, u64, u64)>,
     ) {
         let bind_group = match self.image_manager.get_bind_group(&image.name) {
             Some(bg) => bg,
@@ -713,55 +793,56 @@ impl Renderer {
                 position: [sx, sy],
                 tex_coord: [0.0, 0.0],
                 color,
+                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                _pad: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy],
                 tex_coord: [1.0, 0.0],
                 color,
+                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                _pad: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy + sh],
                 tex_coord: [1.0, 1.0],
                 color,
+                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                _pad: 0,
             },
             QuadVertex {
                 position: [sx, sy + sh],
                 tex_coord: [0.0, 1.0],
                 color,
+                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                _pad: 0,
             },
         ];
-        let indices = [0u16, 1, 2, 0, 2, 3];
 
-        let ndc_verts: Vec<QuadVertex> = verts
-            .iter()
-            .map(|v| {
-                let tp = apply_transform_pixel(v.position, transform);
-                QuadVertex {
-                    position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                    ..*v
-                }
-            })
-            .collect();
+        let ndc_verts: [QuadVertex; 4] = std::array::from_fn(|i| {
+            let v = verts[i];
+            let tp = apply_transform_pixel(v.position, transform);
+            QuadVertex {
+                position: pixel_to_ndc(tp, viewport_width, viewport_height),
+                ..v
+            }
+        });
 
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&ndc_verts),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+        // Reuse the persistent quad stream buffer instead of allocating
+        // a fresh vertex buffer per image. Indices come from the shared
+        // index stream populated at the top of `render()`.
+        let bytes: &[u8] = bytemuck::cast_slice(&ndc_verts);
+        let Some((vb, v_off, v_len)) = self.streams.quad.write(&self.queue, bytes) else {
+            return;
+        };
+        let Some((ib, _, _)) = index_binding else {
+            return;
+        };
 
         pass.set_pipeline(&self.quad_pipeline);
         pass.set_bind_group(0, bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
+        pass.set_index_buffer(ib.slice(0..12), wgpu::IndexFormat::Uint16);
         pass.draw_indexed(0..6, 0, 0..1);
     }
 
@@ -913,26 +994,37 @@ fn path_quad_verts(
     ];
     let uvs = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
 
+    // Path atlas contents are pre-multiplied RGBA matching `entry.color`,
+    // so the monochrome path (`flags = 0`) renders correctly: the shader
+    // outputs `vertex.rgb * tex.a`, equivalent to `path_color * path_alpha`.
     [
         QuadVertex {
             position: positions[0],
             tex_coord: uvs[0],
             color,
+            flags: 0,
+            _pad: 0,
         },
         QuadVertex {
             position: positions[1],
             tex_coord: uvs[1],
             color,
+            flags: 0,
+            _pad: 0,
         },
         QuadVertex {
             position: positions[2],
             tex_coord: uvs[2],
             color,
+            flags: 0,
+            _pad: 0,
         },
         QuadVertex {
             position: positions[3],
             tex_coord: uvs[3],
             color,
+            flags: 0,
+            _pad: 0,
         },
     ]
 }
@@ -1178,6 +1270,11 @@ fn create_quad_pipeline(
                         shader_location: 2,
                         format: wgpu::VertexFormat::Float32x4, // color
                     },
+                    wgpu::VertexAttribute {
+                        offset: 32,
+                        shader_location: 3,
+                        format: wgpu::VertexFormat::Uint32, // flags (bit 0 = color glyph)
+                    },
                 ],
             }],
             compilation_options: Default::default(),
@@ -1321,6 +1418,7 @@ mod tests {
             screen: [10.0, 10.0, 8.0, 8.0],
             atlas: [0.0, 0.0, 2.0, 2.0],
             color: [1.0, 1.0, 1.0, 1.0],
+            is_color: false,
         });
         frame.draw_order.push(DrawCommand::Glyph(0));
 

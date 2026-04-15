@@ -340,6 +340,8 @@ impl TextBackend for TypesetterBridge {
             height: result.height,
             ascent: result.baseline,
             descent: result.height - result.baseline,
+            underline_offset: result.underline_offset,
+            underline_thickness: result.underline_thickness,
             layout_key: key,
             line_count: 1,
             spans: Vec::new(),
@@ -355,6 +357,7 @@ impl TextBackend for TypesetterBridge {
                     screen: g.screen,
                     atlas: g.atlas,
                     color: g.color,
+                    is_color: g.is_color,
                 })
                 .collect(),
         );
@@ -393,6 +396,8 @@ impl TextBackend for TypesetterBridge {
             height: result.height,
             ascent: result.baseline_first,
             descent: (result.height - result.baseline_first).max(0.0),
+            underline_offset: result.underline_offset,
+            underline_thickness: result.underline_thickness,
             layout_key: key,
             line_count: result.line_count.max(1),
             spans: Vec::new(),
@@ -408,6 +413,7 @@ impl TextBackend for TypesetterBridge {
                     screen: g.screen,
                     atlas: g.atlas,
                     color: g.color,
+                    is_color: g.is_color,
                 })
                 .collect(),
         );
@@ -450,6 +456,8 @@ impl TextBackend for TypesetterBridge {
             height: result.height,
             ascent: result.baseline,
             descent: (result.height - result.baseline).max(0.0),
+            underline_offset: result.underline_offset,
+            underline_thickness: result.underline_thickness,
             layout_key: key,
             line_count: 1,
             spans: result
@@ -477,6 +485,7 @@ impl TextBackend for TypesetterBridge {
                     screen: g.screen,
                     atlas: g.atlas,
                     color: g.color,
+                    is_color: g.is_color,
                 })
                 .collect(),
         );
@@ -524,6 +533,8 @@ impl TextBackend for TypesetterBridge {
             height: result.height,
             ascent: result.baseline_first,
             descent: (result.height - result.baseline_first).max(0.0),
+            underline_offset: result.underline_offset,
+            underline_thickness: result.underline_thickness,
             layout_key: key,
             line_count: result.line_count.max(1),
             spans: result
@@ -551,6 +562,7 @@ impl TextBackend for TypesetterBridge {
                     screen: g.screen,
                     atlas: g.atlas,
                     color: g.color,
+                    is_color: g.is_color,
                 })
                 .collect(),
         );
