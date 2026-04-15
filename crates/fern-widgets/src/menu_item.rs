@@ -50,6 +50,7 @@ pub struct MenuItem {
     label: String,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
+    tooltip_text: Option<String>,
     action: Option<CommandFactory>,
     /// Type-erased command for automatic shortcut label lookup via ShortcutMap.
     command_any: Option<Box<dyn std::any::Any>>,
@@ -69,6 +70,7 @@ impl MenuItem {
             label: ls.resolve_now(),
             icon: None,
             shortcut_label: None,
+            tooltip_text: None,
             action: None,
             command_any: None,
             enabled: true,
@@ -141,6 +143,21 @@ impl MenuItem {
         self
     }
 
+    /// Attach a tooltip that appears after a hover delay, same mechanism
+    /// as [`Button::tooltip`](crate::button::Button::tooltip).
+    pub fn tooltip(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.tooltip_text = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `tooltip(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn tooltip_literal(mut self, text: impl Into<String>) -> Self {
+        self.tooltip_text = Some(text.into());
+        self
+    }
+
     /// Create a submenu trigger item. The factory is invoked during `build()` to
     /// pre-create the submenu content (typically a `MenuList`), which is kept
     /// dormant until the hover delay elapses.
@@ -153,6 +170,7 @@ impl MenuItem {
             label: ls.resolve_now(),
             icon: None,
             shortcut_label: None,
+            tooltip_text: None,
             action: None,
             command_any: None,
             enabled: true,
@@ -398,6 +416,14 @@ impl Widget for MenuItem {
         let root_id = ctx.add(zstack);
 
         self.root_child_id = Some(root_id);
+
+        // Attach tooltip if configured. Same 500ms delay as Button.
+        if let Some(ref tooltip_text) = self.tooltip_text {
+            let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
+            let tooltip_id = ctx.add(tooltip_widget);
+            let delay = std::time::Duration::from_millis(500);
+            ctx.attach_tooltip(root_id, tooltip_id, delay);
+        }
 
         // --- Handlers ---
         let action = self.action.take();
