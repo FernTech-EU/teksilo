@@ -157,8 +157,12 @@ impl Widget for Grid {
         let num_cols = self.columns.len().max(1);
         let num_rows = self.rows.len().max(1);
 
-        // Query each child's intrinsic size
-        let child_proposal = SizeProposal::unspecified();
+        // Pass 1: measure children with unspecified width so Auto
+        // columns can size to content. Wrapping children (TextWidget
+        // with markup, etc.) report their single-line width — that's
+        // fine for column resolution because Auto picks the largest
+        // single-line width, and Fractional gets re-measured in pass 2.
+        let intrinsic_proposal = SizeProposal::unspecified();
         let mut col_max = vec![0.0_f32; num_cols];
         let mut row_max = vec![0.0_f32; num_rows];
 
@@ -167,14 +171,42 @@ impl Widget for Grid {
             if row >= num_rows || col >= num_cols {
                 continue;
             }
-            if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
+            if let Some(child_size) = ctx.child_size(child_id, intrinsic_proposal) {
                 col_max[col] = col_max[col].max(child_size.width);
                 row_max[row] = row_max[row].max(child_size.height);
             }
         }
 
+        // Resolve column tracks against the parent's width proposal.
         let col_sizes =
             Self::resolve_tracks(&self.columns, self.column_gap, proposal.width, &col_max);
+
+        // Pass 2: for every child whose column is *narrower* than its
+        // intrinsic width (typical of Fractional columns receiving the
+        // remainder after Auto columns claim their natural sizes),
+        // re-measure with the resolved column width as the proposal so
+        // wrapping content reports its real wrapped height. Without
+        // this, a TextWidget-with-markup inside a Fractional column
+        // reports a 1-line height in pass 1 but actually paints
+        // multi-line, bleeding outside its assigned cell.
+        for (i, &child_id) in self.child_ids.iter().enumerate() {
+            let (row, col) = self.cell_for(i);
+            if row >= num_rows || col >= num_cols {
+                continue;
+            }
+            let needs_remeasure = matches!(self.columns[col], TrackSize::Fractional(_))
+                && col_sizes[col] + 0.5 < col_max[col];
+            if needs_remeasure {
+                let constrained = SizeProposal {
+                    width: Some(col_sizes[col]),
+                    height: None,
+                };
+                if let Some(s) = ctx.child_size(child_id, constrained) {
+                    row_max[row] = row_max[row].max(s.height);
+                }
+            }
+        }
+
         let row_sizes = Self::resolve_tracks(&self.rows, self.row_gap, proposal.height, &row_max);
 
         let total_col_gap = self.column_gap * (num_cols as f32 - 1.0).max(0.0);
@@ -195,8 +227,8 @@ impl Widget for Grid {
         let num_cols = self.columns.len().max(1);
         let num_rows = self.rows.len().max(1);
 
-        // Query intrinsic sizes for Auto track resolution
-        let child_proposal = SizeProposal::unspecified();
+        // Pass 1: intrinsic sizes — same as size_that_fits.
+        let intrinsic_proposal = SizeProposal::unspecified();
         let mut col_max = vec![0.0_f32; num_cols];
         let mut row_max = vec![0.0_f32; num_rows];
 
@@ -205,7 +237,7 @@ impl Widget for Grid {
             if row >= num_rows || col >= num_cols {
                 continue;
             }
-            if let Some(child_size) = ctx.child_size(child.id, child_proposal) {
+            if let Some(child_size) = ctx.child_size(child.id, intrinsic_proposal) {
                 col_max[col] = col_max[col].max(child_size.width);
                 row_max[row] = row_max[row].max(child_size.height);
             }
@@ -213,6 +245,27 @@ impl Widget for Grid {
 
         let col_sizes =
             Self::resolve_tracks(&self.columns, self.column_gap, Some(bounds.width), &col_max);
+
+        // Pass 2: re-measure Fractional cells whose column shrank, so
+        // their row height reflects wrap-induced growth.
+        for (i, child) in children.iter().enumerate() {
+            let (row, col) = self.cell_for(i);
+            if row >= num_rows || col >= num_cols {
+                continue;
+            }
+            let needs_remeasure = matches!(self.columns[col], TrackSize::Fractional(_))
+                && col_sizes[col] + 0.5 < col_max[col];
+            if needs_remeasure {
+                let constrained = SizeProposal {
+                    width: Some(col_sizes[col]),
+                    height: None,
+                };
+                if let Some(s) = ctx.child_size(child.id, constrained) {
+                    row_max[row] = row_max[row].max(s.height);
+                }
+            }
+        }
+
         let row_sizes =
             Self::resolve_tracks(&self.rows, self.row_gap, Some(bounds.height), &row_max);
 
