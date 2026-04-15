@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use fern_core::Signal;
 use fern_text::{RichTextEngine, WrapMode};
-use fern_text::text_document::{DocumentEvent, Subscription, TextCursor, TextDocument};
+use fern_text::text_document::{DocumentEvent, DocumentFragment, Subscription, TextCursor, TextDocument};
 
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
@@ -130,6 +130,106 @@ pub(crate) struct EditorState {
     /// arriving during `drain_events`. Debounced alongside text/format
     /// changes so rapid typing doesn't hammer toolbar observers.
     pub pending_undo_redo: Option<(bool, bool)>,
+
+    /// Active drag-select session state. `Idle` when no primary button is
+    /// held; `Selecting` while the user is extending a selection with the
+    /// pointer, with a cached auto-scroll velocity for when the pointer
+    /// approaches the viewport edges.
+    pub drag_state: DragState,
+
+    /// In-process rich clipboard fragment captured by the last Ctrl+C /
+    /// Ctrl+X. Compared against the system clipboard plain text on
+    /// paste — if they match, the fragment is reinserted to preserve
+    /// formatting; otherwise the system text lands as plain text.
+    pub rich_clipboard_fragment: Option<DocumentFragment>,
+    pub rich_clipboard_plain: Option<String>,
+
+    /// Ctrl+A escalation ladder position. See `keyboard.rs`: when the
+    /// caret is inside a table cell the ladder climbs through 4 levels
+    /// (paragraph → cell → table → document); outside a table it is a
+    /// single-shot `SelectionType::Document` and stays at 0. Reset to 0
+    /// by any non-SelectAll key action (matching godot edit.rs:520-521).
+    pub select_all_level: u8,
+
+    /// Cached flow snapshot used by the accessibility pass. The
+    /// `Widget::accessibility` walk iterates blocks and fragments
+    /// to emit AccessKit `Role::Paragraph` / `Role::TextRun`
+    /// children; the snapshot itself doesn't change between
+    /// rebuilds triggered by focus / resize, so caching it avoids
+    /// re-walking the document tree. Invalidated from
+    /// `drain_events` when a `ContentsChanged` or `FormatChanged`
+    /// event arrives.
+    pub accessibility_flow_snapshot: RefCell<
+        Option<fern_text::text_document::FlowSnapshot>,
+    >,
+
+    /// Per-synthetic-NodeId lookup table populated during the
+    /// accessibility walk. Maps each emitted `Role::TextRun` NodeId
+    /// to its text-document element_id, absolute-document
+    /// character start, and run text. Used by the
+    /// `on_access_action_request` handler to convert AccessKit
+    /// `SetTextSelection` requests (which reference TextRun NodeIds
+    /// and in-run character indices) back into document-absolute
+    /// cursor positions.
+    pub synthetic_to_element: RefCell<
+        std::collections::HashMap<fern_core::accesskit::NodeId, SyntheticElementRef>,
+    >,
+
+    /// `(table_id, row, column, rows, columns)` remembered from the
+    /// Ctrl+A ladder's level-1 call. After `select(BlockUnderCursor)`
+    /// the cursor's position lands on the boundary between the
+    /// selected block and the next, which for a single-block cell's
+    /// last block means `current_table_cell()` would return `None`
+    /// on the following Ctrl+A press — skipping the cell / table
+    /// levels and jumping straight to document. Caching the full
+    /// cell reference at level 1 keeps the ladder stable across
+    /// mid-sequence boundary movement. Cleared whenever
+    /// `select_all_level` resets.
+    pub select_all_anchor_cell: Option<SelectAllAnchorCell>,
+}
+
+/// Cached snapshot of the table cell the caret sat inside at Ctrl+A
+/// level 1. Used by levels 2 and 3 to dodge the boundary-ambiguity
+/// issue where `TextCursor::current_table_cell()` returns `None`
+/// when the cursor is at a block edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectAllAnchorCell {
+    pub table_id: usize,
+    pub row: usize,
+    pub column: usize,
+    pub table_rows: usize,
+    pub table_columns: usize,
+}
+
+/// Per-synthetic-NodeId element reference populated during the
+/// rich text editor's accessibility walk. Lets the
+/// `on_access_action_request` handler convert an AccessKit
+/// `TextSelection` (TextRun NodeId + character index within run)
+/// back into a document-absolute cursor position.
+#[derive(Debug, Clone)]
+pub struct SyntheticElementRef {
+    /// Stable element id in text-document.
+    pub element_id: u64,
+    /// Absolute character position of the run's first character
+    /// within the full document.
+    pub absolute_start: usize,
+    /// The run's text, cached so the handler can convert a char
+    /// index to a byte offset without re-querying the document.
+    pub text: String,
+}
+
+/// Drag-select session lifecycle. Plain `cursor.set_position(hit,
+/// KeepAnchor)` handles both text and rectangular cell selection — the
+/// cell case falls out automatically from `TextCursor::selection_kind()`
+/// at [../text-document/crates/public_api/src/cursor.rs:1200].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DragState {
+    Idle,
+    Selecting {
+        /// Per-second scroll velocity requested by the near-edge
+        /// auto-scroll ramp. Applied by the frame loop on every tick.
+        auto_scroll_v_per_s: f32,
+    },
 }
 
 impl EditorState {
@@ -204,6 +304,13 @@ impl EditorState {
             pending_text_changed: false,
             pending_format_changed: false,
             pending_undo_redo: None,
+            drag_state: DragState::Idle,
+            rich_clipboard_fragment: None,
+            rich_clipboard_plain: None,
+            select_all_level: 0,
+            select_all_anchor_cell: None,
+            accessibility_flow_snapshot: RefCell::new(None),
+            synthetic_to_element: RefCell::new(std::collections::HashMap::new()),
         }))
     }
 
@@ -222,6 +329,16 @@ impl EditorState {
             q.drain(..).collect()
         };
 
+        // Invalidate the accessibility flow snapshot + synthetic-id
+        // map whenever the document actually changes structure or
+        // content. Format-only edits (FormatChanged) also
+        // invalidate because a new bold run creates a new TextRun
+        // node in the accessibility tree with a different
+        // synthetic NodeId. The document_version bump at the end
+        // of drain_events drives AccessibilityOnly binding
+        // propagation, so the widget tree's a11y_dirty flag will
+        // flip during process_state_changes in the same frame.
+        let mut a11y_snapshot_dirty = false;
         for event in drained {
             had_events = true;
             match event {
@@ -231,6 +348,7 @@ impl EditorState {
                     ..
                 } => {
                     self.pending_text_changed = true;
+                    a11y_snapshot_dirty = true;
                     if blocks_affected <= 1 && !self.needs_full_layout {
                         single_pos = Some(position);
                     } else {
@@ -240,6 +358,7 @@ impl EditorState {
                 }
                 DocumentEvent::FormatChanged { .. } => {
                     self.pending_format_changed = true;
+                    a11y_snapshot_dirty = true;
                     self.needs_full_layout = true;
                     single_pos = None;
                 }
@@ -248,6 +367,7 @@ impl EditorState {
                 | DocumentEvent::FlowElementsRemoved { .. }
                 | DocumentEvent::BlockCountChanged(_) => {
                     self.pending_text_changed = true;
+                    a11y_snapshot_dirty = true;
                     self.needs_full_layout = true;
                     single_pos = None;
                 }
@@ -268,6 +388,15 @@ impl EditorState {
             self.content_dirty = true;
             self.document_version
                 .set(self.document_version.get().wrapping_add(1));
+        }
+
+        // Drop the cached flow snapshot and synthetic-id lookup
+        // whenever the document structure / content / formatting
+        // changed. The next accessibility walk rebuilds both
+        // lazily from a fresh `document.snapshot_flow()`.
+        if a11y_snapshot_dirty {
+            *self.accessibility_flow_snapshot.borrow_mut() = None;
+            self.synthetic_to_element.borrow_mut().clear();
         }
 
         (had_events, single_pos)

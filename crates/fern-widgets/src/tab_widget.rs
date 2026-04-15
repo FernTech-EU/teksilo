@@ -790,10 +790,7 @@ mod tests {
 
         tree.layout(SizeProposal::exact(480.0, 240.0));
         let second_header = header_id(&tree, tabs, 1);
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(second_header),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(second_header), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         assert_eq!(selected.get(), 1);
     }

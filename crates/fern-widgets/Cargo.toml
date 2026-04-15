@@ -7,7 +7,12 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-rich-text = ["dep:fern-text"]
+# Rich-text widgets. Depends on fern-platform for `ClipboardHandle` —
+# the clipboard module uses it unconditionally and degrades gracefully
+# when the app hasn't installed a handle into the app-state registry
+# (headless tests, builds without the `fern-app/clipboard` feature).
+# `arboard` is NOT pulled in by this feature; only the handle surface.
+rich-text = ["dep:fern-text", "dep:fern-platform"]
 
 [dependencies]
 fern-core = { workspace = true }
@@ -20,3 +25,8 @@ fern-i18n = { workspace = true }
 # its own `rich-text` feature. Widgets never name either crate
 # directly, keeping fern-widgets's dependency surface minimal.
 fern-text = { workspace = true, optional = true, features = ["rich-text"] }
+# fern-platform for `ClipboardHandle` — only the handle type surface
+# is used by rich-text. The real system clipboard backend pulls in
+# `arboard` through `fern-platform/clipboard`, which is chained in by
+# `fern-app/clipboard` → `fern-ui/clipboard`, not by this feature.
+fern-platform = { workspace = true, optional = true }

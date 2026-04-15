@@ -59,6 +59,15 @@ impl HandlerSet {
         self
     }
 
+    /// Set the on_triple_tap handler — fires on the third click within the
+    /// recognizer's window (same 300 ms / 10 px defaults as double tap).
+    /// Runs independently of `on_double_tap` via cooperative gesture
+    /// recognizers (`GestureRecognizer::resets_on_peer_recognition`).
+    pub fn on_triple_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+        self.handlers.on_triple_tap = Some(Box::new(f));
+        self
+    }
+
     /// Set the on_long_press handler.
     pub fn on_long_press(
         mut self,
@@ -138,6 +147,26 @@ impl HandlerSet {
         f: impl FnMut(accesskit::Action, &mut EventContext) -> EventResponse + 'static,
     ) -> Self {
         self.handlers.on_access_action = Some(Box::new(f));
+        self
+    }
+
+    /// Set the full AccessKit action-request handler. Receives the
+    /// action, target NodeId (may be a synthetic widget-emitted
+    /// child), and optional `ActionData` payload (e.g.
+    /// `SetTextSelection(TextSelection)` or `Value(Box<str>)`).
+    /// When this slot is set it's called INSTEAD of
+    /// `on_access_action` for the same event.
+    pub fn on_access_action_request(
+        mut self,
+        f: impl FnMut(
+                accesskit::Action,
+                accesskit::NodeId,
+                Option<accesskit::ActionData>,
+                &mut EventContext,
+            ) -> EventResponse
+            + 'static,
+    ) -> Self {
+        self.handlers.on_access_action_request = Some(Box::new(f));
         self
     }
 
@@ -247,6 +276,11 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
+    pub fn on_triple_tap(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
+        self.handler_set.handlers.on_triple_tap = Some(Box::new(f));
+        self
+    }
+
     pub fn on_long_press(mut self, f: impl FnMut(Point, &mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_long_press = Some(Box::new(f));
         self
@@ -332,6 +366,20 @@ impl<W: Widget> WidgetWithHandlers<W> {
         f: impl FnMut(accesskit::Action, &mut EventContext) -> EventResponse + 'static,
     ) -> Self {
         self.handler_set.handlers.on_access_action = Some(Box::new(f));
+        self
+    }
+
+    pub fn on_access_action_request(
+        mut self,
+        f: impl FnMut(
+                accesskit::Action,
+                accesskit::NodeId,
+                Option<accesskit::ActionData>,
+                &mut EventContext,
+            ) -> EventResponse
+            + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_access_action_request = Some(Box::new(f));
         self
     }
 
@@ -520,6 +568,13 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         f: impl FnMut(Point, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_double_tap(f)
+    }
+
+    fn on_triple_tap(
+        self,
+        f: impl FnMut(Point, &mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_triple_tap(f)
     }
 
     fn on_long_press(

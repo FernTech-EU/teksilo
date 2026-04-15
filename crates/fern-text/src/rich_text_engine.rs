@@ -272,6 +272,23 @@ impl RichTextEngine {
             .caret_rect(position)
     }
 
+    /// Passthrough to `Typesetter::character_geometry`. Returns
+    /// per-character `(position, width)` for a character range
+    /// within a laid-out block. Used by the rich text editor's
+    /// accessibility pass to populate AccessKit `character_positions`
+    /// / `character_widths` on `Role::TextRun` children.
+    pub fn character_geometry(
+        &self,
+        block_id: usize,
+        char_start: usize,
+        char_end: usize,
+    ) -> Vec<text_typeset::CharacterGeometry> {
+        self.shared
+            .borrow_mut()
+            .typesetter_mut()
+            .character_geometry(block_id, char_start, char_end)
+    }
+
     pub fn ensure_caret_visible(&mut self) -> Option<f32> {
         self.shared
             .borrow_mut()

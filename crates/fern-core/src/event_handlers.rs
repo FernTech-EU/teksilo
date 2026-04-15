@@ -18,6 +18,7 @@ use crate::widget::EventContext;
 pub(crate) struct EventHandlers {
     pub on_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
     pub on_double_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
+    pub on_triple_tap: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
     pub on_long_press: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
     pub on_drag: Option<Box<dyn FnMut(DragPhase, &mut EventContext)>>,
     pub on_swipe: Option<Box<dyn FnMut(SwipeDirection, f32, &mut EventContext)>>,
@@ -29,6 +30,23 @@ pub(crate) struct EventHandlers {
     pub on_scroll: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_access_action:
         Option<Box<dyn FnMut(accesskit::Action, &mut EventContext) -> EventResponse>>,
+    /// Full AccessKit action request handler, with the complete
+    /// `ActionRequest` payload (`target_node` and `data`). Used by
+    /// widgets that care about `SetTextSelection` / `SetValue` /
+    /// `SetScrollOffset` — the bare `on_access_action` handler
+    /// drops the payload. When this slot is set, it is called
+    /// INSTEAD of `on_access_action` for the same event.
+    #[allow(clippy::type_complexity)]
+    pub on_access_action_request: Option<
+        Box<
+            dyn FnMut(
+                accesskit::Action,
+                accesskit::NodeId,
+                Option<accesskit::ActionData>,
+                &mut EventContext,
+            ) -> EventResponse,
+        >,
+    >,
     // --- Drag and Drop handlers ---
     /// Called when a compatible drag payload hovers over this widget.
     /// Returns `DropFeedback` to indicate acceptance and visual feedback.
@@ -47,6 +65,7 @@ impl EventHandlers {
         Self {
             on_tap: None,
             on_double_tap: None,
+            on_triple_tap: None,
             on_long_press: None,
             on_drag: None,
             on_swipe: None,
@@ -57,6 +76,7 @@ impl EventHandlers {
             on_pointer_event: None,
             on_scroll: None,
             on_access_action: None,
+            on_access_action_request: None,
             on_drag_hover: None,
             on_drop: None,
             gesture_arena: None,
@@ -68,6 +88,7 @@ impl EventHandlers {
     pub fn has_any(&self) -> bool {
         self.on_tap.is_some()
             || self.on_double_tap.is_some()
+            || self.on_triple_tap.is_some()
             || self.on_long_press.is_some()
             || self.on_drag.is_some()
             || self.on_swipe.is_some()
@@ -78,6 +99,7 @@ impl EventHandlers {
             || self.on_pointer_event.is_some()
             || self.on_scroll.is_some()
             || self.on_access_action.is_some()
+            || self.on_access_action_request.is_some()
             || self.on_drag_hover.is_some()
             || self.on_drop.is_some()
     }
@@ -86,6 +108,7 @@ impl EventHandlers {
         EventHandlers {
             on_tap: merge_point_handler(self.on_tap, other.on_tap),
             on_double_tap: merge_point_handler(self.on_double_tap, other.on_double_tap),
+            on_triple_tap: merge_point_handler(self.on_triple_tap, other.on_triple_tap),
             on_long_press: merge_point_handler(self.on_long_press, other.on_long_press),
             on_drag: merge_drag_handler(self.on_drag, other.on_drag),
             on_swipe: merge_swipe_handler(self.on_swipe, other.on_swipe),
@@ -96,6 +119,9 @@ impl EventHandlers {
             on_pointer_event: merge_event_handler(self.on_pointer_event, other.on_pointer_event),
             on_scroll: merge_event_handler(self.on_scroll, other.on_scroll),
             on_access_action: merge_access_handler(self.on_access_action, other.on_access_action),
+            on_access_action_request: other
+                .on_access_action_request
+                .or(self.on_access_action_request),
             on_drag_hover: other.on_drag_hover.or(self.on_drag_hover),
             on_drop: other.on_drop.or(self.on_drop),
             gesture_arena: other.gesture_arena.or(self.gesture_arena),
@@ -244,6 +270,7 @@ impl std::fmt::Debug for EventHandlers {
         f.debug_struct("EventHandlers")
             .field("on_tap", &self.on_tap.is_some())
             .field("on_double_tap", &self.on_double_tap.is_some())
+            .field("on_triple_tap", &self.on_triple_tap.is_some())
             .field("on_long_press", &self.on_long_press.is_some())
             .field("on_drag", &self.on_drag.is_some())
             .field("on_swipe", &self.on_swipe.is_some())
@@ -254,6 +281,10 @@ impl std::fmt::Debug for EventHandlers {
             .field("on_pointer_event", &self.on_pointer_event.is_some())
             .field("on_scroll", &self.on_scroll.is_some())
             .field("on_access_action", &self.on_access_action.is_some())
+            .field(
+                "on_access_action_request",
+                &self.on_access_action_request.is_some(),
+            )
             .field("on_drag_hover", &self.on_drag_hover.is_some())
             .field("on_drop", &self.on_drop.is_some())
             .finish()

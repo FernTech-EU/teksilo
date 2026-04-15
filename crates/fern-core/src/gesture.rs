@@ -51,6 +51,9 @@ pub enum GestureEvent {
     DoubleTap {
         position: Point,
     },
+    TripleTap {
+        position: Point,
+    },
     LongPress {
         position: Point,
     },
@@ -152,6 +155,17 @@ pub trait GestureRecognizer {
     /// by the event loop to schedule a wake-up before a long-press fires.
     fn next_deadline(&self) -> Option<Instant> {
         None
+    }
+
+    /// Whether this recognizer should be reset when a peer wins arbitration
+    /// in the same `GestureArena::process` call. The default is `true` —
+    /// winner-take-all, the usual behaviour for mutually exclusive gestures
+    /// (tap vs drag, long-press vs tap). Multi-tap recognizers
+    /// (`DoubleTapRecognizer`, `TripleTapRecognizer`) override this to
+    /// `false` so a `DoubleTap` firing at click 2 does not wipe the
+    /// `TripleTapRecognizer`'s accumulated state before click 3 arrives.
+    fn resets_on_peer_recognition(&self) -> bool {
+        true
     }
 }
 
@@ -334,6 +348,176 @@ impl GestureRecognizer for DoubleTapRecognizer {
 
     fn priority(&self) -> u32 {
         15 // Higher than tap — double-tap should win over single tap
+    }
+
+    fn resets_on_peer_recognition(&self) -> bool {
+        // Cooperative with `TripleTapRecognizer`: when we fire a DoubleTap
+        // at click 2, the triple-tap recognizer may still be mid-sequence
+        // waiting for click 3. The arena must not wipe triple-tap state
+        // because of our win, and symmetrically we don't want our state
+        // wiped by a triple-tap's win either (though we've already reset
+        // ourselves internally by then).
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TripleTapRecognizer
+// ---------------------------------------------------------------------------
+
+/// Recognizes a triple tap (three taps within a time window and distance).
+/// State machine mirrors `DoubleTapRecognizer` with one extra step:
+/// Idle → FirstTapLanded → SecondTapLanded → Recognized(TripleTap).
+/// Defaults match `DoubleTapRecognizer` (300 ms / 10 px) so the two fire
+/// as a natural escalating pair.
+#[derive(Debug)]
+pub struct TripleTapRecognizer {
+    max_distance: f32,
+    max_interval: Duration,
+    first_tap_position: Option<Point>,
+    first_tap_time: Option<Instant>,
+    second_tap_position: Option<Point>,
+    second_tap_time: Option<Instant>,
+    down_position: Option<Point>,
+}
+
+impl TripleTapRecognizer {
+    pub fn new() -> Self {
+        Self {
+            max_distance: 10.0,
+            max_interval: Duration::from_millis(300),
+            first_tap_position: None,
+            first_tap_time: None,
+            second_tap_position: None,
+            second_tap_time: None,
+            down_position: None,
+        }
+    }
+
+    pub fn max_distance(mut self, d: f32) -> Self {
+        self.max_distance = d;
+        self
+    }
+
+    pub fn max_interval(mut self, interval: Duration) -> Self {
+        self.max_interval = interval;
+        self
+    }
+
+    /// Feed an event with an explicit timestamp (for testability without real clocks).
+    pub fn process_at(&mut self, event: &RawPointerEvent, now: Instant) -> GestureResult {
+        match event {
+            RawPointerEvent::Down { position, .. } => {
+                self.down_position = Some(*position);
+                GestureResult::Pending
+            }
+            RawPointerEvent::Move { position } => {
+                if let Some(down) = self.down_position
+                    && distance(*position, down) > self.max_distance
+                {
+                    return GestureResult::Failed;
+                }
+                GestureResult::Pending
+            }
+            RawPointerEvent::Up { position, .. } => {
+                let Some(down) = self.down_position else {
+                    return GestureResult::Failed;
+                };
+                if distance(*position, down) > self.max_distance {
+                    return GestureResult::Failed;
+                }
+                self.down_position = None;
+
+                // Second tap landed — this is the third if both prior
+                // timings are in window.
+                if let (Some(first_pos), Some(first_time), Some(second_pos), Some(second_time)) = (
+                    self.first_tap_position,
+                    self.first_tap_time,
+                    self.second_tap_position,
+                    self.second_tap_time,
+                ) {
+                    if distance(*position, second_pos) <= self.max_distance
+                        && now.duration_since(second_time) <= self.max_interval
+                        && distance(second_pos, first_pos) <= self.max_distance
+                        && second_time.duration_since(first_time) <= self.max_interval
+                    {
+                        self.reset();
+                        return GestureResult::Recognized(GestureEvent::TripleTap {
+                            position: *position,
+                        });
+                    }
+                    // Out of window: fold the two most recent taps forward
+                    // so the next tap can pair with this one.
+                    self.first_tap_position = Some(*position);
+                    self.first_tap_time = Some(now);
+                    self.second_tap_position = None;
+                    self.second_tap_time = None;
+                    return GestureResult::Pending;
+                }
+
+                // First or second tap.
+                if let (Some(first_pos), Some(first_time)) =
+                    (self.first_tap_position, self.first_tap_time)
+                {
+                    // Second tap — if in window, promote to "second landed".
+                    if distance(*position, first_pos) <= self.max_distance
+                        && now.duration_since(first_time) <= self.max_interval
+                    {
+                        self.second_tap_position = Some(*position);
+                        self.second_tap_time = Some(now);
+                        return GestureResult::Pending;
+                    }
+                    // Out of window — treat as a fresh first tap.
+                    self.first_tap_position = Some(*position);
+                    self.first_tap_time = Some(now);
+                    self.second_tap_position = None;
+                    self.second_tap_time = None;
+                    return GestureResult::Pending;
+                }
+
+                // No prior tap — record as first.
+                self.first_tap_position = Some(*position);
+                self.first_tap_time = Some(now);
+                self.second_tap_position = None;
+                self.second_tap_time = None;
+                GestureResult::Pending
+            }
+        }
+    }
+}
+
+impl Default for TripleTapRecognizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GestureRecognizer for TripleTapRecognizer {
+    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
+        self.process_at(event, Instant::now())
+    }
+
+    fn reset(&mut self) {
+        self.first_tap_position = None;
+        self.first_tap_time = None;
+        self.second_tap_position = None;
+        self.second_tap_time = None;
+        self.down_position = None;
+    }
+
+    fn priority(&self) -> u32 {
+        // Higher than DoubleTap so that when both would fire on the same
+        // up event (shouldn't happen in practice — TripleTap only fires
+        // after three taps and DoubleTap only at tap 2) TripleTap wins.
+        20
+    }
+
+    fn resets_on_peer_recognition(&self) -> bool {
+        // Cooperative with `DoubleTapRecognizer` — see the matching
+        // override on DoubleTapRecognizer. The arena must not wipe our
+        // accumulated first/second tap state when DoubleTap fires at
+        // click 2, or click 3 would never promote us to TripleTap.
+        false
     }
 }
 
@@ -754,11 +938,18 @@ impl GestureArena {
             // Winner recognized — reset all non-winning recognizers.
             // The winner keeps its state (important for multi-event gestures
             // like drag, which fire DragStart then DragUpdate then DragEnd).
+            // Peers that explicitly opt out via `resets_on_peer_recognition`
+            // (multi-tap family) keep their state so an escalating sequence
+            // (tap → double tap → triple tap) can progress across winners.
             for (i, entry) in self.entries.iter_mut().enumerate() {
-                if i != *winner_idx && !entry.failed {
-                    entry.recognizer.reset();
-                    entry.failed = false;
+                if i == *winner_idx || entry.failed {
+                    continue;
                 }
+                if !entry.recognizer.resets_on_peer_recognition() {
+                    continue;
+                }
+                entry.recognizer.reset();
+                entry.failed = false;
             }
         }
 
@@ -792,10 +983,14 @@ impl GestureArena {
 
         if let Some((winner_idx, _, _)) = &best {
             for (i, entry) in self.entries.iter_mut().enumerate() {
-                if i != *winner_idx && !entry.failed {
-                    entry.recognizer.reset();
-                    entry.failed = false;
+                if i == *winner_idx || entry.failed {
+                    continue;
                 }
+                if !entry.recognizer.resets_on_peer_recognition() {
+                    continue;
+                }
+                entry.recognizer.reset();
+                entry.failed = false;
             }
         }
 
@@ -1345,6 +1540,129 @@ mod tests {
             button: PointerButton::Primary,
         });
         assert!(matches!(result, Some(GestureEvent::Tap { .. })));
+    }
+
+    // --- TripleTapRecognizer ---
+
+    #[test]
+    fn triple_tap_recognized_within_intervals() {
+        let mut rec = TripleTapRecognizer::new();
+        let t0 = Instant::now();
+
+        // Three taps all within window, all at (10, 10).
+        for i in 0..3 {
+            let offset = Duration::from_millis(200 * i as u64);
+            rec.process_at(
+                &RawPointerEvent::Down {
+                    position: Point::new(10.0, 10.0),
+                    button: PointerButton::Primary,
+                },
+                t0 + offset,
+            );
+            let result = rec.process_at(
+                &RawPointerEvent::Up {
+                    position: Point::new(10.0, 10.0),
+                    button: PointerButton::Primary,
+                },
+                t0 + offset + Duration::from_millis(50),
+            );
+            if i < 2 {
+                assert!(matches!(result, GestureResult::Pending));
+            } else {
+                assert!(matches!(
+                    result,
+                    GestureResult::Recognized(GestureEvent::TripleTap { .. })
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn triple_tap_fails_if_third_is_too_slow() {
+        let mut rec = TripleTapRecognizer::new().max_interval(Duration::from_millis(300));
+        let t0 = Instant::now();
+        let stamp = |ms| t0 + Duration::from_millis(ms);
+
+        // Taps 1, 2 in window.
+        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(0));
+        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(50));
+        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(200));
+        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(250));
+
+        // Third tap > 300 ms after the second — does not recognize.
+        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(700));
+        let result = rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(750));
+        assert!(matches!(result, GestureResult::Pending));
+    }
+
+    #[test]
+    fn triple_tap_fails_if_third_is_too_far() {
+        let mut rec = TripleTapRecognizer::new().max_distance(5.0);
+        let t0 = Instant::now();
+        let stamp = |ms| t0 + Duration::from_millis(ms);
+
+        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(0));
+        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(50));
+        rec.process_at(&RawPointerEvent::Down { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(100));
+        rec.process_at(&RawPointerEvent::Up { position: Point::new(10.0, 10.0), button: PointerButton::Primary }, stamp(150));
+
+        // Third tap > 5 px from the second.
+        rec.process_at(&RawPointerEvent::Down { position: Point::new(30.0, 10.0), button: PointerButton::Primary }, stamp(200));
+        let result = rec.process_at(&RawPointerEvent::Up { position: Point::new(30.0, 10.0), button: PointerButton::Primary }, stamp(250));
+        assert!(matches!(result, GestureResult::Pending));
+    }
+
+    #[test]
+    fn arena_double_and_triple_tap_cooperate() {
+        // Regression for the cooperative-recognizer contract: both
+        // `DoubleTapRecognizer` and `TripleTapRecognizer` must observe
+        // the full click sequence. Without `resets_on_peer_recognition =
+        // false` on both, DoubleTap's win at click 2 would reset the
+        // TripleTapRecognizer and click 3 would never fire TripleTap.
+        let mut arena = GestureArena::new();
+        arena.add(DoubleTapRecognizer::new());
+        arena.add(TripleTapRecognizer::new());
+
+        let pos = Point::new(10.0, 10.0);
+
+        // Click 1 — both recognizers pending.
+        assert!(
+            arena
+                .process(&RawPointerEvent::Down { position: pos, button: PointerButton::Primary })
+                .is_none()
+        );
+        assert!(
+            arena
+                .process(&RawPointerEvent::Up { position: pos, button: PointerButton::Primary })
+                .is_none()
+        );
+
+        // Click 2 — DoubleTap fires.
+        assert!(
+            arena
+                .process(&RawPointerEvent::Down { position: pos, button: PointerButton::Primary })
+                .is_none()
+        );
+        let second = arena.process(&RawPointerEvent::Up { position: pos, button: PointerButton::Primary });
+        assert!(
+            matches!(second, Some(GestureEvent::DoubleTap { .. })),
+            "click 2 must produce DoubleTap, got {:?}",
+            second
+        );
+
+        // Click 3 — TripleTap fires. If the arena reset TripleTapRecognizer
+        // after DoubleTap won, this would be None.
+        assert!(
+            arena
+                .process(&RawPointerEvent::Down { position: pos, button: PointerButton::Primary })
+                .is_none()
+        );
+        let third = arena.process(&RawPointerEvent::Up { position: pos, button: PointerButton::Primary });
+        assert!(
+            matches!(third, Some(GestureEvent::TripleTap { .. })),
+            "click 3 must produce TripleTap, got {:?}",
+            third
+        );
     }
 
     #[test]

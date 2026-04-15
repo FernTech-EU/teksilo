@@ -32,9 +32,10 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
-    FixedSize, Grid, GroupBox, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding,
-    Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, SplitButton,
-    StatusBar, TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
+    FixedSize, Grid, GroupBox, GroupHeader, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList,
+    Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer,
+    SplitButton, StatusBar, TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack,
+    Wrap,
 };
 
 // ---------------------------------------------------------------------------
@@ -676,28 +677,56 @@ impl Widget for WidgetCatalog {
         );
         // --- SplitButton: default action on the left, chevron dropdown on the
         //     right. Reuses MenuItem directly for the dropdown rows so icons,
-        //     shortcut labels and separators come for free.
+        //     shortcut labels, per-item tooltips and separators come for free.
+        //
+        // First control: promoting mode — picking an item from the dropdown
+        // updates the main region's label and default action.
+        // Second control: static mode — main region stays pinned to "Save"
+        // even after you pick "Save As…".
+        // Third control: disabled.
         let split_buttons_row = ctx.add(
             HStack::new()
                 .spacing(8.0)
                 .child(
                     SplitButton::new()
-                        .item(MenuItem::new_literal("Run").on_activate(Cmd::Run))
                         .item(
-                            MenuItem::new_literal("Run Tests").on_activate(Cmd::RunTests),
+                            MenuItem::new_literal("Run")
+                                .on_activate(Cmd::Run)
+                                .tooltip_literal("Run the current configuration"),
+                        )
+                        .item(
+                            MenuItem::new_literal("Run Tests")
+                                .on_activate(Cmd::RunTests)
+                                .tooltip_literal("Run the test suite"),
                         )
                         .item(
                             MenuItem::new_literal("Run with Coverage")
-                                .on_activate(Cmd::RunCoverage),
+                                .on_activate(Cmd::RunCoverage)
+                                .tooltip_literal("Run and collect code coverage"),
                         )
                         .separator()
-                        .item(MenuItem::new_literal("Debug").on_activate(Cmd::Debug))
+                        .item(
+                            MenuItem::new_literal("Debug")
+                                .on_activate(Cmd::Debug)
+                                .tooltip_literal("Launch the debugger"),
+                        )
+                        .tooltip_literal("Run the selected configuration")
+                        .chevron_tooltip_literal("Other run configurations")
                         .style(ButtonVariant::Default),
                 )
                 .child(
-                    SplitButton::new()
-                        .item(MenuItem::new_literal("Save").on_activate(Cmd::Save))
-                        .item(MenuItem::new_literal("Save As…").on_activate(Cmd::Save))
+                    SplitButton::new_static()
+                        .item(
+                            MenuItem::new_literal("Save")
+                                .on_activate(Cmd::Save)
+                                .tooltip_literal("Save the current file"),
+                        )
+                        .item(
+                            MenuItem::new_literal("Save As…")
+                                .on_activate(Cmd::Save)
+                                .tooltip_literal("Save the current file under a new name"),
+                        )
+                        .tooltip_literal("Save (main action stays pinned)")
                         .style(ButtonVariant::Regular),
                 )
                 .child(
@@ -711,8 +740,10 @@ impl Widget for WidgetCatalog {
         let buttons_group = ctx.add(
             VStack::new()
                 .spacing(8.0)
+                .child(GroupHeader::new_literal("Standard buttons"))
                 .add_child(buttons_row)
                 .add_child(buttons_row_disabled)
+                .child(GroupHeader::new_literal("Split buttons"))
                 .add_child(split_buttons_row),
         );
 

@@ -14,17 +14,25 @@ impl WidgetTree {
             return cached.clone();
         }
 
-        let update = self.build_accessibility_tree();
+        let (update, parents) = self.build_accessibility_tree();
         self.cached_a11y = Some(update.clone());
+        self.synthetic_parent_map = parents;
         self.a11y_dirty = false;
         update
     }
 
-    fn build_accessibility_tree(&self) -> accesskit::TreeUpdate {
+    fn build_accessibility_tree(
+        &self,
+    ) -> (
+        accesskit::TreeUpdate,
+        std::collections::HashMap<accesskit::NodeId, WidgetId>,
+    ) {
         use crate::accessibility::{root_node_id, widget_id_to_node_id};
 
         let roots = self.arena.roots();
         let mut nodes: Vec<(accesskit::NodeId, accesskit::Node)> = Vec::new();
+        let mut synthetic_parents: std::collections::HashMap<accesskit::NodeId, WidgetId> =
+            std::collections::HashMap::new();
 
         let mut root = accesskit::Node::new(accesskit::Role::Window);
         for &root_id in &roots {
@@ -35,7 +43,7 @@ impl WidgetTree {
         nodes.push((root_node_id(), root));
 
         for &root_id in &roots {
-            self.build_accessibility_recursive(root_id, &mut nodes);
+            self.build_accessibility_recursive(root_id, &mut nodes, &mut synthetic_parents);
         }
 
         let focus = self
@@ -44,18 +52,31 @@ impl WidgetTree {
             .map(widget_id_to_node_id)
             .unwrap_or_else(root_node_id);
 
-        accesskit::TreeUpdate {
-            nodes,
-            tree: Some(accesskit::Tree::new(root_node_id())),
-            tree_id: accesskit::TreeId::ROOT,
-            focus,
-        }
+        (
+            accesskit::TreeUpdate {
+                nodes,
+                tree: Some(accesskit::Tree::new(root_node_id())),
+                tree_id: accesskit::TreeId::ROOT,
+                focus,
+            },
+            synthetic_parents,
+        )
+    }
+
+    /// Look up the owning widget for a synthetic AccessKit `NodeId`
+    /// emitted by `push_text_run_child` / `push_paragraph_child`.
+    /// Used by `handle_accessibility_actions` to route an
+    /// `ActionRequest` targeting a TextRun child back to the
+    /// editor that owns it.
+    pub fn widget_for_synthetic(&self, node_id: accesskit::NodeId) -> Option<WidgetId> {
+        self.synthetic_parent_map.get(&node_id).copied()
     }
 
     fn build_accessibility_recursive(
         &self,
         id: WidgetId,
         nodes: &mut Vec<(accesskit::NodeId, accesskit::Node)>,
+        synthetic_parents: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
     ) {
         use crate::accessibility::widget_id_to_node_id;
 
@@ -64,7 +85,7 @@ impl WidgetTree {
         }
 
         let node = self.arena.get(id).unwrap();
-        let mut builder = AccessNodeBuilder::new();
+        let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
 
         let children = self.arena.children(id);
@@ -98,17 +119,26 @@ impl WidgetTree {
                 .push_described_by(widget_id_to_node_id(tooltip.content_id));
         }
 
-        let (node_id, ak_node) = builder.build(id);
+        let (node_id, ak_node, synthetic_children) = builder.build(id);
         nodes.push((node_id, ak_node));
+        // Merge the widget's emitted synthetic children into the
+        // tree update and record their parent-widget mapping so
+        // `handle_accessibility_actions` can route incoming
+        // `ActionRequest`s targeting these child NodeIds back to
+        // the owning widget.
+        for (syn_id, syn_node) in synthetic_children {
+            nodes.push((syn_id, syn_node));
+            synthetic_parents.insert(syn_id, id);
+        }
 
         for &child_id in children {
-            self.build_accessibility_recursive(child_id, nodes);
+            self.build_accessibility_recursive(child_id, nodes, synthetic_parents);
         }
     }
 
     pub fn accessibility_node(&self, id: WidgetId) -> AccessibilityInfo {
         let node = self.arena.get(id).unwrap();
-        let mut builder = AccessNodeBuilder::new();
+        let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
         let role = builder.role();
         let name = builder.name().map(|s| s.to_string());
@@ -166,7 +196,7 @@ impl WidgetTree {
     /// Equivalent to the label set via `AccessNodeBuilder::set_name`.
     pub fn text_content(&self, id: WidgetId) -> Option<String> {
         let node = self.arena.get(id)?;
-        let mut builder = AccessNodeBuilder::new();
+        let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
         builder.name().map(|s| s.to_string())
     }
@@ -175,7 +205,7 @@ impl WidgetTree {
     /// Equivalent to the value set via `AccessNodeBuilder::set_value`.
     pub fn text_value(&self, id: WidgetId) -> Option<String> {
         let node = self.arena.get(id)?;
-        let mut builder = AccessNodeBuilder::new();
+        let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
         builder.value().map(|s| s.to_string())
     }

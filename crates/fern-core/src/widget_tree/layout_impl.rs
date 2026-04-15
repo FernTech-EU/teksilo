@@ -18,7 +18,22 @@ impl WidgetTree {
                     self.arena.mark_needs_rebuild(*id);
                     self.arena.mark_ancestors_need_layout(*id);
                 }
+                crate::binding::BindingLevel::AccessibilityOnly => {
+                    // Drained separately below; see `flush_accessibility_dirty`.
+                    // Kept in the match so a future variant addition is a
+                    // compile-time reminder.
+                }
             }
+        }
+
+        // Orthogonal to the visual dirty pass: if any signal bound at
+        // `BindingLevel::AccessibilityOnly` fired, flip the tree-wide
+        // `a11y_dirty` flag so the next `sync_accessibility` rebuilds
+        // the AccessKit tree. Decoupled from layout / paint so a text
+        // edit that changes no visual geometry still reaches screen
+        // readers within one frame.
+        if self.binding_registry.flush_accessibility_dirty() {
+            self.a11y_dirty = true;
         }
 
         // Rebuild data-driven widgets whose data model changed.

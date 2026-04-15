@@ -1,30 +1,40 @@
 //! `RichTextEditor` — the main widget type.
 //!
-//! M8a implements the `read_only()` preset and the shared infrastructure
-//! that the future `editor()` preset (M8b) will reuse. The widget
-//! subscribes to `TextDocument::on_change` so multiple editors can share
-//! a document like QTextEdit views — see gap 10 of the plan.
+//! Constructors: [`RichTextEditor::read_only`] (hidden caret, filter
+//! rejects mutations, accessibility role `Document`) and
+//! [`RichTextEditor::editor`] (blinking caret, full command filter,
+//! role `MultilineTextInput`, `SetValue` action declared). Both
+//! widgets subscribe to `TextDocument::on_change` independently so
+//! any number of editors / viewers can share a document and observe
+//! each other's edits — see gap 10 of the plan.
+//!
+//! This file owns the struct, its builder methods and signal
+//! accessors, `Widget` trait impl (`build` / `size_that_fits` /
+//! `place_children` / `paint` / `accessibility`), and the shared
+//! `sync_cursor_signals` helper used by both `keyboard` and `mouse`
+//! dispatch modules. Key / pointer / gesture handlers live in
+//! [`super::keyboard`] and [`super::mouse`]; the frame-tick loop
+//! lives in [`super::frame_loop`]; clipboard actions in
+//! [`super::clipboard`].
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
-use fern_core::event::{EventResponse, Key, PointerButton, ScrollDelta, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+    CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
+use fern_text::text_document::{SelectionType, TextDocument, TextFormat};
 use fern_text::{FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode};
 use fern_tokens::Color;
-use fern_text::text_document::{MoveMode, MoveOperation, SelectionType, TextDocument};
 
 use super::frame_loop;
 use super::hit_test;
-use super::paint::{paint_frame, PaintParams};
-use super::policy::{CaretPolicy, EditCommandKind, PolicyBundle, EDITOR_PRESET, READ_ONLY_PRESET};
+use super::paint::{PaintParams, paint_frame};
+use super::policy::{CaretPolicy, PolicyBundle, EDITOR_PRESET, READ_ONLY_PRESET};
 use super::state::{EditorState, SharedState};
-use fern_text::text_document::TextFormat;
 
 /// Scrollbar visibility policy, applied independently per axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,7 +275,7 @@ impl RichTextEditor {
         let st = self.state.borrow();
         let hit = hit_test::hit_test_at(&st.engine, point, 0.0, 0.0)?;
         let selection = Some((st.cursor.anchor(), st.cursor.position()));
-        Some(hit_test::classify(&hit, selection))
+        Some(hit_test::classify(&hit, selection, &st.document))
     }
 
     // --- Selection helpers (allowed under both presets) -----------------
@@ -279,11 +289,15 @@ impl RichTextEditor {
             .unwrap_or_default()
     }
 
-    /// Select the entire document.
+    /// Select the entire document programmatically. Equivalent to
+    /// the final step of the Ctrl+A ladder; resets the ladder state
+    /// so a subsequent Ctrl+A starts fresh at level 1.
     pub fn select_all(&self) {
         {
-            let st = self.state.borrow();
+            let mut st = self.state.borrow_mut();
             st.cursor.select(SelectionType::Document);
+            st.select_all_level = 0;
+            st.select_all_anchor_cell = None;
         }
         sync_cursor_signals(&self.state);
     }
@@ -291,8 +305,10 @@ impl RichTextEditor {
     /// Clear any current selection.
     pub fn deselect(&self) {
         {
-            let st = self.state.borrow();
+            let mut st = self.state.borrow_mut();
             st.cursor.clear_selection();
+            st.select_all_level = 0;
+            st.select_all_anchor_cell = None;
         }
         sync_cursor_signals(&self.state);
     }
@@ -336,6 +352,26 @@ impl Widget for RichTextEditor {
             }
         }
 
+        // Bind document_version at `BindingLevel::AccessibilityOnly`
+        // so any text or format edit (which bumps document_version
+        // inside `drain_events`) automatically flips the tree's
+        // `a11y_dirty` flag during `process_state_changes`. Without
+        // this binding, screen readers only see updated text when
+        // an unrelated event (focus change, window resize) happens
+        // to mark the a11y tree dirty. See the RichTextEditor
+        // accessibility plan for details.
+        {
+            let st = self.state.borrow();
+            let document_version = st.document_version.clone();
+            drop(st);
+            let self_id = ctx.self_id();
+            document_version.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                fern_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
+
         // Stash the tree's frame-request handle on the state so the
         // frame-tick effect can self-chain (caret blink, drag
         // auto-scroll) without mutable access to the tree.
@@ -369,9 +405,29 @@ impl Widget for RichTextEditor {
             });
         }
 
-        // Attach handlers: pointer for click dispatch, key for nav
-        // (read-only preset still wants arrow-key + Home/End + Ctrl+C
-        // + Ctrl+A), focus for caret state, scroll for wheel pans.
+        // Attach handlers:
+        // * `on_pointer_event`: PointerDown for caret placement and
+        //   drag-select start, PointerMove for drag extension and
+        //   auto-scroll velocity, PointerUp for drag teardown. Returns
+        //   `Ignored` on Down/Up so the gesture arena also processes
+        //   the event and the double/triple tap recognizers see every
+        //   press. Handled on Move during an active drag.
+        // * `on_scroll`: mouse wheel / trackpad.
+        // * `on_key`: arrow navigation, Home/End (line + document),
+        //   PageUp/PageDown, Enter, Backspace, Delete, Ctrl+Backspace
+        //   / Ctrl+Delete word deletion, Ctrl+B/I/U formatting,
+        //   Ctrl+Z/Y/Shift+Z undo/redo, Ctrl+C/X/V clipboard,
+        //   Ctrl+A with table-aware escalation ladder, printable
+        //   characters into `pending_chars` for frame-start batch
+        //   insertion, IME commit.
+        // * `on_double_tap` / `on_triple_tap`: word / paragraph
+        //   selection via cooperative gesture recognizers in
+        //   `fern-core::gesture`. The single-click caret placement
+        //   is handled by `on_pointer_event::PointerDown` above
+        //   because mouse-down semantics demand immediate response,
+        //   which `on_tap` (fires on release) would violate.
+        // * `on_focus`: mirror `has_focus` onto the editor state so
+        //   `paint()` and `frame_loop::tick` can gate the caret.
         let mut handlers = HandlerSet::new();
         handlers = handlers
             .focusable(true)
@@ -381,11 +437,13 @@ impl Widget for RichTextEditor {
                 move |gained, ctx| {
                     let mut st = state.borrow_mut();
                     st.has_focus = gained;
-                    if gained {
-                        // Reset the blink phase to "now" so the
-                        // caret pops on immediately and the first
-                        // off-toggle happens exactly one interval
-                        // later.
+                    if gained && matches!(st.policy.caret_policy, CaretPolicy::Blinking) {
+                        // Reset the blink phase to "now" so the caret
+                        // pops on immediately and the first off-toggle
+                        // happens exactly one interval later. Skipped
+                        // for `Hidden` — no caret means no blink, and
+                        // we avoid a spurious `caret_visible` signal
+                        // update on focus gain.
                         st.blink_last_toggle = Some(std::time::Instant::now());
                         st.caret_visible.set(true);
                     }
@@ -395,15 +453,29 @@ impl Widget for RichTextEditor {
             })
             .on_pointer_event({
                 let state = self.state.clone();
-                move |event, ctx| on_pointer_event(&state, event, ctx)
+                move |event, ctx| super::mouse::handle_pointer_event(&state, event, ctx)
             })
             .on_scroll({
                 let state = self.state.clone();
-                move |event, ctx| on_scroll(&state, event, ctx)
+                move |event, ctx| super::mouse::handle_scroll(&state, event, ctx)
             })
             .on_key({
                 let state = self.state.clone();
-                move |event, ctx| on_key(&state, event, ctx)
+                move |event, ctx| super::keyboard::handle_key(&state, event, ctx)
+            })
+            .on_double_tap({
+                let state = self.state.clone();
+                move |pos, ctx| super::mouse::handle_double_tap(&state, pos, ctx)
+            })
+            .on_triple_tap({
+                let state = self.state.clone();
+                move |pos, ctx| super::mouse::handle_triple_tap(&state, pos, ctx)
+            })
+            .on_access_action_request({
+                let state = self.state.clone();
+                move |action, target_node, data, ctx| {
+                    handle_access_action_request(&state, action, target_node, data, ctx)
+                }
             });
 
         ctx.apply_self_handlers(handlers);
@@ -426,7 +498,12 @@ impl Widget for RichTextEditor {
         _ctx: &LayoutContext,
     ) {
         // Record the viewport for the frame loop to read next tick.
-        // Scroll bar children layer on in M8b.
+        // The rich text editor is currently a leaf — scroll bar
+        // siblings (§27.10.5's "scrollbars outside ScrollArea" trick)
+        // are a future addition. For now `paint()` is the only
+        // place `viewport_width / height` get reliably refreshed
+        // (since leaf widgets may not call `place_children`), and
+        // this path is the fallback when a parent does call us.
         let mut st = self.state.borrow_mut();
         st.viewport_width = bounds.width;
         st.viewport_height = bounds.height;
@@ -524,8 +601,12 @@ impl Widget for RichTextEditor {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use super::policy::AccessibilityRole;
-        use fern_core::accesskit::{Action, Role};
+        use super::state::SyntheticElementRef;
+        use fern_core::accesskit::{Action, NodeId, Role};
+        use fern_text::text_document::{FlowElementSnapshot, FragmentContent};
+
         let st = self.state.borrow();
+
         let role = match st.policy.access_role {
             AccessibilityRole::Editor => Role::MultilineTextInput,
             AccessibilityRole::Document => Role::Document,
@@ -534,11 +615,141 @@ impl Widget for RichTextEditor {
         if st.policy.is_read_only() {
             builder.set_read_only();
         }
-        if let Ok(text) = st.document.to_plain_text() {
-            builder.set_value(text);
+
+        // Walk the cached flow snapshot (or rebuild it if the last
+        // edit cleared the cache). For each block we emit a
+        // Role::Paragraph child (or Role::Heading when the block's
+        // heading_level is set), then for each text fragment we
+        // emit a Role::TextRun child carrying value,
+        // character_lengths, word_starts, and per-character
+        // geometry from text-typeset. Widget-local
+        // synthetic_to_element map is populated so the on-access
+        // handler can convert AccessKit TextSelection back into
+        // document-absolute cursor positions.
+        let snap = {
+            let mut cache = st.accessibility_flow_snapshot.borrow_mut();
+            if cache.is_none() {
+                *cache = Some(st.document.snapshot_flow());
+            }
+            cache.as_ref().cloned()
+        };
+
+        let user_pos = st.cursor.position();
+        let user_anchor = st.cursor.anchor();
+        let mut caret_pair: Option<(NodeId, usize)> = None;
+        let mut anchor_pair: Option<(NodeId, usize)> = None;
+        let mut syn_map: std::collections::HashMap<NodeId, SyntheticElementRef> =
+            std::collections::HashMap::new();
+
+        if let Some(snap) = snap {
+            for elem in &snap.elements {
+                if let FlowElementSnapshot::Block(block) = elem {
+                    let para_id = builder.push_paragraph_child(block.block_id as u64);
+                    if let Some(level) = block.block_format.heading_level {
+                        builder.set_paragraph_as_heading(para_id, level);
+                    }
+                    for frag in &block.fragments {
+                        if let FragmentContent::Text {
+                            text,
+                            offset,
+                            length,
+                            element_id,
+                            word_starts,
+                            ..
+                        } = frag
+                        {
+                            // character_lengths: UTF-8 byte length of each char.
+                            // AccessKit indexes by char, each entry is byte count.
+                            let char_lengths: Vec<u8> =
+                                text.chars().map(|c| c.len_utf8() as u8).collect();
+
+                            // Per-character geometry from text-typeset. char_start
+                            // / char_end are block-relative character offsets
+                            // (matches LayoutLine::char_range's coordinate space).
+                            let char_start = *offset;
+                            let char_end = char_start + *length;
+                            let geom = st
+                                .engine
+                                .character_geometry(block.block_id, char_start, char_end);
+                            let char_positions: Vec<f32> =
+                                geom.iter().map(|g| g.position).collect();
+                            let char_widths: Vec<f32> =
+                                geom.iter().map(|g| g.width).collect();
+
+                            let node_id = builder.push_text_run_child(
+                                para_id,
+                                *element_id,
+                                *offset,
+                                text.clone(),
+                                char_lengths,
+                                Some(word_starts.clone()),
+                                if char_positions.is_empty() {
+                                    None
+                                } else {
+                                    Some(char_positions)
+                                },
+                                if char_widths.is_empty() {
+                                    None
+                                } else {
+                                    Some(char_widths)
+                                },
+                            );
+
+                            // Remember where this run lives in the document so
+                            // the on-access handler can resolve
+                            // SetTextSelection(TextRun NodeId, char_index).
+                            let absolute_start = block.position + *offset;
+                            syn_map.insert(
+                                node_id,
+                                SyntheticElementRef {
+                                    element_id: *element_id,
+                                    absolute_start,
+                                    text: text.clone(),
+                                },
+                            );
+
+                            // Resolve user cursor / anchor to this run if they
+                            // fall within its absolute character range
+                            // [absolute_start, absolute_start + length].
+                            let absolute_end = absolute_start + *length;
+                            if user_pos >= absolute_start && user_pos <= absolute_end {
+                                let char_idx = char_index_in_text(
+                                    text,
+                                    user_pos - absolute_start,
+                                );
+                                caret_pair = Some((node_id, char_idx));
+                            }
+                            if user_anchor >= absolute_start && user_anchor <= absolute_end {
+                                let char_idx = char_index_in_text(
+                                    text,
+                                    user_anchor - absolute_start,
+                                );
+                                anchor_pair = Some((node_id, char_idx));
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        // Attach the text selection on the editor itself, referencing
+        // the appropriate TextRun children. If we couldn't resolve
+        // either endpoint (empty document, cursor in no fragment),
+        // fall back to a self-targeted selection so screen readers
+        // still see *something*.
+        if let (Some(a), Some(c)) = (anchor_pair, caret_pair) {
+            builder.set_text_selection_to(a, c);
+        } else {
+            builder.set_text_selection_on_self(user_anchor, user_pos);
+        }
+
+        *st.synthetic_to_element.borrow_mut() = syn_map;
+
         builder.add_action(Action::ScrollIntoView);
         builder.add_action(Action::SetTextSelection);
+        if matches!(st.policy.access_role, AccessibilityRole::Editor) {
+            builder.add_action(Action::SetValue);
+        }
     }
 
     fn clips_children(&self) -> bool {
@@ -554,8 +765,10 @@ impl Widget for RichTextEditor {
 /// Push the current cursor position / anchor / selection flag into
 /// the state's reactive signals. Called after every cursor mutation
 /// so external observers (status bars, tests) see the change on the
-/// next signal propagation.
-fn sync_cursor_signals(state: &SharedState) {
+/// next signal propagation. Exported to `super::keyboard` and
+/// `super::mouse` because every event handler ends with a signal
+/// publish.
+pub(super) fn sync_cursor_signals(state: &SharedState) {
     let st = state.borrow();
     let pos = st.cursor.position();
     let anc = st.cursor.anchor();
@@ -569,537 +782,101 @@ fn sync_cursor_signals(state: &SharedState) {
     sel_sig.set(has_sel);
 }
 
-fn on_pointer_event(
+/// Dispatch an AccessKit `ActionRequest` payload for the rich text
+/// editor. Handles `SetTextSelection` (screen-reader-initiated
+/// caret moves), `SetValue` (programmatic text replacement), and
+/// `ScrollIntoView` (scroll so the caret is visible).
+fn handle_access_action_request(
     state: &SharedState,
-    event: &WidgetEvent,
-    ctx: &mut EventContext,
-) -> EventResponse {
-    match event {
-        WidgetEvent::PointerDown {
-            position,
-            button,
-            modifiers: _,
-        } => {
-            if *button != PointerButton::Primary {
-                // Secondary / middle are for the application's own
-                // context menu; let them bubble.
+    action: fern_core::accesskit::Action,
+    _target_node: fern_core::accesskit::NodeId,
+    data: Option<fern_core::accesskit::ActionData>,
+    ctx: &mut fern_core::widget::EventContext,
+) -> fern_core::event::EventResponse {
+    use fern_core::accesskit::{Action, ActionData};
+    use fern_core::event::EventResponse;
+    use fern_text::text_document::{MoveMode, SelectionType};
+    use super::policy::EditCommandKind;
+
+    match (action, data) {
+        (Action::SetTextSelection, Some(ActionData::SetTextSelection(sel))) => {
+            let filter = state.borrow().policy.command_filter;
+            // Screen-reader-initiated caret moves are "navigation",
+            // filtered under the same rule as arrow keys.
+            if !filter.accepts(EditCommandKind::MoveLeft) {
+                return EventResponse::Ignored;
+            }
+            let resolve = |pos: fern_core::accesskit::TextPosition| -> Option<usize> {
+                let st = state.borrow();
+                let map = st.synthetic_to_element.borrow();
+                let er = map.get(&pos.node)?.clone();
+                // Convert character_index (char units within the run)
+                // to a byte offset within the run's text, then add
+                // absolute_start to get the document position.
+                let byte_off = er
+                    .text
+                    .char_indices()
+                    .nth(pos.character_index)
+                    .map(|(i, _)| i)
+                    .unwrap_or(er.text.len());
+                Some(er.absolute_start + byte_off)
+            };
+            if let (Some(a), Some(f)) = (resolve(sel.anchor), resolve(sel.focus)) {
+                let st = state.borrow();
+                st.cursor.set_position(a, MoveMode::MoveAnchor);
+                st.cursor.set_position(f, MoveMode::KeepAnchor);
+                drop(st);
+                sync_cursor_signals(state);
+                ctx.request_frame();
+                EventResponse::Handled
+            } else {
+                EventResponse::Ignored
+            }
+        }
+        (Action::SetValue, Some(ActionData::Value(value))) => {
+            let filter = state.borrow().policy.command_filter;
+            if !filter.accepts(EditCommandKind::InsertChar) {
                 return EventResponse::Ignored;
             }
             let st = state.borrow();
-            // Pointer position arrives in window-local coordinates;
-            // subtract the widget origin (recorded by `paint()`) to
-            // get the widget-local point text-typeset's `hit_test`
-            // expects. scroll offset and zoom are applied internally
-            // by the typesetter.
-            let local = Point::new(
-                position.x - st.viewport_origin.x,
-                position.y - st.viewport_origin.y,
-            );
-            let hit = hit_test::hit_test_at(&st.engine, local, 0.0, 0.0);
+            st.cursor.select(SelectionType::Document);
+            let _ = st.cursor.insert_text(value.as_ref());
             drop(st);
-            let Some(hit) = hit else {
-                return EventResponse::Ignored;
-            };
-            match &hit.region {
-                fern_text::HitRegion::Link { href: _ }
-                | fern_text::HitRegion::Image { name: _ } => {
-                    // Link / image click: M8b will emit the typed
-                    // command. For now just flag the request.
-                    ctx.request_frame();
-                    EventResponse::Handled
-                }
-                _ => {
-                    // Place the cursor so the selection anchor tracks
-                    // the click; read-only preset still allows
-                    // click-drag selection for Copy/Cut later.
-                    let st = state.borrow();
-                    st.cursor.set_position(hit.position, MoveMode::MoveAnchor);
-                    drop(st);
-                    sync_cursor_signals(state);
-                    ctx.request_frame();
-                    EventResponse::Handled
-                }
-            }
+            sync_cursor_signals(state);
+            ctx.request_frame();
+            EventResponse::Handled
         }
-        WidgetEvent::PointerMove { position: _ } => EventResponse::Ignored,
-        WidgetEvent::PointerUp { .. } => EventResponse::Handled,
+        (Action::ScrollIntoView, _) => {
+            let mut st = state.borrow_mut();
+            if let Some(new_y) = st.engine.ensure_caret_visible() {
+                st.scroll_y.set(new_y);
+            }
+            drop(st);
+            ctx.request_frame();
+            EventResponse::Handled
+        }
         _ => EventResponse::Ignored,
     }
 }
 
-fn on_scroll(
-    state: &SharedState,
-    event: &WidgetEvent,
-    ctx: &mut EventContext,
-) -> EventResponse {
-    if let WidgetEvent::Scroll { delta } = event {
-        // Match `ScrollArea`'s sign convention: `delta.y` is the
-        // scroll distance in document pixels per unit of wheel /
-        // trackpad movement, already oriented so that positive
-        // means "scroll content up" (i.e. increase scroll_y). For
-        // line-based events the line_height multiplier is 16 px to
-        // match ScrollArea's default.
-        let (dx, dy) = match delta {
-            ScrollDelta::Lines { x, y } => (*x * 16.0, *y * 16.0),
-            ScrollDelta::Pixels { x, y } => (*x, *y),
-        };
-        let st = state.borrow();
-        let new_y = (st.scroll_y.get() + dy).clamp(0.0, st.max_scroll_y.get());
-        let new_x = (st.scroll_x.get() + dx).clamp(0.0, st.max_scroll_x.get());
-        st.scroll_y.set(new_y);
-        st.scroll_x.set(new_x);
-        drop(st);
-        ctx.request_frame();
-        return EventResponse::Handled;
+/// Convert an intra-fragment byte offset into a character index.
+/// Used by `accessibility()` to map the user's document-absolute
+/// cursor position into AccessKit's `TextPosition.character_index`
+/// (which indexes into the target TextRun's `character_lengths`,
+/// i.e., one entry per Rust `char`).
+fn char_index_in_text(text: &str, byte_offset: usize) -> usize {
+    // Walk char_indices until we pass byte_offset; the count at
+    // that point is the character index. Fall back to the char
+    // count when byte_offset >= text.len().
+    if byte_offset >= text.len() {
+        return text.chars().count();
     }
-    EventResponse::Ignored
-}
-
-/// Kind of key action taken by `on_key`, used to decide whether to
-/// clear the sticky preferred-X afterwards.
-#[derive(Copy, Clone, PartialEq, Eq)]
-enum KeyAction {
-    /// The key caused horizontal motion, a selection change, or
-    /// something else that invalidates the preferred column.
-    ClearPreferredX,
-    /// Vertical motion (Up/Down/PageUp/PageDown): the sticky column
-    /// must be preserved so repeated vertical presses land on the
-    /// same visual column.
-    KeepPreferredX,
-    /// The key was not handled.
-    Unhandled,
-}
-
-fn on_key(
-    state: &SharedState,
-    event: &WidgetEvent,
-    ctx: &mut EventContext,
-) -> EventResponse {
-    // IME commit — one string per composition, already a finalized
-    // grapheme cluster. Treated identically to a KeyDown with printable
-    // text: batched into `pending_chars`, flushed next frame.
-    if let WidgetEvent::ImeCommit { text } = event {
-        return push_pending_chars(state, ctx, text);
-    }
-
-    let WidgetEvent::KeyDown { key, modifiers, text, .. } = event else {
-        return EventResponse::Ignored;
-    };
-
-    let shift = modifiers.shift();
-    let ctrl = modifiers.ctrl() || modifiers.super_key();
-    let mode = if shift {
-        MoveMode::KeepAnchor
-    } else {
-        MoveMode::MoveAnchor
-    };
-
-    // `TextCursor::clone()` creates an **independent** cursor with
-    // its own position/anchor data (see the Clone impl in
-    // text-document/.../cursor.rs). Cloning and mutating the clone
-    // leaves `state.cursor` untouched. We must therefore operate on
-    // `state.cursor` directly through a short-lived borrow and drop
-    // the state before calling `sync_cursor_signals` so the signal
-    // observers see the post-move value.
-    let action: KeyAction = {
-        let mut st = state.borrow_mut();
-        let filter = st.policy.command_filter;
-        match key {
-            Key::ArrowLeft if filter.accepts(EditCommandKind::MoveLeft) => {
-                let op = if ctrl {
-                    MoveOperation::WordLeft
-                } else {
-                    MoveOperation::Left
-                };
-                st.cursor.move_position(op, mode, 1);
-                KeyAction::ClearPreferredX
-            }
-            Key::ArrowRight if filter.accepts(EditCommandKind::MoveRight) => {
-                let op = if ctrl {
-                    MoveOperation::WordRight
-                } else {
-                    MoveOperation::Right
-                };
-                st.cursor.move_position(op, mode, 1);
-                KeyAction::ClearPreferredX
-            }
-            Key::ArrowUp if filter.accepts(EditCommandKind::MoveUp) => {
-                move_cursor_vertical(&mut st, -1, mode);
-                KeyAction::KeepPreferredX
-            }
-            Key::ArrowDown if filter.accepts(EditCommandKind::MoveDown) => {
-                move_cursor_vertical(&mut st, 1, mode);
-                KeyAction::KeepPreferredX
-            }
-            Key::PageUp if filter.accepts(EditCommandKind::PageUp) => {
-                move_cursor_page(&mut st, -1, mode);
-                KeyAction::KeepPreferredX
-            }
-            Key::PageDown if filter.accepts(EditCommandKind::PageDown) => {
-                move_cursor_page(&mut st, 1, mode);
-                KeyAction::KeepPreferredX
-            }
-            Key::Home if filter.accepts(EditCommandKind::MoveHome) => {
-                if ctrl {
-                    st.cursor.move_position(MoveOperation::Start, mode, 1);
-                } else {
-                    move_cursor_to_line_edge(&mut st, LineEdge::Start, mode);
-                }
-                KeyAction::ClearPreferredX
-            }
-            Key::End if filter.accepts(EditCommandKind::MoveEnd) => {
-                if ctrl {
-                    st.cursor.move_position(MoveOperation::End, mode, 1);
-                } else {
-                    // Use the typesetter to find end-of-visual-line
-                    // rather than text-document's EndOfBlock. Two
-                    // wins: (a) a second End press from an already-
-                    // at-end cursor is a no-op, avoiding the
-                    // block-advance bug where `get_block_at_position`
-                    // returns the *next* block when queried at a
-                    // boundary; (b) wrapped blocks stop at the wrap
-                    // point, which is the standard editor behaviour.
-                    move_cursor_to_line_edge(&mut st, LineEdge::End, mode);
-                }
-                KeyAction::ClearPreferredX
-            }
-            Key::A if ctrl && filter.accepts(EditCommandKind::SelectAll) => {
-                st.cursor.select(SelectionType::Document);
-                KeyAction::ClearPreferredX
-            }
-            Key::C if ctrl && filter.accepts(EditCommandKind::Copy) => {
-                // Copy is a no-op here until Phase B wires
-                // `clipboard::copy` through `EventContext::app_state`.
-                // The selection remains readable via
-                // `RichTextEditor::selected_text()`.
-                KeyAction::ClearPreferredX
-            }
-            // --- Editor-preset mutating commands ---
-            Key::Backspace if filter.accepts(EditCommandKind::DeletePrev) => {
-                if ctrl {
-                    // Ctrl+Backspace = delete word to the left.
-                    // Select the word, then delete the selection —
-                    // matches godot rich_text_edit.rs:580 (there is
-                    // no dedicated delete-word API on TextCursor).
-                    if !st.cursor.has_selection() {
-                        st.cursor.move_position(MoveOperation::WordLeft, MoveMode::KeepAnchor, 1);
-                    }
-                    let _ = st.cursor.remove_selected_text();
-                } else if st.cursor.has_selection() {
-                    let _ = st.cursor.remove_selected_text();
-                } else {
-                    let _ = st.cursor.delete_previous_char();
-                }
-                KeyAction::ClearPreferredX
-            }
-            Key::Delete if filter.accepts(EditCommandKind::DeleteNext) => {
-                if ctrl {
-                    if !st.cursor.has_selection() {
-                        st.cursor.move_position(MoveOperation::WordRight, MoveMode::KeepAnchor, 1);
-                    }
-                    let _ = st.cursor.remove_selected_text();
-                } else if st.cursor.has_selection() {
-                    let _ = st.cursor.remove_selected_text();
-                } else {
-                    let _ = st.cursor.delete_char();
-                }
-                KeyAction::ClearPreferredX
-            }
-            Key::Enter if filter.accepts(EditCommandKind::InsertBlock) => {
-                // Phase A: always insert a new block. Phase B will
-                // add table-cell-aware navigation (Enter inside a
-                // table cell navigates to the next row).
-                let _ = st.cursor.insert_block();
-                KeyAction::ClearPreferredX
-            }
-            Key::B if ctrl && filter.accepts(EditCommandKind::ToggleBold) => {
-                toggle_char_format(&mut st, FormatBit::Bold);
-                KeyAction::ClearPreferredX
-            }
-            Key::I if ctrl && filter.accepts(EditCommandKind::ToggleItalic) => {
-                toggle_char_format(&mut st, FormatBit::Italic);
-                KeyAction::ClearPreferredX
-            }
-            Key::U if ctrl && filter.accepts(EditCommandKind::ToggleUnderline) => {
-                toggle_char_format(&mut st, FormatBit::Underline);
-                KeyAction::ClearPreferredX
-            }
-            Key::Z if ctrl && !shift && filter.accepts(EditCommandKind::Undo) => {
-                let _ = st.document.undo();
-                KeyAction::ClearPreferredX
-            }
-            Key::Y if ctrl && filter.accepts(EditCommandKind::Redo) => {
-                let _ = st.document.redo();
-                KeyAction::ClearPreferredX
-            }
-            Key::Z if ctrl && shift && filter.accepts(EditCommandKind::Redo) => {
-                let _ = st.document.redo();
-                KeyAction::ClearPreferredX
-            }
-            _ => {
-                // Printable character fallback: winit populates
-                // `KeyDown::text` with the character produced by the
-                // key (post-layout mapping, so Shift / dead keys /
-                // layout translations are already applied). Only
-                // accepted under `All` filter.
-                if let Some(t) = text.as_deref() {
-                    if filter.accepts(EditCommandKind::InsertChar) {
-                        let clean: String = t
-                            .chars()
-                            .filter(|c| !c.is_control())
-                            .collect();
-                        if !clean.is_empty() {
-                            st.pending_chars.push_str(&clean);
-                            // Fall through the outer match arm's
-                            // post-processing — we want preferred_x
-                            // cleared and a frame request.
-                            KeyAction::ClearPreferredX
-                        } else {
-                            KeyAction::Unhandled
-                        }
-                    } else {
-                        KeyAction::Unhandled
-                    }
-                } else {
-                    KeyAction::Unhandled
-                }
-            }
+    let mut count = 0usize;
+    for (i, _) in text.char_indices() {
+        if i >= byte_offset {
+            return count;
         }
-    };
-
-    match action {
-        KeyAction::Unhandled => EventResponse::Ignored,
-        KeyAction::ClearPreferredX => {
-            {
-                let mut st = state.borrow_mut();
-                st.preferred_x = None;
-            }
-            ensure_caret_visible(state);
-            sync_cursor_signals(state);
-            ctx.request_frame();
-            EventResponse::Handled
-        }
-        KeyAction::KeepPreferredX => {
-            ensure_caret_visible(state);
-            sync_cursor_signals(state);
-            ctx.request_frame();
-            EventResponse::Handled
-        }
+        count += 1;
     }
-}
-
-/// Which `TextFormat` bit a Ctrl+B/I/U toggle flips.
-#[derive(Copy, Clone)]
-enum FormatBit {
-    Bold,
-    Italic,
-    Underline,
-}
-
-/// Toggle a single character-format bit at the caret, mirroring the
-/// godot reference (rich_text_edit.rs:2089-2117): the decision to
-/// turn a format on or off is read from the current caret format
-/// (`char_format()`), not from a selection-wide consensus. If the
-/// caret sits in bold text the toggle turns bold off for the whole
-/// selection (or, with no selection, for subsequent inserts at
-/// the caret position); if the caret sits in plain text with a
-/// mixed-bold selection, Ctrl+B bolds the whole selection.
-///
-/// **Read-position subtlety**: `TextCursor::char_format()` reads
-/// the inline element at `position()`. After a select-all the
-/// caret sits at the *end* of the selection, which may be past the
-/// last character (an empty "virtual" element with default format).
-/// To get a meaningful read for the toggle decision we use
-/// `selection_start()` when a selection is active — that position
-/// is always the actual first character of the selected range.
-fn toggle_char_format(st: &mut EditorState, bit: FormatBit) {
-    let probe = st.document.cursor();
-    if st.cursor.has_selection() {
-        let start = st.cursor.selection_start();
-        probe.set_position(start, fern_text::text_document::MoveMode::MoveAnchor);
-    } else {
-        probe.set_position(
-            st.cursor.position(),
-            fern_text::text_document::MoveMode::MoveAnchor,
-        );
-    }
-    let current = probe.char_format().unwrap_or_default();
-    let new_value = !match bit {
-        FormatBit::Bold => current.font_bold.unwrap_or(false),
-        FormatBit::Italic => current.font_italic.unwrap_or(false),
-        FormatBit::Underline => current.font_underline.unwrap_or(false),
-    };
-    let fmt = match bit {
-        FormatBit::Bold => TextFormat {
-            font_bold: Some(new_value),
-            ..Default::default()
-        },
-        FormatBit::Italic => TextFormat {
-            font_italic: Some(new_value),
-            ..Default::default()
-        },
-        FormatBit::Underline => TextFormat {
-            font_underline: Some(new_value),
-            ..Default::default()
-        },
-    };
-    let _ = st.cursor.merge_char_format(&fmt);
-    st.pending_format_changed = true;
-}
-
-/// Shared helper for printable-character ingestion: push the text
-/// into `pending_chars`, clear sticky `preferred_x`, request a frame.
-/// Reused by the IME commit path.
-fn push_pending_chars(
-    state: &SharedState,
-    ctx: &mut EventContext,
-    text: &str,
-) -> EventResponse {
-    if text.is_empty() {
-        return EventResponse::Ignored;
-    }
-    let filter = state.borrow().policy.command_filter;
-    if !filter.accepts(EditCommandKind::InsertChar) {
-        return EventResponse::Ignored;
-    }
-    let clean: String = text.chars().filter(|c| !c.is_control()).collect();
-    if clean.is_empty() {
-        return EventResponse::Ignored;
-    }
-    {
-        let mut st = state.borrow_mut();
-        st.pending_chars.push_str(&clean);
-        st.preferred_x = None;
-    }
-    ctx.request_frame();
-    EventResponse::Handled
-}
-
-/// Ask the typesetter to compute a scroll offset that keeps the
-/// current caret inside the viewport, and write that offset into
-/// the widget's `scroll_y` signal. Called only from keyboard
-/// handlers (after arrow/page nav), never from the frame loop —
-/// otherwise wheel scrolls that move the viewport away from the
-/// caret would be undone on the next tick.
-fn ensure_caret_visible(state: &SharedState) {
-    let mut st = state.borrow_mut();
-    if !st.engine.has_full_layout() {
-        return;
-    }
-    // Forward the current wheel-driven scroll so ensure_caret_visible
-    // computes the correction relative to where the viewport actually
-    // is, not where it was at last paint.
-    let current = st.scroll_y.get();
-    st.engine.set_scroll_offset(current);
-    if let Some(new_off) = st.engine.ensure_caret_visible() {
-        st.scroll_y.set(new_off);
-    }
-}
-
-#[derive(Copy, Clone)]
-enum LineEdge {
-    Start,
-    End,
-}
-
-/// Move the cursor to the start or end of the current visual line
-/// using the typesetter's `hit_test`. Solves two bugs at once:
-///  * A second End press after landing at line end is a no-op,
-///    avoiding text-document's block-boundary ambiguity where
-///    `get_block_at_position(block_end_pos)` returns the next block.
-///  * Wrapped blocks stop at the wrap point (the standard editor
-///    Home/End semantics).
-fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode) {
-    if !st.engine.has_full_layout() {
-        return;
-    }
-    let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
-    let line_y = caret[1] + caret[3] * 0.5;
-    // Probe far outside the viewport horizontally; the typesetter
-    // clamps the hit to the actual line extent and returns a valid
-    // position at either edge.
-    let probe_x = match edge {
-        LineEdge::Start => -1.0e6,
-        LineEdge::End => 1.0e6,
-    };
-    if let Some(hit) = st.engine.hit_test(probe_x, line_y) {
-        if hit.position != pos {
-            st.cursor.set_position(hit.position, mode);
-        }
-    }
-}
-
-/// Move the cursor up or down by one visual line, using the
-/// typesetter's layout and caret_rect for the source position and
-/// `hit_test` at the target Y to find the position on the next
-/// line. Uses a sticky `preferred_x` so repeated vertical presses
-/// stay on the same visual column even across short lines.
-///
-/// Called from `on_key` with `state.borrow_mut()` already held.
-fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
-    if !st.engine.has_full_layout() {
-        return;
-    }
-    let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
-    let line_height = caret[3].max(16.0);
-    let center_y = caret[1] + caret[3] * 0.5;
-
-    let x = st.preferred_x.unwrap_or(caret[0]);
-    if st.preferred_x.is_none() {
-        st.preferred_x = Some(caret[0]);
-    }
-
-    let target_y = center_y + (direction as f32) * line_height;
-    if target_y < 0.0 || target_y > st.engine.content_height() {
-        return;
-    }
-
-    if let Some(hit) = st.engine.hit_test(x, target_y) {
-        if hit.position != pos {
-            st.cursor.set_position(hit.position, mode);
-        }
-    }
-}
-
-/// Move the cursor up or down by roughly one viewport page, and
-/// scroll so the caret stays visible. Like `move_cursor_vertical`,
-/// uses a sticky preferred X.
-fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
-    if !st.engine.has_full_layout() {
-        return;
-    }
-    let viewport_h = st.viewport_height;
-    if viewport_h <= 0.0 {
-        return;
-    }
-    let pos = st.cursor.position();
-    let caret = st.engine.caret_rect(pos);
-    let line_height = caret[3].max(16.0);
-    let center_y = caret[1] + caret[3] * 0.5;
-
-    let x = st.preferred_x.unwrap_or(caret[0]);
-    if st.preferred_x.is_none() {
-        st.preferred_x = Some(caret[0]);
-    }
-
-    // Move by one viewport minus one line so the reader keeps a
-    // line of visual context across the page jump.
-    let page_step = (viewport_h - line_height).max(line_height);
-    let target_y = (center_y + (direction as f32) * page_step)
-        .clamp(0.0, st.engine.content_height());
-
-    if let Some(hit) = st.engine.hit_test(x, target_y) {
-        if hit.position != pos {
-            st.cursor.set_position(hit.position, mode);
-        }
-    }
-
-    // Scroll so the new caret position is visible. We do a simple
-    // viewport-height step on the scroll signal and let the frame
-    // loop's `ensure_caret_visible` path clamp it.
-    let new_scroll = (st.scroll_y.get() + (direction as f32) * page_step)
-        .clamp(0.0, st.max_scroll_y.get());
-    st.scroll_y.set(new_scroll);
+    count
 }

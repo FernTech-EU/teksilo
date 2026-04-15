@@ -89,6 +89,13 @@ pub struct WidgetTree {
     cached_a11y: Option<accesskit::TreeUpdate>,
     /// Whether the accessibility tree needs rebuilding (set when layout runs).
     a11y_dirty: bool,
+    /// Reverse map from synthetic (widget-emitted) AccessKit NodeIds
+    /// to the WidgetId that owns them. Rebuilt on every full
+    /// accessibility walk. `handle_accessibility_actions` uses this
+    /// to route an `ActionRequest` targeting a TextRun child back
+    /// to the owning rich-text editor, since synthetic NodeIds
+    /// can't be decoded back to a WidgetId by value alone.
+    pub(crate) synthetic_parent_map: std::collections::HashMap<accesskit::NodeId, WidgetId>,
     /// Cached full render frame — reused when no widget needs painting.
     cached_frame: Option<RenderFrame>,
     /// Widget that has captured the pointer (receives all PointerMove/PointerUp
@@ -184,6 +191,7 @@ impl WidgetTree {
             animated_values: Vec::new(),
             cached_a11y: None,
             a11y_dirty: true,
+            synthetic_parent_map: std::collections::HashMap::new(),
             cached_frame: None,
             pointer_captured_by: None,
             current_cursor: crate::widget::CursorIcon::Default,

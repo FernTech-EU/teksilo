@@ -1120,6 +1120,7 @@ dependencies = [
  "fern-core",
  "fern-data",
  "fern-i18n",
+ "fern-platform",
  "fern-text",
  "fern-tokens",
 ]
@@ -2835,6 +2836,13 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
+
+[[package]]
+name = "rich-text-editor"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
+]
 
 [[package]]
 name = "rich-text-viewer"

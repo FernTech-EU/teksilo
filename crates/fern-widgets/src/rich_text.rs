@@ -13,9 +13,12 @@
 //! `ScrollArea` to break the wrap/scrollbar circular dependency of
 //! §27.10.5.
 
+mod clipboard;
 mod frame_loop;
 mod hit_test;
 mod image_cache;
+mod keyboard;
+mod mouse;
 mod paint;
 mod policy;
 mod state;

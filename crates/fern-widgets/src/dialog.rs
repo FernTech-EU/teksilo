@@ -563,10 +563,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
@@ -585,10 +582,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         let request = tree.drain_pending_modal_requests().pop().unwrap().request;
         let content_id = match request.content {
@@ -648,10 +642,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         assert_eq!(tree.drain_pending_modal_requests().len(), 1);
     }
@@ -672,10 +663,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         let request = tree.drain_pending_modal_requests().pop().unwrap().request;
         match request.content {
@@ -700,10 +688,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
@@ -720,10 +705,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);

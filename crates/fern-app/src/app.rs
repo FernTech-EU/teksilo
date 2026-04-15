@@ -492,10 +492,22 @@ impl FernAppHandler {
 
             let actions = managed.platform_window.drain_accessibility_actions();
             for req in actions {
-                let target_widget = fern_core::accessibility::node_id_to_widget_id(req.target_node);
+                // Synthetic NodeIds (TextRun children emitted by the
+                // rich text editor) can't be decoded back to a
+                // WidgetId by value alone — look them up via the
+                // tree's reverse-map. For plain widget NodeIds the
+                // infallible converter is fine.
+                let target_widget = if fern_core::accessibility::is_synthetic(req.target_node)
+                {
+                    managed.tree.widget_for_synthetic(req.target_node)
+                } else {
+                    Some(fern_core::accessibility::node_id_to_widget_id(req.target_node))
+                };
                 managed.tree.dispatch_event(WidgetEvent::AccessAction {
                     action: req.action,
-                    target: Some(target_widget),
+                    target: target_widget,
+                    target_node: req.target_node,
+                    data: req.data,
                 });
             }
         }

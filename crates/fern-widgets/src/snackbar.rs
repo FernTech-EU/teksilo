@@ -381,10 +381,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -404,10 +401,7 @@ mod tests {
         tree.layout(SizeProposal::exact(640.0, 480.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         assert_eq!(tree.active_overlays().len(), 1);
     }
@@ -422,10 +416,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
         assert_eq!(tree.active_overlays().len(), 1);
 
         tree.advance_time(Duration::from_millis(200));

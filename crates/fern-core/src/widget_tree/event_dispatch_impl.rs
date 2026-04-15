@@ -377,11 +377,28 @@ impl WidgetTree {
                 .on_scroll
                 .as_mut()
                 .map(|handler| handler(event, ctx)),
-            WidgetEvent::AccessAction { action, .. } => node
-                .handlers
-                .on_access_action
-                .as_mut()
-                .map(|handler| handler(*action, ctx)),
+            WidgetEvent::AccessAction {
+                action,
+                target_node,
+                data,
+                ..
+            } => {
+                // Prefer the full-payload handler when the widget
+                // has opted in; it's the one that receives
+                // `target_node` and `data` so it can honour
+                // `SetTextSelection` / `SetValue` / `SetScrollOffset`
+                // correctly. Fall back to the bare handler
+                // otherwise — most widgets only care about the
+                // action type.
+                if let Some(handler) = node.handlers.on_access_action_request.as_mut() {
+                    Some(handler(*action, *target_node, data.clone(), ctx))
+                } else {
+                    node.handlers
+                        .on_access_action
+                        .as_mut()
+                        .map(|handler| handler(*action, ctx))
+                }
+            }
             WidgetEvent::Gesture { gesture } => {
                 // Pre-recognized gestures from the platform (OS trackpad
                 // pinch/rotation, double-tap, …) bypass the gesture arena
@@ -393,6 +410,7 @@ impl WidgetTree {
                         | GestureEvent::PinchEnded
                         | GestureEvent::Swipe { .. }
                         | GestureEvent::DoubleTap { .. }
+                        | GestureEvent::TripleTap { .. }
                 ) && {
                     let has_handler = match gesture {
                         GestureEvent::PinchStarted { .. }
@@ -400,6 +418,7 @@ impl WidgetTree {
                         | GestureEvent::PinchEnded => node.handlers.on_pinch.is_some(),
                         GestureEvent::Swipe { .. } => node.handlers.on_swipe.is_some(),
                         GestureEvent::DoubleTap { .. } => node.handlers.on_double_tap.is_some(),
+                        GestureEvent::TripleTap { .. } => node.handlers.on_triple_tap.is_some(),
                         _ => false,
                     };
                     if has_handler {
@@ -510,27 +529,41 @@ impl WidgetTree {
         }
         let has_tap = node.handlers.on_tap.is_some();
         let has_double_tap = node.handlers.on_double_tap.is_some();
+        let has_triple_tap = node.handlers.on_triple_tap.is_some();
         let has_drag = node.handlers.on_drag.is_some();
         let has_long_press = node.handlers.on_long_press.is_some();
         let has_swipe = node.handlers.on_swipe.is_some();
 
-        if !(has_tap || has_double_tap || has_drag || has_long_press || has_swipe) {
+        if !(has_tap
+            || has_double_tap
+            || has_triple_tap
+            || has_drag
+            || has_long_press
+            || has_swipe)
+        {
             return;
         }
 
         let mut arena = GestureArena::new();
         // Important: install `TapRecognizer` ONLY when the widget actually
-        // wired `on_tap`. `DoubleTapRecognizer` is self-contained — it
-        // tracks its own Down/Up sequence — and adding a parallel
-        // `TapRecognizer` would let `Tap` win on the first up (it returns
-        // `Recognized` while `DoubleTap` returns `Pending`), and the
-        // arena's "reset all non-winners" rule would then wipe the
-        // double-tap state before the second tap arrives.
-        if has_tap {
+        // wired `on_tap` AND no multi-tap recognizer is in the arena. A
+        // parallel `TapRecognizer` would let `Tap` win on the first up
+        // (it returns `Recognized` while `DoubleTap` / `TripleTap` return
+        // `Pending`), and the arena's reset loop would wipe the multi-tap
+        // state. Multi-tap recognizers opt out of that reset via
+        // `resets_on_peer_recognition = false`, so once we install a
+        // multi-tap recognizer, we intentionally skip `TapRecognizer` —
+        // callers that need click-1 behaviour under a multi-tap widget
+        // use `on_pointer_event::PointerDown` (which fires before the
+        // gesture arena and runs regardless of multi-tap state).
+        if has_tap && !(has_double_tap || has_triple_tap) {
             arena.add(crate::gesture::TapRecognizer::new());
         }
         if has_double_tap {
             arena.add(crate::gesture::DoubleTapRecognizer::new());
+        }
+        if has_triple_tap {
+            arena.add(crate::gesture::TripleTapRecognizer::new());
         }
         if has_drag {
             arena.add(crate::gesture::DragRecognizer::new().threshold(5.0));
@@ -560,6 +593,11 @@ impl WidgetTree {
             }
             GestureEvent::DoubleTap { position } => {
                 if let Some(handler) = node.handlers.on_double_tap.as_mut() {
+                    handler(position, ctx);
+                }
+            }
+            GestureEvent::TripleTap { position } => {
+                if let Some(handler) = node.handlers.on_triple_tap.as_mut() {
                     handler(position, ctx);
                 }
             }
@@ -1416,6 +1454,8 @@ mod tests {
         tree.dispatch_event(WidgetEvent::AccessAction {
             action: accesskit::Action::Click,
             target: Some(b),
+            target_node: crate::accessibility::widget_id_to_node_id(b),
+            data: None,
         });
     }
 
@@ -1429,6 +1469,8 @@ mod tests {
         tree.dispatch_event(WidgetEvent::AccessAction {
             action: accesskit::Action::Focus,
             target: None,
+            target_node: crate::accessibility::root_node_id(),
+            data: None,
         });
     }
 

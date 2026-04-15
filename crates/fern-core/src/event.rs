@@ -283,6 +283,21 @@ pub enum WidgetEvent {
     AccessAction {
         action: accesskit::Action,
         target: Option<crate::widget_id::WidgetId>,
+        /// Raw AccessKit NodeId from the original `ActionRequest`.
+        /// May be a synthetic (widget-emitted child) NodeId — use
+        /// `crate::accessibility::is_synthetic` to distinguish it
+        /// from a widget-derived NodeId. The widget that registered
+        /// the parent (retrieved via `tree.widget_for_synthetic`)
+        /// is the one set in `target`.
+        target_node: accesskit::NodeId,
+        /// Payload carried by the `ActionRequest`. For
+        /// `Action::SetTextSelection` this is
+        /// `ActionData::SetTextSelection(TextSelection)`, for
+        /// `Action::SetValue` it's `ActionData::Value(Box<str>)`,
+        /// for scroll actions it carries scroll offsets, etc.
+        /// Widgets that declare these actions must read the payload
+        /// to honour screen-reader-initiated requests.
+        data: Option<accesskit::ActionData>,
     },
     /// Dispatched by the framework to a clipping ancestor when a child
     /// gains focus but is outside the viewport. The scroll area adjusts

@@ -898,10 +898,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open wizard").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
@@ -932,10 +929,7 @@ mod tests {
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let launch = tree.find_by_label("Launch").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(launch),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(launch), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         let request = tree.drain_pending_modal_requests().pop().unwrap().request;
         let content_id = match request.content {
@@ -956,19 +950,13 @@ mod tests {
         assert!(tree.find_by_label("Step 1 of 2").is_some());
 
         let next = tree.find_by_label("Next").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(next),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(next), target_node: fern_core::accessibility::root_node_id(), data: None });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         assert!(tree.find_by_label("Step 2 of 2").is_some());
 
         let finish = tree.find_by_label("Create").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(finish),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(finish), target_node: fern_core::accessibility::root_node_id(), data: None });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         assert!(*finished.borrow());

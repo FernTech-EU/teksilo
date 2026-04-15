@@ -44,7 +44,7 @@ pub use focus::{FocusOrigin, FocusPolicy};
 pub use gesture::{
     DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,
     GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer,
-    TapRecognizer,
+    TapRecognizer, TripleTapRecognizer,
 };
 pub use idle::IdleDeadline;
 pub use modal::{

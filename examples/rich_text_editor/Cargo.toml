@@ -1,0 +1,10 @@
+[package]
+name = "rich-text-editor"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+fern-ui = { workspace = true, features = ["rich-text", "clipboard"] }

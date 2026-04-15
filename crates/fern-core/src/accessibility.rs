@@ -11,6 +11,86 @@ pub struct AccessNodeBuilder {
     actions: Vec<Action>,
     toggled: Option<bool>,
     expanded: Option<bool>,
+    /// The owning widget's id. Set at construction time by the
+    /// tree walker (via `AccessNodeBuilder::for_widget`). Used by
+    /// the sub-tree API (`push_paragraph_child` / `push_text_run_child`)
+    /// to derive synthetic NodeIds without asking the caller to
+    /// pass the WidgetId at every call site.
+    owner: Option<WidgetId>,
+    /// Pending text selection targeting the widget's own node id.
+    /// Resolved at `build(id)` time because the widget doesn't know
+    /// its node id during `accessibility(&self, builder)`.
+    pending_self_selection: Option<(usize, usize)>,
+    /// Deferred text selection targeting synthetic child NodeIds
+    /// (TextRuns). Unlike `pending_self_selection`, these
+    /// TextPositions reference NodeIds that are already known at
+    /// the time the widget calls `set_text_selection_to`, so we
+    /// can populate the selection during `build(id)` directly —
+    /// the field just holds them until that point.
+    pending_explicit_selection: Option<(TextPosition, TextPosition)>,
+    /// Synthetic child nodes emitted by the widget via
+    /// `push_paragraph_child` / `push_text_run_child`. Drained by
+    /// the tree walker after `Widget::accessibility(&self, builder)`
+    /// returns and merged into the full AccessKit `TreeUpdate`.
+    children_collected: Vec<(NodeId, Node)>,
+}
+
+/// Discriminator kind for synthetic-NodeId hashing. Different
+/// kinds sharing the same (widget_id, element_id) tuple produce
+/// distinct NodeIds so paragraph and run nodes for the same
+/// source element don't collide.
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum SyntheticKind {
+    Paragraph = 1,
+    TextRun = 2,
+    ImageRun = 3,
+}
+
+/// Top bit of the u64 NodeId encoding. Set for synthetic (widget-
+/// emitted child) NodeIds, clear for widget-derived NodeIds.
+/// Slotmap-derived WidgetIds never set bit 63 in practice because
+/// slotmap's KeyData encoding occupies bits 32-63 with a version
+/// counter that starts at 1.
+pub(crate) const SYNTHETIC_BIT: u64 = 1u64 << 63;
+
+/// Stable hash of (parent widget, element id, kind) producing a
+/// synthetic NodeId that survives edits for as long as the
+/// underlying element id is stable. Used by `AccessNodeBuilder`'s
+/// sub-tree API to allocate NodeIds for paragraph / text-run
+/// children without colliding with widget-derived NodeIds.
+pub fn synthetic_node_id(parent: WidgetId, element_id: u64, kind: SyntheticKind) -> NodeId {
+    use slotmap::Key;
+    let parent_raw = parent.data().as_ffi();
+    let h = fnv_mix_u64(parent_raw, element_id, kind as u64);
+    NodeId((h & !SYNTHETIC_BIT) | SYNTHETIC_BIT)
+}
+
+/// Whether a given `NodeId` is a synthetic child node (emitted by a
+/// widget via `push_paragraph_child` / `push_text_run_child`) rather
+/// than a widget-derived NodeId.
+pub fn is_synthetic(id: NodeId) -> bool {
+    id.0 & SYNTHETIC_BIT != 0
+}
+
+/// FNV-1a-inspired 64-bit mixer for three u64 inputs. Not a
+/// cryptographic hash — just a fast, deterministic, well-distributed
+/// mix for collision-free synthetic NodeIds across the
+/// (widget, element, kind) space.
+fn fnv_mix_u64(a: u64, b: u64, c: u64) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    let mut h = FNV_OFFSET;
+    for byte in a
+        .to_le_bytes()
+        .iter()
+        .chain(b.to_le_bytes().iter())
+        .chain(c.to_le_bytes().iter())
+    {
+        h ^= *byte as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    h
 }
 
 impl AccessNodeBuilder {
@@ -23,7 +103,20 @@ impl AccessNodeBuilder {
             actions: Vec::new(),
             toggled: None,
             expanded: None,
+            owner: None,
+            pending_self_selection: None,
+            pending_explicit_selection: None,
+            children_collected: Vec::new(),
         }
+    }
+
+    /// Construct a builder with a known owner WidgetId. Used by the
+    /// tree walker when invoking `Widget::accessibility`; the owner
+    /// id drives synthetic NodeId derivation in the sub-tree API.
+    pub fn for_widget(owner: WidgetId) -> Self {
+        let mut b = Self::new();
+        b.owner = Some(owner);
+        b
     }
 
     pub fn set_role(&mut self, role: Role) {
@@ -114,10 +207,36 @@ impl AccessNodeBuilder {
         self.expanded
     }
 
-    /// Build the AccessKit Node with the given ID.
-    pub fn build(self, id: WidgetId) -> (NodeId, Node) {
+    /// Build the AccessKit Node with the given ID. Resolves any
+    /// `pending_self_selection` recorded via `set_caret_position_on_self`
+    /// or `set_text_selection_on_self` — at this point we know the
+    /// widget's NodeId and can inject it into the text selection.
+    /// Returns the primary `(NodeId, Node)` pair plus any synthetic
+    /// child nodes emitted by the widget via `push_paragraph_child`
+    /// / `push_text_run_child`. The tree walker is responsible for
+    /// merging these into the final `TreeUpdate`.
+    pub fn build(mut self, id: WidgetId) -> (NodeId, Node, Vec<(NodeId, Node)>) {
         let node_id = widget_id_to_node_id(id);
-        (node_id, self.inner)
+        // Priority: explicit (child-targeting) selection wins over
+        // self-targeting selection — widgets that emit TextRun
+        // children use the explicit path.
+        if let Some((anchor, focus)) = self.pending_explicit_selection.take() {
+            let selection = TextSelection { anchor, focus };
+            self.inner.set_text_selection(selection);
+        } else if let Some((anchor, focus)) = self.pending_self_selection.take() {
+            let selection = TextSelection {
+                anchor: TextPosition {
+                    node: node_id,
+                    character_index: anchor,
+                },
+                focus: TextPosition {
+                    node: node_id,
+                    character_index: focus,
+                },
+            };
+            self.inner.set_text_selection(selection);
+        }
+        (node_id, self.inner, self.children_collected)
     }
 
     /// Get a reference to the inner node for advanced use.
@@ -156,6 +275,165 @@ impl AccessNodeBuilder {
     pub fn set_caret_position(&mut self, node_id: NodeId, character_index: usize) {
         self.set_text_selection(node_id, character_index, character_index);
     }
+
+    /// Declare a text selection whose anchor and focus live on the
+    /// widget's own AccessKit node. The widget doesn't know its own
+    /// `NodeId` inside `accessibility(&self, builder)` — it's only
+    /// resolved when the tree walker calls `builder.build(widget_id)`.
+    /// This method stashes the character indices and defers the
+    /// `set_text_selection` call until `build()` knows the ID.
+    pub fn set_text_selection_on_self(&mut self, anchor: usize, focus: usize) {
+        self.pending_self_selection = Some((anchor, focus));
+    }
+
+    /// Convenience wrapper for a collapsed caret on the widget's own node.
+    pub fn set_caret_position_on_self(&mut self, character_index: usize) {
+        self.set_text_selection_on_self(character_index, character_index);
+    }
+
+    // ── Sub-tree API: multi-node widgets (rich text, etc.) ─────────────
+
+    /// Push a `Role::Paragraph` child on the current node and return
+    /// its `NodeId`. The NodeId is synthetic (bit 63 set) and
+    /// deterministic given the owning widget + `element_id`.
+    ///
+    /// The owning `WidgetId` comes from the builder's `owner`
+    /// field, set by `AccessNodeBuilder::for_widget`. Returns
+    /// `NodeId(0)` (a no-op placeholder) if the builder has no
+    /// owner, which can only happen when a widget constructs a
+    /// builder manually via `new()` instead of going through the
+    /// tree walker. That's a programming error worth catching in
+    /// debug.
+    pub fn push_paragraph_child(&mut self, element_id: u64) -> NodeId {
+        let Some(owner) = self.owner else {
+            debug_assert!(
+                false,
+                "push_paragraph_child called on a builder with no owner — \
+                 widgets must only call this from Widget::accessibility"
+            );
+            return NodeId(0);
+        };
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::Paragraph);
+        let node = Node::new(Role::Paragraph);
+        self.children_collected.push((node_id, node));
+        self.inner.push_child(node_id);
+        node_id
+    }
+
+    /// Override a previously-pushed paragraph child's role to
+    /// `Role::Heading` with the given hierarchical level. Used by
+    /// the rich text editor when a block carries a
+    /// `BlockFormat::heading_level`. Returns `true` if the node was
+    /// found and updated, `false` otherwise (caller mis-used the
+    /// api — the paragraph must have been pushed earlier).
+    pub fn set_paragraph_as_heading(&mut self, node_id: NodeId, level: u8) -> bool {
+        for (id, node) in self.children_collected.iter_mut() {
+            if *id == node_id {
+                node.set_role(Role::Heading);
+                // AccessKit's `set_level` takes a usize (via the
+                // usize_property_methods macro). Clamp to 1..=6 for
+                // conventional heading semantics.
+                let level: usize = (level as usize).clamp(1, 6);
+                node.set_level(level);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Push a `Role::TextRun` child under `parent_node` (usually a
+    /// paragraph NodeId returned from [`push_paragraph_child`], but
+    /// may also be the widget's own node for inline editors).
+    ///
+    /// `element_id` is the stable id of the underlying text-document
+    /// inline element; combined with `parent_widget` and a
+    /// disambiguator it produces a synthetic NodeId that survives
+    /// edits. `fragment_offset` is the block-relative character
+    /// offset of this run — used as the disambiguator so two
+    /// highlight-split sub-runs sharing one source element don't
+    /// collide.
+    ///
+    /// `character_lengths` must be the UTF-8 byte length of each
+    /// character in `value`, per AccessKit's contract. Optional
+    /// `word_starts`, `character_positions`, and `character_widths`
+    /// populate the corresponding AccessKit properties.
+    ///
+    /// Returns the allocated synthetic `NodeId` so the caller can
+    /// reference it later when attaching a `TextSelection` via
+    /// [`set_text_selection_to`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn push_text_run_child(
+        &mut self,
+        parent_node: NodeId,
+        element_id: u64,
+        fragment_offset: usize,
+        value: String,
+        character_lengths: Vec<u8>,
+        word_starts: Option<Vec<u8>>,
+        character_positions: Option<Vec<f32>>,
+        character_widths: Option<Vec<f32>>,
+    ) -> NodeId {
+        let Some(owner) = self.owner else {
+            debug_assert!(
+                false,
+                "push_text_run_child called on a builder with no owner — \
+                 widgets must only call this from Widget::accessibility"
+            );
+            return NodeId(0);
+        };
+        // Mix `fragment_offset` into the element_id bits so sub-runs
+        // of a highlight-split source element get unique NodeIds.
+        let mixed_element = element_id ^ ((fragment_offset as u64) << 32);
+        let node_id = synthetic_node_id(owner, mixed_element, SyntheticKind::TextRun);
+        let mut node = Node::new(Role::TextRun);
+        node.set_value(value);
+        node.set_character_lengths(character_lengths);
+        if let Some(ws) = word_starts {
+            node.set_word_starts(ws);
+        }
+        if let Some(pos) = character_positions {
+            node.set_character_positions(pos);
+        }
+        if let Some(widths) = character_widths {
+            node.set_character_widths(widths);
+        }
+        self.children_collected.push((node_id, node));
+        // Attach the text-run to its parent paragraph's child list.
+        // The parent must already be in `children_collected`.
+        for (id, parent) in self.children_collected.iter_mut() {
+            if *id == parent_node {
+                parent.push_child(node_id);
+                return node_id;
+            }
+        }
+        // Parent not found — push as a direct child of the widget's
+        // own node as a fallback. Caller mis-used the API.
+        self.inner.push_child(node_id);
+        node_id
+    }
+
+    /// Declare a text selection that references TextRun children
+    /// previously emitted via [`push_text_run_child`]. Both the
+    /// anchor and the focus are expressed as
+    /// `(NodeId, character_index)` pairs where the character index
+    /// is an index into the target TextRun's `character_lengths`
+    /// (NOT a document-absolute offset — per AccessKit's contract).
+    pub fn set_text_selection_to(
+        &mut self,
+        anchor: (NodeId, usize),
+        focus: (NodeId, usize),
+    ) {
+        self.pending_explicit_selection = Some((
+            TextPosition {
+                node: anchor.0,
+                character_index: anchor.1,
+            },
+            TextPosition {
+                node: focus.0,
+                character_index: focus.1,
+            },
+        ));
+    }
 }
 
 impl Default for AccessNodeBuilder {
@@ -172,8 +450,29 @@ pub fn widget_id_to_node_id(id: WidgetId) -> NodeId {
     NodeId(raw)
 }
 
-/// Convert an AccessKit NodeId back to a WidgetId.
+/// Convert an AccessKit NodeId back to a WidgetId. Returns `None`
+/// for synthetic NodeIds (widget-emitted child nodes like TextRuns);
+/// callers that need to route an `ActionRequest` targeting a
+/// synthetic NodeId must consult `WidgetTree::synthetic_parent_map`
+/// to find the owning widget.
+pub fn node_id_to_widget_id_maybe(node_id: NodeId) -> Option<WidgetId> {
+    if is_synthetic(node_id) {
+        return None;
+    }
+    use slotmap::KeyData;
+    let key_data = KeyData::from_ffi(node_id.0);
+    Some(key_data.into())
+}
+
+/// Legacy infallible converter kept for existing call sites that
+/// never encounter synthetic NodeIds. New code should prefer
+/// [`node_id_to_widget_id_maybe`]. Panics in debug for synthetic
+/// ids to catch mis-routed calls early.
 pub fn node_id_to_widget_id(node_id: NodeId) -> WidgetId {
+    debug_assert!(
+        !is_synthetic(node_id),
+        "node_id_to_widget_id called on synthetic NodeId — use node_id_to_widget_id_maybe"
+    );
     use slotmap::KeyData;
     let key_data = KeyData::from_ffi(node_id.0);
     key_data.into()
@@ -244,5 +543,131 @@ impl AccessibilityInfo {
 
     pub fn is_disabled(&self) -> bool {
         self.disabled
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_widget(id: u64) -> WidgetId {
+        slotmap::KeyData::from_ffi(id).into()
+    }
+
+    #[test]
+    fn widget_derived_node_id_has_bit_63_clear() {
+        // A freshly-minted slotmap key (version 1, index 0) encodes
+        // to a u64 with bit 63 clear. The plan's top-bit namespace
+        // split only works if widget-derived NodeIds stay below
+        // bit 63.
+        let wid = fake_widget(1);
+        let nid = widget_id_to_node_id(wid);
+        assert_eq!(nid.0 & SYNTHETIC_BIT, 0, "widget NodeId must have bit 63 clear");
+        assert!(!is_synthetic(nid));
+    }
+
+    #[test]
+    fn synthetic_node_id_has_bit_63_set() {
+        let wid = fake_widget(42);
+        let nid = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
+        assert_eq!(nid.0 & SYNTHETIC_BIT, SYNTHETIC_BIT);
+        assert!(is_synthetic(nid));
+    }
+
+    #[test]
+    fn synthetic_node_id_stable_across_calls() {
+        // Same (widget, element, kind) produces identical NodeIds —
+        // the plan relies on this for screen-reader focus stability
+        // across accessibility rebuilds.
+        let wid = fake_widget(42);
+        let a = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
+        let b = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn synthetic_node_id_differs_by_kind() {
+        let wid = fake_widget(42);
+        let p = synthetic_node_id(wid, 17, SyntheticKind::Paragraph);
+        let r = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
+        assert_ne!(p, r, "paragraph and text-run kinds must produce distinct NodeIds");
+    }
+
+    #[test]
+    fn synthetic_node_id_differs_by_element() {
+        let wid = fake_widget(42);
+        let a = synthetic_node_id(wid, 1, SyntheticKind::TextRun);
+        let b = synthetic_node_id(wid, 2, SyntheticKind::TextRun);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn node_id_to_widget_id_maybe_returns_none_for_synthetic() {
+        let wid = fake_widget(42);
+        let syn = synthetic_node_id(wid, 17, SyntheticKind::TextRun);
+        assert!(node_id_to_widget_id_maybe(syn).is_none());
+    }
+
+    #[test]
+    fn node_id_to_widget_id_maybe_round_trips_widget_ids() {
+        let wid = fake_widget(99);
+        let nid = widget_id_to_node_id(wid);
+        let back = node_id_to_widget_id_maybe(nid).unwrap();
+        assert_eq!(wid, back);
+    }
+
+    #[test]
+    fn push_paragraph_child_and_text_run_child_emit_synthetic_nodes() {
+        let owner = fake_widget(7);
+        let mut builder = AccessNodeBuilder::for_widget(owner);
+        builder.set_role(Role::MultilineTextInput);
+
+        let para = builder.push_paragraph_child(100);
+        let run = builder.push_text_run_child(
+            para,
+            200,
+            0,
+            "hello".to_string(),
+            vec![1, 1, 1, 1, 1],
+            Some(vec![0]),
+            None,
+            None,
+        );
+        assert!(is_synthetic(para));
+        assert!(is_synthetic(run));
+
+        let (_nid, _node, children) = builder.build(owner);
+        // Two emitted children: paragraph + text run.
+        assert_eq!(children.len(), 2);
+        assert!(children.iter().any(|(id, _)| *id == para));
+        assert!(children.iter().any(|(id, _)| *id == run));
+    }
+
+    #[test]
+    fn set_text_selection_to_wins_over_self_selection() {
+        let owner = fake_widget(3);
+        let mut builder = AccessNodeBuilder::for_widget(owner);
+        builder.set_role(Role::MultilineTextInput);
+        // Emit a paragraph + run so set_text_selection_to has a
+        // real synthetic NodeId to target.
+        let para = builder.push_paragraph_child(1);
+        let run = builder.push_text_run_child(
+            para,
+            2,
+            0,
+            "ab".to_string(),
+            vec![1, 1],
+            None,
+            None,
+            None,
+        );
+        // Both a self-targeted AND an explicit selection are
+        // staged — the explicit one must win.
+        builder.set_text_selection_on_self(0, 0);
+        builder.set_text_selection_to((run, 0), (run, 2));
+        let (_nid, node, _children) = builder.build(owner);
+        let sel = node.text_selection().expect("text selection set");
+        assert_eq!(sel.focus.node, run);
+        assert_eq!(sel.focus.character_index, 2);
     }
 }

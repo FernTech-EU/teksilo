@@ -474,10 +474,7 @@ mod tests {
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         assert_eq!(tree.active_overlays().len(), 1);
     }
@@ -489,10 +486,7 @@ mod tests {
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
         tree.press_key(Key::Escape, fern_core::event::Modifiers::NONE);
 
         assert!(tree.active_overlays().is_empty());
@@ -507,10 +501,7 @@ mod tests {
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
-        tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
 
         assert_eq!(tree.active_overlays().len(), 1);
     }
@@ -525,10 +516,7 @@ mod tests {
         );
         plain_tree.layout(SizeProposal::exact(480.0, 320.0));
         let trigger = plain_tree.find_by_label("Show popover").unwrap();
-        plain_tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        plain_tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
         plain_tree.layout(SizeProposal::exact(480.0, 320.0));
         let plain_bounds = plain_tree.bounds(plain_tree.overlay_manager().active_content_ids()[0]);
 
@@ -540,10 +528,7 @@ mod tests {
         );
         caret_tree.layout(SizeProposal::exact(480.0, 320.0));
         let trigger = caret_tree.find_by_label("Show popover").unwrap();
-        caret_tree.dispatch_event(WidgetEvent::AccessAction {
-            action: fern_core::accesskit::Action::Click,
-            target: Some(trigger),
-        });
+        caret_tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(trigger), target_node: fern_core::accessibility::root_node_id(), data: None });
         caret_tree.layout(SizeProposal::exact(480.0, 320.0));
         let caret_bounds = caret_tree.bounds(caret_tree.overlay_manager().active_content_ids()[0]);
 
