@@ -437,6 +437,11 @@ fn rasterize_path(
 
 /// Approximate an elliptical arc with cubic Bézier segments.
 /// Each 90° sweep is one cubic; smaller sweeps use one cubic.
+///
+/// `start_angle` and `sweep_angle` are in **degrees** (matching the
+/// public `Path::arc_to` API and existing call sites like
+/// `Path::circle` and `Path::rounded_rect`). They are converted to
+/// radians internally before being fed to `f32::cos`/`f32::sin`.
 #[allow(clippy::too_many_arguments)]
 fn arc_to_cubics(
     pb: &mut tiny_skia::PathBuilder,
@@ -455,9 +460,9 @@ fn arc_to_cubics(
     let rx_s = rx * scale_factor;
     let ry_s = ry * scale_factor;
 
-    let mut remaining = sweep_angle;
-    let mut angle = start_angle;
-    let sign = if sweep_angle >= 0.0 { 1.0 } else { -1.0 };
+    let mut remaining = sweep_angle.to_radians();
+    let mut angle = start_angle.to_radians();
+    let sign = if remaining >= 0.0 { 1.0 } else { -1.0 };
 
     while remaining.abs() > 0.001 {
         let chunk = sign * remaining.abs().min(std::f32::consts::FRAC_PI_2);
