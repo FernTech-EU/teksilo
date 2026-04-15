@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use fern_canvas::{Rect, Size, SizeProposal};
 
 use fern_core::accessibility::AccessNodeBuilder;
@@ -22,6 +25,13 @@ pub struct Switcher {
     selected: Signal<usize>,
     deferred_children: Vec<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
+    /// Optional external buffer populated during `build()` with each
+    /// child's `WidgetId` in insertion order. Callers that need to
+    /// reference the pages later — e.g. `TabWidget` wiring the
+    /// Tab → TabPanel accessibility relation — install a shared
+    /// `Rc<RefCell<Vec<_>>>` via `capture_child_ids_into` and read
+    /// it back after `ctx.add(switcher)` returns.
+    child_ids_out: Option<Rc<RefCell<Vec<WidgetId>>>>,
 }
 
 impl Switcher {
@@ -30,7 +40,21 @@ impl Switcher {
             selected,
             deferred_children: Vec::new(),
             root_child_id: None,
+            child_ids_out: None,
         }
+    }
+
+    /// Capture each child's `WidgetId` into an externally owned
+    /// buffer during `build()`. Use when the caller needs to
+    /// reference the pages after they're added to the arena — e.g.
+    /// for accessibility relations like Tab → TabPanel, where the
+    /// tab must publish `push_controlled(panel_id)` but the
+    /// `WidgetId` only exists after Switcher's `build()` runs.
+    ///
+    /// The buffer is cleared and repopulated on every rebuild.
+    pub fn capture_child_ids_into(mut self, out: Rc<RefCell<Vec<WidgetId>>>) -> Self {
+        self.child_ids_out = Some(out);
+        self
     }
 
     /// Add a child page.
@@ -65,11 +89,17 @@ impl std::fmt::Debug for Switcher {
 impl Widget for Switcher {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         let children = std::mem::take(&mut self.deferred_children);
+        if let Some(ref out) = self.child_ids_out {
+            out.borrow_mut().clear();
+        }
 
         // Add each child to the tree and bind visibility to the selected index
         let mut zstack = ZStack::new();
         for (i, child_widget) in children.into_iter().enumerate() {
             let child_id = ctx.add_boxed(child_widget);
+            if let Some(ref out) = self.child_ids_out {
+                out.borrow_mut().push(child_id);
+            }
             let idx = i;
             let vis = self.selected.map(move |s| *s == idx);
             ctx.visible_when(child_id, vis);

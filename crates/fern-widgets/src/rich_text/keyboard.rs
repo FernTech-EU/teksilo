@@ -18,7 +18,7 @@ use fern_text::text_document::{MoveMode, MoveOperation, SelectionType, TextForma
 use super::clipboard;
 use super::policy::EditCommandKind;
 use super::state::{EditorState, SharedState};
-use super::widget::sync_cursor_signals;
+use super::sync_cursor_signals;
 
 /// Kind of key action taken by `handle_key`, used to decide whether to
 /// clear the sticky preferred-X afterwards.

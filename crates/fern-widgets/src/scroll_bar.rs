@@ -542,22 +542,15 @@ impl Widget for ScrollBar {
         let pos = self.scroll_position.get();
         let max = self.max_scroll.get();
 
-        builder.inner_mut().set_numeric_value(pos as f64);
-        builder.inner_mut().set_min_numeric_value(0.0);
-        builder.inner_mut().set_max_numeric_value(max as f64);
+        builder.set_numeric_value(pos as f64);
+        builder.set_min_numeric_value(0.0);
+        builder.set_max_numeric_value(max as f64);
 
-        match self.orientation {
-            ScrollBarOrientation::Vertical => {
-                builder
-                    .inner_mut()
-                    .set_orientation(fern_core::accesskit::Orientation::Vertical);
-            }
-            ScrollBarOrientation::Horizontal => {
-                builder
-                    .inner_mut()
-                    .set_orientation(fern_core::accesskit::Orientation::Horizontal);
-            }
-        }
+        let orientation = match self.orientation {
+            ScrollBarOrientation::Vertical => fern_core::accesskit::Orientation::Vertical,
+            ScrollBarOrientation::Horizontal => fern_core::accesskit::Orientation::Horizontal,
+        };
+        builder.set_orientation(orientation);
 
         builder.add_action(fern_core::accesskit::Action::SetValue);
     }

@@ -11,6 +11,7 @@ pub struct AccessNodeBuilder {
     actions: Vec<Action>,
     toggled: Option<bool>,
     expanded: Option<bool>,
+    selected: Option<bool>,
     /// The owning widget's id. Set at construction time by the
     /// tree walker (via `AccessNodeBuilder::for_widget`). Used by
     /// the sub-tree API (`push_paragraph_child` / `push_text_run_child`)
@@ -109,6 +110,7 @@ impl AccessNodeBuilder {
             actions: Vec::new(),
             toggled: None,
             expanded: None,
+            selected: None,
             owner: None,
             pending_self_selection: None,
             pending_explicit_selection: None,
@@ -181,6 +183,60 @@ impl AccessNodeBuilder {
         self.inner.set_has_popup(kind);
     }
 
+    /// Selection state — used by `RadioButton`, `Tab`, `ListBoxOption`,
+    /// `TreeItem`, menu items in radio/check groups, etc. This is the
+    /// correct property for "this option in a mutually exclusive
+    /// group is the active one"; don't confuse with `set_toggled`,
+    /// which models checkbox/switch on-off state.
+    pub fn set_selected(&mut self, selected: bool) {
+        self.selected = Some(selected);
+        self.inner.set_selected(selected);
+    }
+
+    pub fn set_orientation(&mut self, orientation: accesskit::Orientation) {
+        self.inner.set_orientation(orientation);
+    }
+
+    /// Flag the node as a modal dialog. Use on `Role::Dialog` /
+    /// `Role::AlertDialog` when input is blocked outside the dialog.
+    pub fn set_modal(&mut self) {
+        self.inner.set_modal();
+    }
+
+    /// Mark this node as the current item within its container
+    /// (e.g. the "current page" crumb inside a `Navigation`, the
+    /// current step in a wizard). Maps to ARIA `aria-current`.
+    pub fn set_aria_current(&mut self, current: accesskit::AriaCurrent) {
+        self.inner.set_aria_current(current);
+    }
+
+    /// Single-step delta for `Slider` / `SpinButton` — how much the
+    /// value changes per keyboard arrow or Action::Increment tick.
+    pub fn set_numeric_value_step(&mut self, step: f64) {
+        self.inner.set_numeric_value_step(step);
+    }
+
+    /// Page-step delta for `Slider` / `SpinButton` — how much the
+    /// value changes per PgUp/PgDown or coarse adjustment.
+    pub fn set_numeric_value_jump(&mut self, jump: f64) {
+        self.inner.set_numeric_value_jump(jump);
+    }
+
+    /// Append a controlled-node relationship — e.g. a `Tab` pointing
+    /// at its matching `TabPanel`, a `ComboBox` pointing at its
+    /// listbox popup. AccessKit / ARIA equivalent of `aria-controls`.
+    pub fn push_controlled(&mut self, id: NodeId) {
+        self.inner.push_controlled(id);
+    }
+
+    /// Declare this radio button's membership in a radio group.
+    /// Each `RadioButton` node should push every sibling in its
+    /// group (including itself); screen readers use this to
+    /// announce positional info like "2 of 3".
+    pub fn push_to_radio_group(&mut self, id: NodeId) {
+        self.inner.push_to_radio_group(id);
+    }
+
     pub fn set_numeric_value(&mut self, value: f64) {
         self.inner.set_numeric_value(value);
     }
@@ -215,6 +271,10 @@ impl AccessNodeBuilder {
 
     pub fn expanded(&self) -> Option<bool> {
         self.expanded
+    }
+
+    pub fn selected(&self) -> Option<bool> {
+        self.selected
     }
 
     /// Build the AccessKit Node with the given ID. Resolves any
@@ -542,6 +602,7 @@ pub struct AccessibilityInfo {
     actions: Vec<Action>,
     toggled: Option<bool>,
     expanded: Option<bool>,
+    selected: Option<bool>,
     disabled: bool,
 }
 
@@ -553,6 +614,7 @@ impl AccessibilityInfo {
             actions,
             toggled: None,
             expanded: None,
+            selected: None,
             disabled: false,
         }
     }
@@ -564,6 +626,11 @@ impl AccessibilityInfo {
 
     pub fn with_expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
+        self
+    }
+
+    pub fn with_selected(mut self, selected: bool) -> Self {
+        self.selected = Some(selected);
         self
     }
 
@@ -590,6 +657,10 @@ impl AccessibilityInfo {
 
     pub fn is_expanded(&self) -> bool {
         self.expanded.unwrap_or(false)
+    }
+
+    pub fn is_selected(&self) -> bool {
+        self.selected.unwrap_or(false)
     }
 
     pub fn is_disabled(&self) -> bool {

@@ -136,6 +136,10 @@ struct TabHeader {
     enabled: bool,
     selected: Signal<usize>,
     header_ids: Rc<RefCell<Vec<WidgetId>>>,
+    /// Shared buffer of the matching TabPanel widget ids, populated
+    /// during TabWidget's build(). Read in `accessibility()` to
+    /// publish the Tab→TabPanel `aria-controls` relation.
+    panel_ids: Rc<RefCell<Vec<WidgetId>>>,
     enabled_tabs: Rc<Vec<bool>>,
     interaction: Signal<TabHeaderInteraction>,
     /// Focus origin at the moment focus was gained. The focus ring only
@@ -153,6 +157,7 @@ impl TabHeader {
         enabled: bool,
         selected: Signal<usize>,
         header_ids: Rc<RefCell<Vec<WidgetId>>>,
+        panel_ids: Rc<RefCell<Vec<WidgetId>>>,
         enabled_tabs: Rc<Vec<bool>>,
     ) -> Self {
         Self {
@@ -161,6 +166,7 @@ impl TabHeader {
             enabled,
             selected,
             header_ids,
+            panel_ids,
             enabled_tabs,
             interaction: Signal::new(TabHeaderInteraction::Idle),
             focus_origin: Signal::new(None),
@@ -453,9 +459,14 @@ impl Widget for TabHeader {
             builder.add_action(fern_core::accesskit::Action::Click);
         }
         builder.add_action(fern_core::accesskit::Action::Focus);
-        builder
-            .inner_mut()
-            .set_selected(self.selected.get() == self.index);
+        builder.set_selected(self.selected.get() == self.index);
+        // Publish the Tab -> TabPanel relation. AccessKit / ARIA models
+        // this via `controls`: the tab "controls" the panel that becomes
+        // visible when it's activated. Read from the shared buffer the
+        // parent TabWidget populated during build().
+        if let Some(&panel_id) = self.panel_ids.borrow().get(self.index) {
+            builder.push_controlled(fern_core::accessibility::widget_id_to_node_id(panel_id));
+        }
     }
 }
 
@@ -659,7 +670,14 @@ impl Widget for TabWidget {
         );
         let mut header_ids = Vec::with_capacity(entries.len());
         let shared_header_ids = Rc::new(RefCell::new(Vec::with_capacity(entries.len())));
-        let mut switcher = Switcher::new(self.selected.clone());
+        // Parallel buffer for TabPanel ids. Switcher's build() pushes
+        // each child's WidgetId into this buffer as it adds it to the
+        // arena (see `Switcher::capture_child_ids_into`). TabHeader's
+        // `accessibility()` reads `panel_ids[index]` to publish the
+        // tab -> panel `controls` relation.
+        let shared_panel_ids = Rc::new(RefCell::new(Vec::with_capacity(entries.len())));
+        let mut switcher =
+            Switcher::new(self.selected.clone()).capture_child_ids_into(shared_panel_ids.clone());
 
         for (index, entry) in entries.into_iter().enumerate() {
             let header_id = ctx.add(TabHeader::new(
@@ -668,6 +686,7 @@ impl Widget for TabWidget {
                 entry.enabled,
                 self.selected.clone(),
                 shared_header_ids.clone(),
+                shared_panel_ids.clone(),
                 enabled_tabs.clone(),
             ));
             header_ids.push(header_id);

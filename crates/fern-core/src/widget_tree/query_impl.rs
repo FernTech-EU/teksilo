@@ -188,6 +188,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         tree.layout(SizeProposal::exact(320.0, 200.0));
 

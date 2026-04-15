@@ -451,10 +451,28 @@ impl Widget for ComboBox {
         let int_hover = interaction.clone();
         let int_focus = interaction.clone();
 
+        // Shared dismiss callback — invoked by the overlay manager
+        // whenever the dropdown is dismissed, regardless of path
+        // (our own Enter/Escape handlers, framework-level
+        // EscapeOrClickOutside, pointer-leave, cascade). Resets
+        // `interaction` back to `Focused` so `set_expanded`
+        // reported by `accessibility()` stays truthful. Closes
+        // the framework coherence gap where a framework-dismissed
+        // overlay used to leave `interaction == Open` forever.
+        let dismiss_callback: fern_core::overlay::OverlayDismissCallback = {
+            let interaction = interaction.clone();
+            Rc::new(move || {
+                if interaction.get() == ComboBoxState::Open {
+                    interaction.set(ComboBoxState::Focused);
+                }
+            })
+        };
+
         let handler_set = HandlerSet::new()
             .on_tap({
                 let interaction = interaction.clone();
                 let dropdown_id = dropdown_id;
+                let dismiss_callback = dismiss_callback.clone();
                 move |_pos, ctx: &mut EventContext| {
                     if !enabled {
                         return;
@@ -468,6 +486,7 @@ impl Widget for ComboBox {
                         dismiss: DismissBehavior::EscapeOrClickOutside,
                         layer: OverlayLayer::InTree,
                         parent_overlay: None,
+                        on_dismiss: Some(dismiss_callback.clone()),
                     });
                 }
             })
@@ -490,6 +509,7 @@ impl Widget for ComboBox {
                 let items_len = self.items.len();
                 let selected = self.selected.clone();
                 let items_for_typeahead = self.items.clone();
+                let dismiss_callback = dismiss_callback.clone();
                 // Type-ahead buffer: (prefix, last_keystroke_time)
                 let typeahead: Rc<RefCell<(String, Instant)>> =
                     Rc::new(RefCell::new((String::new(), Instant::now())));
@@ -517,6 +537,7 @@ impl Widget for ComboBox {
                                     dismiss: DismissBehavior::EscapeOrClickOutside,
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
+                                    on_dismiss: Some(dismiss_callback.clone()),
                                 });
                             }
                             EventResponse::Handled
@@ -547,6 +568,7 @@ impl Widget for ComboBox {
                                     dismiss: DismissBehavior::EscapeOrClickOutside,
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
+                                    on_dismiss: Some(dismiss_callback.clone()),
                                 });
                             }
                             let current = selected.get().unwrap_or(0);
@@ -571,6 +593,7 @@ impl Widget for ComboBox {
                                     dismiss: DismissBehavior::EscapeOrClickOutside,
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
+                                    on_dismiss: Some(dismiss_callback.clone()),
                                 });
                             }
                             let current = selected.get().unwrap_or(0);
@@ -728,11 +751,12 @@ mod tests {
 
     #[test]
     fn accessibility_expanded_flips_on_open_close() {
-        // Uses Enter→Enter (both handled by ComboBox's own key handler) to
-        // exercise the full open/close cycle for `is_expanded()`. Escape
-        // dismissal goes through the overlay manager and doesn't currently
-        // write back into ComboBox's `interaction` signal — that's a
-        // pre-existing framework coherence gap, not something we test here.
+        // Exercises Enter→Escape where Escape is routed through the
+        // overlay manager's framework-level dismissal (not the
+        // ComboBox's own Escape handler). With the `on_dismiss`
+        // callback plumbed through `OverlayRequest`, the anchor's
+        // `interaction` signal now gets reset even when the
+        // framework tears the overlay down on its own.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let selected = Signal::new(None::<usize>);
         let cb = tree.add(ComboBox::new_literal(
@@ -754,6 +778,46 @@ mod tests {
         tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
         tree.layout(SizeProposal::exact(300.0, 200.0));
         assert!(!tree.accessibility_node(cb).is_expanded());
+    }
+
+    #[test]
+    fn accessibility_expanded_resets_on_framework_dismiss() {
+        // Regression guard for the overlay-dismiss coherence gap:
+        // when the overlay manager tears down the dropdown (e.g.
+        // Escape routed through DismissBehavior::EscapeOrClickOutside,
+        // click outside, cascade dismiss), the ComboBox's
+        // interaction signal used to stay Open forever and
+        // `is_expanded()` would keep reporting true. With the
+        // `on_dismiss` callback plumbed through OverlayRequest the
+        // signal resets automatically.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new_literal(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.focus(cb);
+
+        // Open the dropdown.
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert!(tree.accessibility_node(cb).is_expanded());
+
+        // Dismiss the active overlay directly — simulating a
+        // framework-level dismiss path that bypasses the
+        // ComboBox's own Escape handler.
+        let overlay_id = tree
+            .active_overlays()
+            .first()
+            .copied()
+            .expect("dropdown overlay should be active");
+        tree.dismiss_overlay(overlay_id);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert!(
+            !tree.accessibility_node(cb).is_expanded(),
+            "framework overlay dismiss must reset is_expanded() to false"
+        );
     }
 
     #[test]

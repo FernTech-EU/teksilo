@@ -573,6 +573,7 @@ impl Default for SplitButtonStyle {
 pub struct SegmentedControlStyle {
     pub height: f32,
     pub padding_horizontal: f32,
+    pub padding_vertical: f32,
     pub corner_radius: f32,
     pub border_width: f32,
 }
@@ -581,8 +582,9 @@ impl Default for SegmentedControlStyle {
     fn default() -> Self {
         Self {
             height: 24.0,
-            padding_horizontal: 10.0,
-            corner_radius: 4.0,
+            padding_horizontal: 12.0,
+            padding_vertical: 6.0,
+            corner_radius: 3.0,
             border_width: 1.0,
         }
     }

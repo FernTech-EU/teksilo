@@ -4,6 +4,9 @@
 //! `Signal<usize>` — selecting one automatically deselects others.
 //! V2 attached handlers — no event() override.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
@@ -27,6 +30,13 @@ pub struct RadioButton {
     tooltip_text: Option<String>,
     interaction: Option<Signal<InteractionState>>,
     root_child_id: Option<WidgetId>,
+    /// Shared radio-group sibling id buffer populated by an enclosing
+    /// `RadioGroup`. When set, `accessibility()` emits
+    /// `push_to_radio_group(sibling_id)` for every id in the buffer
+    /// so screen readers can announce "2 of 3" positional info.
+    /// Loose radios not wrapped in a RadioGroup leave this `None`
+    /// and drop the group membership metadata.
+    group_ids: Option<Rc<RefCell<Vec<WidgetId>>>>,
 }
 
 impl RadioButton {
@@ -40,7 +50,16 @@ impl RadioButton {
             tooltip_text: None,
             interaction: None,
             root_child_id: None,
+            group_ids: None,
         }
+    }
+
+    /// Called by `RadioGroup` at build time to install the shared
+    /// sibling-id buffer. Not part of the public fluent API —
+    /// users wrap radios in `RadioGroup::new().radio(...)` rather
+    /// than threading the buffer manually.
+    pub(crate) fn set_group_ids(&mut self, ids: Rc<RefCell<Vec<WidgetId>>>) {
+        self.group_ids = Some(ids);
     }
 
     pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
@@ -344,7 +363,19 @@ impl Widget for RadioButton {
         if let Some(ref caption) = self.caption {
             builder.set_description(caption);
         }
-        builder.set_toggled(self.is_selected());
+        // AccessKit / ARIA models radio selection via `selected`,
+        // not `toggled` — `toggled` is for checkbox/switch on-off.
+        builder.set_selected(self.is_selected());
+        // Publish radio-group membership if this button was wrapped
+        // in a `RadioGroup`. Each button declares every sibling
+        // (including itself) so AT can announce "2 of 3".
+        if let Some(group_ids) = &self.group_ids {
+            for &id in group_ids.borrow().iter() {
+                builder.push_to_radio_group(
+                    fern_core::accessibility::widget_id_to_node_id(id),
+                );
+            }
+        }
         if !self.enabled {
             builder.set_disabled();
         }
@@ -407,10 +438,10 @@ mod tests {
 
         let info0 = tree.accessibility_node(r0);
         assert_eq!(info0.role(), fern_core::accesskit::Role::RadioButton);
-        assert!(!info0.is_toggled());
+        assert!(!info0.is_selected());
 
         let info1 = tree.accessibility_node(r1);
-        assert!(info1.is_toggled());
+        assert!(info1.is_selected());
     }
 
     #[test]

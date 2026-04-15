@@ -268,6 +268,8 @@ impl Widget for MenuBarTrigger {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::MenuItem);
         builder.set_name(&self.label);
+        // Every top-level menu bar entry opens a dropdown Menu.
+        builder.set_has_popup(fern_core::accesskit::HasPopup::Menu);
     }
 
     fn children(&self) -> Vec<WidgetId> {

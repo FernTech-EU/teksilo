@@ -440,6 +440,7 @@ impl Widget for SplitButton {
                         dismiss: DismissBehavior::EscapeOrClickOutside,
                         layer: OverlayLayer::InTree,
                         parent_overlay: None,
+                        on_dismiss: None,
                     });
                     // The MenuList owns the keyboard-navigation handler
                     // (ArrowUp/ArrowDown/Enter/Escape) and that handler
@@ -559,6 +560,7 @@ impl Widget for SplitButton {
                                 dismiss: DismissBehavior::EscapeOrClickOutside,
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
+                                on_dismiss: None,
                             });
                             ctx.request_focus(menu_id);
                             EventResponse::Handled

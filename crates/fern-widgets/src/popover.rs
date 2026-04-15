@@ -1,8 +1,13 @@
+use std::rc::Rc;
+
 use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use fern_core::overlay::{
+    DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+};
+use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
@@ -167,7 +172,11 @@ impl Widget for PopoverSurface {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+        // Popover surface is modeled as a non-modal Dialog: ARIA has
+        // no dedicated popover role, and Role::Dialog without
+        // `set_modal` is the standard fallback for panels that float
+        // over other content without blocking it.
+        builder.set_role(fern_core::accesskit::Role::Dialog);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -280,7 +289,27 @@ impl Widget for Popover {
         ));
         ctx.set_dormant(content_id);
 
+        // Popover-is-open signal drives the trigger's `set_expanded`
+        // disclosure state. Each open handler sets it to `true`
+        // before showing the overlay; the `on_dismiss` callback
+        // installed on every `OverlayRequest` below resets it to
+        // `false` when the overlay is dismissed, regardless of
+        // which dismiss path fired.
+        let is_open: Signal<bool> = ctx.signal(false);
+        let dismiss_callback: fern_core::overlay::OverlayDismissCallback = {
+            let is_open = is_open.clone();
+            Rc::new(move || {
+                is_open.set(false);
+            })
+        };
+
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
+            let tap_open = is_open.clone();
+            let tap_dismiss = dismiss_callback.clone();
+            let key_open = is_open.clone();
+            let key_dismiss = dismiss_callback.clone();
+            let action_open = is_open.clone();
+            let action_dismiss = dismiss_callback.clone();
             ctx.add(
                 OverlayTrigger::new(
                     trigger,
@@ -296,6 +325,7 @@ impl Widget for Popover {
                                 }
                                 ctx.dismiss_all_overlays();
                                 ctx.activate(content_id);
+                                tap_open.set(true);
                                 ctx.show_overlay(OverlayRequest {
                                     content_id,
                                     anchor: self_id,
@@ -303,6 +333,7 @@ impl Widget for Popover {
                                     dismiss: dismiss.clone(),
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
+                                    on_dismiss: Some(tap_dismiss.clone()),
                                 });
                             }
                         })
@@ -316,6 +347,7 @@ impl Widget for Popover {
                                 } if enabled => {
                                     ctx.dismiss_all_overlays();
                                     ctx.activate(content_id);
+                                    key_open.set(true);
                                     ctx.show_overlay(OverlayRequest {
                                         content_id,
                                         anchor: self_id,
@@ -323,6 +355,7 @@ impl Widget for Popover {
                                         dismiss: dismiss.clone(),
                                         layer: OverlayLayer::InTree,
                                         parent_overlay: None,
+                                        on_dismiss: Some(key_dismiss.clone()),
                                     });
                                     EventResponse::Handled
                                 }
@@ -334,6 +367,7 @@ impl Widget for Popover {
                                 if action == fern_core::accesskit::Action::Click && enabled {
                                     ctx.dismiss_all_overlays();
                                     ctx.activate(content_id);
+                                    action_open.set(true);
                                     ctx.show_overlay(OverlayRequest {
                                         content_id,
                                         anchor: self_id,
@@ -341,6 +375,7 @@ impl Widget for Popover {
                                         dismiss: dismiss.clone(),
                                         layer: OverlayLayer::InTree,
                                         parent_overlay: None,
+                                        on_dismiss: Some(action_dismiss.clone()),
                                     });
                                     EventResponse::Handled
                                 } else {
@@ -349,13 +384,23 @@ impl Widget for Popover {
                             }
                         }),
                 )
-                .name(label),
+                .name(label)
+                .has_popup(fern_core::accesskit::HasPopup::Dialog)
+                .expanded_when(is_open.clone()),
             )
         } else {
+            let tap_open = is_open.clone();
+            let tap_dismiss = dismiss_callback.clone();
+            let key_open = is_open.clone();
+            let key_dismiss = dismiss_callback.clone();
+            let action_open = is_open.clone();
+            let action_dismiss = dismiss_callback.clone();
             ctx.add(
                 Button::new_literal(label)
                     .style(style)
                     .enabled(enabled)
+                    .has_popup(fern_core::accesskit::HasPopup::Dialog)
+                    .expanded_when(is_open.clone())
                     .on_tap({
                         let placement = placement.clone();
                         let dismiss = dismiss.clone();
@@ -365,6 +410,7 @@ impl Widget for Popover {
                             }
                             ctx.dismiss_all_overlays();
                             ctx.activate(content_id);
+                            tap_open.set(true);
                             ctx.show_overlay(OverlayRequest {
                                 content_id,
                                 anchor: self_id,
@@ -372,6 +418,7 @@ impl Widget for Popover {
                                 dismiss: dismiss.clone(),
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
+                                on_dismiss: Some(tap_dismiss.clone()),
                             });
                         }
                     })
@@ -385,6 +432,7 @@ impl Widget for Popover {
                             } if enabled => {
                                 ctx.dismiss_all_overlays();
                                 ctx.activate(content_id);
+                                key_open.set(true);
                                 ctx.show_overlay(OverlayRequest {
                                     content_id,
                                     anchor: self_id,
@@ -392,6 +440,7 @@ impl Widget for Popover {
                                     dismiss: dismiss.clone(),
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
+                                    on_dismiss: Some(key_dismiss.clone()),
                                 });
                                 EventResponse::Handled
                             }
@@ -403,6 +452,7 @@ impl Widget for Popover {
                             if action == fern_core::accesskit::Action::Click && enabled {
                                 ctx.dismiss_all_overlays();
                                 ctx.activate(content_id);
+                                action_open.set(true);
                                 ctx.show_overlay(OverlayRequest {
                                     content_id,
                                     anchor: self_id,
@@ -410,6 +460,7 @@ impl Widget for Popover {
                                     dismiss: dismiss.clone(),
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
+                                    on_dismiss: Some(action_dismiss.clone()),
                                 });
                                 EventResponse::Handled
                             } else {
@@ -490,6 +541,47 @@ mod tests {
         tree.press_key(Key::Escape, fern_core::event::Modifiers::NONE);
 
         assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn popover_trigger_tracks_expanded_across_dismiss_paths() {
+        // Regression guard: the Popover button reports
+        // set_expanded(true) while its panel is shown and
+        // set_expanded(false) after it's dismissed — including
+        // framework-level dismiss paths (via on_dismiss callback).
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)));
+        tree.layout(SizeProposal::exact(480.0, 320.0));
+        let trigger = tree.find_by_label("Show popover").unwrap();
+
+        assert!(!tree.accessibility_node(trigger).is_expanded());
+
+        // Open via Click action.
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
+        tree.layout(SizeProposal::exact(480.0, 320.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(
+            tree.accessibility_node(trigger).is_expanded(),
+            "open popover should report expanded=true"
+        );
+
+        // Dismiss via the framework path (bypasses trigger handlers).
+        let overlay_id = tree
+            .active_overlays()
+            .first()
+            .copied()
+            .expect("popover overlay active");
+        tree.dismiss_overlay(overlay_id);
+        tree.layout(SizeProposal::exact(480.0, 320.0));
+        assert!(
+            !tree.accessibility_node(trigger).is_expanded(),
+            "framework dismiss must reset popover expanded=false"
+        );
     }
 
     #[test]

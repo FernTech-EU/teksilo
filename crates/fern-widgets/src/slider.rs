@@ -437,6 +437,17 @@ impl Widget for Slider {
         builder.set_numeric_value(self.value.get() as f64);
         builder.set_min_numeric_value(self.min as f64);
         builder.set_max_numeric_value(self.max as f64);
+        // Publish the keyboard step so Orca / VoiceOver can announce
+        // "step by N" when the user holds an arrow key. If the caller
+        // didn't configure an explicit step, fall back to 1% of the
+        // range — same heuristic the keyboard handler uses.
+        let step = self.step.unwrap_or_else(|| (self.max - self.min) * 0.01);
+        builder.set_numeric_value_step(step as f64);
+        let orientation = match self.orientation {
+            Orientation::Horizontal => fern_core::accesskit::Orientation::Horizontal,
+            Orientation::Vertical => fern_core::accesskit::Orientation::Vertical,
+        };
+        builder.set_orientation(orientation);
         if !self.enabled {
             builder.set_disabled();
         }

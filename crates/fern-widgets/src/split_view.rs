@@ -462,6 +462,14 @@ impl Widget for SplitHandle {
         builder.set_min_numeric_value(0.0);
         builder.set_max_numeric_value(100.0);
         builder.set_value(format!("{:.0}%", self.split.get() * 100.0));
+        // ARIA `aria-orientation` on a separator describes the BAR's
+        // own axis — not the split axis. A horizontal SplitView (panes
+        // side-by-side) has a vertical handle bar, and vice versa.
+        let handle_orientation = match self.orientation {
+            Orientation::Horizontal => fern_core::accesskit::Orientation::Vertical,
+            Orientation::Vertical => fern_core::accesskit::Orientation::Horizontal,
+        };
+        builder.set_orientation(handle_orientation);
         if !self.enabled {
             builder.set_disabled();
         } else {

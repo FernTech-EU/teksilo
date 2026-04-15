@@ -221,10 +221,18 @@ impl Widget for ProgressBar {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::ProgressIndicator);
-        let value = self.value.get();
-        builder.set_numeric_value(value as f64);
-        builder.set_min_numeric_value(0.0);
-        builder.set_max_numeric_value(1.0);
+        if self.indeterminate {
+            // Indeterminate bars have no meaningful numeric value —
+            // don't announce a stale 0.0. Live::Polite lets screen
+            // readers pick up "busy / please wait" transitions
+            // without interrupting the user's current action.
+            builder.set_live(fern_core::accesskit::Live::Polite);
+        } else {
+            let value = self.value.get();
+            builder.set_numeric_value(value as f64);
+            builder.set_min_numeric_value(0.0);
+            builder.set_max_numeric_value(1.0);
+        }
     }
 }
 

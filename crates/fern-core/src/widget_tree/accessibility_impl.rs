@@ -150,6 +150,9 @@ impl WidgetTree {
         if let Some(expanded) = builder.expanded() {
             info = info.with_expanded(expanded);
         }
+        if let Some(selected) = builder.selected() {
+            info = info.with_selected(selected);
+        }
         if !self.arena.is_enabled(id) {
             info = info.with_disabled(true);
         }

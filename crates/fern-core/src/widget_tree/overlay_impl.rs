@@ -134,6 +134,7 @@ impl WidgetTree {
                 },
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
+                on_dismiss: None,
             });
             if let Some(entry) = self
                 .tooltips
@@ -661,6 +662,7 @@ mod tests {
             dismiss: crate::overlay::DismissBehavior::Manual,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -685,6 +687,7 @@ mod tests {
             dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -709,6 +712,7 @@ mod tests {
             dismiss: crate::overlay::DismissBehavior::Manual,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -732,6 +736,7 @@ mod tests {
             dismiss: crate::overlay::DismissBehavior::ClickOutside,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         tree.overlay_manager
@@ -763,6 +768,7 @@ mod tests {
             dismiss: crate::overlay::DismissBehavior::Manual,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         tree.show_overlay(crate::overlay::OverlayRequest {
             content_id: content_b,
@@ -771,6 +777,7 @@ mod tests {
             dismiss: crate::overlay::DismissBehavior::Manual,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: Some(parent),
+            on_dismiss: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 2);
@@ -795,6 +802,7 @@ mod tests {
             dismiss: crate::overlay::DismissBehavior::Manual,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -880,6 +888,7 @@ mod tests {
                 dismiss: crate::overlay::DismissBehavior::Manual,
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
+                on_dismiss: None,
             },
             std::time::Duration::from_millis(300),
         );

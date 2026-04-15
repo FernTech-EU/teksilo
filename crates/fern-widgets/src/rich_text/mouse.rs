@@ -23,7 +23,7 @@ use fern_text::text_document::{MoveMode, SelectionType};
 
 use super::hit_test;
 use super::state::{DragState, SharedState};
-use super::widget::sync_cursor_signals;
+use super::sync_cursor_signals;
 
 pub(super) fn handle_pointer_event(
     state: &SharedState,

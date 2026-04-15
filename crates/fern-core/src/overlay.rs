@@ -5,11 +5,25 @@
 //! The `OverlayManager` coordinates creation, positioning, stacking, dismissal,
 //! event routing, and accessibility.
 
+use std::rc::Rc;
 use std::time::Duration;
 
 use fern_canvas::{Point, Rect, Size, Vec2};
 
 use crate::widget_id::WidgetId;
+
+/// Callback invoked by the framework when an overlay is dismissed —
+/// regardless of the dismiss path (Escape, click outside, pointer
+/// leave, explicit API call, cascade). The anchor widget uses this
+/// hook to reset its own interaction state so that SR-facing
+/// properties like `set_expanded` on a `ComboBox` or a submenu
+/// trigger stay consistent with the actual overlay-visible state.
+///
+/// Fired exactly once per overlay lifetime, at the point the
+/// overlay is removed from the stack. `Fn` rather than `FnOnce`
+/// simply because it's easier to pass around by `Rc`; the
+/// framework only invokes it once.
+pub type OverlayDismissCallback = Rc<dyn Fn()>;
 
 /// Unique identifier for an active overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -83,10 +97,14 @@ pub struct OverlayRequest {
     pub layer: OverlayLayer,
     /// Parent overlay (for submenu cascading).
     pub parent_overlay: Option<OverlayId>,
+    /// Invoked when the overlay is dismissed by any path. Use this
+    /// to reset anchor-side state (e.g. `ComboBox.interaction`)
+    /// when the framework tears down the overlay without going
+    /// through the anchor's own key/tap handlers.
+    pub on_dismiss: Option<OverlayDismissCallback>,
 }
 
 /// An active overlay in the stack.
-#[derive(Debug)]
 pub(crate) struct ActiveOverlay {
     pub id: OverlayId,
     pub content_id: WidgetId,
@@ -111,6 +129,35 @@ pub(crate) struct ActiveOverlay {
     pub shown_at_real: std::time::Instant,
     /// When the overlay was shown (simulated time).
     pub shown_at_sim: std::time::Instant,
+    /// Dismiss callback supplied by the show request. Invoked
+    /// exactly once when the overlay is removed from the stack,
+    /// regardless of dismiss path.
+    pub on_dismiss: Option<OverlayDismissCallback>,
+}
+
+// Manual Debug impl: `Rc<dyn Fn()>` doesn't derive Debug, but the
+// surrounding systems (tests, logging) want ActiveOverlay to be
+// printable. Skip the callback field and tag it with a placeholder.
+impl std::fmt::Debug for ActiveOverlay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveOverlay")
+            .field("id", &self.id)
+            .field("content_id", &self.content_id)
+            .field("anchor", &self.anchor)
+            .field("placement", &self.placement)
+            .field("dismiss", &self.dismiss)
+            .field("layer", &self.layer)
+            .field("parent_overlay", &self.parent_overlay)
+            .field("bounds", &self.bounds)
+            .field("focus_restore", &self.focus_restore)
+            .field("pointer_leave_started_real", &self.pointer_leave_started_real)
+            .field("pointer_leave_started_sim", &self.pointer_leave_started_sim)
+            .field("auto_dismiss_after", &self.auto_dismiss_after)
+            .field("shown_at_real", &self.shown_at_real)
+            .field("shown_at_sim", &self.shown_at_sim)
+            .field("on_dismiss", &self.on_dismiss.as_ref().map(|_| "<callback>"))
+            .finish()
+    }
 }
 
 /// Manages the overlay stack — creation, positioning, dismissal, cascading.
@@ -161,6 +208,7 @@ impl OverlayManager {
             auto_dismiss_after,
             shown_at_real: now,
             shown_at_sim: now,
+            on_dismiss: request.on_dismiss,
         };
         self.stack.push(overlay);
         id
@@ -268,8 +316,17 @@ impl OverlayManager {
             .filter(|overlay| to_dismiss.contains(&overlay.id))
             .map(|overlay| overlay.content_id)
             .collect();
+        let callbacks: Vec<OverlayDismissCallback> = self
+            .stack
+            .iter()
+            .filter(|overlay| to_dismiss.contains(&overlay.id))
+            .filter_map(|overlay| overlay.on_dismiss.clone())
+            .collect();
         self.stack
             .retain(|overlay| !to_dismiss.contains(&overlay.id));
+        for cb in callbacks {
+            cb();
+        }
 
         (dismissed_content, focus_restore)
     }
@@ -302,7 +359,20 @@ impl OverlayManager {
             .filter(|o| to_dismiss.contains(&o.id))
             .map(|o| o.content_id)
             .collect();
+        // Collect dismiss callbacks (via Rc::clone) before retain
+        // so we can invoke them AFTER the borrow is released.
+        // Callbacks may do anything, including touching the arena,
+        // so running them mid-retain would risk re-entrancy.
+        let callbacks: Vec<OverlayDismissCallback> = self
+            .stack
+            .iter()
+            .filter(|o| to_dismiss.contains(&o.id))
+            .filter_map(|o| o.on_dismiss.clone())
+            .collect();
         self.stack.retain(|o| !to_dismiss.contains(&o.id));
+        for cb in callbacks {
+            cb();
+        }
         dismissed_content
     }
 
@@ -587,6 +657,7 @@ mod tests {
             dismiss: DismissBehavior::ClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         assert_eq!(mgr.len(), 1);
 
@@ -604,6 +675,7 @@ mod tests {
             dismiss: DismissBehavior::ClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         let _child = mgr.show(OverlayRequest {
             content_id: fake_id(11),
@@ -612,6 +684,7 @@ mod tests {
             dismiss: DismissBehavior::ClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: Some(parent),
+            on_dismiss: None,
         });
         assert_eq!(mgr.len(), 2);
 
@@ -630,6 +703,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         let b = mgr.show(OverlayRequest {
             content_id: fake_id(11),
@@ -638,6 +712,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         let dismissed = mgr.dismiss_top();
@@ -655,6 +730,7 @@ mod tests {
             dismiss: DismissBehavior::ClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         // Set overlay bounds
@@ -683,6 +759,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         assert!(
@@ -702,6 +779,7 @@ mod tests {
             dismiss: DismissBehavior::EscapeOrClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         let dismissed = mgr.try_dismiss_top_on_escape();
@@ -719,6 +797,7 @@ mod tests {
             dismiss: DismissBehavior::EscapeKey,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         // Escape should dismiss
@@ -737,6 +816,7 @@ mod tests {
             dismiss: DismissBehavior::ClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         assert!(mgr.try_dismiss_top_on_escape().is_none());
@@ -753,6 +833,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         assert!(mgr.try_dismiss_top_on_escape().is_none());
@@ -769,6 +850,7 @@ mod tests {
             dismiss: DismissBehavior::EscapeOrClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         let id = mgr.active_ids()[0];
@@ -791,6 +873,7 @@ mod tests {
             dismiss: DismissBehavior::EscapeKey,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         assert!(
@@ -810,6 +893,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         mgr.show(OverlayRequest {
             content_id: fake_id(20),
@@ -818,6 +902,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         let ids = mgr.active_content_ids();
@@ -836,6 +921,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         let b = mgr.show(OverlayRequest {
             content_id: fake_id(11),
@@ -844,6 +930,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         // Both overlays at origin with same bounds
@@ -864,6 +951,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 120.0));
@@ -889,6 +977,7 @@ mod tests {
             dismiss: DismissBehavior::Manual,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 64.0));

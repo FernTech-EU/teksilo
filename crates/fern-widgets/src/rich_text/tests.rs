@@ -9,8 +9,7 @@ use fern_canvas::{Point, SizeProposal};
 use fern_core::widget_tree::WidgetTree;
 use fern_text::text_document::TextDocument;
 
-use super::widget::{RichTextEditor, ScrollPolicy};
-use super::ContextTarget;
+use super::{ContextTarget, RichTextEditor, ScrollPolicy};
 
 fn tree_with_layout() -> WidgetTree {
     let mut tree = WidgetTree::new();

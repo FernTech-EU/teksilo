@@ -342,16 +342,16 @@ impl Widget for BreadcrumbSegment {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(if self.current {
-            fern_core::accesskit::Role::Label
-        } else {
-            fern_core::accesskit::Role::Link
-        });
+        // Every crumb keeps Role::Link — ARIA convention is that the
+        // current page is still announced as a link, just tagged with
+        // `aria-current="page"` so screen readers say "current page,
+        // <label>". Replaces the earlier Label-role + synthesized
+        // i18n `set_value` workaround which didn't map to a standard
+        // ARIA pattern.
+        builder.set_role(fern_core::accesskit::Role::Link);
         builder.set_name(&self.label);
         if self.current {
-            builder
-                .inner_mut()
-                .set_value(fern_i18n::tr_widget!(a11y_breadcrumb_current_page_value()).resolve_now());
+            builder.set_aria_current(fern_core::accesskit::AriaCurrent::Page);
         } else if self.is_interactive() {
             builder.add_action(fern_core::accesskit::Action::Click);
             builder.add_action(fern_core::accesskit::Action::Focus);
@@ -541,7 +541,12 @@ mod tests {
         let current_segment = tree.child_widget(root, 2);
         let info = tree.accessibility_node(current_segment);
 
-        assert_eq!(info.role(), fern_core::accesskit::Role::Label);
+        // Per ARIA convention the current crumb is still a Link —
+        // it's tagged with `aria-current="page"` instead of a
+        // different role. The guarantee this test is actually after
+        // is "the current crumb has no Click action" (can't navigate
+        // to itself), not "the role is Label".
+        assert_eq!(info.role(), fern_core::accesskit::Role::Link);
         assert!(
             !info
                 .actions()

@@ -81,6 +81,15 @@ pub struct Button {
     /// Takes precedence over `tooltip_text` when both are set — last
     /// call wins because the setters clear the other field.
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
+    /// Optional `has_popup` hint used when this button acts as a
+    /// disclosure trigger for a popup (menu, dialog, listbox, etc.).
+    /// Surfaced via `set_has_popup` in `accessibility()`.
+    has_popup: Option<fern_core::accesskit::HasPopup>,
+    /// Optional signal reporting whether the button's popup is
+    /// currently visible. Surfaced via `set_expanded` in
+    /// `accessibility()`. Used alongside `has_popup` for the
+    /// standard ARIA disclosure pattern.
+    expanded_signal: Option<Signal<bool>>,
     /// Interaction state signal — set during build().
     interaction: Signal<InteractionState>,
     /// Root child ID — set during build().
@@ -105,6 +114,8 @@ impl Button {
             enabled: true,
             tooltip_text: None,
             rich_tooltip_source: None,
+            has_popup: None,
+            expanded_signal: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
@@ -186,6 +197,25 @@ impl Button {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Declare that this button is a disclosure trigger for a
+    /// popup (menu, dialog, listbox, tree, grid). Surfaced via
+    /// `set_has_popup` in the a11y node so screen readers announce
+    /// it as leading into the named popup kind.
+    pub fn has_popup(mut self, kind: fern_core::accesskit::HasPopup) -> Self {
+        self.has_popup = Some(kind);
+        self
+    }
+
+    /// Bind a signal reporting whether this button's popup is
+    /// currently visible. The Popover / Dialog wrapper owns the
+    /// signal and flips it on show / dismiss; Button reads it in
+    /// `accessibility()` to publish `set_expanded`. Only
+    /// meaningful alongside `.has_popup(...)`.
+    pub fn expanded_when(mut self, signal: Signal<bool>) -> Self {
+        self.expanded_signal = Some(signal);
         self
     }
 }
@@ -271,6 +301,22 @@ impl fern_core::widget::Widget for Button {
             InteractionState::Disabled
         });
         self.interaction = interaction.clone();
+
+        // If an `expanded_signal` was wired up (disclosure
+        // pattern — see `.has_popup()` / `.expanded_when()`),
+        // register it with the framework so changes trigger a
+        // repaint/a11y refresh on this button. Without the
+        // binding registration, the signal updates but the
+        // widget's `accessibility()` output won't be re-queried.
+        if let Some(ref expanded_signal) = self.expanded_signal {
+            let self_id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            expanded_signal.bind_to(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
+        }
 
         // Derived reactive colors via Signal::map
         let bg_color = {
@@ -478,6 +524,16 @@ impl fern_core::widget::Widget for Button {
         builder.set_name(&self.label);
         if !self.enabled {
             builder.set_disabled();
+        }
+        // ARIA disclosure pattern: a button that opens a popup
+        // should declare `has_popup` and, if the wrapper tracks
+        // it, `expanded`. Both are opt-in — regular buttons with
+        // no popup stay silent on these properties.
+        if let Some(kind) = self.has_popup {
+            builder.set_has_popup(kind);
+        }
+        if let Some(ref signal) = self.expanded_signal {
+            builder.set_expanded(signal.get());
         }
         builder.add_action(fern_core::accesskit::Action::Click);
         builder.add_action(fern_core::accesskit::Action::Focus);

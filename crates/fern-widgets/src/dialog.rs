@@ -22,6 +22,12 @@ pub struct ModalContainer {
     pending_content: Option<Box<dyn Widget>>,
     padding_override: Option<f32>,
     min_width_override: Option<f32>,
+    /// Explicit accessible title for the dialog. Set via `.title(...)`
+    /// — typically the same string the inner `DialogContent` uses as
+    /// its visual title. When `None`, `accessibility()` falls back to
+    /// the generic i18n `a11y_dialog_name` string so there's always
+    /// a non-empty name for screen readers.
+    title: Option<String>,
 }
 
 impl ModalContainer {
@@ -35,6 +41,7 @@ impl ModalContainer {
             pending_content: Some(content),
             padding_override: None,
             min_width_override: None,
+            title: None,
         }
     }
 
@@ -45,6 +52,22 @@ impl ModalContainer {
 
     pub fn min_width(mut self, min_width: f32) -> Self {
         self.min_width_override = Some(min_width.max(0.0));
+        self
+    }
+
+    /// Accessible title for the dialog. Screen readers announce this
+    /// as the dialog's name. Should match the inner `DialogContent`'s
+    /// visible title string.
+    pub fn title(mut self, title: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = title.into();
+        self.title = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `title(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn title_literal(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
         self
     }
 
@@ -71,6 +94,17 @@ impl std::fmt::Debug for ModalContainer {
 impl Widget for ModalContainer {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         if let Some(content) = self.pending_content.take() {
+            // If the caller didn't set an explicit `.title(...)`,
+            // ask the content widget for a suggested title — e.g.
+            // `DialogContent::accessible_title_hint` returns its
+            // own visible title. This lets dialogs announce their
+            // real name without forcing callers to duplicate the
+            // string at both the content and the container level.
+            if self.title.is_none() {
+                if let Some(hint) = content.accessible_title_hint() {
+                    self.title = Some(hint);
+                }
+            }
             self.content_id = Some(ctx.add_boxed(content));
         }
         self.children()
@@ -126,7 +160,15 @@ impl Widget for ModalContainer {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Dialog);
-        builder.set_name(fern_i18n::tr_widget!(a11y_dialog_name()).resolve_now());
+        let name = self
+            .title
+            .clone()
+            .unwrap_or_else(|| fern_i18n::tr_widget!(a11y_dialog_name()).resolve_now());
+        builder.set_name(name);
+        // ModalContainer is always modal — it's the one path that goes
+        // through `ModalRequest` / `ModalPresentation`. A dialog that
+        // doesn't block outside interaction would use `Popover` instead.
+        builder.set_modal();
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -288,6 +330,14 @@ impl Widget for DialogContent {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
+    }
+
+    /// Expose the visible title to an enclosing `ModalContainer`
+    /// (or any other shell) so it can use it as its own accessible
+    /// name without the caller having to thread the same string
+    /// through twice.
+    fn accessible_title_hint(&self) -> Option<String> {
+        self.title.clone()
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -597,6 +647,42 @@ mod tests {
         let info = tree.accessibility_node(dialog);
         assert_eq!(info.role(), fern_core::accesskit::Role::Dialog);
         assert!(tree.bounds(content_id).width > 0.0);
+    }
+
+    #[test]
+    fn modal_container_inherits_title_from_dialog_content() {
+        // When a ModalContainer wraps a DialogContent and the
+        // caller didn't set an explicit title on the container,
+        // the title should propagate automatically via
+        // `Widget::accessible_title_hint`.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let container = tree.add(ModalContainer::new(
+            DialogContent::new()
+                .title_literal("Delete file?")
+                .body(FixedLeaf(100.0, 40.0)),
+        ));
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        let info = tree.accessibility_node(container);
+        assert_eq!(info.role(), fern_core::accesskit::Role::Dialog);
+        assert_eq!(info.name(), Some("Delete file?"));
+    }
+
+    #[test]
+    fn modal_container_explicit_title_wins_over_hint() {
+        // An explicit `.title(...)` on ModalContainer takes
+        // precedence over whatever the content suggests.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let container = tree.add(
+            ModalContainer::new(
+                DialogContent::new()
+                    .title_literal("Inner title")
+                    .body(FixedLeaf(100.0, 40.0)),
+            )
+            .title_literal("Outer title"),
+        );
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        let info = tree.accessibility_node(container);
+        assert_eq!(info.name(), Some("Outer title"));
     }
 
     #[test]

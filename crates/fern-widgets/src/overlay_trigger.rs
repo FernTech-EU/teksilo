@@ -1,6 +1,7 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
+use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -10,6 +11,13 @@ pub(crate) struct OverlayTrigger {
     pending_child: Option<Box<dyn Widget>>,
     pending_handlers: Option<HandlerSet>,
     name: Option<String>,
+    /// Optional `has_popup` hint surfaced on this trigger's a11y
+    /// node. Same role as Button's equivalent — used by Popover
+    /// for the ARIA disclosure pattern.
+    has_popup: Option<fern_core::accesskit::HasPopup>,
+    /// Optional signal reporting whether the owned popup is
+    /// currently visible. Published via `set_expanded`.
+    expanded_signal: Option<Signal<bool>>,
 }
 
 impl OverlayTrigger {
@@ -19,11 +27,23 @@ impl OverlayTrigger {
             pending_child: Some(child),
             pending_handlers: Some(handlers),
             name: None,
+            has_popup: None,
+            expanded_signal: None,
         }
     }
 
     pub(crate) fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
+        self
+    }
+
+    pub(crate) fn has_popup(mut self, kind: fern_core::accesskit::HasPopup) -> Self {
+        self.has_popup = Some(kind);
+        self
+    }
+
+    pub(crate) fn expanded_when(mut self, signal: Signal<bool>) -> Self {
+        self.expanded_signal = Some(signal);
         self
     }
 }
@@ -43,6 +63,17 @@ impl Widget for OverlayTrigger {
         }
         if let Some(handlers) = self.pending_handlers.take() {
             ctx.apply_self_handlers(handlers);
+        }
+        // Register the expanded_signal so flips trigger an a11y
+        // refresh on this trigger node.
+        if let Some(ref expanded_signal) = self.expanded_signal {
+            let self_id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            expanded_signal.bind_to(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
         }
         self.children()
     }
@@ -70,6 +101,12 @@ impl Widget for OverlayTrigger {
         builder.set_role(fern_core::accesskit::Role::Button);
         if let Some(name) = &self.name {
             builder.set_name(name.as_str());
+        }
+        if let Some(kind) = self.has_popup {
+            builder.set_has_popup(kind);
+        }
+        if let Some(ref signal) = self.expanded_signal {
+            builder.set_expanded(signal.get());
         }
     }
 

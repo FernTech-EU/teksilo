@@ -154,6 +154,23 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Declare this widget's accessibility identity.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 
+    /// Suggest an accessible title to an enclosing container that
+    /// wraps this widget as content — typically a modal / dialog
+    /// shell that wants to propagate the inner content's visible
+    /// title as the shell's own accessible name.
+    ///
+    /// Example: `ModalContainer` wraps a `DialogContent`. The
+    /// container owns the `Role::Dialog` node and needs a name;
+    /// `DialogContent` overrides this method to return its own
+    /// `title` string. The container queries this on its pending
+    /// content at build time and uses the result if set.
+    ///
+    /// Default: `None` — widgets that don't carry a natural
+    /// title don't need to override.
+    fn accessible_title_hint(&self) -> Option<String> {
+        None
+    }
+
     /// Return the child widget IDs that this widget manages.
     fn children(&self) -> Vec<WidgetId> {
         Vec::new()

@@ -416,6 +416,7 @@ fn make_link_click_handler(
                     dismiss: DismissBehavior::EscapeOrClickOutside,
                     layer: OverlayLayer::InTree,
                     parent_overlay: None,
+                    on_dismiss: None,
                 });
             }
             return;

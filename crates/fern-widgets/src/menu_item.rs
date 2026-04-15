@@ -60,6 +60,13 @@ pub struct MenuItem {
     submenu_open_delay: Duration,
     // Build state
     interaction: Signal<MenuItemState>,
+    /// Whether this item's submenu overlay is currently visible.
+    /// Flipped to `true` by every open path (tap, hover, Enter,
+    /// ArrowRight) and flipped back to `false` by the overlay
+    /// manager's `on_dismiss` callback — regardless of dismiss
+    /// path. `accessibility()` reads this for `set_expanded`.
+    /// Only meaningful when `submenu_factory.is_some()`.
+    submenu_open: Signal<bool>,
     root_child_id: Option<WidgetId>,
     submenu_content_id: Option<WidgetId>,
 }
@@ -79,6 +86,7 @@ impl MenuItem {
             submenu_factory: None,
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
+            submenu_open: Signal::new(false),
             root_child_id: None,
             submenu_content_id: None,
         }
@@ -199,6 +207,7 @@ impl MenuItem {
             submenu_factory: Some(Box::new(factory)),
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
+            submenu_open: Signal::new(false),
             root_child_id: None,
             submenu_content_id: None,
         }
@@ -467,6 +476,20 @@ impl Widget for MenuItem {
         let self_id = ctx.self_id();
         let is_submenu = submenu_content_id.is_some();
 
+        // Shared dismiss callback for the submenu overlay. Flipped
+        // to `false` by the overlay manager when the submenu is
+        // dismissed by any path (pointer leave, cascade, Escape,
+        // click outside) so `accessibility()` can report accurate
+        // `set_expanded` without needing to track the overlay state
+        // from inside the MenuItem's own handlers.
+        let submenu_open_signal = self.submenu_open.clone();
+        let submenu_dismiss_callback: fern_core::overlay::OverlayDismissCallback = {
+            let open = submenu_open_signal.clone();
+            std::rc::Rc::new(move || {
+                open.set(false);
+            })
+        };
+
         let mut handler_set = HandlerSet::new();
 
         if is_submenu {
@@ -478,6 +501,10 @@ impl Widget for MenuItem {
             let sub_id = submenu_content_id.unwrap();
             let open_delay = self.submenu_open_delay;
 
+            let open_for_tap = submenu_open_signal.clone();
+            let dismiss_for_tap = submenu_dismiss_callback.clone();
+            let open_for_hover = submenu_open_signal.clone();
+            let dismiss_for_hover = submenu_dismiss_callback.clone();
             handler_set = handler_set
                 .on_tap({
                     move |_pos, ctx: &mut EventContext| {
@@ -487,6 +514,7 @@ impl Widget for MenuItem {
                         // Click on submenu trigger opens it immediately
                         ctx.dismiss_child_overlays_except(sub_id);
                         ctx.activate(sub_id);
+                        open_for_tap.set(true);
                         ctx.show_overlay(OverlayRequest {
                             content_id: sub_id,
                             anchor: self_id,
@@ -496,6 +524,7 @@ impl Widget for MenuItem {
                             },
                             layer: OverlayLayer::InTree,
                             parent_overlay: None,
+                            on_dismiss: Some(dismiss_for_tap.clone()),
                         });
                         ctx.request_focus(sub_id);
                     }
@@ -509,6 +538,7 @@ impl Widget for MenuItem {
                         if entered {
                             int_hover.set(MenuItemState::Hovered);
                             ctx.dismiss_child_overlays_except(sub_id);
+                            open_for_hover.set(true);
                             ctx.show_overlay_after_with_focus(
                                 OverlayRequest {
                                     content_id: sub_id,
@@ -519,6 +549,7 @@ impl Widget for MenuItem {
                                     },
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
+                                    on_dismiss: Some(dismiss_for_hover.clone()),
                                 },
                                 open_delay,
                                 sub_id,
@@ -526,6 +557,15 @@ impl Widget for MenuItem {
                         } else {
                             int_hover.set(MenuItemState::Idle);
                             ctx.cancel_delayed_overlay(sub_id);
+                            // If the overlay was still pending (delay
+                            // not yet elapsed), its dismiss callback
+                            // will never fire — we must reset the
+                            // open flag ourselves. Idempotent if the
+                            // overlay already showed: the framework
+                            // dismiss callback will also set it false
+                            // when the PointerLeave behavior tears
+                            // the overlay down shortly afterward.
+                            open_for_hover.set(false);
                         }
                     }
                 });
@@ -566,6 +606,8 @@ impl Widget for MenuItem {
         handler_set = handler_set.on_key({
             let interaction = interaction.clone();
             let sub_id = submenu_content_id;
+            let open_for_key = submenu_open_signal.clone();
+            let dismiss_for_key = submenu_dismiss_callback.clone();
             move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                 if !enabled {
                     return EventResponse::Ignored;
@@ -581,6 +623,7 @@ impl Widget for MenuItem {
                         } else if let Some(sub_id) = sub_id {
                             ctx.dismiss_child_overlays_except(sub_id);
                             ctx.activate(sub_id);
+                            open_for_key.set(true);
                             ctx.show_overlay(OverlayRequest {
                                 content_id: sub_id,
                                 anchor: self_id,
@@ -590,6 +633,7 @@ impl Widget for MenuItem {
                                 },
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
+                                on_dismiss: Some(dismiss_for_key.clone()),
                             });
                             ctx.request_focus(sub_id);
                         }
@@ -604,6 +648,7 @@ impl Widget for MenuItem {
                         if let Some(sub_id) = sub_id {
                             ctx.dismiss_child_overlays_except(sub_id);
                             ctx.activate(sub_id);
+                            open_for_key.set(true);
                             ctx.show_overlay(OverlayRequest {
                                 content_id: sub_id,
                                 anchor: self_id,
@@ -613,6 +658,7 @@ impl Widget for MenuItem {
                                 },
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
+                                on_dismiss: Some(dismiss_for_key.clone()),
                             });
                             ctx.request_focus(sub_id);
                             EventResponse::Handled
@@ -674,6 +720,18 @@ impl Widget for MenuItem {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::MenuItem);
         builder.set_name(&self.label);
+        // A submenu trigger exposes `has_popup(Menu)` so screen
+        // readers announce the item as leading into a nested menu,
+        // and `set_expanded` reflects whether the submenu is
+        // currently visible. We check `submenu_content_id` rather
+        // than `submenu_factory`: the factory is moved out during
+        // `build()` via `take()`, so by the time the framework
+        // queries accessibility the factory is always `None`,
+        // but the content id survives.
+        if self.submenu_content_id.is_some() {
+            builder.set_has_popup(fern_core::accesskit::HasPopup::Menu);
+            builder.set_expanded(self.submenu_open.get());
+        }
         if !self.enabled {
             builder.set_disabled();
         }
@@ -1227,6 +1285,51 @@ mod tests {
         assert!(
             tree.active_overlays().is_empty(),
             "quick pass-through should not open submenu (diagonal tolerance)"
+        );
+    }
+
+    #[test]
+    fn submenu_trigger_exposes_expanded_state() {
+        // Regression guard: a MenuItem with a submenu should
+        // report set_expanded(true) while the submenu overlay is
+        // visible and set_expanded(false) after it's dismissed —
+        // including framework-level dismiss paths that bypass
+        // the item's own handlers. The on_dismiss callback on
+        // the OverlayRequest keeps the state coherent.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let item = tree.add(MenuItem::submenu_literal("More", || {
+            Box::new(
+                crate::menu_list::MenuList::new()
+                    .item(MenuItem::new_literal("Sub").on_activate(TestCmd::Cut)),
+            )
+        }));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        // Initial state: collapsed, has_popup(Menu).
+        let info = tree.accessibility_node(item);
+        assert!(!info.is_expanded(), "fresh submenu item should be collapsed");
+
+        // Open via Enter.
+        tree.focus(item);
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+        assert!(
+            tree.accessibility_node(item).is_expanded(),
+            "open submenu should report expanded=true"
+        );
+
+        // Dismiss via the framework (bypasses MenuItem's handlers).
+        let overlay_id = tree
+            .active_overlays()
+            .first()
+            .copied()
+            .expect("submenu overlay active");
+        tree.dismiss_overlay(overlay_id);
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        assert!(
+            !tree.accessibility_node(item).is_expanded(),
+            "framework dismiss must reset submenu expanded=false"
         );
     }
 

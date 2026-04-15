@@ -31,6 +31,7 @@ fn present_snackbar(
         dismiss,
         layer: OverlayLayer::InTree,
         parent_overlay: None,
+        on_dismiss: None,
     };
     if let Some(duration) = auto_dismiss_after {
         ctx.show_overlay_for(request, duration);
@@ -42,6 +43,12 @@ fn present_snackbar(
 struct SnackbarSurface {
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
+    /// Optional explicit SR announcement string. When set,
+    /// `accessibility()` uses it as the Alert's accessible name
+    /// so screen readers read out the caller-provided message
+    /// the moment the snackbar appears. Falls back to the
+    /// generic `a11y_snackbar_name` when unset.
+    announcement: Option<String>,
 }
 
 impl SnackbarSurface {
@@ -49,7 +56,13 @@ impl SnackbarSurface {
         Self {
             content_id: None,
             pending_content: Some(content),
+            announcement: None,
         }
+    }
+
+    fn with_announcement(mut self, text: Option<String>) -> Self {
+        self.announcement = text;
+        self
     }
 }
 
@@ -121,8 +134,20 @@ impl Widget for SnackbarSurface {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::GenericContainer);
-        builder.set_name(fern_i18n::tr_widget!(a11y_snackbar_name()).resolve_now());
+        // Role::Alert + Live::Polite mirrors the ARIA pattern for
+        // transient notifications: screen readers announce the
+        // contents when the snackbar appears, without interrupting
+        // the user's current action. The accessible name is the
+        // caller-supplied announcement when present, otherwise
+        // the generic fallback. Child widgets still contribute
+        // their own nodes for full context.
+        builder.set_role(fern_core::accesskit::Role::Alert);
+        builder.set_live(fern_core::accesskit::Live::Polite);
+        let name = self
+            .announcement
+            .clone()
+            .unwrap_or_else(|| fern_i18n::tr_widget!(a11y_snackbar_name()).resolve_now());
+        builder.set_name(name);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -138,6 +163,10 @@ pub struct Snackbar {
     auto_dismiss_after: Option<Duration>,
     pending_content: Option<Box<dyn Widget>>,
     pending_trigger: Option<Box<dyn Widget>>,
+    /// Optional explicit announcement string threaded through to
+    /// the `SnackbarSurface`'s a11y node. When set, screen readers
+    /// read this as the Alert's name when the snackbar appears.
+    announcement: Option<String>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -155,6 +184,7 @@ impl Snackbar {
             auto_dismiss_after: Some(DEFAULT_AUTO_DISMISS),
             pending_content: Some(Box::new(content)),
             pending_trigger: None,
+            announcement: None,
             root_child_id: None,
         }
     }
@@ -194,6 +224,26 @@ impl Snackbar {
         self.pending_trigger = Some(Box::new(trigger));
         self
     }
+
+    /// Screen-reader announcement string — used as the Alert's
+    /// accessible name when the snackbar appears. Without this
+    /// the surface falls back to the generic `a11y_snackbar_name`
+    /// i18n string, which says "notification" but can't describe
+    /// the specific message. Set this whenever the snackbar
+    /// conveys information the user needs to hear (errors,
+    /// confirmations, status changes).
+    pub fn announcement(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.announcement = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `announcement(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn announcement_literal(mut self, text: impl Into<String>) -> Self {
+        self.announcement = Some(text.into());
+        self
+    }
 }
 
 impl std::fmt::Debug for Snackbar {
@@ -214,11 +264,14 @@ impl Widget for Snackbar {
         let dismiss = self.dismiss.clone();
         let auto_dismiss_after = self.auto_dismiss_after;
         let style = self.style;
-        let content_id = ctx.add(SnackbarSurface::new(
-            self.pending_content
-                .take()
-                .expect("Snackbar built without content"),
-        ));
+        let content_id = ctx.add(
+            SnackbarSurface::new(
+                self.pending_content
+                    .take()
+                    .expect("Snackbar built without content"),
+            )
+            .with_announcement(self.announcement.clone()),
+        );
         ctx.set_dormant(content_id);
 
         let open_on_tap = {

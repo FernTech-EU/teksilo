@@ -214,6 +214,7 @@ impl WidgetTree {
             dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
+            on_dismiss: None,
         });
         if let Some(focus_id) = prev_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
@@ -799,6 +800,7 @@ impl WidgetTree {
                     dismiss: crate::overlay::DismissBehavior::Manual,
                     layer: crate::overlay::OverlayLayer::InTree,
                     parent_overlay: None,
+                    on_dismiss: None,
                 });
                 (Some(content_id), Some(overlay_id))
             } else {
