@@ -45,6 +45,27 @@ pub struct RichTextEngine {
     default_face: Option<FontFaceId>,
     wrap_mode: WrapMode,
     has_full_layout: bool,
+    /// Unique identifier for this engine's flow layout ownership on
+    /// the shared [`TypesetterBridge`]. Two `RichTextEngine`s viewing
+    /// the same `TextDocument` (e.g. a live editor and a read-only
+    /// preview) share the bridge so glyphs end up in the same GPU
+    /// atlas, but each must have its own flow-layout state (viewport,
+    /// wrap width, caret). The bridge holds one `Typesetter`, so
+    /// whoever ran `layout_full` last owns its current state. This id
+    /// is stamped onto the bridge via `set_layout_owner` on every
+    /// `layout_full`, and [`has_full_layout`](Self::has_full_layout)
+    /// returns `false` whenever the bridge now belongs to a different
+    /// engine — prompting the caller to re-lay out before render.
+    owner_id: u64,
+}
+
+/// Atomic counter for unique engine owner ids. Used by
+/// [`RichTextEngine`] to stamp layout ownership on the shared
+/// `TypesetterBridge`.
+static NEXT_OWNER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_owner_id() -> u64 {
+    NEXT_OWNER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl std::fmt::Debug for RichTextEngine {
@@ -67,6 +88,7 @@ impl RichTextEngine {
             default_face: None,
             wrap_mode: WrapMode::Word,
             has_full_layout: false,
+            owner_id: next_owner_id(),
         }
     }
 
@@ -87,6 +109,7 @@ impl RichTextEngine {
             default_face,
             wrap_mode: WrapMode::Word,
             has_full_layout: false,
+            owner_id: next_owner_id(),
         }
     }
 
@@ -186,28 +209,37 @@ impl RichTextEngine {
             .typesetter_max_content_width_readonly()
     }
 
+    /// Whether this engine has a valid full layout installed on the
+    /// shared typesetter. Returns `false` either when the engine has
+    /// never run `layout_full`, or when another engine sharing the
+    /// same bridge has taken over ownership by running its own
+    /// `layout_full`. Callers use this as a cheap "do I need to
+    /// relay out before rendering?" check — essential when two
+    /// rich-text widgets view the same document but own different
+    /// viewports.
     pub fn has_full_layout(&self) -> bool {
-        self.has_full_layout
+        self.has_full_layout && self.shared.borrow().is_layout_owner(self.owner_id)
     }
 
     // --- Layout ----------------------------------------------------------
 
     pub fn layout_full(&mut self, flow: &FlowSnapshot) {
-        self.shared
-            .borrow_mut()
-            .typesetter_mut()
-            .layout_full(flow);
+        let mut b = self.shared.borrow_mut();
+        b.typesetter_mut().layout_full(flow);
+        b.set_layout_owner(self.owner_id);
         self.has_full_layout = true;
     }
 
     /// Incremental relayout of a single block. Falls back to `layout_full`
-    /// if no full layout has happened yet.
+    /// when no valid full layout is installed for this engine — either
+    /// we've never run one, or another engine has since stolen the
+    /// bridge's flow state via its own `layout_full`.
     pub fn relayout_block_snapshot(
         &mut self,
         doc: &TextDocument,
         block_position: usize,
     ) -> Result<usize, String> {
-        if !self.has_full_layout {
+        if !self.has_full_layout() {
             let flow = doc.snapshot_flow();
             self.layout_full(&flow);
             return Ok(0);
