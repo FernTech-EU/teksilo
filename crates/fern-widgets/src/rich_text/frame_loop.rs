@@ -143,7 +143,16 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // carries into subsequent renders. paint() owns the first layout
     // pass in M8a; the tick only layouts on later edits.
     let viewport_ready = viewport_width > 0.0 && viewport_height > 0.0;
-    if viewport_ready && state.needs_full_layout {
+    // Ownership-stale check: two rich-text widgets viewing the same
+    // document share a `TypesetterBridge` so glyphs end up in the
+    // same GPU atlas, but they each own independent flow-layout
+    // state. `has_full_layout()` returns `false` when the bridge
+    // now belongs to another engine — in that case we must re-run
+    // `layout_full` before reading `content_height` /
+    // `max_content_width` below, otherwise we read the other
+    // widget's metrics and compute a wrong `max_scroll_y`.
+    let layout_stale = viewport_ready && !state.engine.has_full_layout();
+    if viewport_ready && (state.needs_full_layout || layout_stale) {
         let flow = state.document.snapshot_flow();
         state.engine.layout_full(&flow);
         state.needs_full_layout = false;
