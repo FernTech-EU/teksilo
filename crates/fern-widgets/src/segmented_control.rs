@@ -143,17 +143,42 @@ impl SegmentedControl {
         self.labels.len()
     }
 
-    fn segment_width(&self, bounds: Rect) -> f32 {
+    /// The inset-by-focus-ring-envelope bounds where the frame and
+    /// segment row actually paint. Computed identically in
+    /// `paint` and `place_children` so geometry never drifts.
+    fn compute_visual(&self, bounds: Rect, theme: &fern_tokens::Theme) -> Rect {
+        let envelope = theme.shape.focus_ring_offset + theme.shape.focus_ring_width;
+        Rect::new(
+            bounds.x + envelope,
+            bounds.y + envelope,
+            (bounds.width - envelope * 2.0).max(0.0),
+            (bounds.height - envelope * 2.0).max(0.0),
+        )
+    }
+
+    /// The inner row — `visual` inset by the frame's border width.
+    /// All segment-grid math (child placement, non-selected paint,
+    /// selected paint anchor) uses this as its coordinate space.
+    fn compute_inner(&self, visual: Rect, bw: f32) -> Rect {
+        Rect::new(
+            visual.x + bw,
+            visual.y + bw,
+            (visual.width - bw * 2.0).max(0.0),
+            (visual.height - bw * 2.0).max(0.0),
+        )
+    }
+
+    fn segment_width(&self, inner: Rect) -> f32 {
         let n = self.segment_count();
         if n == 0 {
             return 0.0;
         }
-        bounds.width / n as f32
+        inner.width / n as f32
     }
 
-    fn segment_rect(&self, index: usize, bounds: Rect) -> Rect {
-        let w = self.segment_width(bounds);
-        Rect::new(bounds.x + index as f32 * w, bounds.y, w, bounds.height)
+    fn segment_rect(&self, index: usize, inner: Rect) -> Rect {
+        let w = self.segment_width(inner);
+        Rect::new(inner.x + index as f32 * w, inner.y, w, inner.height)
     }
 
     /// Estimate the intrinsic width of all segments.
@@ -327,26 +352,21 @@ impl Widget for SegmentedControl {
         children: &mut [WidgetPlacement],
         ctx: &LayoutContext,
     ) {
-        // Walk the inset-by-envelope visual bounds — same geometry
-        // `paint()` uses — and assign each child SegmentButton one
-        // slice. Children in `children` are in the same order we
-        // returned from `build()` (and stored in `self.segment_ids`),
-        // so `index = slot` works.
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        let visual = Rect::new(
-            bounds.x + envelope,
-            bounds.y + envelope,
-            (bounds.width - envelope * 2.0).max(0.0),
-            (bounds.height - envelope * 2.0).max(0.0),
-        );
+        // Children occupy the inner row (visual inset by the frame
+        // border width) and are split into equal slices. `paint()`
+        // uses the exact same `inner` grid for non-selected segments,
+        // so hit-test rects line up with painted rects to the pixel.
         let n = self.segment_count();
         if n == 0 {
             return;
         }
-        let seg_w = visual.width / n as f32;
+        let sc_style = ctx.theme.components.segmented_control;
+        let visual = self.compute_visual(bounds, &ctx.theme);
+        let inner = self.compute_inner(visual, sc_style.border_width);
+        let seg_w = self.segment_width(inner);
         for (i, placement) in children.iter_mut().enumerate() {
-            placement.origin = fern_canvas::Point::new(visual.x + i as f32 * seg_w, visual.y);
-            placement.size = Size::new(seg_w, visual.height);
+            placement.origin = fern_canvas::Point::new(inner.x + i as f32 * seg_w, inner.y);
+            placement.size = Size::new(seg_w, inner.height);
         }
     }
 
@@ -354,28 +374,19 @@ impl Widget for SegmentedControl {
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
         let sc_style = ctx.theme.components.segmented_control;
-        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
         let n = self.segment_count();
         if n == 0 {
             return;
         }
 
-        // Visual bounds are inset by the focus-ring envelope. Hit
-        // testing now lives on the child `SegmentButton`s, which
-        // are positioned by `place_children` using the same
-        // geometry computed here.
-        let visual = Rect::new(
-            bounds.x + envelope,
-            bounds.y + envelope,
-            (bounds.width - envelope * 2.0).max(0.0),
-            (bounds.height - envelope * 2.0).max(0.0),
-        );
+        let visual = self.compute_visual(bounds, ctx.theme);
+        let bw = sc_style.border_width;
+        let inner = self.compute_inner(visual, bw);
 
         let selected = self.selected.get();
         let hovered = self.hovered_segment.get();
         let focused = self.focus_origin.get().is_some();
         let frame_cr = CornerRadius::uniform(sc_style.corner_radius);
-        let bw = sc_style.border_width;
 
         // 1. Outer frame — one rounded rect wrapping the whole control.
         let frame_border = if !self.enabled {
@@ -385,16 +396,9 @@ impl Widget for SegmentedControl {
         };
         canvas.stroke_rounded_rect(visual, frame_cr, frame_border, bw);
 
-        // 2. Segment row inset by the frame's border width so segment
-        //    borders visually replace the frame border where they overlap.
-        let inner = Rect::new(
-            visual.x + bw,
-            visual.y + bw,
-            (visual.width - bw * 2.0).max(0.0),
-            (visual.height - bw * 2.0).max(0.0),
-        );
-
-        // 3. Non-selected segments first: hover tint only, no border.
+        // 2. Non-selected segments: hover tint + label. No border.
+        //    `segment_rect` steps along the `inner` grid — exactly the
+        //    coordinate space `place_children` uses for hit-testing.
         for i in 0..n {
             if i == selected {
                 continue;
@@ -422,18 +426,19 @@ impl Widget for SegmentedControl {
             );
         }
 
-        // 4. Selected segment — paint last so its border overlays the frame.
-        //    Color depends on focus: accent when focused, inactive surface
-        //    when not.
+        // 3. Selected segment — painted last so its border overlays
+        //    the frame border AND any adjacent hover tint. The rect is
+        //    the inner-grid slot extended uniformly by `bw` on all four
+        //    sides, so its stroke exactly covers the frame edge on the
+        //    outside edges and covers the neighbors' edge pixels on
+        //    middle segments.
         if selected < n {
-            // Selected segment occupies the inner row but its rounded border
-            // extends back out to the outer frame radius.
-            let seg_w = inner.width / n as f32;
+            let sel_base = self.segment_rect(selected, inner);
             let sel = Rect::new(
-                visual.x + selected as f32 * seg_w + (if selected == 0 { 0.0 } else { bw }),
-                visual.y,
-                seg_w + (if selected == 0 || selected == n - 1 { bw } else { bw * 2.0 }),
-                visual.height,
+                sel_base.x - bw,
+                sel_base.y - bw,
+                sel_base.width + bw * 2.0,
+                sel_base.height + bw * 2.0,
             );
             let (sel_bg, sel_border, sel_text) = if !self.enabled {
                 (
@@ -467,7 +472,7 @@ impl Widget for SegmentedControl {
             );
         }
 
-        // 5. Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
+        // 4. Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
             let half_stroke = shape.focus_ring_width * 0.5;
             let ring_rect = Rect::new(
@@ -536,6 +541,40 @@ mod tests {
         // Center is x=150 → segment 1 (the middle one).
         tree.click(sc);
         assert_eq!(selected.get(), 1, "click at center should select segment 1");
+    }
+
+    #[test]
+    fn click_on_each_segment_lands_correctly() {
+        // Regression for the inner-vs-visual-grid drift: the child
+        // `SegmentButton` hit-test rects must match the painted
+        // segment rects to the pixel. With 3 segments, clicking
+        // the center of each slice in the unified `inner` grid
+        // must select that slice.
+        use fern_core::event::PointerButton;
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let sc = tree.add(SegmentedControl::new(
+            vec!["A".into(), "B".into(), "C".into()],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 60.0));
+
+        // The control's first child is SegmentButton 0 — use
+        // child_bounds to get each painted segment rect and click
+        // its center. If hit-test and paint geometry drift, the
+        // click will fall outside the right child.
+        for i in 0..3 {
+            let rect = tree.child_bounds(sc, i);
+            let center = rect.center();
+            tree.pointer_down_button(center, PointerButton::Primary);
+            tree.pointer_up_button(center, PointerButton::Primary);
+            assert_eq!(
+                selected.get(),
+                i,
+                "click on center of segment {} must select it",
+                i
+            );
+        }
     }
 
     #[test]
