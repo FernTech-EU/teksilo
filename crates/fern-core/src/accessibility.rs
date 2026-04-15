@@ -171,6 +171,10 @@ impl AccessNodeBuilder {
         self.inner.set_expanded(expanded);
     }
 
+    pub fn set_has_popup(&mut self, kind: accesskit::HasPopup) {
+        self.inner.set_has_popup(kind);
+    }
+
     pub fn set_numeric_value(&mut self, value: f64) {
         self.inner.set_numeric_value(value);
     }

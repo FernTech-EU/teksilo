@@ -48,6 +48,9 @@ pub struct ComboBox {
     items: Vec<String>,
     selected: Signal<Option<usize>>,
     placeholder: String,
+    /// Accessible label — independent of placeholder and current selection.
+    /// Screen readers announce this as the name of the control.
+    label: Option<String>,
     enabled: bool,
     // Build state
     interaction: Signal<ComboBoxState>,
@@ -70,6 +73,7 @@ impl ComboBox {
                 .collect(),
             selected,
             placeholder: String::new(),
+            label: None,
             enabled: true,
             interaction: Signal::new(ComboBoxState::Idle),
             root_child_id: None,
@@ -102,6 +106,23 @@ impl ComboBox {
     #[doc(hidden)]
     pub fn placeholder_literal(mut self, text: impl Into<String>) -> Self {
         self.placeholder = text.into();
+        self
+    }
+
+    /// Accessible label describing what this combo box is for
+    /// (e.g. "Fruit", "Font family"). Independent of the visible
+    /// placeholder and of the current selection — screen readers
+    /// announce this as the name of the control.
+    pub fn label(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(mut self, text: impl Into<String>) -> Self {
+        self.label = Some(text.into());
         self
     }
 
@@ -632,6 +653,22 @@ impl Widget for ComboBox {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::ComboBox);
+        builder.set_has_popup(fern_core::accesskit::HasPopup::Listbox);
+
+        if let Some(name) = self.label.as_deref() {
+            builder.set_name(name);
+        }
+
+        let value = match self.selected.get() {
+            Some(idx) if idx < self.items.len() => self.items[idx].clone(),
+            _ => self.placeholder.clone(),
+        };
+        if !value.is_empty() {
+            builder.set_value(value);
+        }
+
+        builder.set_expanded(self.interaction.get() == ComboBoxState::Open);
+
         if !self.enabled {
             builder.set_disabled();
         }
@@ -670,6 +707,51 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 50.0));
         let info = tree.accessibility_node(cb);
         assert_eq!(info.role(), fern_core::accesskit::Role::ComboBox);
+        // A fresh, closed combo box should announce its collapsed state.
+        assert!(!info.is_expanded());
+    }
+
+    #[test]
+    fn accessibility_exposes_label_via_set_name() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(
+            ComboBox::new_literal(vec!["Apple", "Banana"], selected.clone())
+                .label_literal("Fruit"),
+        );
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        let info = tree.accessibility_node(cb);
+        assert_eq!(info.name(), Some("Fruit"));
+    }
+
+    #[test]
+    fn accessibility_expanded_flips_on_open_close() {
+        // Uses Enter→Enter (both handled by ComboBox's own key handler) to
+        // exercise the full open/close cycle for `is_expanded()`. Escape
+        // dismissal goes through the overlay manager and doesn't currently
+        // write back into ComboBox's `interaction` signal — that's a
+        // pre-existing framework coherence gap, not something we test here.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let selected = Signal::new(None::<usize>);
+        let cb = tree.add(ComboBox::new_literal(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.focus(cb);
+
+        assert!(!tree.accessibility_node(cb).is_expanded());
+
+        // Enter opens the dropdown.
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert!(tree.accessibility_node(cb).is_expanded());
+
+        // Second Enter is routed back through ComboBox's handler (cb retains
+        // focus), which sets interaction to Focused and dismisses the overlay.
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert!(!tree.accessibility_node(cb).is_expanded());
     }
 
     #[test]
