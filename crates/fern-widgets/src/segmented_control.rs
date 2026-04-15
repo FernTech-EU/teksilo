@@ -13,14 +13,99 @@ use fern_core::focus::FocusOrigin;
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
-use fern_tokens::{Color, CornerRadius};
+use fern_core::widget_id::WidgetId;
+use fern_tokens::CornerRadius;
 
-/// Padding inside each segment.
-const SEGMENT_PADDING_H: f32 = 12.0;
-const SEGMENT_PADDING_V: f32 = 8.0;
 /// Fallback character width when no text backend is available.
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
 const FALLBACK_LINE_HEIGHT: f32 = 16.0;
+
+/// Internal leaf widget — one per visual segment. Carries the
+/// per-segment accessibility node (`Role::RadioButton` + selected
+/// state + label) and owns the click / hover handlers. It renders
+/// nothing; the parent `SegmentedControl` paints the entire control
+/// from `self.labels`, `self.selected`, and `self.hovered_segment`
+/// in a single pass so visuals stay consistent.
+#[derive(Debug)]
+struct SegmentButton {
+    label: String,
+    index: usize,
+    selected: Signal<usize>,
+    enabled: bool,
+    /// Shared with the parent's paint — each SegmentButton
+    /// updates it from its own hover handler so the parent
+    /// can render the hover highlight.
+    hovered_segment: Rc<Cell<Option<usize>>>,
+}
+
+impl Widget for SegmentButton {
+    fn build(
+        &mut self,
+        _ctx: &mut fern_core::build_context::BuildContext,
+    ) -> Vec<WidgetId> {
+        let enabled = self.enabled;
+        let index = self.index;
+        let selected = self.selected.clone();
+        let hovered = self.hovered_segment.clone();
+
+        let on_tap_selected = selected.clone();
+        let handlers = HandlerSet::new()
+            .cursor(CursorIcon::Pointer)
+            // Not focusable on its own — focus stays on the parent
+            // SegmentedControl so the keyboard arrow-key navigation
+            // continues to work as one tab stop. The child nodes
+            // exist purely for ATs to enumerate in browse mode.
+            .focusable(false)
+            .on_tap(move |_pos, _ctx| {
+                if !enabled {
+                    return;
+                }
+                on_tap_selected.set(index);
+            })
+            .on_hover({
+                let hovered = hovered.clone();
+                move |entered, _ctx| {
+                    if !enabled {
+                        if !entered && hovered.get() == Some(index) {
+                            hovered.set(None);
+                        }
+                        return;
+                    }
+                    if entered {
+                        hovered.set(Some(index));
+                    } else if hovered.get() == Some(index) {
+                        hovered.set(None);
+                    }
+                }
+            });
+
+        _ctx.apply_self_handlers(handlers);
+        Vec::new()
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+        // The parent SegmentedControl assigns exact bounds in
+        // `place_children`; `size_that_fits` is only consulted when
+        // the parent uses `child_size`, which we don't. Return
+        // whatever the proposal resolves to.
+        proposal.resolve(0.0, 0.0)
+    }
+
+    fn paint(&self, _bounds: Rect, _canvas: &mut Canvas, _ctx: &PaintContext) {
+        // Parent paints. Empty by design.
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::RadioButton);
+        builder.set_name(&self.label);
+        builder.set_selected(self.selected.get() == self.index);
+        if !self.enabled {
+            builder.set_disabled();
+        } else {
+            builder.add_action(fern_core::accesskit::Action::Click);
+        }
+    }
+}
 
 /// A segmented control with mutually exclusive segments.
 pub struct SegmentedControl {
@@ -28,9 +113,13 @@ pub struct SegmentedControl {
     selected: Signal<usize>,
     enabled: bool,
     hovered_segment: Rc<Cell<Option<usize>>>,
-    last_click_x: Rc<Cell<f32>>,
     focus_origin: Rc<Cell<Option<FocusOrigin>>>,
-    cached_bounds: Rc<Cell<Rect>>,
+    /// Child `SegmentButton` widget ids, one per label. Created in
+    /// `build()`, positioned in `place_children()`. Each child owns
+    /// its own a11y node (`Role::RadioButton`) and click/hover
+    /// handlers so screen readers see per-segment nodes rather
+    /// than a single opaque container.
+    segment_ids: Vec<WidgetId>,
 }
 
 impl SegmentedControl {
@@ -40,9 +129,8 @@ impl SegmentedControl {
             selected,
             enabled: true,
             hovered_segment: Rc::new(Cell::new(None)),
-            last_click_x: Rc::new(Cell::new(0.0)),
             focus_origin: Rc::new(Cell::new(None)),
-            cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            segment_ids: Vec::new(),
         }
     }
 
@@ -68,32 +156,8 @@ impl SegmentedControl {
         Rect::new(bounds.x + index as f32 * w, bounds.y, w, bounds.height)
     }
 
-    fn segment_corner_radius(&self, index: usize, radius: f32) -> CornerRadius {
-        let n = self.segment_count();
-        if n <= 1 {
-            return CornerRadius::uniform(radius);
-        }
-        if index == 0 {
-            CornerRadius {
-                top_left: radius,
-                bottom_left: radius,
-                top_right: 0.0,
-                bottom_right: 0.0,
-            }
-        } else if index == n - 1 {
-            CornerRadius {
-                top_left: 0.0,
-                bottom_left: 0.0,
-                top_right: radius,
-                bottom_right: radius,
-            }
-        } else {
-            CornerRadius::ZERO
-        }
-    }
-
     /// Estimate the intrinsic width of all segments.
-    fn estimate_width(&self) -> f32 {
+    fn estimate_width(&self, padding_h: f32) -> f32 {
         let n = self.segment_count();
         if n == 0 {
             return 0.0;
@@ -103,7 +167,7 @@ impl SegmentedControl {
             .iter()
             .map(|l| l.len() as f32 * FALLBACK_CHAR_WIDTH)
             .fold(0.0_f32, f32::max);
-        (max_label_width + SEGMENT_PADDING_H * 2.0) * n as f32
+        (max_label_width + padding_h * 2.0) * n as f32
     }
 }
 
@@ -133,59 +197,33 @@ impl Widget for SegmentedControl {
         let enabled = self.enabled;
         let n = self.segment_count();
         let hovered_segment = self.hovered_segment.clone();
-        let last_click_x = self.last_click_x.clone();
         let focus_origin = self.focus_origin.clone();
-        let cached_bounds = self.cached_bounds.clone();
+
+        // Create one SegmentButton child per label. Each child owns
+        // its own a11y node, tap handler, and hover handler. The
+        // parent still paints the whole control — children have
+        // empty paint() — and positions them by segment rect in
+        // place_children().
+        self.segment_ids.clear();
+        for (index, label) in self.labels.iter().enumerate() {
+            let id = ctx.add(SegmentButton {
+                label: label.clone(),
+                index,
+                selected: selected.clone(),
+                enabled,
+                hovered_segment: hovered_segment.clone(),
+            });
+            self.segment_ids.push(id);
+        }
 
         let mut handlers = HandlerSet::new()
             .focusable(enabled)
             .cursor(CursorIcon::Pointer);
 
-        // Pointer event handler (click to select segment)
-        {
-            let selected = selected.clone();
-            let cached_bounds = cached_bounds.clone();
-            let last_click_x = last_click_x.clone();
-            let hovered_segment = hovered_segment.clone();
-            handlers = handlers.on_pointer_event(move |event, _ctx| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
-                let bounds = cached_bounds.get();
-                match event {
-                    WidgetEvent::PointerDown { position, .. } => {
-                        last_click_x.set(position.x);
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::PointerUp { .. } => {
-                        // Simple click detection: use last_click_x to determine segment
-                        if n > 0 && bounds.width > 0.0 {
-                            let seg_w = bounds.width / n as f32;
-                            let relative = (last_click_x.get() - bounds.x).max(0.0);
-                            let index = (relative / seg_w).floor() as usize;
-                            selected.set(index.min(n - 1));
-                        }
-                        EventResponse::Handled
-                    }
-                    WidgetEvent::PointerMove { position } => {
-                        if n > 0 && bounds.width > 0.0 {
-                            let seg_w = bounds.width / n as f32;
-                            let relative = (position.x - bounds.x).max(0.0);
-                            let index = (relative / seg_w).floor() as usize;
-                            let idx = index.min(n - 1);
-                            let old = hovered_segment.get();
-                            if old != Some(idx) {
-                                hovered_segment.set(Some(idx));
-                            }
-                        }
-                        EventResponse::Ignored
-                    }
-                    _ => EventResponse::Ignored,
-                }
-            });
-        }
-
-        // Hover handler
+        // Hover handler on the parent — only used to clear the
+        // highlight when the pointer leaves the control bounds
+        // entirely (individual segment entries/exits are handled
+        // by the child SegmentButtons).
         {
             let hovered_segment = hovered_segment.clone();
             handlers = handlers.on_hover(move |entered, _ctx| {
@@ -195,7 +233,9 @@ impl Widget for SegmentedControl {
             });
         }
 
-        // Key handler
+        // Key handler — arrow keys cycle the selection. Focus
+        // stays on the parent (single tab stop) matching the
+        // standard ARIA RadioGroup keyboard model.
         {
             let selected = selected.clone();
             handlers = handlers.on_key(move |event, _ctx| {
@@ -265,7 +305,7 @@ impl Widget for SegmentedControl {
 
         ctx.apply_self_handlers(handlers);
 
-        Vec::new()
+        self.segment_ids.clone()
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
@@ -273,19 +313,41 @@ impl Widget for SegmentedControl {
         let sc_style = ctx.theme.components.segmented_control;
         let width = proposal
             .width
-            .unwrap_or_else(|| self.estimate_width() + envelope * 2.0);
+            .unwrap_or_else(|| self.estimate_width(sc_style.padding_horizontal) + envelope * 2.0);
         // Reserve the focus-ring envelope on top and bottom.
-        let visual_h = (FALLBACK_LINE_HEIGHT + SEGMENT_PADDING_V * 2.0).max(sc_style.height);
+        let visual_h =
+            (FALLBACK_LINE_HEIGHT + sc_style.padding_vertical * 2.0).max(sc_style.height);
         Size::new(width, visual_h + envelope * 2.0)
     }
 
     fn place_children(
         &self,
-        _bounds: Rect,
+        bounds: Rect,
         _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
     ) {
+        // Walk the inset-by-envelope visual bounds — same geometry
+        // `paint()` uses — and assign each child SegmentButton one
+        // slice. Children in `children` are in the same order we
+        // returned from `build()` (and stored in `self.segment_ids`),
+        // so `index = slot` works.
+        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
+        let visual = Rect::new(
+            bounds.x + envelope,
+            bounds.y + envelope,
+            (bounds.width - envelope * 2.0).max(0.0),
+            (bounds.height - envelope * 2.0).max(0.0),
+        );
+        let n = self.segment_count();
+        if n == 0 {
+            return;
+        }
+        let seg_w = visual.width / n as f32;
+        for (i, placement) in children.iter_mut().enumerate() {
+            placement.origin = fern_canvas::Point::new(visual.x + i as f32 * seg_w, visual.y);
+            placement.size = Size::new(seg_w, visual.height);
+        }
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -298,53 +360,59 @@ impl Widget for SegmentedControl {
             return;
         }
 
-        // Visual bounds are inset by the focus-ring envelope; hit testing
-        // uses `cached_bounds` which we set to the visual bounds.
+        // Visual bounds are inset by the focus-ring envelope. Hit
+        // testing now lives on the child `SegmentButton`s, which
+        // are positioned by `place_children` using the same
+        // geometry computed here.
         let visual = Rect::new(
             bounds.x + envelope,
             bounds.y + envelope,
             (bounds.width - envelope * 2.0).max(0.0),
             (bounds.height - envelope * 2.0).max(0.0),
         );
-        self.cached_bounds.set(visual);
 
         let selected = self.selected.get();
         let hovered = self.hovered_segment.get();
+        let focused = self.focus_origin.get().is_some();
+        let frame_cr = CornerRadius::uniform(sc_style.corner_radius);
+        let bw = sc_style.border_width;
 
+        // 1. Outer frame — one rounded rect wrapping the whole control.
+        let frame_border = if !self.enabled {
+            colors.border
+        } else {
+            colors.border_strong
+        };
+        canvas.stroke_rounded_rect(visual, frame_cr, frame_border, bw);
+
+        // 2. Segment row inset by the frame's border width so segment
+        //    borders visually replace the frame border where they overlap.
+        let inner = Rect::new(
+            visual.x + bw,
+            visual.y + bw,
+            (visual.width - bw * 2.0).max(0.0),
+            (visual.height - bw * 2.0).max(0.0),
+        );
+
+        // 3. Non-selected segments first: hover tint only, no border.
         for i in 0..n {
-            let rect = self.segment_rect(i, visual);
-            let cr = self.segment_corner_radius(i, sc_style.corner_radius);
-
-            // Background
-            let bg = if !self.enabled {
-                colors.accent_disabled
-            } else if i == selected {
-                colors.accent
-            } else if hovered == Some(i) {
-                colors.accent.with_alpha(0.08)
-            } else {
-                Color::TRANSPARENT
-            };
-            if bg.a() > 0.0 {
-                canvas.fill_rounded_rect(rect, cr, bg);
+            if i == selected {
+                continue;
             }
-
-            // Border
-            canvas.stroke_rounded_rect(rect, cr, colors.border, sc_style.border_width);
-
-            // Text
+            let rect = self.segment_rect(i, inner);
+            if self.enabled && hovered == Some(i) {
+                canvas.fill_rounded_rect(rect, frame_cr, colors.surface_hover);
+            }
             let text_color = if !self.enabled {
                 colors.text_disabled
-            } else if i == selected {
-                colors.text_on_accent
             } else {
                 colors.text_primary
             };
             let text_rect = Rect::new(
-                rect.x + SEGMENT_PADDING_H,
-                rect.y + SEGMENT_PADDING_V,
-                (rect.width - SEGMENT_PADDING_H * 2.0).max(0.0),
-                (rect.height - SEGMENT_PADDING_V * 2.0).max(0.0),
+                rect.x + sc_style.padding_horizontal,
+                rect.y + sc_style.padding_vertical,
+                (rect.width - sc_style.padding_horizontal * 2.0).max(0.0),
+                (rect.height - sc_style.padding_vertical * 2.0).max(0.0),
             );
             canvas.draw_text(
                 &self.labels[i],
@@ -354,7 +422,52 @@ impl Widget for SegmentedControl {
             );
         }
 
-        // Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
+        // 4. Selected segment — paint last so its border overlays the frame.
+        //    Color depends on focus: accent when focused, inactive surface
+        //    when not.
+        if selected < n {
+            // Selected segment occupies the inner row but its rounded border
+            // extends back out to the outer frame radius.
+            let seg_w = inner.width / n as f32;
+            let sel = Rect::new(
+                visual.x + selected as f32 * seg_w + (if selected == 0 { 0.0 } else { bw }),
+                visual.y,
+                seg_w + (if selected == 0 || selected == n - 1 { bw } else { bw * 2.0 }),
+                visual.height,
+            );
+            let (sel_bg, sel_border, sel_text) = if !self.enabled {
+                (
+                    colors.surface_selected_inactive,
+                    colors.border,
+                    colors.text_disabled,
+                )
+            } else if focused {
+                (colors.accent, colors.accent, colors.text_on_accent)
+            } else {
+                (
+                    colors.surface_selected_inactive,
+                    colors.border_strong,
+                    colors.text_primary,
+                )
+            };
+            canvas.fill_rounded_rect(sel, frame_cr, sel_bg);
+            canvas.stroke_rounded_rect(sel, frame_cr, sel_border, bw);
+
+            let text_rect = Rect::new(
+                sel.x + sc_style.padding_horizontal,
+                sel.y + sc_style.padding_vertical,
+                (sel.width - sc_style.padding_horizontal * 2.0).max(0.0),
+                (sel.height - sc_style.padding_vertical * 2.0).max(0.0),
+            );
+            canvas.draw_text(
+                &self.labels[selected],
+                text_rect,
+                &ctx.theme.typography.small,
+                sel_text,
+            );
+        }
+
+        // 5. Focus ring — drawn OUTSIDE the visual, inside the reserved envelope.
         if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
             let half_stroke = shape.focus_ring_width * 0.5;
             let ring_rect = Rect::new(
@@ -374,13 +487,30 @@ impl Widget for SegmentedControl {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::TabList);
+        // SegmentedControl is mutually exclusive — ARIA's closest
+        // match is `RadioGroup`. Each visual segment is exposed as
+        // a `Role::RadioButton` child node (see `SegmentButton`),
+        // so screen readers enumerate the segments and their
+        // selected state individually.
+        builder.set_role(fern_core::accesskit::Role::RadioGroup);
+        // Expose the current selection's label as the group's
+        // value too, so when a user focuses the whole control the
+        // SR immediately announces the active segment without
+        // needing to drill into the children.
+        let selected_index = self.selected.get();
+        if let Some(label) = self.labels.get(selected_index) {
+            builder.set_value(label);
+        }
         if !self.enabled {
             builder.set_disabled();
         }
         builder.add_action(fern_core::accesskit::Action::Focus);
         builder.add_action(fern_core::accesskit::Action::Increment);
         builder.add_action(fern_core::accesskit::Action::Decrement);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.segment_ids.clone()
     }
 }
 
@@ -454,28 +584,29 @@ mod tests {
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let info = tree.accessibility_node(sc);
-        assert_eq!(info.role(), fern_core::accesskit::Role::TabList);
+        assert_eq!(info.role(), fern_core::accesskit::Role::RadioGroup);
     }
 
     #[test]
-    fn paints_selected_segment_with_primary_color() {
+    fn paints_selected_segment_with_accent_when_focused() {
         let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(SegmentedControl::new(
+        let sc = tree.add(SegmentedControl::new(
             vec!["A".into(), "B".into(), "C".into()],
             selected,
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
+        tree.focus(sc);
         let frame = tree.render();
-        let primary = Theme::light_default().colors.accent.to_array();
+        let accent = Theme::light_default().colors.accent.to_array();
         assert!(
-            frame.shapes.iter().any(|s| s.color == primary),
-            "selected segment should render with primary color"
+            frame.shapes.iter().any(|s| s.color == accent),
+            "focused selected segment should render with accent color"
         );
     }
 
     #[test]
-    fn only_selected_segment_has_primary_color() {
+    fn unfocused_selected_segment_uses_inactive_surface() {
         let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(SegmentedControl::new(
@@ -484,12 +615,15 @@ mod tests {
         ));
         tree.layout(SizeProposal::exact(300.0, 60.0));
         let frame = tree.render();
-        let primary = Theme::light_default().colors.accent.to_array();
-        let primary_count = frame.shapes.iter().filter(|s| s.color == primary).count();
-        assert_eq!(
-            primary_count, 1,
-            "exactly one segment should have primary color, got {}",
-            primary_count
+        let accent = Theme::light_default().colors.accent.to_array();
+        let inactive = Theme::light_default().colors.surface_selected_inactive.to_array();
+        assert!(
+            !frame.shapes.iter().any(|s| s.color == accent),
+            "unfocused selected segment must not use accent color"
+        );
+        assert!(
+            frame.shapes.iter().any(|s| s.color == inactive),
+            "unfocused selected segment should render with surface_selected_inactive"
         );
     }
 
