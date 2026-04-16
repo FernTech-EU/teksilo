@@ -351,17 +351,13 @@ pub struct Dialog {
     enabled: bool,
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
-    content_factory: DialogFactory,
+    content_factory: Option<DialogFactory>,
     pending_trigger: Option<Box<dyn Widget>>,
     root_child_id: Option<WidgetId>,
 }
 
 impl Dialog {
-    pub fn new<W, F>(label: impl Into<fern_i18n::LocalizedString>, factory: F) -> Self
-    where
-        W: Widget + 'static,
-        F: Fn() -> W + 'static,
-    {
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
@@ -369,9 +365,7 @@ impl Dialog {
             enabled: true,
             presentation: ModalPresentation::Auto,
             close_behavior: ModalCloseBehavior::EscapeOrClickOutside,
-            content_factory: std::rc::Rc::new(move || {
-                Box::new(factory()) as Box<dyn Widget>
-            }),
+            content_factory: None,
             pending_trigger: None,
             root_child_id: None,
         }
@@ -379,12 +373,19 @@ impl Dialog {
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
-    pub fn new_literal<W, F>(label: impl Into<String>, factory: F) -> Self
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
+    }
+
+    pub fn content<W, F>(mut self, factory: F) -> Self
     where
         W: Widget + 'static,
         F: Fn() -> W + 'static,
     {
-        Self::new(fern_i18n::LocalizedString::literal(label), factory)
+        self.content_factory = Some(std::rc::Rc::new(move || {
+            Box::new(factory()) as Box<dyn Widget>
+        }));
+        self
     }
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
@@ -430,7 +431,10 @@ impl Widget for Dialog {
         let close_behavior = self.close_behavior;
         let presentation = self.presentation;
         let style = self.style;
-        let content_factory = self.content_factory.clone();
+        let content_factory = self
+            .content_factory
+            .clone()
+            .expect("Dialog requires .content(...) — no content factory was set");
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
             ctx.add(
@@ -609,7 +613,7 @@ mod tests {
     #[test]
     fn access_click_opens_centered_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new_literal("Open dialog").content(|| FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -628,7 +632,7 @@ mod tests {
     #[test]
     fn dialog_surface_exposes_dialog_role() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0)));
+        tree.add(Dialog::new_literal("Open dialog").content(|| FixedLeaf(220.0, 120.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -723,7 +727,9 @@ mod tests {
     fn custom_trigger_opens_dialog_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0)).trigger(FixedLeaf(140.0, 40.0)),
+            Dialog::new_literal("Open dialog")
+                .content(|| FixedLeaf(220.0, 120.0))
+                .trigger(FixedLeaf(140.0, 40.0)),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
@@ -736,16 +742,13 @@ mod tests {
     #[test]
     fn dialog_content_helper_builds_dialog_sections() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Dialog::new_literal(
-            "Open dialog",
-            || {
-                DialogContent::new()
-                    .title_literal("Review Changes")
-                    .supporting_text_literal("Confirm the staged updates before continuing.")
-                    .body(FixedLeaf(220.0, 120.0))
-                    .footer(Button::new_literal("Close"))
-            },
-        ));
+        tree.add(Dialog::new_literal("Open dialog").content(|| {
+            DialogContent::new()
+                .title_literal("Review Changes")
+                .supporting_text_literal("Confirm the staged updates before continuing.")
+                .body(FixedLeaf(220.0, 120.0))
+                .footer(Button::new_literal("Close"))
+        }));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open dialog").unwrap();
@@ -768,7 +771,8 @@ mod tests {
     fn dialog_presentation_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0))
+            Dialog::new_literal("Open dialog")
+                .content(|| FixedLeaf(220.0, 120.0))
                 .presentation(ModalPresentation::InTree),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -785,7 +789,8 @@ mod tests {
     fn dialog_close_behavior_can_be_overridden() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Dialog::new_literal("Open dialog", || FixedLeaf(220.0, 120.0))
+            Dialog::new_literal("Open dialog")
+                .content(|| FixedLeaf(220.0, 120.0))
                 .close_behavior(ModalCloseBehavior::Manual),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -796,5 +801,13 @@ mod tests {
         let requests = tree.drain_pending_modal_requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].request.close_behavior, ModalCloseBehavior::Manual);
+    }
+
+    #[test]
+    #[should_panic(expected = "Dialog requires .content(...)")]
+    fn dialog_without_content_panics_on_build() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Dialog::new_literal("Open dialog"));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
     }
 }

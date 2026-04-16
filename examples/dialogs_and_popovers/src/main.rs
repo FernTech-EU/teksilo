@@ -87,28 +87,29 @@ impl Widget for OverlayDemo {
 
         let auto_modal_theme = theme.clone();
         let modal_trigger_id = ctx.add(
-            Dialog::new_literal("Adaptive modal window", move || {
-                let t = &auto_modal_theme.typography;
-                let c = &auto_modal_theme.colors;
-                DialogContent::new()
-                    .title_literal("Adaptive modal dialog")
-                    .supporting_text_literal(
-                        "The framework chooses the best modal presentation for the current backend: a native modal child window when reliable, otherwise a centered in-tree dialog.",
-                    )
-                    .body(
-                        TextWidget::new_literal(
-                            "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets FernUI resolve it.",
+            Dialog::new_literal("Adaptive modal window")
+                .content(move || {
+                    let t = &auto_modal_theme.typography;
+                    let c = &auto_modal_theme.colors;
+                    DialogContent::new()
+                        .title_literal("Adaptive modal dialog")
+                        .supporting_text_literal(
+                            "The framework chooses the best modal presentation for the current backend: a native modal child window when reliable, otherwise a centered in-tree dialog.",
                         )
-                        .style(t.body.clone())
-                        .color(c.text_secondary),
-                    )
-                    .footer(
-                        Button::new_literal("Close")
-                            .style(ButtonVariant::Default)
-                            .on_tap(|_, ctx| ctx.dismiss_modal()),
-                    )
-            })
-            .style(ButtonVariant::Regular),
+                        .body(
+                            TextWidget::new_literal(
+                                "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets FernUI resolve it.",
+                            )
+                            .style(t.body.clone())
+                            .color(c.text_secondary),
+                        )
+                        .footer(
+                            Button::new_literal("Close")
+                                .style(ButtonVariant::Default)
+                                .on_tap(|_, ctx| ctx.dismiss_modal()),
+                        )
+                })
+                .style(ButtonVariant::Regular),
         );
 
         let root = ctx.add(
@@ -137,36 +138,37 @@ impl Widget for OverlayDemo {
                                         .trigger(popover_trigger),
                                 )
                                 .child(
-                                    Dialog::new_literal("Open dialog", move || {
-                                        let t = &dialog_theme.typography;
-                                        let c = &dialog_theme.colors;
-                                        DialogContent::new()
-                                            .title_literal("Review Changes")
-                                            .supporting_text_literal(
-                                                "Dialogs open centered, dismiss on Escape or outside click, and can host structured body and action sections.",
-                                            )
-                                            .body(
-                                                TextWidget::new_literal(
-                                                    "This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout.",
+                                    Dialog::new_literal("Open dialog")
+                                        .content(move || {
+                                            let t = &dialog_theme.typography;
+                                            let c = &dialog_theme.colors;
+                                            DialogContent::new()
+                                                .title_literal("Review Changes")
+                                                .supporting_text_literal(
+                                                    "Dialogs open centered, dismiss on Escape or outside click, and can host structured body and action sections.",
                                                 )
-                                                .style(t.body.clone())
-                                                .color(c.text_secondary),
-                                            )
-                                            .footer(
-                                                HStack::new()
-                                                    .spacing(12.0)
-                                                    .child(
-                                                        Button::new_literal("Cancel")
-                                                            .style(ButtonVariant::Regular)
-                                                            .on_tap(|_, ctx| ctx.dismiss_modal()),
+                                                .body(
+                                                    TextWidget::new_literal(
+                                                        "This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout.",
                                                     )
-                                                    .child(
-                                                        Button::new_literal("Apply")
-                                                            .style(ButtonVariant::Default)
-                                                            .on_tap(|_, ctx| ctx.dismiss_modal()),
-                                                    ),
-                                            )
-                                    })
+                                                    .style(t.body.clone())
+                                                    .color(c.text_secondary),
+                                                )
+                                                .footer(
+                                                    HStack::new()
+                                                        .spacing(12.0)
+                                                        .child(
+                                                            Button::new_literal("Cancel")
+                                                                .style(ButtonVariant::Regular)
+                                                                .on_tap(|_, ctx| ctx.dismiss_modal()),
+                                                        )
+                                                        .child(
+                                                            Button::new_literal("Apply")
+                                                                .style(ButtonVariant::Default)
+                                                                .on_tap(|_, ctx| ctx.dismiss_modal()),
+                                                        ),
+                                                )
+                                        })
                                         .trigger(dialog_trigger),
                                 )
                                 .child(
