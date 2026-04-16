@@ -778,7 +778,9 @@ mod tests {
         // is needed with viewport_ratio = 0.5.
         let content = MinSize::new(400.0, 800.0);
         let root = tree.add(
-            ScrollArea::new(content).scroll_bar_style(ScrollBarMode::Permanent),
+            ScrollArea::new()
+                .child(content)
+                .scroll_bar_style(ScrollBarMode::Permanent),
         );
         tree.layout(SizeProposal::exact(400.0, 400.0));
         tree.render();

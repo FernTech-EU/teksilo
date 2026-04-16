@@ -91,6 +91,12 @@ pub struct ScrollArea {
     viewport_size: Cell<Size>,
 }
 
+impl Default for ScrollArea {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Debug for ScrollArea {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScrollArea")
@@ -107,9 +113,9 @@ impl std::fmt::Debug for ScrollArea {
 }
 
 impl ScrollArea {
-    pub fn new(child: impl Widget + 'static + 'static) -> Self {
+    pub fn new() -> Self {
         Self {
-            content_child: Some(Box::new(child)),
+            content_child: None,
             content_child_id: None,
             scroll_bar_style: ScrollBarMode::default(),
             vertical_policy: ScrollBarPolicy::default(),
@@ -132,30 +138,17 @@ impl ScrollArea {
         }
     }
 
+    pub fn child(mut self, child: impl Widget + 'static) -> Self {
+        self.content_child = Some(Box::new(child));
+        self.content_child_id = None;
+        self
+    }
+
     /// Construct from an already-registered child WidgetId.
     pub fn from_id(child: WidgetId) -> Self {
-        Self {
-            content_child: None,
-            content_child_id: Some(child),
-            scroll_bar_style: ScrollBarMode::default(),
-            vertical_policy: ScrollBarPolicy::default(),
-            horizontal_policy: ScrollBarPolicy::default(),
-            line_height: 20.0,
-            scroll_bar_thickness: 12.0,
-            widget_resizable: false,
-            smooth_scrolling: true,
-            smooth_scroll_duration: Duration::from_millis(150),
-            preferred_size: None,
-            scroll_y: Signal::new_animated(0.0),
-            scroll_x: Signal::new_animated(0.0),
-            max_scroll_y: Signal::new(0.0),
-            max_scroll_x: Signal::new(0.0),
-            viewport_ratio_y: Signal::new(1.0),
-            viewport_ratio_x: Signal::new(1.0),
-            child_ids: Vec::new(),
-            content_size: Cell::new(Size::ZERO),
-            viewport_size: Cell::new(Size::ZERO),
-        }
+        let mut sa = Self::new();
+        sa.content_child_id = Some(child);
+        sa
     }
 
     pub fn scroll_bar_style(mut self, style: ScrollBarMode) -> Self {
@@ -247,9 +240,11 @@ impl Widget for ScrollArea {
             ctx.add_boxed(child)
         } else if let Some(id) = self.content_child_id.take() {
             id
-        } else {
+        } else if !self.child_ids.is_empty() {
             // Already built — return existing children
             return self.child_ids.clone();
+        } else {
+            panic!("ScrollArea requires .child(...) or ::from_id(...) — no content was set");
         };
         ids.push(content_id);
 
@@ -832,7 +827,8 @@ mod tests {
 
         let content = TallLeaf::new(200.0, 500.0);
         let scroll = tree.add(
-            ScrollArea::new(content)
+            ScrollArea::new()
+                .child(content)
                 .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
@@ -850,7 +846,11 @@ mod tests {
         let mut tree = WidgetTree::new();
 
         let leaf = TallLeaf::new(180.0, 500.0);
-        let scroll = tree.add(ScrollArea::new(leaf).scroll_bar_style(ScrollBarMode::Permanent));
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(leaf)
+                .scroll_bar_style(ScrollBarMode::Permanent),
+        );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -896,7 +896,7 @@ mod tests {
     fn scroll_area_new_accepts_inline_widget() {
         let mut tree = WidgetTree::new();
         // Test the new API: pass widget directly, not a WidgetId
-        let scroll = tree.add(ScrollArea::new(TallLeaf::new(200.0, 500.0)));
+        let scroll = tree.add(ScrollArea::new().child(TallLeaf::new(200.0, 500.0)));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -929,7 +929,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         // Content wider and taller than viewport
         let scroll = tree.add(
-            ScrollArea::new(WideLeaf::new(400.0, 500.0))
+            ScrollArea::new()
+                .child(WideLeaf::new(400.0, 500.0))
                 .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
@@ -975,7 +976,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         // Content taller but NOT wider than viewport (accounting for v_sb)
         let scroll = tree.add(
-            ScrollArea::new(TallLeaf::new(180.0, 500.0))
+            ScrollArea::new()
+                .child(TallLeaf::new(180.0, 500.0))
                 .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
@@ -999,7 +1001,9 @@ mod tests {
     fn overlay_scrollbar_does_not_reduce_viewport() {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
-            ScrollArea::new(WideLeaf::new(400.0, 500.0)).scroll_bar_style(ScrollBarMode::Overlay),
+            ScrollArea::new()
+                .child(WideLeaf::new(400.0, 500.0))
+                .scroll_bar_style(ScrollBarMode::Overlay),
         );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1044,7 +1048,8 @@ mod tests {
     fn horizontal_scroll_via_wheel() {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
-            ScrollArea::new(WideLeaf::new(400.0, 100.0))
+            ScrollArea::new()
+                .child(WideLeaf::new(400.0, 100.0))
                 .scroll_bar_style(ScrollBarMode::Permanent)
                 .scroll_bar_thickness(12.0),
         );
@@ -1075,7 +1080,8 @@ mod tests {
     fn vertical_scrollbar_always_off_hides_scrollbar() {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
-            ScrollArea::new(TallLeaf::new(200.0, 500.0))
+            ScrollArea::new()
+                .child(TallLeaf::new(200.0, 500.0))
                 .scroll_bar_style(ScrollBarMode::Permanent)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .scroll_bar_thickness(12.0),
@@ -1110,7 +1116,8 @@ mod tests {
     fn horizontal_scrollbar_always_off_hides_scrollbar() {
         let mut tree = WidgetTree::new();
         let scroll = tree.add(
-            ScrollArea::new(WideLeaf::new(400.0, 500.0))
+            ScrollArea::new()
+                .child(WideLeaf::new(400.0, 500.0))
                 .scroll_bar_style(ScrollBarMode::Permanent)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .scroll_bar_thickness(12.0),
@@ -1141,7 +1148,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         // Content fits in viewport — normally scrollbar would hide
         let scroll = tree.add(
-            ScrollArea::new(TallLeaf::new(100.0, 50.0))
+            ScrollArea::new()
+                .child(TallLeaf::new(100.0, 50.0))
                 .scroll_bar_style(ScrollBarMode::Permanent)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOn)
                 .scroll_bar_thickness(12.0),
@@ -1165,7 +1173,11 @@ mod tests {
     fn widget_resizable_stretches_small_content() {
         let mut tree = WidgetTree::new();
         // Content is 100x50, viewport is 200x100
-        let scroll = tree.add(ScrollArea::new(TallLeaf::new(100.0, 50.0)).widget_resizable(true));
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(TallLeaf::new(100.0, 50.0))
+                .widget_resizable(true),
+        );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1188,7 +1200,11 @@ mod tests {
     fn widget_resizable_does_not_shrink_large_content() {
         let mut tree = WidgetTree::new();
         // Content is larger than viewport
-        let scroll = tree.add(ScrollArea::new(WideLeaf::new(400.0, 500.0)).widget_resizable(true));
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(WideLeaf::new(400.0, 500.0))
+                .widget_resizable(true),
+        );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1211,7 +1227,11 @@ mod tests {
     #[test]
     fn smooth_scrolling_line_events_use_animation() {
         let mut tree = WidgetTree::new();
-        let scroll = tree.add(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(true));
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(TallLeaf::new(200.0, 1000.0))
+                .smooth_scrolling(true),
+        );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1249,8 +1269,11 @@ mod tests {
     #[test]
     fn smooth_scrolling_disabled_jumps_immediately() {
         let mut tree = WidgetTree::new();
-        let scroll =
-            tree.add(ScrollArea::new(TallLeaf::new(200.0, 1000.0)).smooth_scrolling(false));
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(TallLeaf::new(200.0, 1000.0))
+                .smooth_scrolling(false),
+        );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1277,7 +1300,11 @@ mod tests {
     fn preferred_size_overrides_default() {
         let mut tree = WidgetTree::new();
         let scroll =
-            tree.add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
+            tree.add(
+                ScrollArea::new()
+                    .child(TallLeaf::new(200.0, 500.0))
+                    .preferred_size(500.0, 400.0),
+            );
         // With unconstrained proposal, should use preferred size
         tree.layout(SizeProposal {
             width: None,
@@ -1300,7 +1327,11 @@ mod tests {
     fn constrained_proposal_overrides_preferred_size() {
         let mut tree = WidgetTree::new();
         let scroll =
-            tree.add(ScrollArea::new(TallLeaf::new(200.0, 500.0)).preferred_size(500.0, 400.0));
+            tree.add(
+                ScrollArea::new()
+                    .child(TallLeaf::new(200.0, 500.0))
+                    .preferred_size(500.0, 400.0),
+            );
         // With constrained proposal, the proposal wins
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let bounds = tree.bounds(scroll);

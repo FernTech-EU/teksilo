@@ -521,7 +521,8 @@ impl Widget for TabBar {
         let header_min_height =
             ctx.theme().components.tab.editor_tab_height + envelope * 2.0;
         let headers_scroll_id = ctx.add(
-            ScrollArea::new(headers)
+            ScrollArea::new()
+                .child(headers)
                 .scroll_bar_style(ScrollBarMode::Overlay)
                 .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
                 .horizontal_scroll_bar_policy(ScrollBarPolicy::AsNeeded)

@@ -27,7 +27,7 @@ impl Widget for SplitViewDemo {
         let c = &theme.colors;
 
         let root = ctx.add(
-            ScrollArea::new(
+            ScrollArea::new().child(
                 VStack::new()
                     .spacing(24.0)
                     .child(

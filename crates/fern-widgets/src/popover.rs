@@ -198,10 +198,7 @@ pub struct Popover {
 }
 
 impl Popover {
-    pub fn new(
-        label: impl Into<fern_i18n::LocalizedString>,
-        content: impl Widget + 'static,
-    ) -> Self {
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
@@ -209,7 +206,7 @@ impl Popover {
             enabled: true,
             placement: OverlayPlacement::BelowPreferred,
             dismiss: DismissBehavior::EscapeOrClickOutside,
-            pending_content: Some(Box::new(content)),
+            pending_content: None,
             pending_trigger: None,
             show_caret: true,
             caret_size: 10.0,
@@ -219,8 +216,13 @@ impl Popover {
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
-        Self::new(fern_i18n::LocalizedString::literal(label), content)
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
+    }
+
+    pub fn content(mut self, content: impl Widget + 'static) -> Self {
+        self.pending_content = Some(Box::new(content));
+        self
     }
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
@@ -282,7 +284,7 @@ impl Widget for Popover {
         let content_id = ctx.add(PopoverSurface::new(
             self.pending_content
                 .take()
-                .expect("Popover built without content"),
+                .expect("Popover requires .content(...) — no content was set"),
             placement.clone(),
             show_caret,
             caret_size,
@@ -521,7 +523,7 @@ mod tests {
     #[test]
     fn access_click_opens_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
@@ -533,7 +535,7 @@ mod tests {
     #[test]
     fn escape_dismisses_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
         let trigger = tree.find_by_label("Show popover").unwrap();
@@ -550,7 +552,7 @@ mod tests {
         // set_expanded(false) after it's dismissed — including
         // framework-level dismiss paths (via on_dismiss callback).
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)));
+        tree.add(Popover::new_literal("Show popover").content(FixedLeaf(140.0, 60.0)));
         tree.layout(SizeProposal::exact(480.0, 320.0));
         let trigger = tree.find_by_label("Show popover").unwrap();
 
@@ -588,7 +590,9 @@ mod tests {
     fn custom_trigger_opens_popover_overlay() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0)).trigger(FixedLeaf(128.0, 36.0)),
+            Popover::new_literal("Show popover")
+                .content(FixedLeaf(140.0, 60.0))
+                .trigger(FixedLeaf(128.0, 36.0)),
         );
         tree.layout(SizeProposal::exact(480.0, 320.0));
 
@@ -602,7 +606,8 @@ mod tests {
     fn caret_increases_popover_height_for_below_placement() {
         let mut plain_tree = WidgetTree::new().with_theme(Theme::light_default());
         plain_tree.add(
-            Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0))
+            Popover::new_literal("Show popover")
+                .content(FixedLeaf(140.0, 60.0))
                 .placement(OverlayPlacement::Below)
                 .caret(false),
         );
@@ -614,7 +619,8 @@ mod tests {
 
         let mut caret_tree = WidgetTree::new().with_theme(Theme::light_default());
         caret_tree.add(
-            Popover::new_literal("Show popover", FixedLeaf(140.0, 60.0))
+            Popover::new_literal("Show popover")
+                .content(FixedLeaf(140.0, 60.0))
                 .placement(OverlayPlacement::Below)
                 .caret_size(12.0),
         );
@@ -625,5 +631,13 @@ mod tests {
         let caret_bounds = caret_tree.bounds(caret_tree.overlay_manager().active_content_ids()[0]);
 
         assert!(caret_bounds.height >= plain_bounds.height + 11.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Popover requires .content(...)")]
+    fn popover_without_content_panics_on_build() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Popover::new_literal("Show popover"));
+        tree.layout(SizeProposal::exact(480.0, 320.0));
     }
 }

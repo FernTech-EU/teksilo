@@ -113,7 +113,7 @@ impl Widget for OverlayDemo {
         );
 
         let root = ctx.add(
-            ScrollArea::new(
+            ScrollArea::new().child(
                 VStack::new()
                     .spacing(24.0)
                     .child(
@@ -133,7 +133,8 @@ impl Widget for OverlayDemo {
                             HStack::new()
                                 .spacing(16.0)
                                 .child(
-                                    Popover::new_literal("Show popover", popover_content)
+                                    Popover::new_literal("Show popover")
+                                        .content(popover_content)
                                         .caret_size(12.0)
                                         .trigger(popover_trigger),
                                 )
