@@ -34,7 +34,9 @@
 //!     )
 //! ```
 
-use fern_canvas::{Path, Point, Rect, Size, SizeProposal};
+use std::sync::OnceLock;
+
+use fern_canvas::{Path, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
@@ -153,37 +155,37 @@ impl BuiltInButton {
 
     /// Browse button (ellipsis icon). Opens a file/directory chooser.
     pub fn browse() -> Self {
-        Self::new(browse_icon(16.0))
+        Self::new((BuiltInIcons::global().browse)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_browse()))
     }
 
     /// Expand button (diagonal resize arrows). Enlarges a constrained field.
     pub fn expand() -> Self {
-        Self::new(expand_icon(16.0))
+        Self::new((BuiltInIcons::global().expand)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_expand()))
     }
 
     /// Search button (magnifier icon). Triggers a search.
     pub fn search() -> Self {
-        Self::new(search_icon(16.0))
+        Self::new((BuiltInIcons::global().search)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_search()))
     }
 
     /// Copy button (clipboard icon). Copies the field content.
     pub fn copy() -> Self {
-        Self::new(copy_icon(16.0))
+        Self::new((BuiltInIcons::global().copy)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_copy()))
     }
 
     /// Clear button (X icon). Clears the field content.
     pub fn clear() -> Self {
-        Self::new(clear_icon(16.0))
+        Self::new((BuiltInIcons::global().clear)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_clear()))
     }
 
     /// Add button (plus icon). Adds a new entry.
     pub fn add() -> Self {
-        Self::new(add_icon(16.0))
+        Self::new((BuiltInIcons::global().add)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_add()))
     }
 
@@ -192,8 +194,9 @@ impl BuiltInButton {
     /// The `visible` signal is flipped on each click. The host widget reads
     /// it to decide whether to mask or show the text.
     pub fn visibility_toggle(visible: Signal<bool>) -> Self {
-        Self::new(eye_icon(16.0))
-            .toggle(visible, eye_off_icon(16.0))
+        let icons = BuiltInIcons::global();
+        Self::new((icons.eye)())
+            .toggle(visible, (icons.eye_off)())
             .tooltip(fern_i18n::tr_widget!(a11y_builtin_visibility()))
     }
 }
@@ -507,219 +510,106 @@ impl fern_core::widget::Widget for BuiltInButton {
     }
 }
 
-// ── Icon helpers ────────────────────────────────────────────────────────────
+// ── Overridable icon set ────────────────────────────────────────────────────
 //
-// Each function builds an IconWidget::from_path with coordinates in the
-// 0..size range, matching the pattern of IconWidget::checkmark / chevron_down.
+// Default icons are real SVGs embedded via `include_str!` and parsed once
+// via `LazyLock`. The `res!` macro cannot be used here because it emits
+// `::fern_ui::` paths and fern-widgets sits below fern-ui in the
+// dependency graph.
+//
+// Applications can replace the default icon set globally at startup via
+// `BuiltInIcons::set_global(custom_set)`.
 
-/// Ellipsis "…" — three horizontally-spaced dots.
-fn browse_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    let y = s * 0.5;
-    let r = s * 0.06;
-    // Three dots at 25%, 50%, 75% horizontal
-    for &cx in &[0.3, 0.5, 0.7] {
-        let x = s * cx;
-        path.move_to(Point::new(x - r, y));
-        path.cubic_to(
-            Point::new(x - r, y - r),
-            Point::new(x + r, y - r),
-            Point::new(x + r, y),
-        );
-        path.cubic_to(
-            Point::new(x + r, y + r),
-            Point::new(x - r, y + r),
-            Point::new(x - r, y),
-        );
-        path.close();
+/// Icon factory set for predefined built-in buttons.
+///
+/// Each field is a function pointer that creates an [`IconWidget`].
+/// The default implementation uses SVG icons embedded in fern-widgets.
+///
+/// # Overriding
+///
+/// Call [`BuiltInIcons::set_global`] at app startup (before creating any
+/// built-in buttons) to replace the default icon set:
+///
+/// ```ignore
+/// BuiltInIcons::set_global(BuiltInIcons {
+///     browse: || IconWidget::from_svg(MY_BROWSE_SVG),
+///     clear: || IconWidget::from_svg(MY_CLEAR_SVG),
+///     ..BuiltInIcons::defaults()
+/// });
+/// ```
+pub struct BuiltInIcons {
+    pub browse: fn() -> IconWidget,
+    pub expand: fn() -> IconWidget,
+    pub search: fn() -> IconWidget,
+    pub copy: fn() -> IconWidget,
+    pub clear: fn() -> IconWidget,
+    pub add: fn() -> IconWidget,
+    pub eye: fn() -> IconWidget,
+    pub eye_off: fn() -> IconWidget,
+}
+
+static GLOBAL_ICONS: OnceLock<BuiltInIcons> = OnceLock::new();
+
+impl BuiltInIcons {
+    /// Return the default icon set (SVGs embedded in fern-widgets).
+    pub fn defaults() -> Self {
+        Self {
+            browse: default_browse_icon,
+            expand: default_expand_icon,
+            search: default_search_icon,
+            copy: default_copy_icon,
+            clear: default_clear_icon,
+            add: default_add_icon,
+            eye: default_eye_icon,
+            eye_off: default_eye_off_icon,
+        }
     }
-    IconWidget::from_path(path, size)
+
+    /// Set the global icon set. Call at app startup before creating any
+    /// built-in buttons. Can only be set once; subsequent calls are ignored.
+    /// Use [`defaults()`](Self::defaults) with struct update syntax to
+    /// override only specific icons.
+    pub fn set_global(icons: Self) {
+        GLOBAL_ICONS.set(icons).ok();
+    }
+
+    fn global() -> &'static Self {
+        GLOBAL_ICONS.get_or_init(Self::defaults)
+    }
 }
 
-/// Diagonal resize arrows (expand).
-fn expand_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    // Top-right arrow
-    path.move_to(Point::new(s * 0.55, s * 0.2));
-    path.line_to(Point::new(s * 0.8, s * 0.2));
-    path.line_to(Point::new(s * 0.8, s * 0.45));
-    path.move_to(Point::new(s * 0.8, s * 0.2));
-    path.line_to(Point::new(s * 0.55, s * 0.45));
-    // Bottom-left arrow
-    path.move_to(Point::new(s * 0.45, s * 0.8));
-    path.line_to(Point::new(s * 0.2, s * 0.8));
-    path.line_to(Point::new(s * 0.2, s * 0.55));
-    path.move_to(Point::new(s * 0.2, s * 0.8));
-    path.line_to(Point::new(s * 0.45, s * 0.55));
-    IconWidget::from_path(path, size)
+// ── Default SVG icons ───────────────────────────────────────────────────────
+
+fn default_browse_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-browse.svg"))
 }
 
-/// Magnifier (search).
-fn search_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    // Circle (approximated with cubic beziers)
-    let cx = s * 0.42;
-    let cy = s * 0.42;
-    let r = s * 0.22;
-    let k = r * 0.552; // cubic bezier approximation of quarter-circle
-    path.move_to(Point::new(cx + r, cy));
-    path.cubic_to(
-        Point::new(cx + r, cy + k),
-        Point::new(cx + k, cy + r),
-        Point::new(cx, cy + r),
-    );
-    path.cubic_to(
-        Point::new(cx - k, cy + r),
-        Point::new(cx - r, cy + k),
-        Point::new(cx - r, cy),
-    );
-    path.cubic_to(
-        Point::new(cx - r, cy - k),
-        Point::new(cx - k, cy - r),
-        Point::new(cx, cy - r),
-    );
-    path.cubic_to(
-        Point::new(cx, cy - r),
-        Point::new(cx + k, cy - r),
-        Point::new(cx + r, cy),
-    );
-    // Handle line
-    path.move_to(Point::new(cx + r * 0.7, cy + r * 0.7));
-    path.line_to(Point::new(s * 0.78, s * 0.78));
-    IconWidget::from_path(path, size)
+fn default_expand_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-expand.svg"))
 }
 
-/// Two overlapping rectangles (copy).
-fn copy_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    // Back rect
-    path.move_to(Point::new(s * 0.3, s * 0.2));
-    path.line_to(Point::new(s * 0.75, s * 0.2));
-    path.line_to(Point::new(s * 0.75, s * 0.65));
-    path.line_to(Point::new(s * 0.3, s * 0.65));
-    path.close();
-    // Front rect (offset)
-    path.move_to(Point::new(s * 0.25, s * 0.35));
-    path.line_to(Point::new(s * 0.7, s * 0.35));
-    path.line_to(Point::new(s * 0.7, s * 0.8));
-    path.line_to(Point::new(s * 0.25, s * 0.8));
-    path.close();
-    IconWidget::from_path(path, size)
+fn default_search_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-search.svg"))
 }
 
-/// X cross (clear).
-fn clear_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    path.move_to(Point::new(s * 0.28, s * 0.28));
-    path.line_to(Point::new(s * 0.72, s * 0.72));
-    path.move_to(Point::new(s * 0.72, s * 0.28));
-    path.line_to(Point::new(s * 0.28, s * 0.72));
-    IconWidget::from_path(path, size)
+fn default_copy_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-copy.svg"))
 }
 
-/// Plus sign (add).
-fn add_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    // Horizontal bar
-    path.move_to(Point::new(s * 0.25, s * 0.5));
-    path.line_to(Point::new(s * 0.75, s * 0.5));
-    // Vertical bar
-    path.move_to(Point::new(s * 0.5, s * 0.25));
-    path.line_to(Point::new(s * 0.5, s * 0.75));
-    IconWidget::from_path(path, size)
+fn default_clear_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-clear.svg"))
 }
 
-/// Open eye (visibility on).
-fn eye_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    // Eye outline: lens shape via two arcs approximated with cubics
-    path.move_to(Point::new(s * 0.12, s * 0.5));
-    path.cubic_to(
-        Point::new(s * 0.25, s * 0.28),
-        Point::new(s * 0.4, s * 0.22),
-        Point::new(s * 0.5, s * 0.22),
-    );
-    path.cubic_to(
-        Point::new(s * 0.6, s * 0.22),
-        Point::new(s * 0.75, s * 0.28),
-        Point::new(s * 0.88, s * 0.5),
-    );
-    path.cubic_to(
-        Point::new(s * 0.75, s * 0.72),
-        Point::new(s * 0.6, s * 0.78),
-        Point::new(s * 0.5, s * 0.78),
-    );
-    path.cubic_to(
-        Point::new(s * 0.4, s * 0.78),
-        Point::new(s * 0.25, s * 0.72),
-        Point::new(s * 0.12, s * 0.5),
-    );
-    // Pupil (small circle)
-    let pr = s * 0.1;
-    let pk = pr * 0.552;
-    let pcx = s * 0.5;
-    let pcy = s * 0.5;
-    path.move_to(Point::new(pcx + pr, pcy));
-    path.cubic_to(
-        Point::new(pcx + pr, pcy + pk),
-        Point::new(pcx + pk, pcy + pr),
-        Point::new(pcx, pcy + pr),
-    );
-    path.cubic_to(
-        Point::new(pcx - pk, pcy + pr),
-        Point::new(pcx - pr, pcy + pk),
-        Point::new(pcx - pr, pcy),
-    );
-    path.cubic_to(
-        Point::new(pcx - pr, pcy - pk),
-        Point::new(pcx - pk, pcy - pr),
-        Point::new(pcx, pcy - pr),
-    );
-    path.cubic_to(
-        Point::new(pcx + pk, pcy - pr),
-        Point::new(pcx + pr, pcy - pk),
-        Point::new(pcx + pr, pcy),
-    );
-    IconWidget::from_path(path, size)
+fn default_add_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-add.svg"))
 }
 
-/// Eye with diagonal slash (visibility off).
-fn eye_off_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    // Reuse eye shape
-    path.move_to(Point::new(s * 0.12, s * 0.5));
-    path.cubic_to(
-        Point::new(s * 0.25, s * 0.28),
-        Point::new(s * 0.4, s * 0.22),
-        Point::new(s * 0.5, s * 0.22),
-    );
-    path.cubic_to(
-        Point::new(s * 0.6, s * 0.22),
-        Point::new(s * 0.75, s * 0.28),
-        Point::new(s * 0.88, s * 0.5),
-    );
-    path.cubic_to(
-        Point::new(s * 0.75, s * 0.72),
-        Point::new(s * 0.6, s * 0.78),
-        Point::new(s * 0.5, s * 0.78),
-    );
-    path.cubic_to(
-        Point::new(s * 0.4, s * 0.78),
-        Point::new(s * 0.25, s * 0.72),
-        Point::new(s * 0.12, s * 0.5),
-    );
-    // Diagonal slash
-    path.move_to(Point::new(s * 0.2, s * 0.8));
-    path.line_to(Point::new(s * 0.8, s * 0.2));
-    IconWidget::from_path(path, size)
+fn default_eye_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-eye.svg"))
+}
+
+fn default_eye_off_icon() -> IconWidget {
+    IconWidget::from_svg(include_str!("../resources/icons/builtin-eye-off.svg"))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
