@@ -1,4 +1,4 @@
-use crate::geometry::{Point, Rect};
+use crate::geometry::{Point, Rect, Transform2D};
 use fern_tokens::CornerRadius;
 
 /// A path command for building arbitrary shapes (Tier 3 rendering).
@@ -266,6 +266,54 @@ impl Path {
         path
     }
 
+    /// Append all commands from another path.
+    pub fn append(&mut self, other: &Path) {
+        self.commands.extend_from_slice(&other.commands);
+    }
+
+    /// Create a copy of this path with all points transformed by the given
+    /// affine transform. `ArcTo` commands are transformed via
+    /// `apply_rect` which is only exact for translate/scale — for
+    /// rotation, convert arcs to cubics before transforming.
+    pub fn transformed(&self, transform: &Transform2D) -> Path {
+        let mut result = Path::new();
+        for cmd in &self.commands {
+            match *cmd {
+                PathCommand::MoveTo(p) => {
+                    result.move_to(transform.apply_point(p));
+                }
+                PathCommand::LineTo(p) => {
+                    result.line_to(transform.apply_point(p));
+                }
+                PathCommand::QuadTo { control, to } => {
+                    result.quad_to(transform.apply_point(control), transform.apply_point(to));
+                }
+                PathCommand::CubicTo {
+                    control1,
+                    control2,
+                    to,
+                } => {
+                    result.cubic_to(
+                        transform.apply_point(control1),
+                        transform.apply_point(control2),
+                        transform.apply_point(to),
+                    );
+                }
+                PathCommand::ArcTo {
+                    rect,
+                    start_angle,
+                    sweep_angle,
+                } => {
+                    result.arc_to(transform.apply_rect(rect), start_angle, sweep_angle);
+                }
+                PathCommand::Close => {
+                    result.close();
+                }
+            }
+        }
+        result
+    }
+
     /// Create a closed polygon from a list of points.
     pub fn polygon(points: &[Point]) -> Self {
         let mut path = Self::new();
@@ -393,5 +441,112 @@ mod tests {
     fn polygon_empty_points() {
         let p = Path::polygon(&[]);
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn append_merges_paths() {
+        let mut a = Path::new();
+        a.move_to(Point::new(0.0, 0.0));
+        a.line_to(Point::new(10.0, 10.0));
+
+        let mut b = Path::new();
+        b.move_to(Point::new(20.0, 20.0));
+        b.line_to(Point::new(30.0, 30.0));
+
+        a.append(&b);
+        assert_eq!(a.commands.len(), 4);
+        assert!(matches!(a.commands[2], PathCommand::MoveTo(p) if (p.x - 20.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn append_empty_is_noop() {
+        let mut a = Path::new();
+        a.move_to(Point::new(1.0, 2.0));
+        let b = Path::new();
+        a.append(&b);
+        assert_eq!(a.commands.len(), 1);
+    }
+
+    #[test]
+    fn transformed_translate() {
+        let mut path = Path::new();
+        path.move_to(Point::new(10.0, 20.0));
+        path.line_to(Point::new(30.0, 40.0));
+        path.close();
+
+        let t = Transform2D::translate(100.0, 200.0);
+        let result = path.transformed(&t);
+
+        assert_eq!(result.commands.len(), 3);
+        match result.commands[0] {
+            PathCommand::MoveTo(p) => {
+                assert!((p.x - 110.0).abs() < 0.01);
+                assert!((p.y - 220.0).abs() < 0.01);
+            }
+            _ => panic!("expected MoveTo"),
+        }
+        match result.commands[1] {
+            PathCommand::LineTo(p) => {
+                assert!((p.x - 130.0).abs() < 0.01);
+                assert!((p.y - 240.0).abs() < 0.01);
+            }
+            _ => panic!("expected LineTo"),
+        }
+        assert!(matches!(result.commands[2], PathCommand::Close));
+    }
+
+    #[test]
+    fn transformed_scale() {
+        let mut path = Path::new();
+        path.move_to(Point::new(10.0, 20.0));
+        path.quad_to(Point::new(15.0, 25.0), Point::new(30.0, 40.0));
+
+        let t = Transform2D::scale(2.0, 3.0);
+        let result = path.transformed(&t);
+
+        match result.commands[1] {
+            PathCommand::QuadTo { control, to } => {
+                assert!((control.x - 30.0).abs() < 0.01);
+                assert!((control.y - 75.0).abs() < 0.01);
+                assert!((to.x - 60.0).abs() < 0.01);
+                assert!((to.y - 120.0).abs() < 0.01);
+            }
+            _ => panic!("expected QuadTo"),
+        }
+    }
+
+    #[test]
+    fn transformed_cubic() {
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        path.cubic_to(
+            Point::new(1.0, 0.0),
+            Point::new(2.0, 1.0),
+            Point::new(3.0, 3.0),
+        );
+
+        let t = Transform2D::translate(10.0, 20.0);
+        let result = path.transformed(&t);
+
+        match result.commands[1] {
+            PathCommand::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                assert!((control1.x - 11.0).abs() < 0.01);
+                assert!((control2.x - 12.0).abs() < 0.01);
+                assert!((to.x - 13.0).abs() < 0.01);
+            }
+            _ => panic!("expected CubicTo"),
+        }
+    }
+
+    #[test]
+    fn transformed_preserves_command_count() {
+        let p = Path::circle(Point::new(50.0, 50.0), 25.0);
+        let t = Transform2D::scale(2.0, 2.0);
+        let result = p.transformed(&t);
+        assert_eq!(result.commands.len(), p.commands.len());
     }
 }

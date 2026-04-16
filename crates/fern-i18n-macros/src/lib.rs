@@ -10,10 +10,9 @@
 //! site.
 //!
 //! The runtime side of the i18n stack lives in `fern-i18n`. The macros
-//! emit code that calls `::fern_i18n::localized(...)` and
-//! `::fern_i18n::resolve_message[_widget](...)`, so any crate using these
-//! macros must also depend on `fern-i18n` (or use the re-exports that
-//! `fern-i18n` provides).
+//! emit code that calls `::fern_ui::i18n::localized(...)` and
+//! `::fern_ui::i18n::resolve_message[_widget](...)`, so any crate using
+//! these macros must depend on `fern-ui` (with the `i18n` feature enabled).
 //!
 //! # Source file resolution
 //!
@@ -77,10 +76,35 @@ enum SourceKind {
 }
 
 impl SourceKind {
-    fn resolver_path(self) -> TokenStream2 {
+    /// The i18n crate root path.
+    ///
+    /// External apps route through `::fern_ui::i18n` so they only
+    /// need `fern-ui` in deps (the serde pattern). Internal fern
+    /// crates (`fern-widgets`, `fern-i18n` tests) route through
+    /// `::fern_i18n` because they can't depend on `fern-ui` (circular).
+    fn i18n_root(self) -> TokenStream2 {
         match self {
-            SourceKind::App => quote!(::fern_i18n::resolve_message),
-            SourceKind::Widget => quote!(::fern_i18n::resolve_message_widget),
+            SourceKind::Widget => quote!(::fern_i18n),
+            SourceKind::App => {
+                // Internal crates (fern-i18n's own tests, trybuild
+                // fixtures) don't have fern-ui in their dep tree.
+                // Detect by checking CARGO_PKG_NAME — any crate
+                // starting with "fern-" is internal to the workspace.
+                let pkg = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
+                if pkg.starts_with("fern-") {
+                    quote!(::fern_i18n)
+                } else {
+                    quote!(::fern_ui::i18n)
+                }
+            }
+        }
+    }
+
+    fn resolver_path(self) -> TokenStream2 {
+        let root = self.i18n_root();
+        match self {
+            SourceKind::App => quote!(#root::resolve_message),
+            SourceKind::Widget => quote!(#root::resolve_message_widget),
         }
     }
 }
@@ -705,6 +729,7 @@ fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
     }
 
     // 3. Emit the expansion.
+    let i18n_root = kind.i18n_root();
     let resolver = kind.resolver_path();
     let key_lit = proc_macro2::Literal::string(&fluent_key);
     // One tracked `include_bytes!` per `.ftl` file that contributed to
@@ -737,7 +762,7 @@ fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
             let #binding_ident = { #value_expr };
         });
         arg_slice_entries.push(quote! {
-            (#name_lit, ::fern_i18n::FluentValue::from(#binding_ident.clone()))
+            (#name_lit, #i18n_root::FluentValue::from(#binding_ident.clone()))
         });
     }
 
@@ -801,7 +826,7 @@ fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
             // containing crate. The constants are discarded.
             #(#watch_stmts)*
 
-            ::fern_i18n::localized({
+            #i18n_root::localized({
                 #(#arg_let_bindings)*
                 move || {
                     #fallback_body

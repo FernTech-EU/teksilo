@@ -8,7 +8,3 @@ publish = false
 
 [dependencies]
 fern-ui = { workspace = true, features = ["fonts-arabic"] }
-# Direct dep: the `tr!` / `tr_widget!` proc macros expand to
-# `::fern_i18n::...` paths, so the consuming crate must declare
-# `fern-i18n` even though it re-exports through `fern_ui::i18n`.
-fern-i18n = { workspace = true }

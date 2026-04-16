@@ -529,14 +529,56 @@ impl Canvas {
 
     // --- Image drawing ---
 
-    /// Draw an image at the given rectangle (stretched to fit).
+    /// Draw an image at the given rectangle (stretched to fit, full color).
     pub fn draw_image(&mut self, rect: Rect, name: impl Into<String>) {
         let idx = self.frame.images.len();
         self.frame.images.push(ImageQuad {
             screen: rect.to_array(),
             name: name.into(),
+            tint: None,
         });
         self.frame.draw_order.push(DrawCommand::Image(idx));
+    }
+
+    /// Draw an image as an alpha mask tinted with the given color.
+    /// The image texture is treated as a monochrome mask — only the
+    /// alpha channel matters. The fill color comes from `tint`.
+    pub fn draw_tinted_image(
+        &mut self,
+        rect: Rect,
+        name: impl Into<String>,
+        tint: fern_tokens::Color,
+    ) {
+        let idx = self.frame.images.len();
+        self.frame.images.push(ImageQuad {
+            screen: rect.to_array(),
+            name: name.into(),
+            tint: Some([tint.r(), tint.g(), tint.b(), tint.a()]),
+        });
+        self.frame.draw_order.push(DrawCommand::Image(idx));
+    }
+
+    /// Queue an image for GPU registration. The renderer uploads the
+    /// texture if not already present. For compile-time embedded data,
+    /// use `Cow::Borrowed` for zero-copy.
+    pub fn ensure_image_registered(
+        &mut self,
+        name: impl Into<String>,
+        width: u32,
+        height: u32,
+        pixels: std::borrow::Cow<'static, [u8]>,
+    ) {
+        let name = name.into();
+        // Skip if already queued this frame
+        if self.frame.pending_images.iter().any(|p| p.name == name) {
+            return;
+        }
+        self.frame.pending_images.push(crate::render_frame::PendingImage {
+            name,
+            width,
+            height,
+            pixels,
+        });
     }
 
     // --- Paragraph drawing ---

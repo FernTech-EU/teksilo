@@ -32,7 +32,7 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
-    FixedSize, Grid, GroupBox, GroupHeader, HStack, IconWidget, Link, MaxSize, MenuItem, MenuList,
+    FixedSize, Grid, GroupBox, GroupHeader, HStack, IconLocation, IconWidget, Link, MaxSize, MenuItem, MenuList,
     Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer,
     SplitButton, StatusBar, TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack,
     Wrap,
@@ -676,6 +676,66 @@ impl Widget for WidgetCatalog {
                         .enabled(false),
                 ),
         );
+        // --- Icon buttons: demonstrate icons from SVG with all IconLocation variants.
+        //
+        // Primary path: res!() macro — compile-time validated, lazy-decoded.
+        let save_icon = fern_ui::res!("resources/icons/save.svg");
+        let home_icon = fern_ui::res!("resources/icons/home.svg");
+        //
+        // Alternative: include_str! + from_svg (no compile-time validation,
+        // parses every time — kept here for reference).
+        // let save_svg = include_str!("../resources/icons/save.svg");
+        // IconWidget::from_svg(save_svg)
+        let icon_buttons_row = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .child(
+                    Button::new_literal("Save")
+                        .icon(
+                            IconWidget::from_svg_icon(save_icon),
+                            IconLocation::Leading,
+                        )
+                        .style(ButtonVariant::Default)
+                        .on_activate(Cmd::Save),
+                )
+                .child(
+                    Button::new_literal("Home")
+                        .icon(
+                            IconWidget::from_svg_icon(home_icon),
+                            IconLocation::Leading,
+                        )
+                        .style(ButtonVariant::Regular)
+                        .on_activate(Cmd::Cancel),
+                )
+                .child(
+                    Button::new_literal("Save")
+                        .icon(
+                            IconWidget::from_svg_icon(save_icon),
+                            IconLocation::Trailing,
+                        )
+                        .style(ButtonVariant::Flat)
+                        .on_activate(Cmd::Save),
+                )
+                .child(
+                    Button::new_literal("Save")
+                        .icon(
+                            IconWidget::from_svg_icon(save_icon),
+                            IconLocation::IconOnly,
+                        )
+                        .style(ButtonVariant::Flat)
+                        .on_activate(Cmd::Save),
+                )
+                .child(
+                    Button::new_literal("")
+                        .icon(
+                            IconWidget::chevron_down(16.0),
+                            IconLocation::IconOnly,
+                        )
+                        .style(ButtonVariant::Regular)
+                        .on_activate(Cmd::Cancel),
+                ),
+        );
+
         // --- SplitButton: default action on the left, chevron dropdown on the
         //     right. Reuses MenuItem directly for the dropdown rows so icons,
         //     shortcut labels, per-item tooltips and separators come for free.
@@ -744,6 +804,8 @@ impl Widget for WidgetCatalog {
                 .child(GroupHeader::new_literal("Standard buttons"))
                 .add_child(buttons_row)
                 .add_child(buttons_row_disabled)
+                .child(GroupHeader::new_literal("Icon buttons"))
+                .add_child(icon_buttons_row)
                 .child(GroupHeader::new_literal("Split buttons"))
                 .add_child(split_buttons_row),
         );

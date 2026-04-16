@@ -155,6 +155,22 @@ impl Renderer {
         // Begin frame for path atlas LRU tracking
         self.path_atlas.begin_frame();
 
+        // Process pending images: upload textures for newly embedded resources
+        for pending in &frame.pending_images {
+            if !self.image_manager.contains(&pending.name) {
+                let layout = self.quad_pipeline.get_bind_group_layout(0);
+                self.image_manager.register_image(
+                    &pending.name,
+                    pending.width,
+                    pending.height,
+                    &pending.pixels,
+                    &self.device,
+                    &self.queue,
+                    &layout,
+                );
+            }
+        }
+
         // Pre-rasterize all paths in this frame into the path atlas
         let mut path_regions: Vec<Option<crate::path_atlas::AtlasRegion>> =
             Vec::with_capacity(frame.paths.len());
@@ -786,35 +802,43 @@ impl Renderer {
         let sw = w * scale_factor;
         let sh = h * scale_factor;
 
-        let color = [1.0, 1.0, 1.0, opacity];
+        // Tintable mode: image is an alpha mask tinted with the given color (flag=0).
+        // Full-color mode: image RGB used directly (flag=1, existing behavior).
+        let (color, flags) = if let Some(tint) = image.tint {
+            // Tint colors are sRGB-encoded (from fern_tokens::Color) — linearize
+            // for the Rgba8UnormSrgb surface, same as all other vertex colors.
+            (crate::vertex::srgb_to_linear_rgba([tint[0], tint[1], tint[2], tint[3] * opacity]), 0)
+        } else {
+            ([1.0, 1.0, 1.0, opacity], crate::vertex::QUAD_FLAG_COLOR_GLYPH)
+        };
 
         let verts = [
             QuadVertex {
                 position: [sx, sy],
                 tex_coord: [0.0, 0.0],
                 color,
-                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                flags,
                 _pad: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy],
                 tex_coord: [1.0, 0.0],
                 color,
-                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                flags,
                 _pad: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy + sh],
                 tex_coord: [1.0, 1.0],
                 color,
-                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                flags,
                 _pad: 0,
             },
             QuadVertex {
                 position: [sx, sy + sh],
                 tex_coord: [0.0, 1.0],
                 color,
-                flags: crate::vertex::QUAD_FLAG_COLOR_GLYPH,
+                flags,
                 _pad: 0,
             },
         ];

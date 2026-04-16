@@ -5,6 +5,11 @@ pub use fern_data as data;
 pub use fern_platform as platform;
 pub use fern_tokens as tokens;
 
+/// Re-export the `res!` macro so consuming crates only need `fern-ui`
+/// in their `[dependencies]` — same pattern as `serde` re-exporting
+/// `serde_derive`.
+pub use fern_resources::res;
+
 #[cfg(feature = "widgets")]
 pub use fern_widgets as widgets;
 

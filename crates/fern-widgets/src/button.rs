@@ -19,7 +19,8 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, ColorTokens, CornerRadius};
 
-use crate::primitives::{Padding, RectWidget, TextWidget, ZStack};
+use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use crate::primitives::icon_widget::IconWidget;
 
 /// Visual role of the button.
 ///
@@ -60,6 +61,25 @@ pub enum InteractionState {
     Disabled,
 }
 
+/// Internal interaction state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IconLocation {
+    /// No icon (default).
+    #[default]
+    None,
+    /// Icon only, no label.
+    IconOnly,
+    /// Icon to the left of the label (default).
+    Leading,
+    /// Icon to the right of the label.
+    Trailing,
+    /// Icon above the label.
+    Top,
+     /// Icon below the label.
+    Bottom,
+
+}
+
 /// A production-quality button widget — non-generic, composition-based.
 ///
 /// ```ignore
@@ -76,6 +96,8 @@ pub struct Button {
     style: ButtonVariant,
     action: Option<CommandFactory>,
     enabled: bool,
+    icon: Option<IconWidget>,
+    icon_location: IconLocation,
     tooltip_text: Option<String>,
     /// Optional rich tooltip source (registry key or inline content).
     /// Takes precedence over `tooltip_text` when both are set — last
@@ -112,6 +134,8 @@ impl Button {
             style: ButtonVariant::Regular,
             action: None,
             enabled: true,
+            icon: None,
+            icon_location: IconLocation::None,
             tooltip_text: None,
             rich_tooltip_source: None,
             has_popup: None,
@@ -197,6 +221,13 @@ impl Button {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Add an icon to the button at the specified location.
+    pub fn icon(mut self, icon: IconWidget, location: IconLocation) -> Self {
+        self.icon = Some(icon);
+        self.icon_location = location;
         self
     }
 
@@ -333,18 +364,89 @@ impl fern_core::widget::Widget for Button {
         };
 
         // Build the widget subtree
-        let text = TextWidget::new_literal(&self.label)
-            .bind_color(text_color)
-            .single_line()
-            .a11y_hidden();
-        let text_id = ctx.add(text);
-
         let button_style = theme.components.button;
+
+        // Build the content (icon + label) based on icon_location
+        let content_id = match self.icon_location {
+            IconLocation::None => {
+                let text = TextWidget::new_literal(&self.label)
+                    .bind_color(text_color)
+                    .single_line()
+                    .a11y_hidden();
+                ctx.add(text)
+            }
+            IconLocation::IconOnly => {
+                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon = icon.icon_size(button_style.icon_size).bind_color(text_color);
+                ctx.add(icon)
+            }
+            IconLocation::Leading => {
+                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color.clone()));
+                let text = TextWidget::new_literal(&self.label)
+                    .bind_color(text_color)
+                    .single_line()
+                    .a11y_hidden();
+                let text_id = ctx.add(text);
+                ctx.add(
+                    HStack::new()
+                        .spacing(button_style.icon_label_gap)
+                        .add_child(icon_id)
+                        .add_child(text_id),
+                )
+            }
+            IconLocation::Trailing => {
+                let text = TextWidget::new_literal(&self.label)
+                    .bind_color(text_color.clone())
+                    .single_line()
+                    .a11y_hidden();
+                let text_id = ctx.add(text);
+                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color));
+                ctx.add(
+                    HStack::new()
+                        .spacing(button_style.icon_label_gap)
+                        .add_child(text_id)
+                        .add_child(icon_id),
+                )
+            }
+            IconLocation::Top => {
+                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color.clone()));
+                let text = TextWidget::new_literal(&self.label)
+                    .bind_color(text_color)
+                    .single_line()
+                    .a11y_hidden();
+                let text_id = ctx.add(text);
+                ctx.add(
+                    VStack::new()
+                        .spacing(button_style.icon_label_gap)
+                        .add_child(icon_id)
+                        .add_child(text_id),
+                )
+            }
+            IconLocation::Bottom => {
+                let text = TextWidget::new_literal(&self.label)
+                    .bind_color(text_color.clone())
+                    .single_line()
+                    .a11y_hidden();
+                let text_id = ctx.add(text);
+                let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color));
+                ctx.add(
+                    VStack::new()
+                        .spacing(button_style.icon_label_gap)
+                        .add_child(text_id)
+                        .add_child(icon_id),
+                )
+            }
+        };
+
         let padding = Padding::symmetric(
             button_style.padding_vertical,
             button_style.padding_horizontal,
         )
-        .set_child(text_id);
+        .set_child(content_id);
         let padding_id = ctx.add(padding);
 
         // Int UI: border is fixed at 1 dp. Focus is shown via the FocusRing

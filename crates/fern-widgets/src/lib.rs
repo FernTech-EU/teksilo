@@ -46,7 +46,7 @@ pub use tooltip::TooltipWidget;
 pub use accordion::Accordion;
 pub use badge::Badge;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
-pub use button::{Button, ButtonVariant};
+pub use button::{Button, ButtonVariant, IconLocation};
 pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
 pub use combo_box::ComboBox;

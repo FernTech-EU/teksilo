@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::geometry::{Rect, Transform2D};
 use crate::paint::StrokeStyle;
 
@@ -13,6 +15,8 @@ pub struct RenderFrame {
     pub rasterized: Vec<RasterizedQuad>,
     pub paths: Vec<PathEntry>,
     pub draw_order: Vec<DrawCommand>,
+    /// Images that need GPU registration before rendering this frame.
+    pub pending_images: Vec<PendingImage>,
 }
 
 impl RenderFrame {
@@ -140,6 +144,24 @@ pub struct ImageQuad {
     pub screen: [f32; 4],
     /// Resource name of the image.
     pub name: String,
+    /// When `Some(color)`, the image is rendered as an alpha mask tinted
+    /// with this color (shader flag=0). When `None`, the image is rendered
+    /// in full color (shader flag=1, existing behavior).
+    pub tint: Option<[f32; 4]>,
+}
+
+/// An image that needs to be registered (uploaded to GPU) before rendering.
+/// Widgets emit these during paint for embedded raster resources.
+#[derive(Debug, Clone)]
+pub struct PendingImage {
+    /// Resource name to register under.
+    pub name: String,
+    /// Image width in pixels.
+    pub width: u32,
+    /// Image height in pixels.
+    pub height: u32,
+    /// RGBA pixel data. Uses `Cow` for zero-copy with compile-time data.
+    pub pixels: Cow<'static, [u8]>,
 }
 
 /// A colored rectangle for decorations (selections, cursors, underlines, borders, etc.).
