@@ -27,6 +27,8 @@ pub mod repeater;
 #[cfg(feature = "rich-text")]
 pub mod rich_text;
 pub mod scroll_area;
+#[cfg(feature = "rich-text")]
+pub mod text_input;
 pub mod scroll_bar;
 pub mod segmented_control;
 pub mod slider;
@@ -80,6 +82,8 @@ pub use split_button::SplitButton;
 pub use split_view::SplitView;
 pub use status_bar::StatusBar;
 pub use tab_widget::{TabItem, TabWidget};
+#[cfg(feature = "rich-text")]
+pub use text_input::{TextInput, ValidationState};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};
 pub use toggle::Toggle;
 pub use toolbar::Toolbar;

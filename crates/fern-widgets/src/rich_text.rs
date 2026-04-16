@@ -32,10 +32,10 @@
 mod clipboard;
 mod frame_loop;
 mod hit_test;
-mod image_cache;
+pub(crate) mod image_cache;
 mod keyboard;
 mod mouse;
-mod paint;
+pub(crate) mod paint;
 mod policy;
 mod state;
 

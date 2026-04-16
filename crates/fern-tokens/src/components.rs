@@ -73,8 +73,8 @@ pub struct TextFieldStyle {
 impl Default for TextFieldStyle {
     fn default() -> Self {
         Self {
-            height: 24.0,
-            padding_horizontal: 9.0,
+            height: 28.0,
+            padding_horizontal: 4.0,
             padding_vertical: 4.0,
             border_width: 1.0,
             corner_radius: 4.0,

@@ -35,7 +35,7 @@ use fern_ui::widgets::{
     Checkbox, ComboBox, Divider, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
     IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel, ProgressBar,
     RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, SplitButton, StatusBar, TabItem,
-    TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
+    TabWidget, TextInput, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
 use fern_ui::widgets::tooltip::TooltipContent;
 
@@ -1655,6 +1655,46 @@ impl Widget for WidgetCatalog {
                 ),
         );
 
+        // --- Text Input ---
+        let search_text = ctx.signal(String::new());
+        let username_text = ctx.signal("cyril".to_string());
+        let readonly_text = ctx.signal("Read-only value".to_string());
+
+        let text_input_section = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new_literal("Text Input")
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
+                )
+                .child(
+                    TextWidget::new_literal("Single-line text editing with placeholder, clear button, slots")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    TextInput::new(search_text)
+                        .placeholder("Search...")
+                        .show_clear_button(true)
+                        .leading_slot(
+                            IconWidget::checkmark(14.0).color(c.text_secondary),
+                        ),
+                )
+                .child(
+                    TextInput::new(username_text)
+                        .placeholder("Username")
+                        .label("Username")
+                        .trailing_slot(
+                            BuiltInButton::browse().on_activate(Cmd::Save),
+                        ),
+                )
+                .child(
+                    TextInput::new(readonly_text)
+                        .read_only(true),
+                ),
+        );
+
         // =====================================================================
         // Assemble all sections
         // =====================================================================
@@ -1706,7 +1746,9 @@ impl Widget for WidgetCatalog {
                 .child(Divider::new())
                 .add_child(image_section)
                 .child(Divider::new())
-                .add_child(builtin_section),
+                .add_child(builtin_section)
+                .child(Divider::new())
+                .add_child(text_input_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
         let scroll = ctx.add(ScrollArea::from_id(padded));

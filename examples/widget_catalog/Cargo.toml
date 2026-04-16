@@ -7,7 +7,7 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-fern-ui = { workspace = true }
+fern-ui = { workspace = true, features = ["rich-text"] }
 
 [dev-dependencies]
 fern-render = { workspace = true }
