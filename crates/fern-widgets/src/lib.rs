@@ -61,7 +61,8 @@ pub use menu_list::{MenuList, MenuSeparator};
 pub use panel::Panel;
 pub use popover::Popover;
 pub use primitives::{
-    AspectRatio, Center, Divider, Expand, FixedSize, Grid, HStack, IconWidget, MaxSize, MinSize,
+    AspectRatio, Center, Divider, Expand, FixedSize, Grid, HStack, IconWidget, MasonryLayout,
+    MaxSize, MinSize,
     Padding, RectWidget, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
 pub use progress_bar::ProgressBar;
