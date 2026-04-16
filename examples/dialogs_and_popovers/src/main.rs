@@ -172,7 +172,8 @@ impl Widget for OverlayDemo {
                                         .trigger(dialog_trigger),
                                 )
                                 .child(
-                                    Snackbar::new_literal("Show snackbar", snackbar_content)
+                                    Snackbar::new_literal("Show snackbar")
+                                        .content(snackbar_content)
                                         .auto_dismiss_after(Duration::from_millis(2500)),
                                 )
                                 .add_child(modal_trigger_id),

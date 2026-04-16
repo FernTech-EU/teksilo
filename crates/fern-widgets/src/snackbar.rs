@@ -171,10 +171,7 @@ pub struct Snackbar {
 }
 
 impl Snackbar {
-    pub fn new(
-        label: impl Into<fern_i18n::LocalizedString>,
-        content: impl Widget + 'static,
-    ) -> Self {
+    pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
@@ -182,7 +179,7 @@ impl Snackbar {
             enabled: true,
             dismiss: DismissBehavior::ClickOutside,
             auto_dismiss_after: Some(DEFAULT_AUTO_DISMISS),
-            pending_content: Some(Box::new(content)),
+            pending_content: None,
             pending_trigger: None,
             announcement: None,
             root_child_id: None,
@@ -191,8 +188,13 @@ impl Snackbar {
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
     #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
-        Self::new(fern_i18n::LocalizedString::literal(label), content)
+    pub fn new_literal(label: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(label))
+    }
+
+    pub fn content(mut self, content: impl Widget + 'static) -> Self {
+        self.pending_content = Some(Box::new(content));
+        self
     }
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
@@ -268,7 +270,7 @@ impl Widget for Snackbar {
             SnackbarSurface::new(
                 self.pending_content
                     .take()
-                    .expect("Snackbar built without content"),
+                    .expect("Snackbar requires .content(...) — no content was set"),
             )
             .with_announcement(self.announcement.clone()),
         );
@@ -430,7 +432,7 @@ mod tests {
     #[test]
     fn access_click_opens_bottom_center_snackbar() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Snackbar::new_literal("Show snackbar", FixedLeaf(220.0, 40.0)));
+        tree.add(Snackbar::new_literal("Show snackbar").content(FixedLeaf(220.0, 40.0)));
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Show snackbar").unwrap();
@@ -449,7 +451,9 @@ mod tests {
     fn custom_trigger_opens_snackbar() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Snackbar::new_literal("Show snackbar", FixedLeaf(180.0, 36.0)).trigger(FixedLeaf(132.0, 36.0)),
+            Snackbar::new_literal("Show snackbar")
+                .content(FixedLeaf(180.0, 36.0))
+                .trigger(FixedLeaf(132.0, 36.0)),
         );
         tree.layout(SizeProposal::exact(640.0, 480.0));
 
@@ -463,7 +467,8 @@ mod tests {
     fn snackbar_auto_dismisses_after_duration() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(
-            Snackbar::new_literal("Show snackbar", FixedLeaf(220.0, 40.0))
+            Snackbar::new_literal("Show snackbar")
+                .content(FixedLeaf(220.0, 40.0))
                 .auto_dismiss_after(Duration::from_millis(300)),
         );
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -477,5 +482,13 @@ mod tests {
 
         tree.advance_time(Duration::from_millis(150));
         assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "Snackbar requires .content(...)")]
+    fn snackbar_without_content_panics_on_build() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Snackbar::new_literal("Show snackbar"));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
     }
 }
