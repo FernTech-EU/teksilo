@@ -33,7 +33,7 @@ use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Card, CheckState,
     Checkbox, ComboBox, Divider, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
-    IconLocation, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel, ProgressBar,
+    IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel, ProgressBar,
     RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, SplitButton, StatusBar, TabItem,
     TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
@@ -1541,7 +1541,33 @@ impl Widget for WidgetCatalog {
         );
 
         // =====================================================================
-        // Section 8: Built-in Buttons
+        // Section 8: ImageWidget
+        // =====================================================================
+
+        let tree_img = fern_ui::res!("resources/icons/tree.webp");
+        let image_section = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new_literal("Image Widget")
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
+                )
+                .child(
+                    TextWidget::new_literal("Full-color WebP photo, Contain fit, 300x200 display")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    ImageWidget::new(tree_img)
+                        .size(300.0, 200.0)
+                        .fit(ImageFit::Contain)
+                        .alt("A tree"),
+                ),
+        );
+
+        // =====================================================================
+        // Section 9: Built-in Buttons
         // =====================================================================
 
         let visibility_signal = ctx.signal(false);
@@ -1677,6 +1703,8 @@ impl Widget for WidgetCatalog {
                 .add_child(rich_tooltips_section)
                 .child(Divider::new())
                 .add_child(menus_section)
+                .child(Divider::new())
+                .add_child(image_section)
                 .child(Divider::new())
                 .add_child(builtin_section),
         );

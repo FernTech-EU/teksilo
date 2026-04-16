@@ -407,12 +407,14 @@ impl IconWidget {
         upload_pixels: &[u8],
         color: Color,
     ) {
-        canvas.ensure_image_registered(
-            name,
-            width,
-            height,
-            Cow::Owned(upload_pixels.to_vec()),
-        );
+        if !canvas.has_pending_image(name) {
+            canvas.ensure_image_registered(
+                name,
+                width,
+                height,
+                Cow::Owned(upload_pixels.to_vec()),
+            );
+        }
         match self.mode {
             IconMode::Tintable => canvas.draw_tinted_image(bounds, name, color),
             IconMode::FullColor => canvas.draw_image(bounds, name),

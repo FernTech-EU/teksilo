@@ -558,6 +558,11 @@ impl Canvas {
         self.frame.draw_order.push(DrawCommand::Image(idx));
     }
 
+    /// Check if an image is already queued for registration this frame.
+    pub fn has_pending_image(&self, name: &str) -> bool {
+        self.frame.pending_images.iter().any(|p| p.name == name)
+    }
+
     /// Queue an image for GPU registration. The renderer uploads the
     /// texture if not already present. For compile-time embedded data,
     /// use `Cow::Borrowed` for zero-copy.
