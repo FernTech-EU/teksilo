@@ -528,6 +528,7 @@ impl Signal<f32> {
                     duration,
                     easing,
                     frame_interval,
+                    looping: false,
                 });
                 anim.target = Some(target);
                 drop(anim);
@@ -538,6 +539,35 @@ impl Signal<f32> {
                 animation: None, ..
             } => Err(SignalAccessError::AnimationUnsupported),
             SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
+        }
+    }
+
+    /// Start a looping animation from the current value to `target`,
+    /// repeating with the given period. Runs until cancelled.
+    /// Frame updates are capped at `frame_interval` (default ~30fps).
+    pub fn animate_looping(
+        &self,
+        target: f32,
+        period: std::time::Duration,
+        easing: fern_tokens::Easing,
+        frame_interval: Option<std::time::Duration>,
+    ) {
+        if let SignalKind::Mutable {
+            inner,
+            animation: Some(animation),
+        } = &self.kind
+        {
+            let mut anim = animation.borrow_mut();
+            anim.pending = Some(crate::animation::AnimationRequest {
+                target,
+                duration: period,
+                easing,
+                frame_interval,
+                looping: true,
+            });
+            anim.target = Some(target);
+            drop(anim);
+            inner.borrow_mut().dirty = true;
         }
     }
 

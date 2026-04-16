@@ -641,14 +641,27 @@ impl WidgetTree {
         });
 
         for (signal, req) in pending {
-            self.animation_scheduler.animate_with_frame_interval(
-                &signal,
-                req.target,
-                req.duration,
-                req.easing,
-                req.frame_interval,
-                now,
-            );
+            if req.looping {
+                let start = signal.get();
+                self.animation_scheduler.animate_looping(
+                    &signal,
+                    start,
+                    req.target,
+                    req.duration,
+                    req.easing,
+                    req.frame_interval,
+                    now,
+                );
+            } else {
+                self.animation_scheduler.animate_with_frame_interval(
+                    &signal,
+                    req.target,
+                    req.duration,
+                    req.easing,
+                    req.frame_interval,
+                    now,
+                );
+            }
         }
     }
 

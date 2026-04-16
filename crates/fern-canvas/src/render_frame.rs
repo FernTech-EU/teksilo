@@ -46,6 +46,12 @@ impl RenderFrame {
         self.shadows.extend_from_slice(&other.shadows);
         self.rasterized.extend_from_slice(&other.rasterized);
         self.paths.extend_from_slice(&other.paths);
+        // Merge pending image registrations (deduped by renderer)
+        for pending in &other.pending_images {
+            if !self.pending_images.iter().any(|p| p.name == pending.name) {
+                self.pending_images.push(pending.clone());
+            }
+        }
 
         for cmd in &other.draw_order {
             let shifted = match cmd {

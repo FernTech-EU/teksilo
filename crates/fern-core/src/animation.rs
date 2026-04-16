@@ -30,6 +30,9 @@ pub struct AnimationRequest {
     pub duration: Duration,
     pub easing: Easing,
     pub frame_interval: Option<Duration>,
+    /// If true, the animation loops: resets to the signal's current
+    /// value each time it reaches `target`.
+    pub looping: bool,
 }
 
 /// A single active animation driving a `Signal<f32>` from `start` to `end`.
@@ -42,9 +45,16 @@ struct ActiveAnimation {
     easing: Easing,
     frame_interval: Duration,
     next_tick: Instant,
+    /// If true, the animation restarts from `start_value` when it
+    /// reaches `end_value`, looping indefinitely. Stopped by
+    /// `cancel()` or by dropping the signal.
+    looping: bool,
 }
 
-const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// Default frame interval for animations: ~30 fps. Smooth enough for
+/// UI transitions while keeping CPU/GPU usage low. Individual
+/// animations can override via `animate_with_frame_interval`.
+const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(33);
 
 /// Manages active animations and advances them each frame.
 pub struct AnimationScheduler {
@@ -99,6 +109,36 @@ impl AnimationScheduler {
             easing,
             frame_interval: frame_interval.unwrap_or(DEFAULT_FRAME_INTERVAL),
             next_tick: now,
+            looping: false,
+        });
+    }
+
+    /// Start a looping animation that cycles from `start` to `end`
+    /// repeatedly. The signal resets to `start` each time it reaches
+    /// `end`. Runs until cancelled.
+    pub fn animate_looping(
+        &mut self,
+        signal: &Signal<f32>,
+        start: f32,
+        end: f32,
+        period: Duration,
+        easing: Easing,
+        frame_interval: Option<Duration>,
+        now: Instant,
+    ) {
+        self.cancel(signal);
+        signal.set(start);
+
+        self.animations.push(ActiveAnimation {
+            signal: signal.clone(),
+            start_value: start,
+            end_value: end,
+            start_time: now,
+            duration: period,
+            easing,
+            frame_interval: frame_interval.unwrap_or(DEFAULT_FRAME_INTERVAL),
+            next_tick: now,
+            looping: true,
         });
     }
 
@@ -126,13 +166,19 @@ impl AnimationScheduler {
             let value = fern_tokens::lerp(anim.start_value, anim.end_value, eased);
             anim.signal.set(value);
 
-            let keep = t < 1.0;
-            if !keep {
+            if t >= 1.0 && anim.looping {
+                // Restart the loop, carrying over any overshoot
+                anim.start_time = now;
+                anim.signal.set(anim.start_value);
+                anim.next_tick = now + anim.frame_interval;
+                true
+            } else if t >= 1.0 {
                 anim.signal.clear_animation_target();
+                false
             } else {
                 anim.next_tick = now + anim.frame_interval;
+                true
             }
-            keep
         });
 
         !self.animations.is_empty()
@@ -145,7 +191,6 @@ impl AnimationScheduler {
 
     /// The earliest deadline when the next animation tick is needed.
     /// Returns None if no animations are active.
-    /// Targets ~60fps by scheduling the next tick 16ms from now.
     pub fn next_deadline(&self) -> Option<Instant> {
         self.animations.iter().map(|anim| anim.next_tick).min()
     }
@@ -320,5 +365,60 @@ mod tests {
         assert_eq!(scheduler.active_count(), 0);
         assert!((a.get() - 100.0).abs() < 0.01);
         assert!((b.get() - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn looping_animation_restarts() {
+        let signal = Signal::<f32>::new_animated(0.0);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate_looping(
+            &signal,
+            0.0,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            None,
+            start,
+        );
+
+        // At 50%: value ≈ 50
+        scheduler.tick(start + Duration::from_millis(100));
+        assert!((signal.get() - 50.0).abs() < 1.0);
+
+        // At 100%: value resets to 0 (loop restarts)
+        let has_more = scheduler.tick(start + Duration::from_millis(200));
+        assert!(has_more, "looping animation should keep running");
+        assert!(
+            signal.get() < 5.0,
+            "should have reset near 0, got {}",
+            signal.get()
+        );
+
+        // Second loop at 50%: value ≈ 50 again
+        scheduler.tick(start + Duration::from_millis(300));
+        assert!((signal.get() - 50.0).abs() < 5.0);
+    }
+
+    #[test]
+    fn looping_animation_cancelled() {
+        let signal = Signal::<f32>::new_animated(0.0);
+        let mut scheduler = AnimationScheduler::new();
+        let start = Instant::now();
+
+        scheduler.animate_looping(
+            &signal,
+            0.0,
+            10.0,
+            Duration::from_millis(100),
+            Easing::Linear,
+            None,
+            start,
+        );
+        assert_eq!(scheduler.active_count(), 1);
+
+        scheduler.cancel(&signal);
+        assert_eq!(scheduler.active_count(), 0);
     }
 }

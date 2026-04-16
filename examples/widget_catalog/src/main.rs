@@ -679,8 +679,13 @@ impl Widget for WidgetCatalog {
         // --- Icon buttons: demonstrate icons from SVG with all IconLocation variants.
         //
         // Primary path: res!() macro — compile-time validated, lazy-decoded.
+        // SVG icons (tintable — color follows button theme state)
         let save_icon = fern_ui::res!("resources/icons/save.svg");
         let home_icon = fern_ui::res!("resources/icons/home.svg");
+        // PNG icon (tintable — white-on-transparent, used as alpha mask)
+        let star_icon = fern_ui::res!("resources/icons/star.png");
+        // WebP icon (tintable)
+        let clock_icon = fern_ui::res!("resources/icons/clock.webp");
         //
         // Alternative: include_str! + from_svg (no compile-time validation,
         // parses every time — kept here for reference).
@@ -689,6 +694,7 @@ impl Widget for WidgetCatalog {
         let icon_buttons_row = ctx.add(
             HStack::new()
                 .spacing(8.0)
+                // SVG, leading
                 .child(
                     Button::new_literal("Save")
                         .icon(
@@ -698,6 +704,7 @@ impl Widget for WidgetCatalog {
                         .style(ButtonVariant::Default)
                         .on_activate(Cmd::Save),
                 )
+                // SVG, leading
                 .child(
                     Button::new_literal("Home")
                         .icon(
@@ -707,15 +714,27 @@ impl Widget for WidgetCatalog {
                         .style(ButtonVariant::Regular)
                         .on_activate(Cmd::Cancel),
                 )
+                // PNG, leading
                 .child(
-                    Button::new_literal("Save")
+                    Button::new_literal("Star")
                         .icon(
-                            IconWidget::from_svg_icon(save_icon),
-                            IconLocation::Trailing,
+                            IconWidget::from_raster(star_icon, 24.0),
+                            IconLocation::Leading,
                         )
-                        .style(ButtonVariant::Flat)
+                        .style(ButtonVariant::Regular)
                         .on_activate(Cmd::Save),
                 )
+                // WebP, leading
+                .child(
+                    Button::new_literal("Clock")
+                        .icon(
+                            IconWidget::from_raster(clock_icon, 24.0),
+                            IconLocation::Leading,
+                        )
+                        .style(ButtonVariant::Regular)
+                        .on_activate(Cmd::Cancel),
+                )
+                // SVG, icon-only
                 .child(
                     Button::new_literal("Save")
                         .icon(
@@ -725,6 +744,7 @@ impl Widget for WidgetCatalog {
                         .style(ButtonVariant::Flat)
                         .on_activate(Cmd::Save),
                 )
+                // Built-in programmatic, icon-only
                 .child(
                     Button::new_literal("")
                         .icon(

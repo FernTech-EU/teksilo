@@ -3,9 +3,8 @@
 //! Supports determinate mode (bound to a `Prop<f32>`) and indeterminate mode
 //! (animated sweep via `Signal<f32>`). Horizontal or vertical.
 //!
-//! The indeterminate animation is paint-driven: it keeps advancing while the
-//! widget is being painted, and naturally stops when the widget is fully
-//! clipped or otherwise offscreen.
+//! The indeterminate animation uses a looping `Signal<f32>` driven by the
+//! animation scheduler. It loops automatically and is capped at 30fps.
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
@@ -53,18 +52,10 @@ impl ProgressBar {
     /// the widget continues to be painted. If the progress bar is fully
     /// outside an ancestor clip, the current sweep finishes and then stops.
     pub fn indeterminate() -> Self {
-        let pos = Signal::new_animated(0.0);
-        // Start the animation loop — the first animate_to kicks it off.
-        pos.animate_to_with_frame_interval(
-            1.0,
-            INDETERMINATE_SWEEP_DURATION,
-            Easing::Linear,
-            Some(INDETERMINATE_FRAME_INTERVAL),
-        );
         Self {
             value: Prop::Static(0.0),
             indeterminate: true,
-            indeterminate_pos: pos,
+            indeterminate_pos: Signal::new_animated(0.0),
             orientation: Orientation::Horizontal,
             thickness: DEFAULT_THICKNESS,
             track_color: None,
@@ -111,7 +102,7 @@ impl Widget for ProgressBar {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
         if self.indeterminate {
             // Re-create animated signal registered with the scheduler
-            self.indeterminate_pos = ctx.animated_signal(self.indeterminate_pos.get());
+            self.indeterminate_pos = ctx.animated_signal(0.0);
         }
 
         // Register bindings
@@ -122,8 +113,8 @@ impl Widget for ProgressBar {
         if self.indeterminate {
             self.indeterminate_pos
                 .bind_to(id, registry, BindingLevel::RepaintOnly);
-            // Kick off the animation loop
-            self.indeterminate_pos.animate_to_with_frame_interval(
+            // Looping animation: 0→1 over sweep duration, restarts automatically
+            self.indeterminate_pos.animate_looping(
                 1.0,
                 INDETERMINATE_SWEEP_DURATION,
                 Easing::Linear,
@@ -186,16 +177,6 @@ impl Widget for ProgressBar {
                 }
             };
             canvas.fill_rounded_rect(fill_rect, radius, fill_color);
-
-            if pos >= 0.99 {
-                self.indeterminate_pos.set(0.0);
-                self.indeterminate_pos.animate_to_with_frame_interval(
-                    1.0,
-                    INDETERMINATE_SWEEP_DURATION,
-                    Easing::Linear,
-                    Some(INDETERMINATE_FRAME_INTERVAL),
-                );
-            }
         } else {
             // Determinate: fill proportional to value
             let value = self.value.get().clamp(0.0, 1.0);

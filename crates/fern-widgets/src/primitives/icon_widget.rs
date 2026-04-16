@@ -15,9 +15,9 @@ use std::borrow::Cow;
 use fern_canvas::{AnimatedIcon, Canvas, Path, PathCommand, Point, Rect, RasterIcon, Size, SizeProposal};
 use fern_canvas::svg::SvgIcon;
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::signal::Prop;
+use fern_core::signal::{Prop, Signal};
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
-use fern_tokens::Color;
+use fern_tokens::{Color, Easing};
 
 /// Whether an icon is rendered as a theme-tinted mask or in its original colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,11 +44,13 @@ enum IconSource {
     },
     /// An animated image (animated WebP).
     /// `frame_upload_pixels` holds pre-computed pixels per frame.
+    /// `frame_signal` is a looping animated Signal<f32> from 0 to frame_count,
+    /// driven by the animation scheduler.
     Animated {
         name: String,
         icon: AnimatedIcon,
         frame_upload_pixels: Vec<Vec<u8>>,
-        start: std::time::Instant,
+        frame_signal: Option<Signal<f32>>,
     },
 }
 
@@ -199,7 +201,7 @@ impl IconWidget {
                     name,
                     icon: anim,
                     frame_upload_pixels,
-                    start: std::time::Instant::now(),
+                    frame_signal: None, // initialized in build()
                 },
                 design_size: size,
                 display_size: size,
@@ -231,7 +233,7 @@ impl IconWidget {
     /// Create an icon from a pre-decoded [`RasterIcon`].
     /// Accepts a reference — pixel data is copied internally.
     pub fn from_raster(icon: &RasterIcon, size: f32) -> Self {
-        let name = format!("_icon_raster_{}", icon.width());
+        let name = format!("_icon_raster_{:p}", icon as *const RasterIcon);
         let mode = IconMode::Tintable;
         let upload_pixels = prepare_pixels(icon, mode);
         Self {
@@ -246,7 +248,7 @@ impl IconWidget {
     /// Create an icon from a pre-decoded [`AnimatedIcon`].
     /// Accepts a reference — frame data is copied internally.
     pub fn from_animated(icon: &AnimatedIcon, size: f32) -> Self {
-        let name = format!("_icon_anim_{}", icon.frame_count());
+        let name = format!("_icon_anim_{:p}", icon as *const AnimatedIcon);
         let mode = IconMode::Tintable;
         let frame_upload_pixels: Vec<Vec<u8>> = icon
             .frames()
@@ -258,7 +260,7 @@ impl IconWidget {
                 name,
                 icon: icon.clone(),
                 frame_upload_pixels,
-                start: std::time::Instant::now(),
+                frame_signal: None, // initialized in build()
             },
             design_size: size,
             display_size: size,
@@ -432,13 +434,42 @@ impl Widget for IconWidget {
         &mut self,
         ctx: &mut fern_core::build_context::BuildContext,
     ) -> Vec<fern_core::widget_id::WidgetId> {
-        let self_id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        self.color.register_if_bound(
-            self_id,
-            registry,
-            fern_core::binding::BindingLevel::RepaintOnly,
-        );
+        // Register color binding
+        {
+            let self_id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            self.color.register_if_bound(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
+        }
+
+        // For animated icons: create a looping animation signal that
+        // drives frame cycling. The signal goes from 0 to frame_count
+        // over total_duration, then loops. Capped at 30fps.
+        if let IconSource::Animated { icon, frame_signal, .. } = &mut self.source {
+            let signal = ctx.animated_signal(0.0);
+            {
+                let self_id = ctx.self_id();
+                let registry = ctx.binding_registry();
+                signal.bind_to(
+                    self_id,
+                    registry,
+                    fern_core::binding::BindingLevel::RepaintOnly,
+                );
+            }
+            let frame_count = icon.frame_count() as f32;
+            let period = icon.total_duration();
+            signal.animate_looping(
+                frame_count,
+                period,
+                Easing::Linear,
+                Some(std::time::Duration::from_millis(33)), // 30fps cap
+            );
+            *frame_signal = Some(signal);
+        }
+
         Vec::new()
     }
 
@@ -462,25 +493,12 @@ impl Widget for IconWidget {
                 self.paint_raster(bounds, canvas, name, icon.width(), icon.height(), upload_pixels, color);
             }
             IconSource::Animated {
-                name, icon, frame_upload_pixels, start, ..
+                name, icon, frame_upload_pixels, frame_signal, ..
             } => {
-                let elapsed = start.elapsed();
-                // Compute frame index
-                let idx = if icon.frame_count() <= 1 || icon.total_duration().is_zero() {
-                    0
-                } else {
-                    let ms = elapsed.as_millis() % icon.total_duration().as_millis();
-                    let mut acc = 0u128;
-                    let mut found = 0;
-                    for (i, dur) in icon.frame_durations().iter().enumerate() {
-                        acc += dur.as_millis();
-                        if ms < acc {
-                            found = i;
-                            break;
-                        }
-                    }
-                    found
-                };
+                let idx = frame_signal
+                    .as_ref()
+                    .map(|s| (s.get() as usize).min(icon.frame_count().saturating_sub(1)))
+                    .unwrap_or(0);
                 let frame_name = format!("{name}_f{idx}");
                 let frame = &icon.frames()[idx];
                 let pixels = &frame_upload_pixels[idx];
