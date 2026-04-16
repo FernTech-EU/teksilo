@@ -35,31 +35,32 @@ struct WizardStepInfo {
 pub struct WizardStep {
     title: String,
     supporting_text: Option<String>,
-    content_factory: WizardStepFactory,
+    content_factory: Option<WizardStepFactory>,
 }
 
 impl WizardStep {
-    pub fn new<W, F>(title: impl Into<fern_i18n::LocalizedString>, factory: F) -> Self
-    where
-        W: Widget + 'static,
-        F: Fn() -> W + 'static,
-    {
+    pub fn new(title: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = title.into();
         Self {
             title: ls.resolve_now(),
             supporting_text: None,
-            content_factory: Rc::new(move || Box::new(factory()) as Box<dyn Widget>),
+            content_factory: None,
         }
     }
 
     /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw title in `LocalizedString::literal`.
     #[doc(hidden)]
-    pub fn new_literal<W, F>(title: impl Into<String>, factory: F) -> Self
+    pub fn new_literal(title: impl Into<String>) -> Self {
+        Self::new(fern_i18n::LocalizedString::literal(title))
+    }
+
+    pub fn content<W, F>(mut self, factory: F) -> Self
     where
         W: Widget + 'static,
         F: Fn() -> W + 'static,
     {
-        Self::new(fern_i18n::LocalizedString::literal(title), factory)
+        self.content_factory = Some(Rc::new(move || Box::new(factory()) as Box<dyn Widget>));
+        self
     }
 
     pub fn supporting_text(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
@@ -485,7 +486,16 @@ impl Widget for WizardFlow {
 
         let mut switcher = Switcher::new(self.current_step.clone());
         for step in &self.steps {
-            switcher = switcher.child_boxed((step.content_factory.as_ref())());
+            let factory = step
+                .content_factory
+                .as_ref()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "WizardStep \"{}\" requires .content(...) — no content factory was set",
+                        step.title
+                    )
+                });
+            switcher = switcher.child_boxed(factory());
         }
         let switcher_id = ctx.add(switcher);
 
@@ -892,9 +902,11 @@ mod tests {
     #[test]
     fn wizard_queues_modal_request() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(Wizard::new_literal("Open wizard").step(WizardStep::new_literal("Details", || {
-            FixedLeaf(220.0, 120.0)
-        })));
+        tree.add(
+            Wizard::new_literal("Open wizard").step(
+                WizardStep::new_literal("Details").content(|| FixedLeaf(220.0, 120.0)),
+            ),
+        );
         tree.layout(SizeProposal::exact(800.0, 600.0));
 
         let trigger = tree.find_by_label("Open wizard").unwrap();
@@ -917,10 +929,14 @@ mod tests {
         tree.add(
             Wizard::new_literal("Launch")
                 .step(
-                    WizardStep::new_literal("Account", || Button::new_literal("Account field"))
+                    WizardStep::new_literal("Account")
+                        .content(|| Button::new_literal("Account field"))
                         .supporting_text_literal("Enter the account details before continuing."),
                 )
-                .step(WizardStep::new_literal("Review", || Button::new_literal("Review field")))
+                .step(
+                    WizardStep::new_literal("Review")
+                        .content(|| Button::new_literal("Review field")),
+                )
                 .finish_label_literal("Create")
                 .on_finish(move |_ctx| {
                     *finished_flag.borrow_mut() = true;
@@ -962,5 +978,29 @@ mod tests {
 
         assert!(*finished.borrow());
         assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "requires .content(...)")]
+    fn wizard_step_without_content_panics_on_modal_build() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(Wizard::new_literal("Open wizard").step(WizardStep::new_literal("Details")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Open wizard").unwrap();
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: fern_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: fern_core::accessibility::root_node_id(),
+            data: None,
+        });
+
+        let request = tree.drain_pending_modal_requests().pop().unwrap().request;
+        match request.content {
+            ModalContent::Deferred(builder) => {
+                builder(&mut tree);
+            }
+            ModalContent::ExistingWidget(_) => unreachable!("wizard uses deferred modal content"),
+        }
     }
 }
