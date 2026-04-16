@@ -227,13 +227,27 @@ impl Widget for Grid {
         let num_cols = self.columns.len().max(1);
         let num_rows = self.rows.len().max(1);
 
+        // Map each active child to its original cell index. The
+        // framework filters dormant children out of `children`, so we
+        // look up each child's position in `self.child_ids` (which
+        // retains all children) to keep cell assignments stable.
+        let original_indices: Vec<usize> = children
+            .iter()
+            .map(|c| {
+                self.child_ids
+                    .iter()
+                    .position(|&id| id == c.id)
+                    .unwrap_or(0)
+            })
+            .collect();
+
         // Pass 1: intrinsic sizes — same as size_that_fits.
         let intrinsic_proposal = SizeProposal::unspecified();
         let mut col_max = vec![0.0_f32; num_cols];
         let mut row_max = vec![0.0_f32; num_rows];
 
         for (i, child) in children.iter().enumerate() {
-            let (row, col) = self.cell_for(i);
+            let (row, col) = self.cell_for(original_indices[i]);
             if row >= num_rows || col >= num_cols {
                 continue;
             }
@@ -249,7 +263,7 @@ impl Widget for Grid {
         // Pass 2: re-measure Fractional cells whose column shrank, so
         // their row height reflects wrap-induced growth.
         for (i, child) in children.iter().enumerate() {
-            let (row, col) = self.cell_for(i);
+            let (row, col) = self.cell_for(original_indices[i]);
             if row >= num_rows || col >= num_cols {
                 continue;
             }
@@ -292,7 +306,7 @@ impl Widget for Grid {
 
         // Place each child in its cell
         for (i, child) in children.iter_mut().enumerate() {
-            let (row, col) = self.cell_for(i);
+            let (row, col) = self.cell_for(original_indices[i]);
             if row >= num_rows || col >= num_cols {
                 child.size = Size::ZERO;
                 continue;
@@ -459,5 +473,72 @@ mod tests {
         assert!((gb.width - 110.0).abs() < 0.01);
         // Height: max(20, 30) = 30
         assert!((gb.height - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn dormant_child_preserves_cell_positions() {
+        // 2x2 grid: a(0,0) b(0,1) c(1,0) d(1,1)
+        // Making a dormant should leave b at (0,1), c at (1,0), d at (1,1).
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(50.0, 30.0));
+        let b = tree.add(FixedLeaf(50.0, 30.0));
+        let c = tree.add(FixedLeaf(50.0, 30.0));
+        let d = tree.add(FixedLeaf(50.0, 30.0));
+        let _grid = tree.add(
+            Grid::new()
+                .columns(vec![TrackSize::Fixed(80.0), TrackSize::Fixed(80.0)])
+                .rows(vec![TrackSize::Fixed(40.0), TrackSize::Fixed(40.0)])
+                .column_gap(10.0)
+                .row_gap(5.0)
+                .add_child(a)
+                .add_child(b)
+                .add_child(c)
+                .add_child(d),
+        );
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        // Before dormant: b at col 1 → x=90 (80+10), c at row 1 → y=45 (40+5)
+        assert!((tree.bounds(b).x - 90.0).abs() < 0.01);
+        assert!((tree.bounds(c).y - 45.0).abs() < 0.01);
+        assert!((tree.bounds(d).x - 90.0).abs() < 0.01);
+        assert!((tree.bounds(d).y - 45.0).abs() < 0.01);
+
+        // Make a dormant — b, c, d keep their original cells
+        tree.set_dormant(a);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        // b stays at cell (0,1)
+        assert!(
+            (tree.bounds(b).x - 90.0).abs() < 0.01,
+            "b.x should stay at 90, got {}",
+            tree.bounds(b).x
+        );
+        assert!(
+            (tree.bounds(b).y - 0.0).abs() < 0.01,
+            "b.y should stay at 0, got {}",
+            tree.bounds(b).y
+        );
+        // c stays at cell (1,0)
+        assert!(
+            (tree.bounds(c).x - 0.0).abs() < 0.01,
+            "c.x should stay at 0, got {}",
+            tree.bounds(c).x
+        );
+        assert!(
+            (tree.bounds(c).y - 45.0).abs() < 0.01,
+            "c.y should stay at 45, got {}",
+            tree.bounds(c).y
+        );
+        // d stays at cell (1,1)
+        assert!(
+            (tree.bounds(d).x - 90.0).abs() < 0.01,
+            "d.x should stay at 90, got {}",
+            tree.bounds(d).x
+        );
+        assert!(
+            (tree.bounds(d).y - 45.0).abs() < 0.01,
+            "d.y should stay at 45, got {}",
+            tree.bounds(d).y
+        );
     }
 }

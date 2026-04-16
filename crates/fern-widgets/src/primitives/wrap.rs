@@ -151,7 +151,8 @@ impl Widget for Wrap {
             return;
         }
 
-        let (sizes, line_breaks) = self.compute_layout(bounds.width, &self.child_ids, ctx);
+        let active_ids: Vec<WidgetId> = children.iter().map(|c| c.id).collect();
+        let (sizes, line_breaks) = self.compute_layout(bounds.width, &active_ids, ctx);
         let mut x = bounds.x;
         let mut y = bounds.y;
         let mut line_height = 0.0_f32;
@@ -281,5 +282,40 @@ mod tests {
         let _wrap = tree.add(Wrap::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
         // No crash
+    }
+
+    #[test]
+    fn dormant_child_does_not_misalign_placement() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FixedLeaf(40.0, 20.0));
+        let b = tree.add(FixedLeaf(50.0, 25.0));
+        let c = tree.add(FixedLeaf(60.0, 30.0));
+        let _wrap = tree.add(
+            Wrap::new()
+                .spacing(10.0)
+                .add_child(a)
+                .add_child(b)
+                .add_child(c),
+        );
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+
+        // Before dormant: a at x=0, b at x=50, c at x=110
+        assert!((tree.bounds(b).x - 50.0).abs() < 0.01);
+        assert!((tree.bounds(b).width - 50.0).abs() < 0.01);
+        assert!((tree.bounds(c).x - 110.0).abs() < 0.01);
+        assert!((tree.bounds(c).width - 60.0).abs() < 0.01);
+
+        // Make first child dormant
+        tree.set_dormant(a);
+        tree.layout(SizeProposal::exact(300.0, 100.0));
+
+        // b should get its own size (50x25), not a's size (40x20)
+        assert!((tree.bounds(b).x - 0.0).abs() < 0.01);
+        assert!((tree.bounds(b).width - 50.0).abs() < 0.01);
+        assert!((tree.bounds(b).height - 25.0).abs() < 0.01);
+        // c follows b
+        assert!((tree.bounds(c).x - 60.0).abs() < 0.01); // 50 + 10
+        assert!((tree.bounds(c).width - 60.0).abs() < 0.01);
+        assert!((tree.bounds(c).height - 30.0).abs() < 0.01);
     }
 }
