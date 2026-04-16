@@ -31,11 +31,11 @@ use std::rc::Rc;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
-    Accordion, Badge, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider, Expand,
-    FixedSize, Grid, GroupBox, GroupHeader, HStack, IconLocation, IconWidget, Link, MaxSize, MenuItem, MenuList,
-    Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl, Slider, Spacer,
-    SplitButton, StatusBar, TabItem, TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack,
-    Wrap,
+    Accordion, Badge, BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Card, CheckState,
+    Checkbox, ComboBox, Divider, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
+    IconLocation, IconWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel, ProgressBar,
+    RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, SplitButton, StatusBar, TabItem,
+    TabWidget, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
 use fern_ui::widgets::tooltip::TooltipContent;
 
@@ -1541,6 +1541,95 @@ impl Widget for WidgetCatalog {
         );
 
         // =====================================================================
+        // Section 8: Built-in Buttons
+        // =====================================================================
+
+        let visibility_signal = ctx.signal(false);
+        let vis_label = visibility_signal.map(|v| if *v { "Visible".to_string() } else { "Hidden".to_string() });
+
+        let builtin_section = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new_literal("Built-in Buttons")
+                        .style(t.body_bold.clone())
+                        .color(c.text_primary),
+                )
+                .child(
+                    TextWidget::new_literal("Predefined (browse, expand, search, copy, clear, add)")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(4.0)
+                        .child(BuiltInButton::browse().on_activate(Cmd::Save))
+                        .child(BuiltInButton::expand().on_activate(Cmd::Save))
+                        .child(BuiltInButton::search().on_activate(Cmd::Save))
+                        .child(BuiltInButton::copy().on_activate(Cmd::Copy))
+                        .child(BuiltInButton::clear().on_activate(Cmd::Save))
+                        .child(BuiltInButton::add().on_activate(Cmd::Save)),
+                )
+                .child(
+                    TextWidget::new_literal("Visibility toggle")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(BuiltInButton::visibility_toggle(visibility_signal))
+                        .child(
+                            TextWidget::new_literal("Hidden")
+                                .bind_text(vis_label)
+                                .style(t.body.clone())
+                                .color(c.text_primary),
+                        ),
+                )
+                .child(
+                    TextWidget::new_literal("Size variants (compact, default, large)")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(
+                            BuiltInButton::search()
+                                .size(BuiltInButtonSize::Compact)
+                                .on_activate(Cmd::Save),
+                        )
+                        .child(BuiltInButton::search().on_activate(Cmd::Save))
+                        .child(
+                            BuiltInButton::search()
+                                .size(BuiltInButtonSize::Large)
+                                .on_activate(Cmd::Save),
+                        ),
+                )
+                .child(
+                    TextWidget::new_literal("Disabled")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(4.0)
+                        .child(BuiltInButton::browse().enabled(false))
+                        .child(BuiltInButton::clear().enabled(false)),
+                )
+                .child(
+                    TextWidget::new_literal("Custom icon")
+                        .style(t.small.clone())
+                        .color(c.text_secondary),
+                )
+                .child(
+                    BuiltInButton::new(IconWidget::checkmark(16.0))
+                        .tooltip_literal("Custom checkmark")
+                        .on_activate(Cmd::Save),
+                ),
+        );
+
+        // =====================================================================
         // Assemble all sections
         // =====================================================================
 
@@ -1587,7 +1676,9 @@ impl Widget for WidgetCatalog {
                 .child(Divider::new())
                 .add_child(rich_tooltips_section)
                 .child(Divider::new())
-                .add_child(menus_section),
+                .add_child(menus_section)
+                .child(Divider::new())
+                .add_child(builtin_section),
         );
         let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
         let scroll = ctx.add(ScrollArea::from_id(padded));

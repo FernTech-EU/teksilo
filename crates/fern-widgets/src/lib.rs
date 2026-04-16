@@ -1,6 +1,7 @@
 pub mod accordion;
 pub mod badge;
 pub mod breadcrumb;
+pub mod built_in_button;
 pub mod button;
 pub mod card;
 pub mod checkbox;
@@ -46,6 +47,7 @@ pub use tooltip::TooltipWidget;
 pub use accordion::Accordion;
 pub use badge::Badge;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
+pub use built_in_button::{BuiltInButton, BuiltInButtonSize};
 pub use button::{Button, ButtonVariant, IconLocation};
 pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
