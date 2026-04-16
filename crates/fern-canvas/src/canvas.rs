@@ -304,10 +304,9 @@ impl Canvas {
         let mut backend = backend.borrow_mut();
 
         // Add a small epsilon to the bounds width before using it as max_width.
-        // The text was already measured during layout; re-shaping with the exact
-        // measured width can cause spurious truncation due to float precision loss
-        // in the scale_factor roundtrip (logical → physical → logical). The 0.5px
-        // cushion prevents that while still truncating text that genuinely overflows.
+        // The same epsilon is applied in TextWidget::size_that_fits so that
+        // both paths produce the same TypesetterBridge cache key, avoiding
+        // duplicate cache entries and inconsistent truncation.
         let max_width = Some(position.width + 0.5);
         let layout = backend.layout_single_line(text, style, max_width);
         let glyphs = backend.ensure_glyphs(&layout);

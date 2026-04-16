@@ -364,12 +364,20 @@ impl Widget for TextWidget {
         };
         let mut backend = backend.borrow_mut();
 
+        // Add a small epsilon to the proposal width before passing it as
+        // max_width. The same epsilon is applied in Canvas::draw_text /
+        // draw_paragraph so both measurement and paint produce the same
+        // TypesetterBridge cache key, avoiding duplicate cache entries
+        // and inconsistent truncation from float precision loss in the
+        // scale_factor roundtrip (logical → physical → logical).
+        let max_width = proposal.width.map(|w| w + 0.5);
+
         // Markup path: only reachable in Wrap mode. The backend parses
         // the source internally and returns a TextLayout whose `spans`
         // field carries per-run rects (including links) that we stash
         // for hit-testing during event dispatch.
         if self.markup {
-            let layout = match proposal.width {
+            let layout = match max_width {
                 Some(w) => backend.layout_paragraph_markup(&text, &self.style, w, self.max_lines),
                 None => backend.layout_single_line_markup(&text, &self.style, None),
             };
@@ -379,7 +387,7 @@ impl Widget for TextWidget {
         }
 
         match self.overflow {
-            TextOverflow::Wrap => match proposal.width {
+            TextOverflow::Wrap => match max_width {
                 Some(w) => {
                     let layout = backend.layout_paragraph(&text, &self.style, w, self.max_lines);
                     Size::new(layout.width, layout.height)
@@ -394,13 +402,13 @@ impl Widget for TextWidget {
             TextOverflow::Ellipsis(EllipsisMode::Trailing) => {
                 // text-typeset truncates with trailing "…" when a max_width
                 // is supplied — let it do the work.
-                let layout = backend.layout_single_line(&text, &self.style, proposal.width);
+                let layout = backend.layout_single_line(&text, &self.style, max_width);
                 Size::new(layout.width, layout.height)
             }
             TextOverflow::Ellipsis(mode) => {
                 // Middle / Leading: compute the truncated display string
                 // first, then measure it unconstrained.
-                let Some(max_w) = proposal.width else {
+                let Some(max_w) = max_width else {
                     let layout = backend.layout_single_line(&text, &self.style, None);
                     return Size::new(layout.width, layout.height);
                 };

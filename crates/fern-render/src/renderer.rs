@@ -446,27 +446,29 @@ impl Renderer {
                         }
                     }
                     fern_canvas::DrawCommand::Glyph(idx) => {
-                        flush_all!(
-                            pass,
-                            &self.queue,
-                            self.streams,
-                            &self.rect_pipeline,
-                            &self.sdf_pipeline,
-                            &self.quad_pipeline,
-                            &self.shadow_pipeline,
-                            rect_batch,
-                            sdf_batch,
-                            quad_batch,
-                            shadow_batch,
-                            self.atlas_texture,
-                            self.path_atlas_texture,
-                            quad_source,
-                            index_binding
-                        );
-                        quad_source = None;
-                        if let Some(atlas) = &self.atlas_texture {
+                        // Only flush when the quad source changes — consecutive
+                        // glyphs batch into one draw call.
+                        if quad_source != Some(QuadSource::GlyphAtlas) {
+                            flush_all!(
+                                pass,
+                                &self.queue,
+                                self.streams,
+                                &self.rect_pipeline,
+                                &self.sdf_pipeline,
+                                &self.quad_pipeline,
+                                &self.shadow_pipeline,
+                                rect_batch,
+                                sdf_batch,
+                                quad_batch,
+                                shadow_batch,
+                                self.atlas_texture,
+                                self.path_atlas_texture,
+                                quad_source,
+                                index_binding
+                            );
                             quad_source = Some(QuadSource::GlyphAtlas);
-
+                        }
+                        if let Some(atlas) = &self.atlas_texture {
                             let Some(glyph) = frame.glyphs.get(*idx) else {
                                 continue;
                             };

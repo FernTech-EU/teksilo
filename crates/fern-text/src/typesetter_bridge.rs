@@ -9,6 +9,7 @@ use text_typeset::{
     DocumentFlow, FontFaceId, InlineMarkup, LaidOutSpanKind, ParagraphResult, SingleLineResult,
     TextFontService, TextFormat,
 };
+use text_typeset::atlas::cache::GlyphCacheKey;
 
 /// Which layout method produced the cache entry — separates the
 /// single-line and paragraph caches so a single-line truncated result
@@ -96,10 +97,12 @@ pub struct TypesetterBridge {
     /// Layout metrics cache: avoids re-shaping text just for size
     /// measurement.
     layout_cache: HashMap<LayoutCacheKey, TextLayout>,
-    /// Glyph quads stored by opaque layout key so ensure_glyphs can
-    /// be resolved independently for many text widgets in the same
-    /// frame.
-    glyph_cache: HashMap<u64, Vec<GlyphQuad>>,
+    /// Glyph quads + per-glyph cache keys stored by opaque layout key
+    /// so ensure_glyphs can be resolved independently for many text
+    /// widgets in the same frame. The cache keys are used to touch
+    /// glyphs in text-typeset's internal `GlyphCache` so they aren't
+    /// evicted while still being rendered via paint-cache hits.
+    glyph_cache: HashMap<u64, (Vec<GlyphQuad>, Vec<GlyphCacheKey>)>,
     /// Whether any text work (`layout_single_line`/`ensure_glyphs`)
     /// happened since the last `atlas_info()` call. When false we
     /// skip advancing the eviction generation to avoid aging out
@@ -350,16 +353,19 @@ impl TextBackend for TypesetterBridge {
         self.layout_cache.insert(cache_key.clone(), layout.clone());
         self.glyph_cache.insert(
             key,
-            result
-                .glyphs
-                .iter()
-                .map(|g| GlyphQuad {
-                    screen: g.screen,
-                    atlas: g.atlas,
-                    color: g.color,
-                    is_color: g.is_color,
-                })
-                .collect(),
+            (
+                result
+                    .glyphs
+                    .iter()
+                    .map(|g| GlyphQuad {
+                        screen: g.screen,
+                        atlas: g.atlas,
+                        color: g.color,
+                        is_color: g.is_color,
+                    })
+                    .collect(),
+                result.glyph_keys.clone(),
+            ),
         );
         layout
     }
@@ -406,16 +412,19 @@ impl TextBackend for TypesetterBridge {
         self.layout_cache.insert(cache_key.clone(), layout.clone());
         self.glyph_cache.insert(
             key,
-            result
-                .glyphs
-                .iter()
-                .map(|g| GlyphQuad {
-                    screen: g.screen,
-                    atlas: g.atlas,
-                    color: g.color,
-                    is_color: g.is_color,
-                })
-                .collect(),
+            (
+                result
+                    .glyphs
+                    .iter()
+                    .map(|g| GlyphQuad {
+                        screen: g.screen,
+                        atlas: g.atlas,
+                        color: g.color,
+                        is_color: g.is_color,
+                    })
+                    .collect(),
+                result.glyph_keys.clone(),
+            ),
         );
         layout
     }
@@ -478,16 +487,19 @@ impl TextBackend for TypesetterBridge {
         self.layout_cache.insert(cache_key, layout.clone());
         self.glyph_cache.insert(
             key,
-            result
-                .glyphs
-                .iter()
-                .map(|g| GlyphQuad {
-                    screen: g.screen,
-                    atlas: g.atlas,
-                    color: g.color,
-                    is_color: g.is_color,
-                })
-                .collect(),
+            (
+                result
+                    .glyphs
+                    .iter()
+                    .map(|g| GlyphQuad {
+                        screen: g.screen,
+                        atlas: g.atlas,
+                        color: g.color,
+                        is_color: g.is_color,
+                    })
+                    .collect(),
+                result.glyph_keys.clone(),
+            ),
         );
         layout
     }
@@ -555,25 +567,42 @@ impl TextBackend for TypesetterBridge {
         self.layout_cache.insert(cache_key, layout.clone());
         self.glyph_cache.insert(
             key,
-            result
-                .glyphs
-                .iter()
-                .map(|g| GlyphQuad {
-                    screen: g.screen,
-                    atlas: g.atlas,
-                    color: g.color,
-                    is_color: g.is_color,
-                })
-                .collect(),
+            (
+                result
+                    .glyphs
+                    .iter()
+                    .map(|g| GlyphQuad {
+                        screen: g.screen,
+                        atlas: g.atlas,
+                        color: g.color,
+                        is_color: g.is_color,
+                    })
+                    .collect(),
+                result.glyph_keys.clone(),
+            ),
         );
         layout
     }
 
     fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<GlyphQuad> {
-        self.glyph_cache
-            .get(&layout.layout_key)
-            .cloned()
-            .unwrap_or_default()
+        if let Some((quads, keys)) = self.glyph_cache.get(&layout.layout_key) {
+            // Touch the glyphs in text-typeset's internal cache so they
+            // aren't evicted while still being rendered via paint-cache
+            // hits (where layout_single_line is not called and the
+            // internal glyph_cache.get() that refreshes last_used is
+            // never reached).
+            //
+            // Note: do NOT set `had_text_activity` here — touch_glyphs
+            // directly updates the glyph timestamps, which is sufficient
+            // to protect them when eviction does run (triggered by real
+            // text work on other frames). Setting the flag here would
+            // advance the atlas generation every frame, defeating the
+            // idle-protection mechanism.
+            self.service.touch_glyphs(keys);
+            quads.clone()
+        } else {
+            Vec::new()
+        }
     }
 }
 
