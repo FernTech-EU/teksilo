@@ -84,6 +84,19 @@ When the user asks about `fern!`, match against these situations:
    and always use `ctx.add(...)`. `ctx` must be in scope — either via
    the `fern!(ctx => ...)` preamble or as a local at the call site.
 
+6. **Handler-attachment properties are auto-reordered to the end** of
+   the emitted chain. Methods on `WidgetBuilder` (`on_tap`, `on_hover`,
+   `on_key`, `focusable`, `tab_index`, `cursor`, `clips_children_on`,
+   `context_menu`, `on_drag_hover`, `on_drop`, all the gesture
+   handlers) wrap the widget in `WidgetWithHandlers<T>` which doesn't
+   expose per-widget setters — so the macro silently moves them past
+   any `.child(...)`, `.spacing(...)`, or other widget-specific call.
+   Write `on_tap: cb` before or after children; both compile. If you
+   see a `WidgetWithHandlers<T>` error at expansion, check whether the
+   property name matches a known handler — if not, it's a widget
+   method and ordering within the widget's own setters is the
+   builder's concern.
+
 ## Writing `fern!` — preferred patterns
 
 **Simple tree**:

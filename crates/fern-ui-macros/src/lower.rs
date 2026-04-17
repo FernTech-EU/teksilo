@@ -89,11 +89,27 @@ fn lower_element_chain(
     hoisted: &mut Vec<TokenStream2>,
 ) -> Result<TokenStream2, syn::Error> {
     let mut out = chain::lower_ctor_call(e);
-    for item in &e.body {
+    for item in reordered_body(&e.body) {
         let attach = lower_body_attach(item, ctx_tok, hoisted)?;
         out = quote! { #out #attach };
     }
     Ok(out)
+}
+
+/// Return an iterator over body items with `WidgetBuilder`-method
+/// properties moved to the end. Those methods wrap the widget in
+/// `WidgetWithHandlers<T>` which doesn't expose per-widget setters,
+/// so any `.child(...)` / `.spacing(...)` / `.slot_name(...)` after
+/// them fails to resolve. Pushing handler properties to the end lets
+/// users mix them with children in any source order.
+///
+/// Within each partition (non-handler, handler), the original source
+/// order is preserved.
+fn reordered_body(body: &[BodyItem]) -> impl Iterator<Item = &BodyItem> {
+    let (non_handlers, handlers): (Vec<_>, Vec<_>) = body.iter().partition(|item| {
+        !matches!(item, BodyItem::Property(p) if diag::is_widget_builder_method(&p.name.to_string()))
+    });
+    non_handlers.into_iter().chain(handlers.into_iter())
 }
 
 fn lower_element_stmt(
@@ -105,7 +121,7 @@ fn lower_element_stmt(
     let mut stmts: Vec<TokenStream2> = Vec::new();
     stmts.push(quote! { let mut __parent = #ctor; });
 
-    for item in &e.body {
+    for item in reordered_body(&e.body) {
         match item {
             BodyItem::Let(local) => {
                 stmts.push(quote! { #local });

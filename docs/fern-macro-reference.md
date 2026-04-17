@@ -410,7 +410,14 @@ Side-effect form forces statement-sequence lowering.
 
 Handlers are properties whose value is a closure. The macro preserves
 closure syntax verbatim — `move`, capture, and arity stay as you wrote
-them:
+them. Handler-attachment properties (`on_tap`, `on_hover`, `on_key`,
+`focusable`, `cursor`, `context_menu`, and every other method on the
+`WidgetBuilder` trait) are **automatically moved to the end** of the
+emitted builder chain, so you can interleave them with children and
+widget-specific properties in any order. Without the reorder, a call
+like `.context_menu(...).child(...)` would fail to resolve because the
+`WidgetBuilder` methods wrap the widget in `WidgetWithHandlers<T>`
+which doesn't expose per-widget setters.
 
 ```rust
 Button("Click") {

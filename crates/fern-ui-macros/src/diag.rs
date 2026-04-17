@@ -18,6 +18,42 @@ pub(crate) fn error<T: std::fmt::Display>(span: Span, msg: T) -> Error {
 /// compiler would otherwise produce a generic method-resolution error.
 /// We pre-empt with a targeted message pointing at the slot name they
 /// most likely meant.
+/// Returns true if `name` is a method on `WidgetBuilder` (or the
+/// inherent impl on `WidgetWithHandlers`). These methods wrap the
+/// widget in `WidgetWithHandlers<T>`, which doesn't expose per-widget
+/// builder methods. The lowering reorders handler-attachment items
+/// to come AFTER every widget-specific item so users can write them
+/// in any order without hitting "no method named `child` found for
+/// `WidgetWithHandlers<T>`".
+///
+/// Kept in sync with `crates/fern-core/src/widget_builder.rs`.
+pub(crate) fn is_widget_builder_method(name: &str) -> bool {
+    matches!(
+        name,
+        "on_tap"
+            | "on_double_tap"
+            | "on_triple_tap"
+            | "on_long_press"
+            | "on_drag"
+            | "on_swipe"
+            | "on_pinch"
+            | "on_focus"
+            | "on_key"
+            | "on_pointer_event"
+            | "on_hover"
+            | "on_scroll"
+            | "on_access_action"
+            | "on_access_action_request"
+            | "on_drag_hover"
+            | "on_drop"
+            | "focusable"
+            | "tab_index"
+            | "cursor"
+            | "clips_children_on"
+            | "context_menu"
+    )
+}
+
 pub(crate) fn category_b_bare_child(parent_ty: &str, child_span: Span) -> Error {
     let slot_hint = category_b_slot_hint(parent_ty);
     Error::new(
