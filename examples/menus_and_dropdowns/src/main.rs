@@ -69,6 +69,11 @@ impl Widget for Root {
         let fruit_selected = ctx.signal(None::<String>);
         let color_selected = ctx.signal(Some("Blue".to_string())); // pre-select "Blue"
         let size_selected = ctx.signal(None::<String>);
+        // Searchable combo — its query signal is held externally so the
+        // caller could observe or clear it. Here we just let it live
+        // alongside the selection signal.
+        let country_selected = ctx.signal(None::<String>);
+        let country_query = ctx.signal(String::new());
 
         let combo_section = ctx.add(
             VStack::new()
@@ -81,7 +86,9 @@ impl Widget for Root {
                 .child(
                     TextWidget::new_literal(
                         "Click to open the dropdown. Use arrow keys to navigate, \
-                         Enter to select, Escape to close.",
+                         Enter to select, Escape to close. The searchable variant \
+                         adds a text field at the top of the panel that filters the \
+                         list live.",
                     )
                     .style(t.body.clone())
                     .color(c.text_primary),
@@ -141,6 +148,55 @@ impl Widget for Root {
                                     )
                                     .placeholder("Choose size")
                                     .enabled(false),
+                                ),
+                        )
+                        .child(
+                            VStack::new()
+                                .spacing(4.0)
+                                .child(
+                                    TextWidget::new_literal("Country (searchable)")
+                                        .style(t.small.clone())
+                                        .color(c.text_primary),
+                                )
+                                .child(
+                                    ComboBox::new(
+                                        vec![
+                                            "Argentina",
+                                            "Australia",
+                                            "Belgium",
+                                            "Brazil",
+                                            "Canada",
+                                            "Chile",
+                                            "China",
+                                            "Denmark",
+                                            "Egypt",
+                                            "Finland",
+                                            "France",
+                                            "Germany",
+                                            "Greece",
+                                            "Iceland",
+                                            "India",
+                                            "Ireland",
+                                            "Italy",
+                                            "Japan",
+                                            "Mexico",
+                                            "Netherlands",
+                                            "Norway",
+                                            "Poland",
+                                            "Portugal",
+                                            "Spain",
+                                            "Sweden",
+                                            "Switzerland",
+                                            "Turkey",
+                                            "United Kingdom",
+                                            "United States",
+                                            "Vietnam",
+                                        ],
+                                        country_selected.clone(),
+                                    )
+                                    .placeholder("Pick a country…")
+                                    .search_query(country_query.clone())
+                                    .max_visible_items(6),
                                 ),
                         ),
                 ),

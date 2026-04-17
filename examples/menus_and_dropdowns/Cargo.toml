@@ -7,4 +7,6 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-fern-ui = { workspace = true }
+# `rich-text` enables the `TextInput`-backed `.searchable()` combo box
+# showcased in Section 1.
+fern-ui = { workspace = true, features = ["rich-text"] }
