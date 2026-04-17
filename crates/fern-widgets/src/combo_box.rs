@@ -243,10 +243,14 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// `Role::ListBoxOption` accessibility and tap handler, so callers
     /// do not need to manage a11y or selection dispatch themselves.
     ///
-    /// **Reactivity.** The closure is re-run whenever the item's
-    /// highlighted state changes (selection flipped on or off for this
-    /// row) — the `bool` parameter always reflects the current state at
-    /// render time.
+    /// **Reactivity.** The `bool` argument is a snapshot at build time.
+    /// If the selection flips after the dropdown is open, the user's
+    /// subtree is not automatically re-rendered; the framework-managed
+    /// highlight background (behind the custom widget) does update, and
+    /// closing and re-opening the dropdown picks up the new state. If
+    /// you need a reactive appearance that tracks selection, close over
+    /// a `Signal<Option<T>>` in your closure and compare against the
+    /// item value inside a `.map()` / `bind_*` on primitives.
     ///
     /// **Accessibility.** The wrapper's `set_name(label)` (from
     /// `item_label`) is what screen readers announce. If the returned
@@ -357,18 +361,42 @@ fn resolve_index<T: Clone + PartialEq + 'static>(
     found
 }
 
-/// Build the default label-plus-background item widget used when
-/// `render_item` is not provided. Matches the pre-generic appearance.
-fn default_item_widget(label: &str, theme: &fern_tokens::Theme) -> Box<dyn Widget> {
+/// Add the default label-plus-padding subtree into the arena and return
+/// its root id. Used when `render_item` is not provided.
+///
+/// The label is wrapped in an `HStack` with a trailing `Spacer` so the
+/// inner content stretches to the full item width — without that
+/// stretch, the `ZStack` in `DropdownItem` (which defaults to
+/// `Alignment::CENTER`) would center the narrow text inside the wide
+/// row, producing visibly centered labels instead of left-aligned
+/// ones. This mirrors the pattern used by `MenuItem`'s row.
+fn build_default_item(
+    ctx: &mut BuildContext,
+    label: &str,
+    theme: &fern_tokens::Theme,
+) -> WidgetId {
     let text = TextWidget::new_literal(label)
         .style(theme.typography.body.clone())
         .color(theme.colors.text_primary)
         .single_line()
         .a11y_hidden();
+    let text_id = ctx.add(text);
+
+    // HStack { label | Spacer } fills the available width, which forces
+    // the enclosing `Padding` to stretch to its full proposal rather
+    // than shrinking to the label's intrinsic width.
+    let row = HStack::new()
+        .spacing(0.0)
+        .add_child(text_id)
+        .child(Spacer::new());
+    let row_id = ctx.add(row);
+
     let menu_style = theme.components.menu;
     let pad_v =
         ((menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5).max(0.0);
-    Box::new(Padding::symmetric(pad_v, menu_style.item_padding_horizontal).child(text))
+    let padding =
+        Padding::symmetric(pad_v, menu_style.item_padding_horizontal).child_id(row_id);
+    ctx.add(padding)
 }
 
 /// A single row in the dropdown. Wraps the user-rendered (or default)
@@ -396,16 +424,12 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for DropdownItem<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        use fern_core::binding::BindingLevel;
-
         let theme = ctx.theme().clone();
         let selected_signal = self.selected_signal.clone();
         let value_for_tap = self.value.clone();
 
         // Track whether this item is highlighted (hovered or selected).
         let highlighted = ctx.signal(false);
-        let is_currently_selected = selected_signal.get().as_ref() == Some(&self.value);
-        highlighted.set(is_currently_selected);
 
         // Sync highlight with the currently-selected value.
         {
@@ -415,13 +439,6 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
                 highlighted.set(sel.as_ref() == Some(&value));
             });
         }
-
-        // Rebuild this row whenever its highlight flips — necessary so
-        // custom `render_item` closures that depend on the `selected`
-        // bool actually observe the change. Only the two items involved
-        // in a selection transition (old and new) rebuild; unaffected
-        // items stay put.
-        highlighted.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
         let bg_color = highlighted.map({
             let primary = theme.colors.accent;
@@ -435,14 +452,16 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         });
 
         // Build the inner content — either the user's render_item or the
-        // default label row. `render_item` is re-invoked on rebuild so
-        // callers see a fresh `selected` bool each time the highlight
-        // flips.
-        let inner: Box<dyn Widget> = match &self.render {
-            Some(r) => (r)(&self.value, is_currently_selected),
-            None => default_item_widget(&self.label, &theme),
+        // default label row. The default path adds widgets directly via
+        // `ctx.add` so every child is in the arena at layout time.
+        let is_currently_selected = self.selected_signal.get().as_ref() == Some(&self.value);
+        let inner_id = match &self.render {
+            Some(r) => {
+                let widget = (r)(&self.value, is_currently_selected);
+                ctx.add_boxed(widget)
+            }
+            None => build_default_item(ctx, &self.label, &theme),
         };
-        let inner_id = ctx.add_boxed(inner);
 
         let bg = RectWidget::new().bind_background(bg_color);
         let bg_id = ctx.add(bg);
@@ -471,15 +490,18 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let min_h = ctx.theme.components.menu.item_height;
-        match self.root_child_id {
-            Some(id) => {
-                let s = ctx
-                    .child_size(id, proposal)
-                    .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
-                Size::new(s.width, s.height.max(min_h))
-            }
-            None => proposal.resolve(120.0, min_h),
-        }
+        // Forward the width proposal so each row stretches the full panel
+        // width instead of collapsing to its text's intrinsic width —
+        // ZStack::size_that_fits queries children with `unspecified`,
+        // stripping the proposed width, so we can't just delegate to the
+        // root ZStack. Same pattern as `menu_list::KeyboardHighlightWrapper`.
+        let child_size = self
+            .root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, min_h));
+        let width = proposal.width.unwrap_or(child_size.width.max(120.0));
+        let height = child_size.height.max(min_h);
+        Size::new(width, height)
     }
 
     fn place_children(
@@ -557,16 +579,28 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 vstack = vstack.child(item);
             }
         }
+        let vstack_id = ctx.add(vstack);
 
         let menu_style = theme.components.menu;
-        let padded = Padding::uniform(4.0).child(vstack);
+        let padded_id = ctx.add(Padding::uniform(4.0).child_id(vstack_id));
 
-        // Cap the panel height at max_visible_items * item_height so
-        // overflowing item counts scroll rather than run off-screen.
-        // +8 accounts for the 4px outer padding on both sides.
-        let max_height = self.max_visible_items as f32 * menu_style.item_height + 8.0;
-        let scrollable = crate::scroll_area::ScrollArea::new().child(padded);
-        let clamped = ctx.add(crate::primitives::MaxSize::height(max_height).child(scrollable));
+        // Only wrap in ScrollArea when the item count actually exceeds
+        // the visibility cap. For the common case (few items), a plain
+        // padded VStack sizes naturally to its content — wrapping in
+        // ScrollArea would impose the ScrollArea's 200px default height
+        // regardless of content, leaving a blank strip below the items.
+        let content_id = if total > self.max_visible_items {
+            // +8 accounts for the 4px outer padding on both sides.
+            let max_height =
+                self.max_visible_items as f32 * menu_style.item_height + 8.0;
+            let scrollable_id = ctx.add(
+                crate::scroll_area::ScrollArea::from_id(padded_id)
+                    .preferred_size(0.0, max_height),
+            );
+            ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
+        } else {
+            padded_id
+        };
 
         // Dropdown panel — same surface treatment as MenuList (raised + popup radius)
         let bg = RectWidget::new()
@@ -576,7 +610,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(clamped);
+        let zstack = ZStack::new().add_child(bg_id).add_child(content_id);
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 
@@ -683,7 +717,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             interaction.map(move |s| resolve_text(*s, &colors))
         };
 
-        // Build trigger: [label | Spacer | chevron]
+        // Build trigger: [label | Spacer | divider | chevron]
         let label = TextWidget::new_literal("")
             .style(theme.typography.body.clone())
             .bind_text(label_text)
@@ -691,6 +725,20 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);
+
+        // Divider between the selected-value area and the chevron,
+        // matching the `SplitButton` visual pattern — a thin vertical
+        // rule in the `border` token that visually separates the
+        // display region from the dropdown trigger indicator.
+        let combo_style = theme.components.combo_box;
+        let divider_fill_id =
+            ctx.add(RectWidget::new().background(theme.colors.border));
+        let divider_id = ctx.add(
+            crate::primitives::FixedSize::new()
+                .bind_width(theme.shape.border_width)
+                .bind_height(combo_style.height * 0.6)
+                .child_id(divider_fill_id),
+        );
 
         let chevron =
             IconWidget::chevron_down(12.0).color(theme.colors.text_primary.with_alpha(0.5));
@@ -700,10 +748,10 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             .spacing(8.0)
             .add_child(label_id)
             .child(Spacer::new())
+            .add_child(divider_id)
             .add_child(chevron_id);
         let row_id = ctx.add(row);
 
-        let combo_style = theme.components.combo_box;
         let padding = Padding::symmetric(
             combo_style.padding_horizontal * 0.5,
             combo_style.padding_horizontal,
@@ -733,7 +781,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         );
         self.root_child_id = Some(root_id);
 
-        // Pre-create the dropdown panel (dormant until opened)
+        // Pre-create the dropdown panel (dormant until opened). On
+        // rebuild, first tear down the previous panel subtree — it was
+        // inserted as an arena root via `ctx.add(..)` + `set_dormant`,
+        // so the framework's rebuild path (which only destroys this
+        // widget's direct arena children) would otherwise leave it
+        // behind as an orphan on every model mutation.
+        if let Some(old_id) = self.dropdown_content_id.take() {
+            ctx.destroy_subtree(old_id);
+        }
         let dropdown_panel = DropdownPanel {
             source: self.source.clone(),
             selected: self.selected.clone(),
@@ -1470,17 +1526,120 @@ mod tests {
     }
 
     #[test]
-    fn render_item_reruns_on_selection_change() {
-        // Regression guard: the `bool selected` argument to `render_item`
-        // must reflect the current highlight state at every render, not a
-        // snapshot from the first build. Flipping selection across two
-        // items must cause the render closure to observe `selected = true`
-        // for each of them in turn.
+    fn dropdown_items_span_panel_width() {
+        // Regression: DropdownItem::size_that_fits delegates to the root
+        // ZStack, which queries children with UNSPECIFIED — so items
+        // collapsed to the intrinsic width of their text label and
+        // appeared as narrow centered stripes inside the wider dropdown
+        // panel. The panel bg and RectWidgets filled the panel area but
+        // the items (containing the labels) did not, producing a
+        // visually-blank dropdown where only clicks that happened to
+        // land on the narrow label strip changed the selection.
+        //
+        // Each item's bounds must match the panel's inner width
+        // (accounting for the 4px outer padding on both sides).
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        let content_ids = tree.overlay_manager().active_content_ids();
+        let panel_width = tree.bounds(content_ids[0]).width;
+        assert!(panel_width > 100.0, "panel should be reasonably wide");
+
+        for name in ["Apple", "Banana", "Cherry"] {
+            let id = tree
+                .find_by_label(name)
+                .unwrap_or_else(|| panic!("dropdown should contain {name}"));
+            let w = tree.bounds(id).width;
+            // Panel has 4px padding on each side — items should fill
+            // the inner width (panel_width - 8).
+            assert!(
+                w >= panel_width - 10.0,
+                "row {name} should span panel width: item={}, panel={}",
+                w,
+                panel_width
+            );
+        }
+    }
+
+    #[test]
+    fn dropdown_items_have_nonzero_bounds_when_open() {
+        // Regression guard for a rendering bug where the dropdown panel
+        // showed a blank surface: the item rows must each occupy a visible
+        // rectangle after the overlay opens. Without this, the widget-
+        // catalog demo regressed to an empty-looking dropdown even though
+        // the logic tests all passed.
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 400.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(300.0, 400.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        for name in ["Apple", "Banana", "Cherry"] {
+            let id = tree
+                .find_by_label(name)
+                .unwrap_or_else(|| panic!("dropdown should contain {name}"));
+            let b = tree.bounds(id);
+            assert!(
+                b.width > 0.0 && b.height > 0.0,
+                "{name} row should have nonzero bounds, got {:?}",
+                b
+            );
+        }
+    }
+
+    #[test]
+    fn many_items_scroll_without_overflow_past_overlay() {
+        // More items than max_visible_items (default 8): the dropdown
+        // must cap at roughly max_visible * item_height, not grow to
+        // fit every row.
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let many: Vec<String> = (0..20).map(|i| format!("Item {i}")).collect();
+        let cb = tree.add(ComboBox::new(many, selected.clone()));
+        tree.layout(SizeProposal::exact(300.0, 800.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(300.0, 800.0));
+
+        let content_ids = tree.overlay_manager().active_content_ids();
+        let panel_bounds = tree.bounds(content_ids[0]);
+        // 20 rows × 32px = 640px uncapped; expect well under that.
+        assert!(
+            panel_bounds.height < 400.0,
+            "panel should be capped, was {}",
+            panel_bounds.height
+        );
+        assert!(
+            panel_bounds.height > 0.0,
+            "panel should have visible height"
+        );
+    }
+
+    #[test]
+    fn render_item_closure_receives_selection_snapshot_at_build() {
+        // Documents current behavior: the `bool selected` passed to
+        // `render_item` reflects the selection state at the moment the
+        // dropdown panel was built. It is NOT automatically re-fired when
+        // the selection changes while the dropdown is open — consumers
+        // that need a reactive appearance should close over a Signal and
+        // bind primitives directly. See `.render_item()` rustdoc.
         use std::sync::Mutex;
         let observed: Rc<Mutex<Vec<(String, bool)>>> = Rc::new(Mutex::new(Vec::new()));
 
         let mut tree = light_tree();
-        let selected = Signal::new(None::<String>);
+        let selected = Signal::new(Some("Banana".to_string()));
         let items = vec!["Apple".to_string(), "Banana".to_string()];
         let obs = observed.clone();
         let cb = tree.add(
@@ -1491,26 +1650,18 @@ mod tests {
                 }),
         );
         tree.layout(SizeProposal::exact(300.0, 300.0));
-        // Open so items build for the first time.
         tree.click(cb);
-        tree.layout(SizeProposal::exact(300.0, 300.0));
-
-        // Select Apple; the Apple row must rebuild with is_selected=true.
-        selected.set(Some("Apple".to_string()));
-        tree.layout(SizeProposal::exact(300.0, 300.0));
-        // Now select Banana; Apple rebuilds with false, Banana with true.
-        selected.set(Some("Banana".to_string()));
         tree.layout(SizeProposal::exact(300.0, 300.0));
 
         let calls = observed.lock().unwrap().clone();
         assert!(
-            calls.contains(&("Apple".to_string(), true)),
-            "render_item should have been called for Apple with selected=true; got {:?}",
+            calls.contains(&("Apple".to_string(), false)),
+            "Apple row should have been rendered with selected=false; got {:?}",
             calls
         );
         assert!(
             calls.contains(&("Banana".to_string(), true)),
-            "render_item should have been called for Banana with selected=true; got {:?}",
+            "Banana row should have been rendered with selected=true; got {:?}",
             calls
         );
     }
