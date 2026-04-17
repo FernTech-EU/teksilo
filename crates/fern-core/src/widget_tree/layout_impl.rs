@@ -37,10 +37,7 @@ impl WidgetTree {
         }
 
         // Rebuild data-driven widgets whose data model changed.
-        let to_rebuild = self.arena.collect_needs_rebuild();
-        for widget_id in to_rebuild {
-            self.rebuild_single_widget(widget_id);
-        }
+        self.process_pending_rebuilds();
 
         let mut to_dormant = Vec::new();
         let mut to_activate = Vec::new();
@@ -56,6 +53,19 @@ impl WidgetTree {
         }
         for id in to_activate {
             self.arena.activate(id);
+        }
+    }
+
+    /// Drain any widgets flagged `needs_rebuild` that are currently
+    /// active + have built children. Called from
+    /// [`process_state_changes`] after dirty bindings have been
+    /// flushed, and again after overlay / tooltip activation so that
+    /// widgets transitioning from dormant → active in the same
+    /// layout pass get rebuilt *this* frame rather than the next.
+    pub(super) fn process_pending_rebuilds(&mut self) {
+        let to_rebuild = self.arena.collect_needs_rebuild();
+        for widget_id in to_rebuild {
+            self.rebuild_single_widget(widget_id);
         }
     }
 
@@ -83,6 +93,13 @@ impl WidgetTree {
         self.process_delayed_overlays_real();
         self.process_pointer_leave_overlays_real();
         self.process_auto_dismiss_overlays_real();
+        // Overlay / tooltip activation may have flipped widgets from
+        // dormant → active; if any of those had `needs_rebuild`
+        // pending (e.g. a shortcut rebind happened while the tooltip
+        // was hidden), drain them now so the freshly-visible surface
+        // shows fresh content in the *same* layout pass rather than
+        // waiting for another paint-triggering event.
+        self.process_pending_rebuilds();
 
         self.arena.refresh_roots();
 

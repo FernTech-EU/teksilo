@@ -252,6 +252,37 @@ pub struct EventContext {
     /// Populated by the dispatcher before running each handler; `None`
     /// for hand-constructed contexts in tests.
     pub(crate) app_context: Option<std::rc::Rc<crate::event_source::TreeAppContext>>,
+    /// Intents queued by handlers via `send_intent`. Drained by the
+    /// tree after event dispatch and routed source-widget → root.
+    pub(crate) pending_intents: Vec<crate::intent::Intent>,
+    /// Key-capture callback armed via `ctx.begin_key_capture(...)`.
+    /// The callback + its shared slot are installed on the tree by
+    /// `collect_from_ctx`. Only one per ctx; the last caller wins.
+    pub(crate) pending_key_capture: Option<crate::shortcut::KeyCaptureSlot>,
+    /// Set to request cancellation of any armed key capture.
+    pub(crate) cancel_key_capture: bool,
+    /// Deferred mutations to the tree's [`ShortcutRegistry`](crate::shortcut::ShortcutRegistry),
+    /// typically issued by settings-UI buttons to rebind or clear
+    /// overrides. Applied in `collect_from_ctx` after the handler
+    /// returns.
+    pub(crate) pending_shortcut_mutations: Vec<ShortcutMutation>,
+}
+
+/// Deferred edit to the tree's shortcut registry, queued on an
+/// `EventContext` and applied in `collect_from_ctx`.
+#[derive(Debug, Clone)]
+pub(crate) enum ShortcutMutation {
+    RebindPrimary {
+        id: String,
+        keystroke: Option<crate::shortcut::KeyStroke>,
+    },
+    RebindSecondary {
+        id: String,
+        keystroke: Option<crate::shortcut::KeyStroke>,
+    },
+    ClearOverride {
+        id: String,
+    },
 }
 
 /// A structural change to the widget tree, deferred until after event dispatch.
@@ -289,6 +320,10 @@ impl EventContext {
             locale_request: None,
             frame_requested: false,
             app_context: None,
+            pending_intents: Vec::new(),
+            pending_key_capture: None,
+            cancel_key_capture: false,
+            pending_shortcut_mutations: Vec::new(),
         }
     }
 
@@ -324,6 +359,87 @@ impl EventContext {
     pub fn emit<C: crate::app_command::AppCommand>(&mut self, cmd: C) {
         self.commands
             .push(crate::app_command::ErasedCommand::new(cmd));
+    }
+
+    /// Dispatch an [`Intent`](crate::intent::Intent) as if the source
+    /// widget pressed its keyboard shortcut. The framework walks
+    /// source-widget → root after the current handler returns,
+    /// invoking any matching [`Action`](crate::action::Action) it
+    /// finds. Unmatched intents are silently dropped.
+    pub fn send_intent(&mut self, intent: crate::intent::Intent) {
+        self.pending_intents.push(intent);
+    }
+
+    /// Arm a one-shot key-capture callback, returning a
+    /// [`CaptureHandle`](crate::shortcut::CaptureHandle) whose `Drop`
+    /// cancels the capture if it hasn't fired yet. The next `KeyDown`
+    /// bypasses shortcut resolution and invokes the callback with:
+    /// - the captured [`KeyStroke`](crate::shortcut::KeyStroke)
+    /// - mutable access to the registry (rebinds in-place)
+    /// - a mutable [`EventContext`] (emit commands, send intents,
+    ///   dismiss overlays, …)
+    ///
+    /// The handle must be stored somewhere with an appropriate
+    /// lifetime (typically in the calling widget's state) or the
+    /// capture will be cancelled immediately when the returned
+    /// handle drops at end of scope.
+    pub fn begin_key_capture(
+        &mut self,
+        callback: impl FnOnce(
+                crate::shortcut::KeyStroke,
+                &mut crate::shortcut::ShortcutRegistry,
+                &mut EventContext,
+            ) + 'static,
+    ) -> crate::shortcut::CaptureHandle {
+        let slot: crate::shortcut::KeyCaptureSlot =
+            std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(callback))));
+        self.pending_key_capture = Some(slot.clone());
+        self.cancel_key_capture = false;
+        crate::shortcut::CaptureHandle::new(slot)
+    }
+
+    /// Cancel any key capture armed earlier in this handler or via
+    /// [`WidgetTree::begin_key_capture`] before the handler ran.
+    pub fn cancel_key_capture(&mut self) {
+        self.pending_key_capture = None;
+        self.cancel_key_capture = true;
+    }
+
+    /// Queue a deferred rebind of the primary keystroke for the
+    /// registered shortcut with the given id. Applied by the tree
+    /// after the current handler returns. Use `None` to explicitly
+    /// unbind the slot.
+    pub fn rebind_shortcut_primary(
+        &mut self,
+        id: impl Into<String>,
+        keystroke: Option<crate::shortcut::KeyStroke>,
+    ) {
+        self.pending_shortcut_mutations
+            .push(ShortcutMutation::RebindPrimary {
+                id: id.into(),
+                keystroke,
+            });
+    }
+
+    /// Queue a deferred rebind of the secondary keystroke for the
+    /// registered shortcut with the given id.
+    pub fn rebind_shortcut_secondary(
+        &mut self,
+        id: impl Into<String>,
+        keystroke: Option<crate::shortcut::KeyStroke>,
+    ) {
+        self.pending_shortcut_mutations
+            .push(ShortcutMutation::RebindSecondary {
+                id: id.into(),
+                keystroke,
+            });
+    }
+
+    /// Queue a deferred clear of any user override for the given
+    /// shortcut id, restoring its declared defaults.
+    pub fn clear_shortcut_override(&mut self, id: impl Into<String>) {
+        self.pending_shortcut_mutations
+            .push(ShortcutMutation::ClearOverride { id: id.into() });
     }
 
     /// Request a cursor icon change.

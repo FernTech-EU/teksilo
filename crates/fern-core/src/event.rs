@@ -11,7 +11,7 @@ pub enum PointerButton {
 }
 
 /// Keyboard key identifiers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Key {
     Space,
     Enter,
@@ -110,7 +110,17 @@ impl Key {
 }
 
 /// Keyboard modifier state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct Modifiers {
     bits: u8,
 }

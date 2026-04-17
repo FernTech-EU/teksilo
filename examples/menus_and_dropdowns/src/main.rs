@@ -957,10 +957,10 @@ mod tests {
 
     #[test]
     fn shortcut_display() {
-        use fern_ui::prelude::Shortcut;
+        use fern_ui::prelude::KeyStroke;
 
-        assert_eq!(Shortcut::ctrl(Key::S).to_string(), "Ctrl+S");
-        assert_eq!(Shortcut::ctrl_shift(Key::Z).to_string(), "Ctrl+Shift+Z");
-        assert_eq!(Shortcut::alt(Key::F4).to_string(), "Alt+F4");
+        assert_eq!(KeyStroke::ctrl(Key::S).to_string(), "Ctrl+S");
+        assert_eq!(KeyStroke::ctrl_shift(Key::Z).to_string(), "Ctrl+Shift+Z");
+        assert_eq!(KeyStroke::alt(Key::F4).to_string(), "Alt+F4");
     }
 }

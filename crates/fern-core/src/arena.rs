@@ -83,6 +83,10 @@ pub struct WidgetNode {
     pub(crate) subscription_handles: Vec<(SubscriptionId, SubscriptionHandle)>,
     /// Context menu factory — invoked on right-click to produce overlay content.
     pub(crate) context_menu_factory: Option<crate::widget_builder::ContextMenuFactory>,
+    /// Intent-bound actions attached by this widget during `build()`.
+    /// Consulted during intent dispatch (source-widget → root walk).
+    /// Cleared on rebuild in the same pass that clears handlers.
+    pub(crate) actions: Vec<crate::action::Action>,
 }
 
 impl std::fmt::Debug for WidgetNode {
@@ -156,6 +160,7 @@ impl WidgetArena {
             effect_handles: Vec::new(),
             subscription_handles: Vec::new(),
             context_menu_factory: None,
+            actions: Vec::new(),
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -203,6 +208,7 @@ impl WidgetArena {
             effect_handles: Vec::new(),
             subscription_handles: Vec::new(),
             context_menu_factory: None,
+            actions: Vec::new(),
         });
         // Set up parent-child for declared children
         for &child_id in &children {

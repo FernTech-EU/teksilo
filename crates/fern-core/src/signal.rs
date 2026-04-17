@@ -372,15 +372,41 @@ impl<T: Clone + 'static> Signal<T> {
     }
 
     /// Bind this signal to a widget at the given dirty-tracking level.
+    ///
+    /// Idempotent per `(widget_id, source_id, kind)` tuple: a widget
+    /// that calls `bind_to` on the same signal twice in one build
+    /// doesn't get duplicate entries — the second call promotes the
+    /// existing entry's level if its priority is higher, otherwise
+    /// it's a no-op.
     pub fn bind_to(&self, widget_id: WidgetId, registry: &BindingRegistry, level: BindingLevel) {
         let (is_dirty, clear_dirty) = self.dirty_fns();
+        let source_id = self.source_id();
         if let (Some(is_dirty), Some(clear_dirty)) = (is_dirty, clear_dirty) {
             registry.register(Binding {
                 widget_id,
                 level,
                 is_dirty,
                 clear_dirty,
+                source_id,
             });
+        }
+    }
+
+    /// Stable identity of the signal's source state, used by
+    /// [`BindingRegistry`] to dedup `bind_to` calls. Mutable signals
+    /// return the address of their shared `Rc<RefCell<Inner>>`;
+    /// derived signals return the address of their shared
+    /// `source_dirty` closure (which is itself cloned from the
+    /// source's dirty `Rc`, so sibling derived signals from the
+    /// same source share identity). Two signals with the same source
+    /// have the same `source_id` regardless of how many intermediate
+    /// derives sit between them.
+    pub fn source_id(&self) -> usize {
+        match &self.kind {
+            SignalKind::Mutable { inner, .. } => Rc::as_ptr(inner) as *const () as usize,
+            SignalKind::Derived { source_dirty, .. } => {
+                Rc::as_ptr(source_dirty) as *const () as usize
+            }
         }
     }
 

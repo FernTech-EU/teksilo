@@ -218,18 +218,29 @@ impl Widget for RichTooltipWidget {
         }
         let nested_map = Rc::new(nested_ids);
 
-        // Resolve the shortcut label: manual override first, fall back
-        // to `ctx.shortcut_label_for_any(command)` for command-bound
-        // tooltips so the live ShortcutMap is the source of truth.
-        let shortcut_text: Option<String> = content
-            .shortcut_label
-            .clone()
-            .or_else(|| {
-                content
-                    .command
-                    .as_ref()
-                    .and_then(|c| ctx.shortcut_label_for_any(c.as_ref()))
-            });
+        // Resolve the shortcut label: the manual override wins;
+        // otherwise, if the tooltip was bound to a shortcut id via
+        // `.for_shortcut(id)`, the effective primary keystroke is
+        // pulled from the tree's `ShortcutRegistry`. The registry's
+        // `version` signal is bound to the tooltip at `Relayout`
+        // level so user rebinds and late registrations refresh the
+        // chip on the next pass.
+        let shortcut_text: Option<String> = content.shortcut_label.clone().or_else(|| {
+            content.shortcut_id.and_then(|id| {
+                ctx.effective_shortcut(id)
+                    .and_then(|eff| eff.primary.map(|ks| ks.to_string()))
+            })
+        });
+        if content.shortcut_id.is_some() {
+            // Rebuild (not Relayout): the chip's text is read from
+            // the registry by value during build(), so a rebind only
+            // updates when build() re-enters.
+            ctx.shortcut_version().bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                fern_core::binding::BindingLevel::Rebuild,
+            );
+        }
 
         // Body row: text + optional shortcut chip.
         // a11y_hidden: the tooltip root owns `set_name(body_text)`, so the

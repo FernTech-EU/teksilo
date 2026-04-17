@@ -59,12 +59,85 @@ impl WidgetTree {
             }
         }
 
-        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event
-            && let Some(cmd) = self.shortcut_map_lookup(*key, *modifiers)
-        {
-            self.pending_commands.push(cmd);
-            self.flush_commands();
-            return;
+        // Key-capture mode: if a callback is armed (via
+        // `WidgetTree::begin_key_capture`), the next KeyDown bypasses
+        // shortcut resolution entirely and runs the callback with
+        // mutable access to the registry AND an `EventContext` so
+        // rebind handlers can also emit commands, send intents,
+        // dismiss overlays, etc. The capture is one-shot; its slot
+        // is emptied before the callback runs so a re-entrant
+        // `begin_key_capture` call from inside the callback arms a
+        // fresh session (rather than competing with the in-flight
+        // one).
+        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
+            if let Some(callback) = self.take_key_capture() {
+                let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
+                let mut cap_ctx =
+                    EventContext::new().with_app_context(self.app_context.clone());
+                callback(keystroke, self.shortcut_registry_mut(), &mut cap_ctx);
+                // Route side effects of the callback through the
+                // focused widget (or an arbitrary root if no focus).
+                let anchor = self.focused.or_else(|| self.arena.roots().first().copied());
+                if let Some(anchor_id) = anchor {
+                    self.collect_from_ctx(cap_ctx, anchor_id);
+                    self.drain_pending_intents();
+                }
+                self.flush_commands();
+                return;
+            }
+        }
+
+        // Shortcut → intent → action dispatch. A KeyDown whose chord
+        // matches a registered enabled `Shortcut` whose scope contains
+        // the focused widget is consumed here: the shortcut's
+        // `on_activate` runs (producing an `Intent`), its ctx side
+        // effects are collected, and the intent walks source-widget →
+        // root firing any matching `Action`. Otherwise the focused
+        // widget sees the raw KeyDown below.
+        //
+        // Two-phase: the registry is inspected first (immutable read)
+        // to resolve `id / scope / propagate_when_disabled`. Only if
+        // scope matches the current focus do we take a mutable borrow
+        // to invoke `on_activate` — this way a scope mismatch cannot
+        // drop side effects the closure put into its ctx, because
+        // the closure never runs.
+        if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
+            let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
+            let lookup = self.shortcut_registry.find_by_keystroke(keystroke).map(
+                |eff| {
+                    (
+                        eff.shortcut.id,
+                        eff.shortcut.scope,
+                        eff.shortcut.propagate_when_disabled,
+                    )
+                },
+            );
+            if let Some((id, scope, propagate_when_disabled)) = lookup {
+                let anchor = match scope {
+                    crate::shortcut::ShortcutScope::Global => self.focused,
+                    crate::shortcut::ShortcutScope::Scoped(scope_id) => self
+                        .focused
+                        .filter(|f| self.is_descendant_of(*f, scope_id)),
+                };
+                if let Some(anchor_id) = anchor {
+                    let mut act_ctx =
+                        EventContext::new().with_app_context(self.app_context.clone());
+                    if let Some(intent) = self.shortcut_registry.invoke_on_activate(
+                        id,
+                        keystroke,
+                        &mut act_ctx,
+                    ) {
+                        self.collect_from_ctx(act_ctx, anchor_id);
+                        self.enqueue_intent(anchor_id, intent, propagate_when_disabled);
+                        self.drain_pending_intents();
+                        self.flush_commands();
+                        return;
+                    }
+                }
+                // Scope mismatch — fall through to normal KeyDown
+                // dispatch. `on_activate` was never called, so nothing
+                // to clean up.
+            }
         }
 
         // --- Active drag session handling ---
@@ -185,6 +258,11 @@ impl WidgetTree {
             | WidgetEvent::FocusGained { .. }
             | WidgetEvent::FocusLost => {}
         }
+        // Any intents queued by handlers via `ctx.send_intent(...)`
+        // are dispatched after the raw event has been handled but
+        // before commands are flushed, so commands emitted from
+        // action handlers land on the same tick.
+        self.drain_pending_intents();
         self.flush_commands();
     }
 
@@ -700,6 +778,42 @@ impl WidgetTree {
             self.current_cursor = cursor;
         }
         self.pending_commands.extend(ctx.commands);
+        // Intents queued through `ctx.send_intent` are anchored at
+        // the originating widget. Programmatic sends default to
+        // `propagate_when_disabled = true` — there is no shortcut to
+        // consult, and propagation is the safe, least-surprising
+        // default.
+        for intent in ctx.pending_intents {
+            self.enqueue_intent(source_widget, intent, true);
+        }
+        // Key capture: process cancel before arm, matching the
+        // handler's call order (the handler sets `cancel_key_capture`
+        // when it calls `ctx.cancel_key_capture()`, and separately
+        // stores `pending_key_capture` when it calls
+        // `ctx.begin_key_capture(...)`). If the handler did both,
+        // arm wins (whichever was called last on the ctx has
+        // already overwritten the other field's effect via the
+        // setter logic).
+        if ctx.cancel_key_capture {
+            self.cancel_key_capture();
+        }
+        if let Some(slot) = ctx.pending_key_capture {
+            self.key_capture = Some(slot);
+        }
+        // Registry mutations queued by settings-UI buttons.
+        for mutation in ctx.pending_shortcut_mutations {
+            match mutation {
+                crate::widget::ShortcutMutation::RebindPrimary { id, keystroke } => {
+                    self.shortcut_registry.rebind_primary(id, keystroke);
+                }
+                crate::widget::ShortcutMutation::RebindSecondary { id, keystroke } => {
+                    self.shortcut_registry.rebind_secondary(id, keystroke);
+                }
+                crate::widget::ShortcutMutation::ClearOverride { id } => {
+                    self.shortcut_registry.clear_override(&id);
+                }
+            }
+        }
         self.pending_modal_requests
             .extend(ctx.modal_requests.into_iter().map(|request| {
                 crate::modal::QueuedModalRequest {
@@ -1142,31 +1256,9 @@ mod tests {
         assert_eq!(tree.hovered, None);
     }
 
-    #[test]
-    fn shortcut_intercepts_before_widget() {
-        use crate::shortcut::{Shortcut, ShortcutMap};
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let save_called = Rc::new(Cell::new(false));
-        let save_flag = save_called.clone();
-
-        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::S), TestCmd::Save);
-
-        let mut tree = WidgetTree::new().with_shortcuts(shortcuts);
-        tree.on_command(move |cmd: &TestCmd| {
-            if *cmd == TestCmd::Save {
-                save_flag.set(true);
-            }
-        });
-
-        let widget = tree.add(FillWidget::new().focusable());
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-        tree.focus(widget);
-
-        tree.press_key(Key::S, Modifiers::CTRL);
-        assert!(save_called.get());
-    }
+    // NOTE: legacy `shortcut_intercepts_before_widget` test removed with
+    // the ShortcutMap dispatch path. The new shortcut→intent interception
+    // lands in step 3 on top of `ShortcutRegistry` + `Action`.
 
     #[test]
     fn scroll_event_dispatched_to_hovered() {
@@ -1514,37 +1606,9 @@ mod tests {
         });
     }
 
-    #[test]
-    fn scoped_shortcut_fires_when_focused_in_subtree() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        #[derive(Debug, Clone, Copy, PartialEq)]
-        enum Cmd {
-            GlobalAction,
-        }
-
-        impl crate::app_command::AppCommand for Cmd {}
-
-        let fired = Rc::new(Cell::new(None));
-        let fired_flag = fired.clone();
-
-        let shortcuts = crate::shortcut::ShortcutMap::new()
-            .bind(crate::shortcut::Shortcut::ctrl(Key::Z), Cmd::GlobalAction);
-
-        let mut tree = WidgetTree::new().with_shortcuts(shortcuts);
-        tree.on_command(move |cmd: &Cmd| {
-            fired_flag.set(Some(*cmd));
-        });
-
-        let parent = tree.add(FillWidget::new());
-        let child = tree.add_child(parent, FillWidget::new());
-        tree.layout(SizeProposal::exact(200.0, 100.0));
-
-        tree.focus(child);
-        tree.press_key(Key::Z, Modifiers::CTRL);
-        assert_eq!(fired.get(), Some(Cmd::GlobalAction));
-    }
+    // NOTE: legacy `scoped_shortcut_fires_when_focused_in_subtree` test
+    // removed along with the ShortcutMap dispatch path. Scope-aware
+    // dispatch returns in step 3 on the new ShortcutRegistry.
 
     // --- Drag and Drop tests ---
 
@@ -1830,6 +1894,727 @@ mod tests {
             received_value.get(),
             777,
             "Target should receive the typed payload from source"
+        );
+    }
+
+    // --- Intent / Action dispatch (step 3) ------------------------------
+
+    #[test]
+    fn shortcut_fires_matching_action_on_source_widget() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let fired = Rc::new(Cell::new(false));
+        let fired_flag = fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.push_action(
+            widget,
+            Action::new("app.save").on_invoke(move |_intent, _ctx| {
+                fired_flag.set(true);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(fired.get(), "matching action must fire on KeyDown");
+    }
+
+    #[test]
+    fn scoped_shortcut_matches_only_when_focus_in_scope() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut, ShortcutScope};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let fired = Rc::new(Cell::new(0));
+        let fired_flag = fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let scope_root = tree.add(FillWidget::new().focusable());
+        let inside = tree.add_child(scope_root, FillWidget::new().focusable());
+        let outside = tree.add(FillWidget::new().focusable());
+
+        tree.push_action(
+            scope_root,
+            Action::new("editor.find").on_invoke(move |_i, _c| {
+                fired_flag.set(fired_flag.get() + 1);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("editor.find")
+                .primary(KeyStroke::ctrl(Key::F))
+                .scope(ShortcutScope::Scoped(scope_root))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Focus outside the scope: the shortcut does NOT activate.
+        tree.focus(outside);
+        tree.press_key(Key::F, Modifiers::CTRL);
+        assert_eq!(fired.get(), 0, "scoped shortcut must not fire outside scope");
+
+        // Focus inside the scope: it fires.
+        tree.focus(inside);
+        tree.press_key(Key::F, Modifiers::CTRL);
+        assert_eq!(fired.get(), 1, "scoped shortcut must fire when focus in scope");
+    }
+
+    #[test]
+    fn propagated_action_lets_ancestor_handle() {
+        use crate::action::Action;
+        use crate::intent::IntentResponse;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let inner_seen = Rc::new(Cell::new(false));
+        let outer_seen = Rc::new(Cell::new(false));
+        let inner_flag = inner_seen.clone();
+        let outer_flag = outer_seen.clone();
+
+        let mut tree = WidgetTree::new();
+        let outer = tree.add(FillWidget::new().focusable());
+        let inner = tree.add_child(outer, FillWidget::new().focusable());
+
+        // Inner observes then propagates; outer consumes.
+        tree.push_action(
+            inner,
+            Action::new("app.save").on_invoke_with_response(move |_i, _c| {
+                inner_flag.set(true);
+                IntentResponse::Propagated
+            }),
+        );
+        tree.push_action(
+            outer,
+            Action::new("app.save").on_invoke(move |_i, _c| {
+                outer_flag.set(true);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(inner);
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(inner_seen.get(), "inner action observed the intent");
+        assert!(outer_seen.get(), "outer action reached after Propagated");
+    }
+
+    #[test]
+    fn handled_action_stops_propagation() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let inner_seen = Rc::new(Cell::new(false));
+        let outer_seen = Rc::new(Cell::new(false));
+        let inner_flag = inner_seen.clone();
+        let outer_flag = outer_seen.clone();
+
+        let mut tree = WidgetTree::new();
+        let outer = tree.add(FillWidget::new().focusable());
+        let inner = tree.add_child(outer, FillWidget::new().focusable());
+
+        tree.push_action(
+            inner,
+            Action::new("app.save").on_invoke(move |_i, _c| {
+                inner_flag.set(true);
+            }),
+        );
+        tree.push_action(
+            outer,
+            Action::new("app.save").on_invoke(move |_i, _c| {
+                outer_flag.set(true);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(inner);
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(inner_seen.get());
+        assert!(!outer_seen.get(), "Handled at inner must stop propagation");
+    }
+
+    #[test]
+    fn disabled_action_propagates_by_default() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use crate::signal::Signal;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let inner_seen = Rc::new(Cell::new(false));
+        let outer_seen = Rc::new(Cell::new(false));
+        let inner_flag = inner_seen.clone();
+        let outer_flag = outer_seen.clone();
+
+        let mut tree = WidgetTree::new();
+        let outer = tree.add(FillWidget::new().focusable());
+        let inner = tree.add_child(outer, FillWidget::new().focusable());
+
+        let enabled = Signal::new(false);
+        tree.push_action(
+            inner,
+            Action::new("app.save")
+                .enabled_when(enabled.clone())
+                .on_invoke(move |_i, _c| {
+                    inner_flag.set(true);
+                }),
+        );
+        tree.push_action(
+            outer,
+            Action::new("app.save").on_invoke(move |_i, _c| {
+                outer_flag.set(true);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(inner);
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(!inner_seen.get(), "disabled inner must not run");
+        assert!(outer_seen.get(), "intent must propagate past disabled inner");
+    }
+
+    #[test]
+    fn disabled_action_with_non_propagating_shortcut_consumes() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use crate::signal::Signal;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let inner_seen = Rc::new(Cell::new(false));
+        let outer_seen = Rc::new(Cell::new(false));
+        let inner_flag = inner_seen.clone();
+        let outer_flag = outer_seen.clone();
+
+        let mut tree = WidgetTree::new();
+        let outer = tree.add(FillWidget::new().focusable());
+        let inner = tree.add_child(outer, FillWidget::new().focusable());
+
+        let enabled = Signal::new(false);
+        tree.push_action(
+            inner,
+            Action::new("app.save")
+                .enabled_when(enabled.clone())
+                .on_invoke(move |_i, _c| {
+                    inner_flag.set(true);
+                }),
+        );
+        tree.push_action(
+            outer,
+            Action::new("app.save").on_invoke(move |_i, _c| {
+                outer_flag.set(true);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .propagate_when_disabled(false)
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(inner);
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(!inner_seen.get(), "disabled inner still does not run");
+        assert!(
+            !outer_seen.get(),
+            "intent must NOT propagate when shortcut disallows it"
+        );
+    }
+
+    #[test]
+    fn send_intent_from_handler_reaches_ancestor_action() {
+        use crate::action::Action;
+        use crate::intent::Intent;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let save_seen = Rc::new(Cell::new(false));
+        let save_flag = save_seen.clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(FillWidget::new());
+        let button = tree.add_child(
+            root,
+            FillWidget::new().on_tap(|_pos, ctx| {
+                ctx.send_intent(Intent::new("app.save"));
+            }),
+        );
+        tree.push_action(
+            root,
+            Action::new("app.save").on_invoke(move |_i, _c| {
+                save_flag.set(true);
+            }),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.click(button);
+        assert!(save_seen.get(), "ctx.send_intent must reach ancestor action");
+    }
+
+    #[test]
+    fn disabled_shortcut_falls_through_to_focused_widget() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use crate::signal::Signal;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let action_fired = Rc::new(Cell::new(false));
+        let on_key_fired = Rc::new(Cell::new(false));
+        let af = action_fired.clone();
+        let kf = on_key_fired.clone();
+
+        let enabled = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new()
+                .focusable()
+                .on_key(move |event, _ctx| {
+                    if matches!(
+                        event,
+                        WidgetEvent::KeyDown {
+                            key: Key::S,
+                            modifiers,
+                            ..
+                        } if modifiers.ctrl()
+                    ) {
+                        kf.set(true);
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        tree.push_action(
+            widget,
+            Action::new("app.save").on_invoke(move |_i, _c| af.set(true)),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .enabled_when(enabled.clone())
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        // Disabled: keystroke falls through to on_key.
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(
+            !action_fired.get(),
+            "disabled shortcut must not invoke its action"
+        );
+        assert!(
+            on_key_fired.get(),
+            "disabled shortcut must let KeyDown reach the focused widget"
+        );
+
+        // Re-enable → action fires, on_key does not.
+        on_key_fired.set(false);
+        enabled.set(true);
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(action_fired.get(), "re-enabled shortcut must dispatch");
+        assert!(
+            !on_key_fired.get(),
+            "enabled shortcut must consume the KeyDown"
+        );
+    }
+
+    #[test]
+    fn scope_mismatch_does_not_invoke_on_activate() {
+        use crate::intent::Intent;
+        use crate::shortcut::{KeyStroke, Shortcut, ShortcutScope};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // Regression: before the find/invoke split, `on_activate` ran
+        // even when the focused widget was outside the shortcut's
+        // scope, and any side effects on its ctx were silently
+        // dropped. The closure must now only run when the scope
+        // check has already passed.
+        let activated = Rc::new(Cell::new(false));
+        let activated_flag = activated.clone();
+
+        let mut tree = WidgetTree::new();
+        let scope_root = tree.add(FillWidget::new().focusable());
+        let outside = tree.add(FillWidget::new().focusable());
+
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("editor.find")
+                .primary(KeyStroke::ctrl(Key::F))
+                .scope(ShortcutScope::Scoped(scope_root))
+                .on_activate(move |_ks, _ctx| {
+                    activated_flag.set(true);
+                    Intent::new("editor.find")
+                })
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(outside);
+
+        tree.press_key(Key::F, Modifiers::CTRL);
+        assert!(
+            !activated.get(),
+            "on_activate must not run when focus is outside the shortcut's scope"
+        );
+    }
+
+    #[test]
+    fn key_capture_runs_callback_and_bypasses_registry() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let action_fired = Rc::new(Cell::new(false));
+        let af = action_fired.clone();
+        let captured = Rc::new(Cell::new(None));
+        let cf = captured.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.push_action(
+            widget,
+            Action::new("app.save").on_invoke(move |_i, _c| af.set(true)),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        let handle = tree.begin_key_capture(move |ks, _reg, _ctx| cf.set(Some(ks)));
+        assert!(tree.is_capturing_keys());
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert_eq!(
+            captured.get(),
+            Some(KeyStroke::ctrl(Key::S)),
+            "capture callback must receive the chord"
+        );
+        assert!(
+            !action_fired.get(),
+            "shortcut action must not fire while capture is armed"
+        );
+        assert!(
+            !tree.is_capturing_keys(),
+            "capture is one-shot; next KeyDown flows normally"
+        );
+        drop(handle);
+    }
+
+    #[test]
+    fn key_capture_can_rebind_through_registry() {
+        use crate::shortcut::{KeyStroke, Shortcut};
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        // Arm capture: whatever chord comes next, rebind app.save to it.
+        let _h = tree.begin_key_capture(|ks, reg, _ctx| {
+            reg.rebind_primary("app.save", Some(ks));
+        });
+
+        tree.press_key(Key::B, Modifiers::CTRL | Modifiers::SHIFT);
+        assert_eq!(
+            tree.shortcut_registry()
+                .effective("app.save")
+                .unwrap()
+                .primary,
+            Some(KeyStroke::ctrl_shift(Key::B))
+        );
+    }
+
+    #[test]
+    fn dropping_capture_handle_cancels_capture() {
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let action_fired = Rc::new(Cell::new(false));
+        let af = action_fired.clone();
+        let capture_fired = Rc::new(Cell::new(false));
+        let cf = capture_fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.push_action(
+            widget,
+            crate::action::Action::new("app.save")
+                .on_invoke(move |_i, _c| af.set(true)),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        // Arm capture in a scope, then drop the handle before any key
+        // is pressed. The next KeyDown must fall through to the normal
+        // shortcut path, firing the action — not the cancelled capture.
+        {
+            let _h = tree.begin_key_capture(move |_ks, _reg, _ctx| cf.set(true));
+            assert!(tree.is_capturing_keys());
+            // `_h` drops here → cancel.
+        }
+        assert!(
+            !tree.is_capturing_keys(),
+            "dropping the handle must cancel the capture"
+        );
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(!capture_fired.get(), "cancelled capture must not fire");
+        assert!(
+            action_fired.get(),
+            "shortcut action runs after capture was cancelled"
+        );
+    }
+
+    #[test]
+    fn second_begin_key_capture_does_not_racecancel_first() {
+        use crate::shortcut::KeyStroke;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let first = Rc::new(Cell::new(false));
+        let second = Rc::new(Cell::new(false));
+        let f = first.clone();
+        let s = second.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        // Arm #1 then replace with #2. #1's handle is later dropped,
+        // which would have cancelled the active capture under the old
+        // `Option<Box<FnOnce>>` design — CaptureHandle now ties each
+        // session to its own slot, so the drop only clears #1's
+        // (orphaned) slot, not #2.
+        let h1 = tree.begin_key_capture(move |_ks, _reg, _ctx| f.set(true));
+        let _h2 = tree.begin_key_capture(move |_ks, _reg, _ctx| s.set(true));
+        drop(h1);
+
+        assert!(
+            tree.is_capturing_keys(),
+            "dropping the older handle must not cancel the active capture"
+        );
+        tree.press_key(Key::K, Modifiers::CTRL);
+        assert!(!first.get());
+        assert!(second.get(), "newest capture wins");
+    }
+
+    #[test]
+    fn capture_callback_can_send_intent() {
+        use crate::action::Action;
+        use crate::intent::Intent;
+        use crate::shortcut::KeyStroke;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let ran = Rc::new(Cell::new(false));
+        let flag = ran.clone();
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().focusable());
+        tree.push_action(
+            widget,
+            Action::new("app.save").on_invoke(move |_i, _c| flag.set(true)),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        let _h = tree.begin_key_capture(|_ks, _reg, ctx| {
+            ctx.send_intent(Intent::new("app.save"));
+        });
+        tree.press_key(Key::X, Modifiers::CTRL);
+        assert!(
+            ran.get(),
+            "intent queued from capture callback must dispatch"
+        );
+    }
+
+    #[test]
+    fn binding_registry_does_not_accumulate_across_rebuilds() {
+        use crate::binding::BindingLevel;
+        use crate::signal::Signal;
+
+        #[derive(Debug)]
+        struct BoundLeaf {
+            tick: Signal<u64>,
+        }
+        impl crate::widget::Widget for BoundLeaf {
+            fn build(
+                &mut self,
+                ctx: &mut crate::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                self.tick.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    BindingLevel::Relayout,
+                );
+                Vec::new()
+            }
+            fn size_that_fits(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &crate::widget::LayoutContext,
+            ) -> fern_canvas::Size {
+                proposal.resolve(10.0, 10.0)
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let tick = Signal::new(0_u64);
+        let widget = tree.add(BoundLeaf {
+            tick: tick.clone(),
+        });
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        let after_first_build = tree.binding_registry().len();
+        assert!(after_first_build >= 1);
+
+        // Force rebuild a handful of times and verify the binding
+        // count does not keep growing. Pre-fix: each rebuild pushed
+        // a new entry for the same (widget, signal) pair.
+        for _ in 0..5 {
+            tree.arena.mark_needs_rebuild(widget);
+            tree.layout(SizeProposal::exact(200.0, 200.0));
+        }
+        assert_eq!(
+            tree.binding_registry().len(),
+            after_first_build,
+            "bindings must be cleared on rebuild"
+        );
+
+        tree.destroy_subtree(widget);
+        assert_eq!(
+            tree.binding_registry().len(),
+            0,
+            "bindings must be cleared on destroy"
+        );
+        // Silence unused-variable warning for the signal.
+        let _ = tick;
+    }
+
+    #[test]
+    fn clear_shortcut_override_via_event_context_restores_default() {
+        use crate::shortcut::{KeyStroke, Shortcut};
+
+        let mut tree = WidgetTree::new();
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+        tree.shortcut_registry_mut()
+            .rebind_primary("app.save", Some(KeyStroke::alt(Key::S)));
+
+        let source = tree.add(FillWidget::new());
+        let mut ctx = EventContext::new();
+        ctx.clear_shortcut_override("app.save");
+        tree.collect_from_ctx(ctx, source);
+
+        assert_eq!(
+            tree.shortcut_registry()
+                .effective("app.save")
+                .unwrap()
+                .primary,
+            Some(KeyStroke::ctrl(Key::S))
+        );
+    }
+
+    #[test]
+    fn rebind_shortcut_primary_via_event_context() {
+        use crate::shortcut::{KeyStroke, Shortcut};
+
+        let mut tree = WidgetTree::new();
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+        let source = tree.add(FillWidget::new());
+
+        let mut ctx = EventContext::new();
+        ctx.rebind_shortcut_primary("app.save", Some(KeyStroke::alt(Key::S)));
+        tree.collect_from_ctx(ctx, source);
+
+        assert_eq!(
+            tree.shortcut_registry()
+                .effective("app.save")
+                .unwrap()
+                .primary,
+            Some(KeyStroke::alt(Key::S))
+        );
+    }
+
+    #[test]
+    fn unregister_all_for_owner_called_on_destroy() {
+        use crate::shortcut::{KeyStroke, Shortcut};
+
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        let widget_owner = widget;
+        tree.shortcut_registry_mut().register_owned(
+            Shortcut::new("scoped.thing")
+                .primary(KeyStroke::ctrl(Key::K))
+                .build(),
+            widget_owner,
+        );
+        assert!(tree.shortcut_registry().get_default("scoped.thing").is_some());
+
+        tree.destroy_subtree(widget);
+        assert!(
+            tree.shortcut_registry().get_default("scoped.thing").is_none(),
+            "destroying the owner must unregister its shortcut"
         );
     }
 }

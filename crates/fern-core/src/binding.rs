@@ -47,6 +47,11 @@ pub(crate) struct Binding {
     pub is_dirty: Rc<dyn Fn() -> bool>,
     /// Clear the dirty flag on the source signal.
     pub clear_dirty: Rc<dyn Fn()>,
+    /// Stable identity of the source signal — see
+    /// [`Signal::source_id`](crate::signal::Signal::source_id).
+    /// Used by [`BindingRegistry::register`] to dedup repeated
+    /// `bind_to` calls within a single build cycle.
+    pub source_id: usize,
 }
 
 /// Shared registry of all active property bindings.
@@ -61,7 +66,41 @@ impl BindingRegistry {
     }
 
     pub(crate) fn register(&self, binding: Binding) {
-        self.bindings.borrow_mut().push(binding);
+        // Dedup: if an entry already exists for this
+        // (widget_id, source_id, bucket) tuple, merge levels instead
+        // of pushing a duplicate. AccessibilityOnly bindings live in
+        // a different "bucket" from visual bindings (they flush
+        // through separate paths) so we don't collapse across that
+        // axis.
+        let same_bucket = |existing: &Binding| -> bool {
+            existing.widget_id == binding.widget_id
+                && existing.source_id == binding.source_id
+                && is_a11y_only(existing.level) == is_a11y_only(binding.level)
+        };
+        let mut bindings = self.bindings.borrow_mut();
+        if let Some(existing) = bindings.iter_mut().find(|b| same_bucket(b)) {
+            existing.level = promote_level(existing.level, binding.level);
+            return;
+        }
+        bindings.push(binding);
+    }
+
+    /// Drop every binding targeting `widget_id`. Called by the widget
+    /// tree before a widget rebuilds (so `build()` can re-register a
+    /// fresh, deduplicated set) and on destroy (so a dead widget's
+    /// bindings no longer keep source-signal references alive or
+    /// accumulate across the lifetime of the app).
+    pub(crate) fn unregister_for_widget(&self, widget_id: WidgetId) {
+        self.bindings
+            .borrow_mut()
+            .retain(|b| b.widget_id != widget_id);
+    }
+
+    /// Number of live bindings. Exposed for tests that verify
+    /// cleanup does not accumulate entries across rebuilds.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.bindings.borrow().len()
     }
 
     /// Return widget IDs that need updating due to signal changes,
@@ -134,6 +173,23 @@ impl BindingRegistry {
     }
 }
 
+/// Priority order for visual binding levels — `Rebuild` dominates
+/// `Relayout` dominates `RepaintOnly`. `AccessibilityOnly` lives in
+/// its own bucket and is never compared against visual levels.
+fn promote_level(existing: BindingLevel, incoming: BindingLevel) -> BindingLevel {
+    use BindingLevel::*;
+    match (existing, incoming) {
+        (Rebuild, _) | (_, Rebuild) => Rebuild,
+        (Relayout, _) | (_, Relayout) => Relayout,
+        (RepaintOnly, _) | (_, RepaintOnly) => RepaintOnly,
+        (AccessibilityOnly, AccessibilityOnly) => AccessibilityOnly,
+    }
+}
+
+fn is_a11y_only(level: BindingLevel) -> bool {
+    matches!(level, BindingLevel::AccessibilityOnly)
+}
+
 impl std::fmt::Debug for BindingRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BindingRegistry")
@@ -166,7 +222,87 @@ mod tests {
             level,
             is_dirty,
             clear_dirty,
+            // Every call creates a fresh cell → unique source id,
+            // so existing tests that register multiple times don't
+            // accidentally collapse through the new dedup path.
+            source_id: Rc::as_ptr(&dirty) as *const () as usize,
         }
+    }
+
+    #[test]
+    fn register_dedups_same_widget_same_signal_same_bucket() {
+        use crate::signal::Signal;
+        let reg = BindingRegistry::new();
+        let sig = Signal::new(0_i32);
+        let id: WidgetId = slotmap::KeyData::from_ffi(7).into();
+
+        sig.bind_to(id, &reg, BindingLevel::RepaintOnly);
+        sig.bind_to(id, &reg, BindingLevel::RepaintOnly);
+        sig.bind_to(id, &reg, BindingLevel::RepaintOnly);
+
+        assert_eq!(
+            reg.len(),
+            1,
+            "three identical bind_to calls must collapse to one entry"
+        );
+    }
+
+    #[test]
+    fn register_promotes_level_on_dedup() {
+        use crate::signal::Signal;
+        let reg = BindingRegistry::new();
+        let sig = Signal::new(0_i32);
+        let id: WidgetId = slotmap::KeyData::from_ffi(7).into();
+
+        sig.bind_to(id, &reg, BindingLevel::RepaintOnly);
+        sig.bind_to(id, &reg, BindingLevel::Relayout);
+        sig.bind_to(id, &reg, BindingLevel::RepaintOnly);
+
+        assert_eq!(reg.len(), 1, "dedup still collapses across calls");
+        // Signal must now be marked dirty so flush_dirty sees it.
+        sig.set(1);
+        let visual = reg.flush_dirty();
+        assert_eq!(visual.len(), 1);
+        assert_eq!(
+            visual[0].1,
+            BindingLevel::Relayout,
+            "the merged entry reflects the highest-priority visual level seen"
+        );
+    }
+
+    #[test]
+    fn register_does_not_collapse_a11y_and_visual_buckets() {
+        use crate::signal::Signal;
+        let reg = BindingRegistry::new();
+        let sig = Signal::new(0_i32);
+        let id: WidgetId = slotmap::KeyData::from_ffi(7).into();
+
+        sig.bind_to(id, &reg, BindingLevel::RepaintOnly);
+        sig.bind_to(id, &reg, BindingLevel::AccessibilityOnly);
+
+        assert_eq!(
+            reg.len(),
+            2,
+            "visual and a11y-only bindings live in distinct buckets"
+        );
+    }
+
+    #[test]
+    fn register_distinct_signals_remain_distinct() {
+        use crate::signal::Signal;
+        let reg = BindingRegistry::new();
+        let a = Signal::new(0_i32);
+        let b = Signal::new(0_i32);
+        let id: WidgetId = slotmap::KeyData::from_ffi(7).into();
+
+        a.bind_to(id, &reg, BindingLevel::Relayout);
+        b.bind_to(id, &reg, BindingLevel::Relayout);
+
+        assert_eq!(
+            reg.len(),
+            2,
+            "different signals must not collapse into one binding"
+        );
     }
 
     #[test]

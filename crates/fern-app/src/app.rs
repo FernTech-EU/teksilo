@@ -1018,9 +1018,7 @@ impl FernAppBuilder {
     /// markup as `[label](:key)`) to a translatable body, an optional
     /// long-form "more" body revealed by the Accordion disclosure
     /// inside a sticky rich tooltip, and an optional keyboard shortcut
-    /// (either as a literal label or bound to an [`AppCommand`] whose
-    /// current binding is looked up in the live `ShortcutMap` at
-    /// render time).
+    /// (literal label — registry-backed auto-lookup returns in step 3).
     ///
     /// This is a **single-call registration**: the list is the
     /// application's complete tooltip catalog. Call once at app boot,

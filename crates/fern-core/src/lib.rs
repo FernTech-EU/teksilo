@@ -1,4 +1,5 @@
 pub mod accessibility;
+pub mod action;
 pub mod animation;
 pub mod app_command;
 pub mod app_event;
@@ -13,6 +14,7 @@ pub mod event_source;
 pub mod focus;
 pub mod gesture;
 pub mod idle;
+pub mod intent;
 pub mod modal;
 pub mod overlay;
 pub mod shortcut;
@@ -55,7 +57,12 @@ pub use modal::{
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
-pub use shortcut::{Shortcut, ShortcutMap, ShortcutScope};
+pub use action::{Action, ActionBuilder, ActionHandler};
+pub use intent::{ActionArg, Intent, IntentParams, IntentResponse};
+pub use shortcut::{
+    CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,
+    ShortcutBuilder, ShortcutOnActivate, ShortcutRegistry, ShortcutScope, SlotOverride,
+};
 pub use animation::AnimationRequest;
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
 pub use binding::{BindingLevel, BindingRegistry};

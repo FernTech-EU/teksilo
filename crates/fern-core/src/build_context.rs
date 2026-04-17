@@ -234,19 +234,96 @@ impl<'a> BuildContext<'a> {
         self.tree.destroy_subtree(id);
     }
 
-    /// Look up the shortcut label for a command (type-erased).
-    /// Returns the display string (e.g. "Ctrl+S") if a shortcut is bound to this command
-    /// in the tree's `ShortcutMap`. Used by `MenuItem` for automatic shortcut labels.
-    pub fn shortcut_label_for_any(&self, command: &dyn std::any::Any) -> Option<String> {
-        self.tree.shortcut_label_for_any(command)
-    }
-
     /// Apply a `HandlerSet` to the composite widget being built (self).
     /// This transfers attached event handlers, focusable flag, cursor, etc.
     /// to the widget's arena node, replacing `event()` and `is_focusable()` overrides.
     pub fn apply_self_handlers(&mut self, handler_set: crate::widget_builder::HandlerSet) {
         let id = self.self_id();
         self.tree.apply_handler_set(id, handler_set);
+    }
+
+    // --- Actions & shortcuts (step 3) ---
+
+    /// Attach an [`Action`](crate::action::Action) to the widget being
+    /// built. Actions are consulted during intent dispatch as the
+    /// framework walks source-widget → root; the first matching,
+    /// enabled action wins (subject to the `IntentResponse` returned
+    /// by its handler).
+    ///
+    /// Actions are cleared on rebuild, mirroring event handlers.
+    pub fn register_action(&mut self, action: crate::action::Action) {
+        let id = self.self_id();
+        self.tree.push_action(id, action);
+    }
+
+    /// Register a [`Shortcut`](crate::shortcut::Shortcut) in the
+    /// tree's registry, owned by the widget being built.
+    ///
+    /// If the shortcut builder left `scope` at the default
+    /// ([`ShortcutScope::Global`](crate::shortcut::ShortcutScope::Global)),
+    /// this method rewrites it to `Scoped(self_id)` so the shortcut
+    /// only fires when focus is inside the registering widget's
+    /// subtree — the ergonomic default for widget-declared shortcuts.
+    /// Callers that want an explicit global shortcut should use
+    /// [`BuildContext::register_shortcut_global`] instead; callers
+    /// that want to scope to a specific child should set
+    /// `.scope_to(child_id)` on the builder themselves.
+    ///
+    /// Ownership: the shortcut is removed from the registry when the
+    /// widget is destroyed or rebuilt. User overrides survive across
+    /// rebuilds (graveyard semantics).
+    pub fn register_shortcut(&mut self, mut shortcut: crate::shortcut::Shortcut) {
+        let id = self.self_id();
+        if shortcut.scope == crate::shortcut::ShortcutScope::Global {
+            shortcut.scope = crate::shortcut::ShortcutScope::Scoped(id);
+        }
+        self.tree
+            .shortcut_registry_mut()
+            .register_owned(shortcut, id);
+    }
+
+    /// Register a [`Shortcut`](crate::shortcut::Shortcut) with
+    /// explicit global scope, owned by the widget being built. Unlike
+    /// [`BuildContext::register_shortcut`], this does not rewrite the
+    /// scope — the shortcut fires regardless of focus position.
+    ///
+    /// Ownership still applies: the shortcut is torn down when this
+    /// widget goes away.
+    pub fn register_shortcut_global(&mut self, mut shortcut: crate::shortcut::Shortcut) {
+        let id = self.self_id();
+        shortcut.scope = crate::shortcut::ShortcutScope::Global;
+        self.tree
+            .shortcut_registry_mut()
+            .register_owned(shortcut, id);
+    }
+
+    /// Read-through access to the tree's shortcut registry. Consumers
+    /// (menus, tooltips) look up the effective keystroke for a given
+    /// id here, and observe
+    /// [`ShortcutRegistry::version`](crate::shortcut::ShortcutRegistry::version)
+    /// to refresh when the user rebinds.
+    pub fn shortcut_registry(&self) -> &crate::shortcut::ShortcutRegistry {
+        self.tree.shortcut_registry()
+    }
+
+    /// Effective view of a shortcut by id, merged with any user
+    /// override. Returns `None` when no default has been registered
+    /// for `id`. Typical caller pattern: call from `paint()` so
+    /// late-registered shortcuts are still picked up without a
+    /// dedicated build-phase query.
+    pub fn effective_shortcut<'b>(
+        &'b self,
+        id: &str,
+    ) -> Option<crate::shortcut::EffectiveShortcut<'b>> {
+        self.shortcut_registry().effective(id)
+    }
+
+    /// Convenience accessor for the reactive version signal. Widgets
+    /// that render shortcut-derived state (menu labels, tooltips)
+    /// observe this so the UI refreshes when the user rebinds or a
+    /// new shortcut is registered.
+    pub fn shortcut_version(&self) -> &Signal<u64> {
+        self.shortcut_registry().version()
     }
 
     /// Apply a `HandlerSet` to a child widget created during this build.

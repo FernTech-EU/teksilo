@@ -50,11 +50,15 @@ pub struct MenuItem {
     label: String,
     icon: Option<IconWidget>,
     shortcut_label: Option<String>,
+    /// Optional shortcut id. When set and [`shortcut_label`] is not,
+    /// the rendered trailing label is pulled from the tree's
+    /// [`ShortcutRegistry`](fern_core::shortcut::ShortcutRegistry) and
+    /// tracks user rebindings automatically (the build registers the
+    /// registry's version signal as a Relayout binding on self).
+    shortcut_id: Option<&'static str>,
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     action: Option<CommandFactory>,
-    /// Type-erased command for automatic shortcut label lookup via ShortcutMap.
-    command_any: Option<Box<dyn std::any::Any>>,
     enabled: bool,
     submenu_factory: Option<Box<dyn Fn() -> Box<dyn Widget>>>,
     submenu_open_delay: Duration,
@@ -78,10 +82,10 @@ impl MenuItem {
             label: ls.resolve_now(),
             icon: None,
             shortcut_label: None,
+            shortcut_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
             action: None,
-            command_any: None,
             enabled: true,
             submenu_factory: None,
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
@@ -99,13 +103,10 @@ impl MenuItem {
     }
 
     /// Set the command to emit on activation. Generic only at this call site.
-    /// Also stores the command for automatic shortcut label lookup from the ShortcutMap.
     pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
-        let cmd_for_lookup = command.clone();
         self.action = Some(Rc::new(move |ctx: &mut EventContext| {
             ctx.emit(command.clone());
         }));
-        self.command_any = Some(Box::new(cmd_for_lookup));
         self
     }
 
@@ -145,6 +146,21 @@ impl MenuItem {
     /// this accepts a plain string.
     pub fn shortcut_label(mut self, label: impl Into<String>) -> Self {
         self.shortcut_label = Some(label.into());
+        self
+    }
+
+    /// Bind the trailing shortcut label to a registered
+    /// [`Shortcut`](fern_core::shortcut::Shortcut) by its stable id.
+    /// At build time the effective primary keystroke is rendered;
+    /// rebinds performed through
+    /// [`ShortcutRegistry`](fern_core::shortcut::ShortcutRegistry)
+    /// rebuild this item automatically via the registry's version
+    /// signal.
+    ///
+    /// A manual [`shortcut_label`](Self::shortcut_label) takes
+    /// precedence when both are set.
+    pub fn for_shortcut(mut self, id: &'static str) -> Self {
+        self.shortcut_id = Some(id);
         self
     }
 
@@ -199,10 +215,10 @@ impl MenuItem {
             label: ls.resolve_now(),
             icon: None,
             shortcut_label: None,
+            shortcut_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
             action: None,
-            command_any: None,
             enabled: true,
             submenu_factory: Some(Box::new(factory)),
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
@@ -359,21 +375,34 @@ impl Widget for MenuItem {
         // Stretch spacer — pushes trailing content to the right edge.
         row = row.child(Spacer::new());
 
-        // Shortcut label — manual label takes precedence, then auto-lookup
-        // from ShortcutMap. Uses the dedicated `tooltip_shortcut` color
-        // token at the same size as the body label.
+        // Shortcut label — the manual label wins; otherwise, if the
+        // item was bound to a shortcut id via `.for_shortcut(id)`, the
+        // effective primary keystroke is pulled from the tree's
+        // `ShortcutRegistry`. The registry's `version` signal is
+        // bound to this widget at the `Relayout` level so user
+        // rebindings (or late registrations) refresh the label on
+        // the next pass.
         //
         // A fixed-width gap (`shortcut_left_gap`, 24 dp) is inserted
         // between the stretch Spacer and the shortcut label so that even
         // when the row is packed tight (Spacer stretch = 0), there is
-        // always a visible gap between label and shortcut. This mirrors
-        // the `icon_label_gap` pattern: a FixedSize-wrapped Spacer acts
-        // as a fixed non-spacer child so HStack can't collapse it.
+        // always a visible gap between label and shortcut.
         let resolved_shortcut = self.shortcut_label.clone().or_else(|| {
-            self.command_any
-                .as_ref()
-                .and_then(|cmd| ctx.shortcut_label_for_any(cmd.as_ref()))
+            self.shortcut_id.and_then(|id| {
+                ctx.effective_shortcut(id)
+                    .and_then(|eff| eff.primary.map(|ks| ks.to_string()))
+            })
         });
+        if self.shortcut_id.is_some() {
+            // Rebuild (not Relayout) because the shortcut label is
+            // read from the registry by value during build() — a
+            // rebind must re-enter build() to pick up the new chord.
+            ctx.shortcut_version().bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                fern_core::binding::BindingLevel::Rebuild,
+            );
+        }
         if let Some(ref shortcut_text) = resolved_shortcut {
             // Fixed minimum gap, always present.
             let shortcut_gap_spacer = ctx.add(Spacer::new());
@@ -873,82 +902,13 @@ mod tests {
         assert!(tree.bounds(item).width > 0.0);
     }
 
-    #[test]
-    fn auto_shortcut_label_from_shortcut_map() {
-        use fern_core::shortcut::{Shortcut, ShortcutMap};
+    // NOTE: the legacy `auto_shortcut_label_from_shortcut_map`,
+    // `manual_shortcut_label_overrides_auto` and
+    // `no_shortcut_label_when_command_not_bound` tests were removed
+    // along with the ShortcutMap auto-lookup path. Equivalent coverage
+    // for registry-backed auto-labels lands in step 3 when
+    // `MenuItem::for_shortcut(id)` wires into `ShortcutRegistry`.
 
-        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
-
-        // Item with auto-resolved shortcut (via ShortcutMap)
-        let mut tree_with = WidgetTree::new()
-            .with_theme(Theme::light_default())
-            .with_shortcuts(shortcuts);
-        let item_with = tree_with.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
-        tree_with.layout(SizeProposal::unspecified());
-
-        // Item without shortcuts registered
-        let mut tree_without = WidgetTree::new().with_theme(Theme::light_default());
-        let item_without = tree_without.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
-        tree_without.layout(SizeProposal::unspecified());
-
-        // The item with an auto-resolved shortcut label should be wider
-        let width_with = tree_with.bounds(item_with).width;
-        let width_without = tree_without.bounds(item_without).width;
-        assert!(
-            width_with > width_without,
-            "auto shortcut label should make item wider: {} vs {}",
-            width_with,
-            width_without
-        );
-    }
-
-    #[test]
-    fn manual_shortcut_label_overrides_auto() {
-        use fern_core::shortcut::{Shortcut, ShortcutMap};
-
-        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::X), TestCmd::Cut);
-
-        // Manual label should take precedence over auto-lookup
-        let mut tree = WidgetTree::new()
-            .with_theme(Theme::light_default())
-            .with_shortcuts(shortcuts);
-        let item = tree.add(
-            MenuItem::new_literal("Cut")
-                .on_activate(TestCmd::Cut)
-                .shortcut_label("Custom"),
-        );
-        tree.layout(SizeProposal::exact(300.0, 40.0));
-        // Should build without panic — manual label used
-        assert!(tree.bounds(item).width > 0.0);
-    }
-
-    #[test]
-    fn no_shortcut_label_when_command_not_bound() {
-        use fern_core::shortcut::{Shortcut, ShortcutMap};
-
-        // Only Paste is bound, not Cut
-        let shortcuts = ShortcutMap::new().bind(Shortcut::ctrl(Key::V), TestCmd::Paste);
-
-        let mut tree_with_map = WidgetTree::new()
-            .with_theme(Theme::light_default())
-            .with_shortcuts(shortcuts);
-        let item_with_map = tree_with_map.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
-        tree_with_map.layout(SizeProposal::unspecified());
-
-        let mut tree_no_map = WidgetTree::new().with_theme(Theme::light_default());
-        let item_no_map = tree_no_map.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Cut));
-        tree_no_map.layout(SizeProposal::unspecified());
-
-        // Widths should be the same — no shortcut label resolved for Cut
-        let width_with = tree_with_map.bounds(item_with_map).width;
-        let width_without = tree_no_map.bounds(item_no_map).width;
-        assert!(
-            (width_with - width_without).abs() < 0.01,
-            "unbound command should produce no shortcut label: {} vs {}",
-            width_with,
-            width_without
-        );
-    }
 
     #[test]
     fn submenu_item_has_chevron() {

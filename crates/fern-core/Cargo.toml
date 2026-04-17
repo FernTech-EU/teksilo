@@ -12,3 +12,4 @@ fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 accesskit = { workspace = true }
 slotmap = "1"
+serde = { workspace = true }

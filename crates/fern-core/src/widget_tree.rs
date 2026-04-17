@@ -21,20 +21,6 @@ mod test_api;
 
 /// The main widget tree orchestrating arena, layout, events, accessibility, and paint.
 /// Provides both the runtime API and the headless test API.
-/// Type-erased shortcut lookup function.
-/// The third argument is `focused`, and the fourth is an `is_in_scope(focused, scope)` checker.
-type ShortcutLookup = Box<
-    dyn Fn(
-        Key,
-        Modifiers,
-        Option<WidgetId>,
-        &dyn Fn(WidgetId, WidgetId) -> bool,
-    ) -> Option<ErasedCommand>,
->;
-
-/// Type-erased reverse lookup: given a command (as `&dyn Any`), find its shortcut.
-type ShortcutReverseLookup = Box<dyn Fn(&dyn std::any::Any) -> Option<crate::shortcut::Shortcut>>;
-
 struct AnimatedRegistration(crate::signal::WeakAnimatedSignal);
 
 impl AnimatedRegistration {
@@ -67,8 +53,24 @@ pub struct WidgetTree {
     pending_commands: Vec<ErasedCommand>,
     pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
     pending_modal_dismissal: bool,
-    shortcut_lookup: Option<ShortcutLookup>,
-    shortcut_reverse_lookup: Option<ShortcutReverseLookup>,
+    shortcut_registry: crate::shortcut::ShortcutRegistry,
+    /// Queue of intents awaiting dispatch. Populated either by the
+    /// keystroke interception path (`dispatch_event` for KeyDown) or
+    /// by handlers calling `ctx.send_intent(...)`. Drained between
+    /// event-handler calls by [`WidgetTree::drain_pending_intents`].
+    /// The tuple carries the source widget (dispatch anchor), the
+    /// intent itself, and the firing shortcut's
+    /// `propagate_when_disabled` policy.
+    pending_intents: Vec<(WidgetId, crate::intent::Intent, bool)>,
+    /// Currently-armed key-capture slot. `Some` when
+    /// [`WidgetTree::begin_key_capture`] has been called and the
+    /// returned [`CaptureHandle`](crate::shortcut::CaptureHandle)
+    /// is still alive. The slot is shared (via `Rc`) with the handle
+    /// so dropping the handle cancels the capture, and calling
+    /// `begin_key_capture` again creates a fresh slot without
+    /// touching the previous one (whose handle, if dropped later,
+    /// only clears its own orphaned slot).
+    key_capture: Option<crate::shortcut::KeyCaptureSlot>,
     binding_registry: crate::binding::BindingRegistry,
     idle_queue: crate::idle::IdleQueue,
     /// Simulated clock for deterministic time-dependent testing.
@@ -208,8 +210,9 @@ impl WidgetTree {
             pending_commands: Vec::new(),
             pending_modal_requests: Vec::new(),
             pending_modal_dismissal: false,
-            shortcut_lookup: None,
-            shortcut_reverse_lookup: None,
+            shortcut_registry: crate::shortcut::ShortcutRegistry::new(),
+            pending_intents: Vec::new(),
+            key_capture: None,
             binding_registry: crate::binding::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
             sim_clock: std::time::Instant::now(),
@@ -768,11 +771,22 @@ impl WidgetTree {
         // thread's work sooner.
         let drained_subs = if let Some(node) = self.arena.get_mut(widget_id) {
             node.effect_handles.clear();
+            node.actions.clear();
             node.dirty.needs_rebuild = false;
             std::mem::take(&mut node.subscription_handles)
         } else {
             Vec::new()
         };
+        // Shortcuts the widget declared are torn down too — they will
+        // be re-registered during the upcoming `build()` call. User
+        // overrides live in a separate map keyed by id, so user
+        // rebindings survive this round-trip (see ShortcutRegistry
+        // graveyard semantics).
+        self.shortcut_registry.unregister_all_for_owner(widget_id);
+        // Drop any signal→widget bindings from the previous build
+        // cycle so `build()` can re-register a fresh set without
+        // accumulating duplicates across rebuilds.
+        self.binding_registry.unregister_for_widget(widget_id);
         for (sub_id, handle) in drained_subs {
             drop(handle);
             self.app_context
@@ -836,6 +850,14 @@ impl WidgetTree {
                 .borrow_mut()
                 .remove(&sub_id);
         }
+        // Drop any shortcuts the destroyed widget owned. Unlike
+        // `rebuild_single_widget`, destruction is permanent; if the
+        // user had overrides, they stay in the graveyard.
+        self.shortcut_registry.unregister_all_for_owner(widget_id);
+        // Bindings from this widget stop being relevant; clean them
+        // up so the registry doesn't leak dead entries for the
+        // lifetime of the app.
+        self.binding_registry.unregister_for_widget(widget_id);
         self.arena.destroy(widget_id);
     }
 
@@ -914,38 +936,179 @@ impl WidgetTree {
         &self.binding_registry
     }
 
-    /// Register a ShortcutMap for keyboard shortcut interception.
-    /// Shortcuts are checked before any widget sees the key event (preview pass).
-    pub fn with_shortcuts<C: AppCommand>(mut self, map: crate::shortcut::ShortcutMap<C>) -> Self {
-        let map_for_reverse = map.clone();
-        self.shortcut_lookup = Some(Box::new(move |key, modifiers, focused, is_in_scope| {
-            let shortcut = crate::shortcut::Shortcut::new(key, modifiers);
-            map.find(&shortcut, focused, is_in_scope)
-                .map(|cmd| ErasedCommand::new(cmd.clone()))
-        }));
-        self.shortcut_reverse_lookup = Some(Box::new(move |cmd_any: &dyn std::any::Any| {
-            cmd_any
-                .downcast_ref::<C>()
-                .and_then(|cmd| map_for_reverse.find_shortcut_for(cmd).copied())
-        }));
-        self
+    /// Shared access to the shortcut registry. Widgets register their
+    /// default shortcuts through here during `build()` (via
+    /// `BuildContext::register_shortcut`); settings UIs and
+    /// persistence layers read and mutate overrides directly.
+    pub fn shortcut_registry(&self) -> &crate::shortcut::ShortcutRegistry {
+        &self.shortcut_registry
     }
 
-    /// Lookup a shortcut, returning a type-erased command if matched.
-    fn shortcut_map_lookup(&self, key: Key, modifiers: Modifiers) -> Option<ErasedCommand> {
-        let lookup = self.shortcut_lookup.as_ref()?;
-        let is_in_scope =
-            |focused: WidgetId, scope: WidgetId| -> bool { self.is_descendant_of(focused, scope) };
-        lookup(key, modifiers, self.focused, &is_in_scope)
+    pub fn shortcut_registry_mut(&mut self) -> &mut crate::shortcut::ShortcutRegistry {
+        &mut self.shortcut_registry
     }
 
-    /// Reverse-lookup: find the shortcut label for a type-erased command.
-    /// Returns the `Shortcut::to_string()` display (e.g. "Ctrl+S").
-    pub(crate) fn shortcut_label_for_any(&self, command: &dyn std::any::Any) -> Option<String> {
-        self.shortcut_reverse_lookup
+    /// Install a one-shot key-capture callback, returning a
+    /// [`CaptureHandle`](crate::shortcut::CaptureHandle) whose `Drop`
+    /// cancels the capture if it hasn't already fired. The next
+    /// `KeyDown` the tree receives bypasses shortcut-registry lookup
+    /// and invokes the callback with:
+    /// - the captured [`KeyStroke`](crate::shortcut::KeyStroke)
+    /// - mutable access to the registry (rebind in-place)
+    /// - a mutable [`EventContext`] (so the handler can also emit
+    ///   commands, send intents, dismiss overlays, …)
+    ///
+    /// Calling this while a previous capture is armed creates a
+    /// **separate** slot; the prior handle, when eventually dropped,
+    /// cancels only its own (now-orphaned) slot. The new capture
+    /// wins.
+    pub fn begin_key_capture(
+        &mut self,
+        callback: impl FnOnce(
+                crate::shortcut::KeyStroke,
+                &mut crate::shortcut::ShortcutRegistry,
+                &mut EventContext,
+            ) + 'static,
+    ) -> crate::shortcut::CaptureHandle {
+        let slot: crate::shortcut::KeyCaptureSlot =
+            std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new(callback))));
+        self.key_capture = Some(slot.clone());
+        crate::shortcut::CaptureHandle::new(slot)
+    }
+
+    /// Cancel any currently-armed key capture without invoking it.
+    /// Equivalent to dropping the [`CaptureHandle`](crate::shortcut::CaptureHandle),
+    /// but exposed here so callers that lost the handle (or never
+    /// kept one) can still bail out.
+    pub fn cancel_key_capture(&mut self) {
+        if let Some(slot) = self.key_capture.take() {
+            slot.borrow_mut().take();
+        }
+    }
+
+    /// Whether a key-capture callback is currently armed.
+    pub fn is_capturing_keys(&self) -> bool {
+        self.key_capture
             .as_ref()
-            .and_then(|lookup| lookup(command))
-            .map(|shortcut| shortcut.to_string())
+            .map(|slot| slot.borrow().is_some())
+            .unwrap_or(false)
+    }
+
+    /// Consume any pending key-capture callback. Used internally by
+    /// the dispatch path — returns the boxed closure so the caller
+    /// can invoke it once the KeyStroke has been constructed. Also
+    /// drops the outer `Option<Rc<...>>` so `is_capturing_keys` goes
+    /// back to `false`.
+    pub(crate) fn take_key_capture(&mut self) -> Option<crate::shortcut::KeyCaptureCallback> {
+        let slot = self.key_capture.take()?;
+        slot.borrow_mut().take()
+    }
+
+    /// Append an [`Action`](crate::action::Action) to a widget's arena
+    /// node. Invoked by [`BuildContext::register_action`]; not meant
+    /// to be called directly.
+    pub(crate) fn push_action(&mut self, widget_id: WidgetId, action: crate::action::Action) {
+        if let Some(node) = self.arena.get_mut(widget_id) {
+            node.actions.push(action);
+        }
+    }
+
+    /// Enqueue an intent for dispatch from `source`. Called from
+    /// `collect_from_ctx` after a handler runs `ctx.send_intent(...)`
+    /// and from the KeyDown shortcut-interception path.
+    pub(crate) fn enqueue_intent(
+        &mut self,
+        source: WidgetId,
+        intent: crate::intent::Intent,
+        propagate_when_disabled: bool,
+    ) {
+        self.pending_intents
+            .push((source, intent, propagate_when_disabled));
+    }
+
+    /// Dispatch every queued intent. Handlers may call
+    /// `ctx.send_intent(...)` to enqueue more; the loop consumes
+    /// those too until the queue drains. No ordering guarantee
+    /// beyond "first-enqueued is first-dispatched"; the `pop` path
+    /// uses `remove(0)` to keep that FIFO behavior.
+    pub(crate) fn drain_pending_intents(&mut self) {
+        while !self.pending_intents.is_empty() {
+            let (source, intent, propagate) = self.pending_intents.remove(0);
+            self.dispatch_intent(source, intent, propagate);
+        }
+    }
+
+    /// Walk `source → root` invoking any [`Action`](crate::action::Action)
+    /// whose `intent` name matches. The first enabled, `Handled`
+    /// response stops the walk. A `Propagated` or disabled action
+    /// (when the shortcut's `propagate_when_disabled` is true) lets
+    /// the walk continue. A disabled action with
+    /// `propagate_when_disabled == false` consumes the intent at that
+    /// level without invoking a handler.
+    pub(crate) fn dispatch_intent(
+        &mut self,
+        source: WidgetId,
+        intent: crate::intent::Intent,
+        propagate_when_disabled: bool,
+    ) {
+        // Pre-compute the source → root chain so the walk doesn't
+        // need to hold any arena borrow while invoking handlers.
+        let chain: Vec<WidgetId> = {
+            let mut v = vec![source];
+            let mut current = self.arena.parent(source);
+            while let Some(id) = current {
+                v.push(id);
+                current = self.arena.parent(id);
+            }
+            v
+        };
+
+        for id in chain {
+            if !self.arena.is_active(id) || !self.arena.is_enabled(id) {
+                continue;
+            }
+
+            // Take out the first matching action by intent name so
+            // we can invoke its FnMut handler without holding an
+            // arena-wide borrow. The action is reinserted at its
+            // original position so declaration order is preserved
+            // for any follow-on dispatch.
+            let Some((mut action, idx, enabled)) =
+                self.arena.get_mut(id).and_then(|node| {
+                    let idx = node
+                        .actions
+                        .iter()
+                        .position(|a| a.intent == intent.name)?;
+                    let enabled = node.actions[idx].is_enabled();
+                    Some((node.actions.remove(idx), idx, enabled))
+                })
+            else {
+                continue;
+            };
+
+            if !enabled {
+                // Return the action untouched.
+                if let Some(node) = self.arena.get_mut(id) {
+                    node.actions.insert(idx, action);
+                }
+                if propagate_when_disabled {
+                    continue;
+                }
+                return;
+            }
+
+            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
+            let response = (action.handler)(&intent, &mut ctx);
+            if let Some(node) = self.arena.get_mut(id) {
+                node.actions.insert(idx, action);
+            }
+            self.collect_from_ctx(ctx, id);
+
+            match response {
+                crate::intent::IntentResponse::Handled => return,
+                crate::intent::IntentResponse::Propagated => continue,
+            }
+        }
     }
 
     // --- Command handling ---

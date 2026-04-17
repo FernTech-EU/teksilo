@@ -31,7 +31,9 @@ pub mod scroll_area;
 #[cfg(feature = "rich-text")]
 pub mod text_input;
 pub mod scroll_bar;
+pub mod keystroke_format;
 pub mod segmented_control;
+pub mod shortcut_settings;
 pub mod slider;
 pub mod snackbar;
 pub mod split_button;
@@ -77,6 +79,7 @@ pub use repeater::Repeater;
 pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarMode};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
 pub use segmented_control::SegmentedControl;
+pub use shortcut_settings::ShortcutSettings;
 pub use slider::Slider;
 pub use snackbar::Snackbar;
 pub use split_button::SplitButton;

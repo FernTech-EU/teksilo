@@ -5,8 +5,8 @@
 //! metadata that rich-tooltip widgets resolve at hover time.
 //!
 //! Two entry points:
-//! - [`TooltipContent::new`] (plus `.with_more` / `.with_shortcut_label`
-//!   / `.with_command`) builds an entry at app boot.
+//! - [`TooltipContent::new`] (plus `.with_more` / `.with_shortcut_label`)
+//!   builds an entry at app boot.
 //! - [`install_tooltip_registry`] freezes a `Vec<TooltipContent>` into a
 //!   thread-local registry that the tooltip widget reads from.
 //!
@@ -25,9 +25,7 @@
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
-use fern_core::app_command::AppCommand;
 use fern_i18n::LocalizedString;
 
 /// One tooltip content entry.
@@ -36,12 +34,9 @@ use fern_i18n::LocalizedString;
 /// by the Accordion disclosure inside a sticky rich tooltip) and a
 /// keyboard shortcut hint.
 ///
-/// The shortcut follows the same pattern as [`MenuItem`]
-/// (`crates/fern-widgets/src/menu_item.rs`): either a literal label
-/// override, **or** a type-erased [`AppCommand`] whose current binding
-/// is looked up in the live `ShortcutMap` at render time via
-/// `BuildContext::shortcut_label_for_any`. The literal override wins
-/// when both are set.
+/// The shortcut is currently a literal label override. Registry-backed
+/// auto-lookup against the new [`ShortcutRegistry`] lands in step 3
+/// via a shortcut-id field.
 ///
 /// [`MenuItem`]: crate::menu_item::MenuItem
 pub struct TooltipContent {
@@ -54,16 +49,13 @@ pub struct TooltipContent {
     /// inside a sticky tooltip. Same inline-markup pipeline as `text`.
     pub more: Option<LocalizedString>,
     /// Manual shortcut label override (e.g. "Ctrl+Shift+S"). Used
-    /// verbatim when set.
+    /// verbatim when set; takes precedence over [`shortcut_id`].
     pub shortcut_label: Option<String>,
-    /// Type-erased command reference. When set and `shortcut_label`
-    /// isn't, the tooltip widget reverse-looks-up the current binding
-    /// in the ShortcutMap — the same `ctx.shortcut_label_for_any` API
-    /// MenuItem uses.
-    ///
-    /// Stored as `Rc<dyn Any>` so `TooltipContent` clones cheaply out
-    /// of the registry on every hover.
-    pub command: Option<Rc<dyn std::any::Any>>,
+    /// Registered shortcut id — the tooltip renders the effective
+    /// primary keystroke from the tree's
+    /// [`ShortcutRegistry`](fern_core::shortcut::ShortcutRegistry) and
+    /// tracks user rebinds automatically.
+    pub shortcut_id: Option<&'static str>,
 }
 
 impl std::fmt::Debug for TooltipContent {
@@ -72,7 +64,7 @@ impl std::fmt::Debug for TooltipContent {
             .field("key", &self.key)
             .field("has_more", &self.more.is_some())
             .field("shortcut_label", &self.shortcut_label)
-            .field("has_command", &self.command.is_some())
+            .field("shortcut_id", &self.shortcut_id)
             .finish()
     }
 }
@@ -84,7 +76,7 @@ impl Clone for TooltipContent {
             text: self.text.clone(),
             more: self.more.clone(),
             shortcut_label: self.shortcut_label.clone(),
-            command: self.command.clone(),
+            shortcut_id: self.shortcut_id,
         }
     }
 }
@@ -97,7 +89,7 @@ impl TooltipContent {
             text,
             more: None,
             shortcut_label: None,
-            command: None,
+            shortcut_id: None,
         }
     }
 
@@ -108,18 +100,18 @@ impl TooltipContent {
     }
 
     /// Attach a manual shortcut label override ("Ctrl+Shift+S",
-    /// "Hold ⇧ + drag", …). Takes precedence over command-based lookup.
+    /// "Hold ⇧ + drag", …). Takes precedence over
+    /// [`TooltipContent::for_shortcut`].
     pub fn with_shortcut_label(mut self, s: impl Into<String>) -> Self {
         self.shortcut_label = Some(s.into());
         self
     }
 
-    /// Bind the tooltip to a command so its shortcut label reflects the
-    /// live [`ShortcutMap`](fern_core::shortcut::ShortcutMap) binding at
-    /// render time. The command is stored type-erased so
-    /// `TooltipContent` isn't generic over the app's command enum.
-    pub fn with_command<C: AppCommand + 'static>(mut self, cmd: C) -> Self {
-        self.command = Some(Rc::new(cmd));
+    /// Bind the tooltip's trailing chip to a registered shortcut id.
+    /// The tooltip widget reads the effective primary keystroke from
+    /// the tree's shortcut registry and refreshes on user rebinds.
+    pub fn for_shortcut(mut self, id: &'static str) -> Self {
+        self.shortcut_id = Some(id);
         self
     }
 
@@ -128,7 +120,7 @@ impl TooltipContent {
     }
 
     pub fn has_shortcut(&self) -> bool {
-        self.shortcut_label.is_some() || self.command.is_some()
+        self.shortcut_label.is_some() || self.shortcut_id.is_some()
     }
 }
 
@@ -310,22 +302,7 @@ mod tests {
         _reset_tooltip_registry();
     }
 
-    #[test]
-    fn with_command_stores_type_erased_ref() {
-        #[derive(Debug, Clone, PartialEq)]
-        enum MyCmd {
-            Save,
-        }
-        impl AppCommand for MyCmd {}
-
-        let c = TooltipContent::new("save", LocalizedString::literal("Save"))
-            .with_command(MyCmd::Save);
-        assert!(c.command.is_some());
-        assert!(c.has_shortcut());
-
-        // Downcast back through Any to verify the type-erased payload.
-        let cmd_any = c.command.as_ref().unwrap();
-        let downcast = cmd_any.downcast_ref::<MyCmd>();
-        assert_eq!(downcast, Some(&MyCmd::Save));
-    }
+    // NOTE: `with_command_stores_type_erased_ref` test removed along
+    // with the `command` field; registry-backed shortcut resolution
+    // returns in step 3 via shortcut-id binding.
 }
