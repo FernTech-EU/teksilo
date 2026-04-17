@@ -2,7 +2,7 @@
 name = "text-and-layout"
 edition = "2024"
 version.workspace = true
-license.workspace = true
+license-file.workspace = true
 authors.workspace = true
 publish = false
 

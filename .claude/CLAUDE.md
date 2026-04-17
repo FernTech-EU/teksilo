@@ -4,7 +4,7 @@
 
 FernUI is a pure-Rust GUI framework for serious desktop applications. Primary target: **Skribisto** (cross-platform writing app). Architecture: retained widget tree with SwiftUI-style layout, AccessKit accessibility, wgpu rendering.
 
-- **License:** MPL-2.0
+- **License:** Proprietary — Copyright (c) 2026-2026 FernTech, all rights reserved
 - **Rust edition:** 2024 (resolver 3)
 - **Author:** Cyril Jacquet
 
