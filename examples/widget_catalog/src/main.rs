@@ -1754,14 +1754,10 @@ impl Widget for WidgetCatalog {
         let scroll = ctx.add(ScrollArea::from_id(padded));
 
         // Root: Toolbar | ScrollArea (fills remaining space) | StatusBar.
-        // Migrated to the fern! DSL per spec §7.8. Expand is a
-        // single-child wrapper (uses `.child_id(id)`, not
-        // `.add_child`) so `scroll` goes through a property call;
-        // VStack and StatusBar are multi-child containers and take
-        // `.add_child(id)` via the `#{ }` id-escape.
+        // Migrated to the fern! DSL per spec §7.8.
         let root = fern!(ctx =>
             VStack {
-                #{ toolbar }
+                add_child: toolbar
                 Expand {
                     fills_stack
                     child_id: scroll

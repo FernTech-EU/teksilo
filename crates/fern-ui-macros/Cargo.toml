@@ -10,9 +10,6 @@ repository.workspace = true
 proc-macro = true
 
 [dependencies]
-# `span-locations` is needed for `Span::start()/end()` line info —
-# used by the property parser to detect the newline boundary between
-# a multi-arg property's arguments and the next body item.
-proc-macro2 = { version = "1", features = ["span-locations"] }
+proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }

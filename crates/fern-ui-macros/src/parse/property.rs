@@ -13,22 +13,23 @@
 //! decision is made from the leading 1-2 tokens with no backtracking.
 //!
 //! Multi-arg continuation rule: after each arg, if the next token is a
-//! `,` on the same line as the arg's start, consume it and parse
-//! another arg. Otherwise stop.
+//! `,` and the token AFTER the comma doesn't look like the start of a
+//! new body item (`ident:`, structural keyword, spread, escape), the
+//! comma continues the arg list. Otherwise the arg list terminates
+//! and the comma stays in the stream for the body parser to handle.
 //!
-//! Phase 1 limitation (still in effect): a multi-line expression value
-//! followed by a continuation comma on the last line is not reliably
-//! detected — `Span::end()` isn't populated under `span-locations` on
-//! stable Rust.
+//! This replaces an earlier line-based rule that relied on
+//! `proc-macro2`'s `span-locations` feature, which interacts poorly
+//! with rust-analyzer's proc-macro server. Syntactic lookahead works
+//! under both cargo and rust-analyzer uniformly.
 
 use syn::parse::{ParseStream, Result};
-use syn::spanned::Spanned;
 use syn::{Expr, Token};
 
 use crate::diag;
 use crate::ir::{FernProperty, PropArg};
 
-use super::{parse_element, peek_binding, peek_element_start, peek_escape};
+use super::{parse_element, peek_binding, peek_element_start, peek_escape, peek_spread};
 
 /// Parse the argument list of a property (everything after `name:`).
 /// Never empty — property body form always has at least one argument.
@@ -40,11 +41,7 @@ pub(crate) fn parse_property_args(input: ParseStream) -> Result<Vec<PropArg>> {
         if !input.peek(Token![,]) {
             break;
         }
-        let comma_line = input.cursor().span().start().line;
-        let last_arg_line = arg_span_start_line(
-            args.last().expect("args is non-empty by construction"),
-        );
-        if comma_line != last_arg_line {
+        if comma_begins_new_body_item(input) {
             break;
         }
         let _comma: Token![,] = input.parse()?;
@@ -53,6 +50,50 @@ pub(crate) fn parse_property_args(input: ParseStream) -> Result<Vec<PropArg>> {
     }
 
     Ok(args)
+}
+
+/// Peek past a comma that sits at the current cursor and decide
+/// whether what follows looks like a body item. If yes, the comma is
+/// stray (spec §9.2) and the arg list should terminate so the body
+/// parser can surface the "use newlines, not commas" diagnostic.
+fn comma_begins_new_body_item(input: ParseStream) -> bool {
+    let fork = input.fork();
+    if fork.parse::<Token![,]>().is_err() {
+        return false;
+    }
+
+    // Structural keywords unambiguously begin body items.
+    if fork.peek(Token![if])
+        || fork.peek(Token![for])
+        || fork.peek(Token![match])
+        || fork.peek(Token![let])
+    {
+        return true;
+    }
+    // `..expr` spread.
+    if peek_spread(&fork) {
+        return true;
+    }
+    // `#{ expr }` escape.
+    if peek_escape(&fork) {
+        return true;
+    }
+    // `ident :` property (but NOT `ident ::` path, which is an
+    // element arg value).
+    if fork.peek(syn::Ident) && fork.peek2(Token![:]) && !fork.peek2(Token![::]) {
+        return true;
+    }
+    // `ident =` binding with an element on the right.
+    if peek_binding(&fork) {
+        return true;
+    }
+    // An UpperCamel-starting element after the comma is kept as an
+    // arg continuation so the `tab_literal: "x", Card { ... }` pattern
+    // (spec §3.4 TabWidget example) works. A comma followed by a
+    // would-be new child on the next line is still treated as
+    // continuation — users end a property without a trailing comma to
+    // begin a new body item.
+    false
 }
 
 fn parse_prop_arg(input: ParseStream) -> Result<PropArg> {
@@ -84,15 +125,6 @@ fn parse_prop_arg(input: ParseStream) -> Result<PropArg> {
 
     let expr: Expr = input.parse()?;
     Ok(PropArg::Expr(expr))
-}
-
-fn arg_span_start_line(arg: &PropArg) -> usize {
-    match arg {
-        PropArg::Expr(e) => e.span().start().line,
-        PropArg::Element(e) => e.head_span.start().line,
-        PropArg::Escape(e) => e.span().start().line,
-        PropArg::Binding { name, .. } => name.span().start().line,
-    }
 }
 
 /// Parse an argument-free property: a bare lowercase ident that sits
