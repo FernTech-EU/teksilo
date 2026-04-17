@@ -24,52 +24,8 @@ use fern_core::widget_id::WidgetId;
 use fern_data::ListModel;
 use fern_data::selection_model::SelectionModel;
 
+use crate::list_source::ListSource;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
-
-/// Type-erased data source for ListView (wraps both ListModel and ListDataSource).
-struct ListSource<T: 'static> {
-    len_fn: Rc<dyn Fn() -> usize>,
-    with_item_fn: Rc<dyn Fn(usize, &dyn Fn(&T) -> Box<dyn Widget>) -> Option<Box<dyn Widget>>>,
-    observe_fn: Rc<dyn Fn(Box<dyn Fn(&fern_data::DataChange)>) -> fern_core::ObserverHandle>,
-    /// For reorder: only available when backed by ListModel.
-    move_item_fn: Option<Rc<dyn Fn(usize, usize)>>,
-}
-
-impl<T: 'static> ListSource<T> {
-    fn from_model(model: ListModel<T>) -> Self {
-        let m1 = model.clone();
-        let m2 = model.clone();
-        let m3 = model.clone();
-        let m4 = model.clone();
-        Self {
-            len_fn: Rc::new(move || m1.len()),
-            with_item_fn: Rc::new(move |index, f| m2.with_item(index, |item| f(item))),
-            observe_fn: Rc::new(move |f| m3.observe_changes(move |c| f(c))),
-            move_item_fn: Some(Rc::new(move |from, to| m4.move_item(from, to))),
-        }
-    }
-
-    fn from_data_source<S: fern_data::ListDataSource<Item = T>>(source: S) -> Self {
-        let s = Rc::new(source);
-        let s1 = s.clone();
-        let s2 = s.clone();
-        let s3 = s.clone();
-        Self {
-            len_fn: Rc::new(move || s1.len()),
-            with_item_fn: Rc::new(move |index, f| s2.with_item(index, |item| f(item))),
-            observe_fn: Rc::new(move |f| s3.observe_changes(move |c| f(c))),
-            move_item_fn: None, // External sources don't support move_item
-        }
-    }
-
-    fn len(&self) -> usize {
-        (self.len_fn)()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
 
 /// Internal drag payload for intra-ListView reordering.
 #[derive(Debug, Clone)]

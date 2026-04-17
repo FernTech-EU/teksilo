@@ -66,9 +66,9 @@ impl Widget for Root {
 
         // --- Section 1: ComboBox demos ---
 
-        let fruit_selected = ctx.signal(None::<usize>);
-        let color_selected = ctx.signal(Some(2_usize)); // pre-select "Blue"
-        let size_selected = ctx.signal(None::<usize>);
+        let fruit_selected = ctx.signal(None::<String>);
+        let color_selected = ctx.signal(Some("Blue".to_string())); // pre-select "Blue"
+        let size_selected = ctx.signal(None::<String>);
 
         let combo_section = ctx.add(
             VStack::new()
@@ -98,7 +98,7 @@ impl Widget for Root {
                                         .color(c.text_primary),
                                 )
                                 .child(
-                                    ComboBox::new_literal(
+                                    ComboBox::new(
                                         vec![
                                             "Apple",
                                             "Banana",
@@ -110,7 +110,7 @@ impl Widget for Root {
                                         ],
                                         fruit_selected.clone(),
                                     )
-                                    .placeholder_literal("Select a fruit..."),
+                                    .placeholder("Select a fruit..."),
                                 ),
                         )
                         .child(
@@ -121,7 +121,7 @@ impl Widget for Root {
                                         .style(t.small.clone())
                                         .color(c.text_primary),
                                 )
-                                .child(ComboBox::new_literal(
+                                .child(ComboBox::new(
                                     vec!["Red", "Green", "Blue", "Yellow", "Purple"],
                                     color_selected.clone(),
                                 )),
@@ -135,11 +135,11 @@ impl Widget for Root {
                                         .color(c.text_primary),
                                 )
                                 .child(
-                                    ComboBox::new_literal(
+                                    ComboBox::new(
                                         vec!["Small", "Medium", "Large"],
                                         size_selected.clone(),
                                     )
-                                    .placeholder_literal("Choose size")
+                                    .placeholder("Choose size")
                                     .enabled(false),
                                 ),
                         ),
@@ -545,10 +545,10 @@ mod tests {
     #[test]
     fn combo_box_opens_on_click() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let selected = Signal::new(None::<usize>);
+        let selected = Signal::new(None::<String>);
         let cb = tree.add(
-            ComboBox::new_literal(vec!["Apple", "Banana", "Cherry"], selected.clone())
-                .placeholder_literal("Pick one"),
+            ComboBox::new(vec!["Apple", "Banana", "Cherry"], selected.clone())
+                .placeholder("Pick one"),
         );
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
@@ -561,16 +561,16 @@ mod tests {
     #[test]
     fn combo_box_arrow_keys_change_selection() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let selected = Signal::new(None::<usize>);
-        let cb = tree.add(ComboBox::new_literal(vec!["A", "B", "C"], selected.clone()));
+        let selected = Signal::new(None::<String>);
+        let cb = tree.add(ComboBox::new(vec!["A", "B", "C"], selected.clone()));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         tree.focus(cb);
 
         tree.press_key(Key::ArrowDown, Modifiers::NONE);
-        assert_eq!(selected.get(), Some(1));
+        assert_eq!(selected.get().as_deref(), Some("B"));
 
         tree.press_key(Key::ArrowUp, Modifiers::NONE);
-        assert_eq!(selected.get(), Some(0));
+        assert_eq!(selected.get().as_deref(), Some("A"));
     }
 
     #[test]

@@ -183,6 +183,22 @@ impl AccessNodeBuilder {
         self.inner.set_has_popup(kind);
     }
 
+    /// Placeholder text displayed when the widget has no user-entered value
+    /// yet. Screen readers treat this distinctly from `value` — they'll
+    /// announce the placeholder as hint text rather than as the current
+    /// value. Used by `ComboBox` when selection is `None`, by `TextInput`
+    /// before the user types, etc.
+    pub fn set_placeholder(&mut self, placeholder: impl Into<String>) {
+        self.inner.set_placeholder(placeholder.into());
+    }
+
+    /// Autocomplete behavior for combobox / text input widgets. Maps to
+    /// ARIA `aria-autocomplete`: `Inline` completes within the field,
+    /// `List` shows a popup of matching values, `Both` does both.
+    pub fn set_auto_complete(&mut self, kind: accesskit::AutoComplete) {
+        self.inner.set_auto_complete(kind);
+    }
+
     /// Selection state — used by `RadioButton`, `Tab`, `ListBoxOption`,
     /// `TreeItem`, menu items in radio/check groups, etc. This is the
     /// correct property for "this option in a mutually exclusive

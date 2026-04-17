@@ -11,6 +11,7 @@ pub mod group_box;
 pub mod group_header;
 pub mod link;
 pub(crate) mod list_item_a11y;
+pub(crate) mod list_source;
 pub mod list_view;
 pub mod menu_bar;
 pub(crate) mod menu_context;

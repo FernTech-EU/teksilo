@@ -1477,7 +1477,7 @@ impl Widget for WidgetCatalog {
         // Section 7: Menus & Dropdowns (Milestone 4)
         // =====================================================================
 
-        let combo_selected = ctx.signal(None::<usize>);
+        let combo_selected = ctx.signal(None::<String>);
         let menus_section = ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -1493,11 +1493,11 @@ impl Widget for WidgetCatalog {
                 )
                 .child(
                     HStack::new().spacing(16.0).child(
-                        ComboBox::new_literal(
+                        ComboBox::new(
                             vec!["Apple", "Banana", "Cherry", "Date", "Elderberry"],
                             combo_selected.clone(),
                         )
-                        .placeholder_literal("Select a fruit..."),
+                        .placeholder("Select a fruit..."),
                     ),
                 )
                 .child(
