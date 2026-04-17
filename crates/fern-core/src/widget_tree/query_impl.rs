@@ -15,6 +15,11 @@ impl WidgetTree {
         self.arena.children(id).to_vec()
     }
 
+    /// Parent widget id in the arena graph, or `None` for roots.
+    pub fn parent(&self, id: WidgetId) -> Option<WidgetId> {
+        self.arena.parent(id)
+    }
+
     pub fn needs_layout(&self) -> bool {
         self.arena.any_needs_layout()
     }

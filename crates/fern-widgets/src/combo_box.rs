@@ -891,15 +891,20 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             #[cfg(feature = "rich-text")]
             {
                 if let Some(query) = &self.search_query {
-                    let clear_query = query.clone();
-                    let clear_btn = crate::built_in_button::BuiltInButton::clear()
-                        .size(crate::built_in_button::BuiltInButtonSize::Compact)
-                        .on_activate_fn(move |_ctx| {
-                            clear_query.set(String::new());
-                        });
+                    // `show_clear_button(true)` inserts a clear button
+                    // into `TextInput`'s trailing slot, wired to empty
+                    // the bound text signal, and — critically — binds
+                    // its visibility to `text.is_empty().not()` so the
+                    // button only appears once something has been typed.
+                    // Using the built-in option here rather than a
+                    // hand-wired `BuiltInButton::clear()` in the
+                    // trailing slot avoids reaching for the trailing
+                    // widget's id from the outside (it lives inside
+                    // TextInput's build) just to register
+                    // `ctx.visible_when`.
                     let search_input = crate::text_input::TextInput::new(query.clone())
                         .placeholder("Search…")
-                        .trailing_slot(clear_btn);
+                        .show_clear_button(true);
                     let search_id = ctx.add(search_input);
                     self.search_input_slot.set(Some(search_id));
                     let search_wrapped = ctx.add(
@@ -931,6 +936,27 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         let zstack = ZStack::new().add_child(bg_id).add_child(content_id);
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
+
+        // Panel-level key handler: consume Tab / Shift+Tab and dismiss
+        // the overlay. The framework dispatches Tab to the focused
+        // widget first (and bubbles up through its ancestors) before
+        // falling back to built-in focus cycling — returning `Handled`
+        // here both closes the panel and suppresses the default cycle.
+        // The next user action (or Shift+Tab) then moves focus through
+        // the main tree naturally, starting from where focus lived
+        // before the combo opened. `TextInput` itself returns
+        // `Ignored` for Tab, so the bubble reaches the panel whether
+        // focus is in the search field or on an item.
+        let panel_handlers = HandlerSet::new().on_key(|event, ctx| match event {
+            WidgetEvent::KeyDown {
+                key: Key::Tab, ..
+            } => {
+                ctx.dismiss_all_overlays();
+                EventResponse::Handled
+            }
+            _ => EventResponse::Ignored,
+        });
+        ctx.apply_self_handlers(panel_handlers);
 
         vec![root_id]
     }
@@ -2200,6 +2226,88 @@ mod tests {
             node.auto_complete(),
             Some(fern_core::accesskit::AutoComplete::List),
             "searchable combobox must expose aria-autocomplete=list",
+        );
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn tab_dismisses_open_searchable_dropdown() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let query = Signal::new(String::new());
+        let cb = tree.add(
+            ComboBox::new(vec!["Apple", "Banana", "Cherry"], selected.clone())
+                .search_query(query.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.press_key(Key::Tab, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Tab should dismiss the open dropdown so focus can leave the popup"
+        );
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn shift_tab_dismisses_open_searchable_dropdown() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let query = Signal::new(String::new());
+        let cb = tree.add(
+            ComboBox::new(vec!["Apple", "Banana", "Cherry"], selected.clone())
+                .search_query(query.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.press_key(Key::Tab, fern_core::event::Modifiers::SHIFT);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Shift+Tab should also dismiss the open dropdown"
+        );
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn searchable_opens_with_focus_in_search_field() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let query = Signal::new(String::new());
+        let cb = tree.add(
+            ComboBox::new(vec!["Apple", "Banana"], selected.clone())
+                .search_query(query.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        let focused = tree
+            .focused()
+            .expect("something inside the dropdown should be focused after open");
+        assert_ne!(focused, cb, "focus must leave the combo trigger");
+        // The focused widget should be inside the overlay content subtree.
+        let overlay_root = tree.overlay_manager().active_content_ids()[0];
+        let mut cur = Some(focused);
+        let mut in_overlay = false;
+        while let Some(id) = cur {
+            if id == overlay_root {
+                in_overlay = true;
+                break;
+            }
+            cur = tree.parent(id);
+        }
+        assert!(
+            in_overlay,
+            "focused widget should be inside the dropdown panel"
         );
     }
 

@@ -134,7 +134,21 @@ impl WidgetTree {
             }
             WidgetEvent::KeyDown { key, modifiers, .. } => {
                 if *key == Key::Tab {
-                    self.cycle_focus(modifiers.shift());
+                    // Dispatch Tab to the focused widget first so
+                    // ancestors (e.g. an open overlay that wants to
+                    // close instead of moving focus out through its
+                    // content) get a chance to intercept. Fall back to
+                    // built-in focus cycling only when no handler
+                    // returns `EventResponse::Handled`.
+                    let handled = self
+                        .focused
+                        .map(|focused| {
+                            self.dispatch_to_widget_returning_handled(focused, &event)
+                        })
+                        .unwrap_or(false);
+                    if !handled {
+                        self.cycle_focus(modifiers.shift());
+                    }
                 } else if let Some(focused) = self.focused {
                     self.dispatch_to_widget(focused, &event);
                 }
@@ -244,8 +258,21 @@ impl WidgetTree {
     }
 
     pub(super) fn dispatch_to_widget(&mut self, target: WidgetId, event: &WidgetEvent) {
+        self.dispatch_to_widget_returning_handled(target, event);
+    }
+
+    /// Same as [`dispatch_to_widget`] but returns `true` when any
+    /// preview or bubble handler consumed the event. Used for keyboard
+    /// events the framework wants to consume by default (Tab focus
+    /// navigation): callers can dispatch first, then fall back to
+    /// built-in behavior only when no widget claimed it.
+    pub(super) fn dispatch_to_widget_returning_handled(
+        &mut self,
+        target: WidgetId,
+        event: &WidgetEvent,
+    ) -> bool {
         if !self.arena.is_enabled(target) {
-            return;
+            return false;
         }
 
         let mut ancestors = Vec::new();
@@ -266,7 +293,7 @@ impl WidgetTree {
             self.collect_from_ctx(ctx, id);
             if response == EventResponse::Handled {
                 self.arena.mark_needs_paint(id);
-                return;
+                return true;
             }
         }
 
@@ -289,10 +316,11 @@ impl WidgetTree {
                 } else {
                     self.arena.mark_needs_paint(id);
                 }
-                break;
+                return true;
             }
             current = self.arena.parent(id);
         }
+        false
     }
 
     pub(super) fn dispatch_to_widget_direct(&mut self, target: WidgetId, event: &WidgetEvent) {
@@ -784,7 +812,17 @@ impl WidgetTree {
             self.click(id);
         }
         if let Some(&id) = ctx.focus_requests.last() {
-            self.focus(id);
+            // If the requested widget is itself not focusable (e.g. a
+            // composite like `TextInput` whose focus-handling lives on
+            // an inner leaf), walk into the subtree and land on the
+            // first focusable descendant in document order. This makes
+            // `ctx.request_focus(some_composite)` Do The Right Thing
+            // without every caller having to reach into private inner
+            // ids. `first_focusable_descendant` returns the node itself
+            // when it's focusable, so the usual leaf-target case is
+            // still a no-op lookup.
+            let target = self.first_focusable_descendant(id).unwrap_or(id);
+            self.focus(target);
         }
 
         // --- Drag and drop ---
