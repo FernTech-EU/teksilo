@@ -63,7 +63,9 @@ pub use widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 pub use widget_builder::{HandlerSet, WidgetBuilder, WidgetWithHandlers};
-pub use widget_builder_branching::{FernBranch, FernBranch3, FernBranch4, IntoFernChild};
+pub use widget_builder_branching::{
+    FernBranch, FernBranch3, FernBranch4, IntoFernChild, IntoFernCondition,
+};
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 pub use window_chrome::{

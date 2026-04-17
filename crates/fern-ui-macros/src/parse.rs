@@ -15,6 +15,7 @@ mod body;
 mod cursor;
 mod element;
 mod property;
+mod structural;
 
 pub(crate) fn parse_root(tokens: TokenStream2) -> Result<FernRoot> {
     Parser::parse2(parse_root_impl, tokens)
@@ -49,3 +50,4 @@ pub(crate) use element::parse_element;
 pub(crate) use property::parse_property_args;
 #[allow(unused_imports)]
 pub(crate) use cursor::{peek_binding, peek_element_start, peek_escape};
+pub(crate) use structural::{parse_for, parse_if, parse_match, parse_spread, peek_spread};

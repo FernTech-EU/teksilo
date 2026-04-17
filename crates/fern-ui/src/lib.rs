@@ -40,7 +40,8 @@ pub mod prelude {
     // Core widget types
     pub use fern_core::{
         AccessNodeBuilder, AppCommand, BuildContext, CursorIcon, EventContext, EventResponse,
-        FernBranch, FernBranch3, FernBranch4, FocusPolicy, IntoFernChild, Key, LayoutContext,
+        FernBranch, FernBranch3, FernBranch4, FocusPolicy, IntoFernChild, IntoFernCondition,
+        Key, LayoutContext,
         ModalCloseBehavior, ModalPresentation, Modifiers, PaintContext, Prop, Shortcut,
         ShortcutMap, Signal, Widget, WidgetBuilder, WidgetEvent, WidgetId,
     };

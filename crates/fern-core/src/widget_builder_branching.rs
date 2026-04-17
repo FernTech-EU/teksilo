@@ -341,6 +341,67 @@ impl IntoFernChild for WidgetId {
     }
 }
 
+// ---------------------------------------------------------------------------
+// IntoFernCondition — reactive/static dispatch for `if bare_ident { ... }`
+// ---------------------------------------------------------------------------
+
+/// Dispatch trait the `fern!` macro uses for `if bare_ident { Element }`
+/// — spec §5.1 "reactive conditionals". The bare-identifier form
+/// lowers to a call on this trait; which impl fires (and thus whether
+/// the element is conditionally built or always built with bound
+/// visibility) is decided at monomorphization.
+///
+/// - `bool`: static — the element is built only when the flag is true.
+///   Returns `Some(id)` if built, `None` if skipped.
+/// - `Signal<bool>` / `Prop<bool>`: reactive — the element is always
+///   built, and its visibility is bound to the signal via
+///   `BuildContext::visible_when`. Returns `Some(id)` unconditionally.
+///
+/// The return type is `Option<WidgetId>` so the macro can use a single
+/// lowering shape (`if let Some(id) = ... { parent.add_child(id) }`)
+/// that works for both cases.
+pub trait IntoFernCondition {
+    fn fern_into_conditional_child<W: crate::widget::Widget + 'static>(
+        self,
+        child: W,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Option<WidgetId>;
+}
+
+impl IntoFernCondition for bool {
+    fn fern_into_conditional_child<W: crate::widget::Widget + 'static>(
+        self,
+        child: W,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Option<WidgetId> {
+        if self { Some(ctx.add(child)) } else { None }
+    }
+}
+
+impl IntoFernCondition for crate::signal::Signal<bool> {
+    fn fern_into_conditional_child<W: crate::widget::Widget + 'static>(
+        self,
+        child: W,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Option<WidgetId> {
+        let id = ctx.add(child);
+        ctx.visible_when(id, self);
+        Some(id)
+    }
+}
+
+impl IntoFernCondition for crate::signal::Prop<bool> {
+    fn fern_into_conditional_child<W: crate::widget::Widget + 'static>(
+        self,
+        child: W,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Option<WidgetId> {
+        let id = ctx.add(child);
+        ctx.visible_when(id, self);
+        Some(id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

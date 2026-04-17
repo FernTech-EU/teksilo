@@ -20,7 +20,10 @@ use syn::{Block, Expr, Local, Stmt, Token};
 use crate::diag;
 use crate::ir::{BodyItem, RustShape};
 
-use super::{parse_element, parse_property_args, peek_binding, peek_escape};
+use super::{
+    parse_element, parse_for, parse_if, parse_match, parse_property_args, parse_spread,
+    peek_binding, peek_escape, peek_spread,
+};
 
 pub(crate) fn parse_body(input: ParseStream) -> Result<Vec<BodyItem>> {
     let mut items = Vec::new();
@@ -64,6 +67,23 @@ fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
     if input.peek(Token![let]) {
         let local = parse_let_local(input)?;
         return Ok(BodyItem::Let(local));
+    }
+
+    // Structural keywords — spec §5.1–§5.3.
+    if input.peek(Token![if]) {
+        return parse_if(input).map(BodyItem::If);
+    }
+    if input.peek(Token![match]) {
+        return parse_match(input).map(BodyItem::Match);
+    }
+    if input.peek(Token![for]) {
+        return parse_for(input).map(BodyItem::For);
+    }
+
+    // `..expr` spread — spec §5.5.
+    if peek_spread(input) {
+        let (expr, span) = parse_spread(input)?;
+        return Ok(BodyItem::Spread { expr, span });
     }
 
     // `rust { ... }` — spec §5.6.

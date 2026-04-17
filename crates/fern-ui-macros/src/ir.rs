@@ -6,7 +6,7 @@
 //! user token it originated from.
 
 use proc_macro2::Span;
-use syn::{Block, Expr, Ident, Local, Path};
+use syn::{Block, Expr, Ident, Local, Pat, Path};
 
 /// The root of a `fern!` invocation.
 pub(crate) struct FernRoot {
@@ -65,6 +65,52 @@ pub(crate) enum BodyItem {
     /// `.child(block)`) and side-effect (block tail ends in `;`,
     /// emitted inline as a side-effect statement).
     Rust { block: Block, span: Span, shape: RustShape },
+    /// `if cond { Element } [else if cond { Element }]* [else { Element }]?`
+    /// — spec §5.1. Lowers to `.child_opt(...)` (no-else) or
+    /// `.child(FernBranch{N}::...)` (with else branches).
+    If(FernIf),
+    /// `match expr { pat => Element, ... }` — spec §5.3. Lowers to
+    /// `.child(match ... { ... FernBranch{N}::... })` with arms
+    /// dispatched by variant index.
+    Match(FernMatch),
+    /// `for pat in iter { Element }` — spec §5.2. Lowers to
+    /// `.children(iter.map(|pat| Element))`.
+    For(FernFor),
+    /// `..expr` — spec §5.5. Inlines an iterator of `WidgetId`s as
+    /// children. Forces statement-sequence lowering on the parent.
+    Spread { expr: Expr, span: Span },
+}
+
+pub(crate) struct FernIf {
+    pub(crate) cond: Expr,
+    pub(crate) then: FernElement,
+    pub(crate) else_branch: Option<Box<FernElse>>,
+    pub(crate) span: Span,
+}
+
+pub(crate) enum FernElse {
+    ElseIf(FernIf),
+    Element(FernElement),
+}
+
+pub(crate) struct FernMatch {
+    pub(crate) scrutinee: Expr,
+    pub(crate) arms: Vec<FernMatchArm>,
+    pub(crate) span: Span,
+}
+
+pub(crate) struct FernMatchArm {
+    pub(crate) pat: Pat,
+    pub(crate) guard: Option<(syn::Token![if], Expr)>,
+    pub(crate) element: FernElement,
+}
+
+pub(crate) struct FernFor {
+    pub(crate) pat: Pat,
+    pub(crate) iter: Expr,
+    pub(crate) lets: Vec<Local>,
+    pub(crate) element: FernElement,
+    pub(crate) span: Span,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
