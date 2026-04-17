@@ -47,9 +47,33 @@ pub(crate) enum BodyItem {
     Property(FernProperty),
     /// A bare element at body position — attaches via `.child(...)`.
     Child(FernElement),
+    /// `name = Element` — a binding that hoists `let name = ctx.add(...)`
+    /// to the enclosing statement-forming block, then attaches via
+    /// `.add_child(name)` on the parent (spec §3.3).
+    Binding { name: Ident, element: FernElement },
+    /// `#{ expr }` at body position — the expr is expected to evaluate
+    /// to a `WidgetId` and attaches via `.add_child(expr)` (spec §6.1).
+    /// Phase 2 keeps the semantics simple: always WidgetId. The full
+    /// `IntoFernChild` routing (widget-or-id dispatch) is Phase 3.
+    Escape { expr: Expr, span: Span },
 }
 
 pub(crate) struct FernProperty {
     pub(crate) name: Ident,
-    pub(crate) args: Vec<Expr>,
+    pub(crate) args: Vec<PropArg>,
+}
+
+/// A property argument. `Expr` and `Element` both emit `.prop_name(...)`;
+/// `Escape` and `Binding` force the `_id` slot suffix per spec §A.3 and
+/// hoist the binding when present.
+pub(crate) enum PropArg {
+    /// A plain Rust expression (scalars, closures, method calls).
+    Expr(Expr),
+    /// An embedded fern element — `tab_literal: "name", Card { ... }`.
+    Element(FernElement),
+    /// `#{ expr }` — a WidgetId expression that routes to `.prop_id`.
+    Escape(Expr),
+    /// `name = Element` — hoists `let name = ctx.add(...)` and routes
+    /// to `.prop_id(name)`.
+    Binding { name: Ident, element: FernElement },
 }

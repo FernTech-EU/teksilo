@@ -1,40 +1,39 @@
 //! Property-argument parser.
 //!
-//! Spec §3.4: "The argument list of a property terminates at the next
-//! newline, unless the last token on the line is inside an open bracket,
-//! in which case parsing continues until the brackets balance."
+//! Spec §3.4 + §3.3 + §6.1. A property argument is one of:
 //!
-//! Implementation: syn delegates bracket-balancing to `syn::Expr` parsing
-//! (each Expr consumes whatever nested brackets it contains). Between
-//! args, we use span line info to decide whether a comma continues the
-//! arg list or belongs to the next body item.
+//! - `#{ expr }` — escape, expects a `WidgetId`.
+//! - `name = Element` — binding, hoists a `let` and routes slots to
+//!   `.prop_id(name)`.
+//! - `TypePath [(args)] [{ body }]` — a fern element value
+//!   (`tab_literal: "name", Card { ... }`).
+//! - Otherwise, an arbitrary Rust expression.
 //!
-//! Specifically: after parsing an `Expr`, we peek for a `,`. If the
-//! comma's span starts on the same line as the Expr's LAST token, we
-//! consume it and parse another Expr. If the comma is on a later line,
-//! or there is no comma, the arg list ends.
+//! Dispatch follows spec §3.1 "commit on distinctive prefix": the
+//! decision is made from the leading 1-2 tokens with no backtracking.
+//!
+//! Multi-arg continuation rule: after each arg, if the next token is a
+//! `,` on the same line as the arg's start, consume it and parse
+//! another arg. Otherwise stop.
+//!
+//! Phase 1 limitation (still in effect): a multi-line expression value
+//! followed by a continuation comma on the last line is not reliably
+//! detected — `Span::end()` isn't populated under `span-locations` on
+//! stable Rust.
 
 use syn::parse::{ParseStream, Result};
 use syn::spanned::Spanned;
 use syn::{Expr, Token};
 
-use crate::ir::FernProperty;
+use crate::diag;
+use crate::ir::{FernProperty, PropArg};
+
+use super::{parse_element, peek_binding, peek_element_start, peek_escape};
 
 /// Parse the argument list of a property (everything after `name:`).
-///
-/// Multi-arg continuation rule (spec §3.4): after each Expr, if the
-/// next token is a `,` whose start line equals the START line of the
-/// just-parsed Expr, consume it and parse another Expr. Otherwise
-/// stop.
-///
-/// Phase 1 limitation: a multi-line expression value (struct literal,
-/// multi-line closure) followed by a continuation comma is not
-/// supported — `Span::end()` isn't populated reliably under
-/// `span-locations` on stable Rust, so we can't tell whether the comma
-/// is on the same line as the expression's LAST token. Workaround:
-/// split into separate properties, or paren-wrap the multi-line value.
-pub(crate) fn parse_property_args(input: ParseStream) -> Result<Vec<Expr>> {
-    let first: Expr = input.parse()?;
+/// Never empty — property body form always has at least one argument.
+pub(crate) fn parse_property_args(input: ParseStream) -> Result<Vec<PropArg>> {
+    let first = parse_prop_arg(input)?;
     let mut args = vec![first];
 
     loop {
@@ -42,21 +41,58 @@ pub(crate) fn parse_property_args(input: ParseStream) -> Result<Vec<Expr>> {
             break;
         }
         let comma_line = input.cursor().span().start().line;
-        let last_expr_line = args
-            .last()
-            .expect("args is non-empty by construction")
-            .span()
-            .start()
-            .line;
-        if comma_line != last_expr_line {
+        let last_arg_line = arg_span_start_line(
+            args.last().expect("args is non-empty by construction"),
+        );
+        if comma_line != last_arg_line {
             break;
         }
         let _comma: Token![,] = input.parse()?;
-        let next: Expr = input.parse()?;
+        let next = parse_prop_arg(input)?;
         args.push(next);
     }
 
     Ok(args)
+}
+
+fn parse_prop_arg(input: ParseStream) -> Result<PropArg> {
+    if peek_escape(input) {
+        let _pound: Token![#] = input.parse()?;
+        let content;
+        let _brace = syn::braced!(content in input);
+        let expr: Expr = content.parse()?;
+        if !content.is_empty() {
+            return Err(diag::error(
+                content.span(),
+                "expected a single expression inside `#{ ... }`",
+            ));
+        }
+        return Ok(PropArg::Escape(expr));
+    }
+
+    if peek_binding(input) {
+        let name: syn::Ident = input.parse()?;
+        let _eq: Token![=] = input.parse()?;
+        let element = parse_element(input)?;
+        return Ok(PropArg::Binding { name, element });
+    }
+
+    if peek_element_start(input) {
+        let element = parse_element(input)?;
+        return Ok(PropArg::Element(element));
+    }
+
+    let expr: Expr = input.parse()?;
+    Ok(PropArg::Expr(expr))
+}
+
+fn arg_span_start_line(arg: &PropArg) -> usize {
+    match arg {
+        PropArg::Expr(e) => e.span().start().line,
+        PropArg::Element(e) => e.head_span.start().line,
+        PropArg::Escape(e) => e.span().start().line,
+        PropArg::Binding { name, .. } => name.span().start().line,
+    }
 }
 
 /// Parse an argument-free property: a bare lowercase ident that sits

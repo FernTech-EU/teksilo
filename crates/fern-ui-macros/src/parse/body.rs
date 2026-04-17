@@ -4,23 +4,23 @@
 //! prefix":
 //!
 //! ```text
+//! `#{` expr `}`                     → body-position escape (adds a WidgetId child)
+//! ident `=` <element-start>         → binding (hoisted at lowering time)
 //! ident `:` <args>                  → property
-//! lowercase-ident at EOL            → argument-free property
-//! UpperCamel-ident `(` / `{` / `::` → child element
-//! UpperCamel-ident alone            → child element (e.g. Spacer)
+//! UpperCamel-ident `(`/`{`/`::`/EOL → child element
+//! lowercase-ident alone             → argument-free property
 //! ```
 //!
-//! Bindings, `#{ }` escape, structural forms, spreads are not handled in
-//! Phase 1 — they fall through to an error on the first unrecognized
-//! token. Phase 2/3 will add those arms.
+//! Structural forms (`if`, `for`, `match`, `let`, spread, `rust`) are
+//! out of Phase 2 scope and fall through to a targeted error.
 
-use syn::Token;
 use syn::parse::{ParseStream, Result};
+use syn::{Expr, Token};
 
 use crate::diag;
 use crate::ir::BodyItem;
 
-use super::{parse_element, parse_property_args};
+use super::{parse_element, parse_property_args, peek_binding, peek_escape};
 
 pub(crate) fn parse_body(input: ParseStream) -> Result<Vec<BodyItem>> {
     let mut items = Vec::new();
@@ -32,44 +32,55 @@ pub(crate) fn parse_body(input: ParseStream) -> Result<Vec<BodyItem>> {
 }
 
 fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
-    // Primary dispatch is on the kind of the leading ident. If the body
-    // doesn't start with an ident, we reject with a targeted error.
+    // `#{ expr }` — body-position escape. A WidgetId expression that
+    // attaches via `.add_child(...)` on the parent.
+    if peek_escape(input) {
+        let pound_span = input.span();
+        let _pound: Token![#] = input.parse()?;
+        let content;
+        let _brace = syn::braced!(content in input);
+        let expr: Expr = content.parse()?;
+        if !content.is_empty() {
+            return Err(diag::error(
+                content.span(),
+                "expected a single expression inside `#{ ... }`",
+            ));
+        }
+        return Ok(BodyItem::Escape {
+            expr,
+            span: pound_span,
+        });
+    }
+
+    // `name = Element` — binding.
+    if peek_binding(input) {
+        let name: syn::Ident = input.parse()?;
+        let _eq: Token![=] = input.parse()?;
+        let element = parse_element(input)?;
+        return Ok(BodyItem::Binding { name, element });
+    }
+
     if !input.peek(syn::Ident) {
         let span = input.span();
         return Err(diag::error(
             span,
-            "expected a property name, child element, or structural form",
+            "expected a property name, child element, binding, or `#{ expr }` escape",
         ));
     }
 
-    // `ident :` → property. This check is before the element-start
-    // checks because a lowercase Rust path like `module::Widget`
-    // wouldn't fit a property (no `:` after single ident), so the
-    // distinction is mechanical.
+    // `ident :` → property.
     if input.peek2(Token![:]) {
         return parse_property(input).map(BodyItem::Property);
     }
 
-    // Otherwise we have a bare element. Whether the ident is
-    // UpperCamel (child element) or lowercase-bare (argument-free
-    // property like `fills_stack`) depends on the first character.
-    // For Phase 1 we only handle the UpperCamel child case; the bare
-    // lowercase-ident-as-zero-arg-property case and bindings are Phase
-    // 1 extensions.
-    let ident: &proc_macro2::Ident = &input.fork().parse()?;
-    let first = ident
-        .to_string()
-        .chars()
-        .next()
-        .unwrap_or('_');
-    if first.is_ascii_uppercase() {
+    // UpperCamel-starting ident — child element. Lowercase-starting —
+    // argument-free property (e.g. `fills_stack`).
+    let ident: syn::Ident = input.fork().parse()?;
+    if super::cursor::ident_starts_upper(&ident) {
         let element = parse_element(input)?;
         return Ok(BodyItem::Child(element));
     }
 
-    // Phase 1 extension (still in scope): bare lowercase ident at body
-    // position is an argument-free property. `Expand { fills_stack }`
-    // desugars to `.fills_stack()`.
     let property = super::property::parse_property_no_args(input)?;
     Ok(BodyItem::Property(property))
 }

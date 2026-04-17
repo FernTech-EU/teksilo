@@ -12,6 +12,7 @@ use syn::parse::{ParseStream, Parser, Result};
 use crate::ir::FernRoot;
 
 mod body;
+mod cursor;
 mod element;
 mod property;
 
@@ -46,3 +47,5 @@ fn parse_root_impl(input: ParseStream) -> Result<FernRoot> {
 pub(crate) use body::parse_body;
 pub(crate) use element::parse_element;
 pub(crate) use property::parse_property_args;
+#[allow(unused_imports)]
+pub(crate) use cursor::{peek_binding, peek_element_start, peek_escape};
