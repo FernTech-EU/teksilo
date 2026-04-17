@@ -149,7 +149,7 @@ impl Widget for Link {
         let underline_sized = ctx.add(
             crate::primitives::FixedSize::new()
                 .bind_height(1.0_f32)
-                .set_child(underline_id),
+                .child_id(underline_id),
         );
 
         let content_id = ctx.add(
@@ -164,7 +164,7 @@ impl Widget for Link {
         let root_id = ctx.add(
             crate::primitives::FocusRing::new(focused)
                 .corner_radius(theme.components.link.corner_radius)
-                .set_child(content_id),
+                .child_id(content_id),
         );
 
         if let Some(source) = self.rich_tooltip_source.take() {

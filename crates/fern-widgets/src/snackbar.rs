@@ -5,7 +5,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
@@ -42,7 +42,7 @@ fn present_snackbar(
 
 struct SnackbarSurface {
     content_id: Option<WidgetId>,
-    pending_content: Option<Box<dyn Widget>>,
+    pending_content: Option<PendingChild>,
     /// Optional explicit SR announcement string. When set,
     /// `accessibility()` uses it as the Alert's accessible name
     /// so screen readers read out the caller-provided message
@@ -52,7 +52,7 @@ struct SnackbarSurface {
 }
 
 impl SnackbarSurface {
-    fn new(content: Box<dyn Widget>) -> Self {
+    fn new(content: PendingChild) -> Self {
         Self {
             content_id: None,
             pending_content: Some(content),
@@ -74,8 +74,11 @@ impl std::fmt::Debug for SnackbarSurface {
 
 impl Widget for SnackbarSurface {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        if let Some(content) = self.pending_content.take() {
-            self.content_id = Some(ctx.add_boxed(content));
+        if let Some(pending) = self.pending_content.take() {
+            self.content_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
         }
         self.children()
     }
@@ -161,8 +164,8 @@ pub struct Snackbar {
     enabled: bool,
     dismiss: DismissBehavior,
     auto_dismiss_after: Option<Duration>,
-    pending_content: Option<Box<dyn Widget>>,
-    pending_trigger: Option<Box<dyn Widget>>,
+    pending_content: Option<PendingChild>,
+    pending_trigger: Option<PendingChild>,
     /// Optional explicit announcement string threaded through to
     /// the `SnackbarSurface`'s a11y node. When set, screen readers
     /// read this as the Alert's name when the snackbar appears.
@@ -193,7 +196,12 @@ impl Snackbar {
     }
 
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
-        self.pending_content = Some(Box::new(content));
+        self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
+        self
+    }
+
+    pub fn content_id(mut self, id: WidgetId) -> Self {
+        self.pending_content = Some(PendingChild::Id(id));
         self
     }
 
@@ -223,7 +231,12 @@ impl Snackbar {
     }
 
     pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
-        self.pending_trigger = Some(Box::new(trigger));
+        self.pending_trigger = Some(PendingChild::Deferred(Box::new(trigger)));
+        self
+    }
+
+    pub fn trigger_id(mut self, id: WidgetId) -> Self {
+        self.pending_trigger = Some(PendingChild::Id(id));
         self
     }
 
@@ -293,51 +306,51 @@ impl Widget for Snackbar {
         };
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
-            ctx.add(
-                OverlayTrigger::new(
-                    trigger,
-                    fern_core::widget_builder::HandlerSet::new()
-                        .focusable(true)
-                        .cursor(fern_core::widget::CursorIcon::Pointer)
-                        .on_tap(open_on_tap)
-                        .on_key({
-                            let dismiss = dismiss.clone();
-                            move |event, ctx| match event {
-                                WidgetEvent::KeyUp {
-                                    key: Key::Enter | Key::Space,
-                                    ..
-                                } if enabled => {
-                                    present_snackbar(
-                                        ctx,
-                                        self_id,
-                                        content_id,
-                                        dismiss.clone(),
-                                        auto_dismiss_after,
-                                    );
-                                    EventResponse::Handled
-                                }
-                                _ => EventResponse::Ignored,
-                            }
-                        })
-                        .on_access_action({
-                            move |action, ctx| {
-                                if action == fern_core::accesskit::Action::Click && enabled {
-                                    present_snackbar(
-                                        ctx,
-                                        self_id,
-                                        content_id,
-                                        dismiss.clone(),
-                                        auto_dismiss_after,
-                                    );
-                                    EventResponse::Handled
-                                } else {
-                                    EventResponse::Ignored
-                                }
-                            }
-                        }),
-                )
-                .name(label),
-            )
+            let handlers = fern_core::widget_builder::HandlerSet::new()
+                .focusable(true)
+                .cursor(fern_core::widget::CursorIcon::Pointer)
+                .on_tap(open_on_tap)
+                .on_key({
+                    let dismiss = dismiss.clone();
+                    move |event, ctx| match event {
+                        WidgetEvent::KeyUp {
+                            key: Key::Enter | Key::Space,
+                            ..
+                        } if enabled => {
+                            present_snackbar(
+                                ctx,
+                                self_id,
+                                content_id,
+                                dismiss.clone(),
+                                auto_dismiss_after,
+                            );
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                })
+                .on_access_action({
+                    move |action, ctx| {
+                        if action == fern_core::accesskit::Action::Click && enabled {
+                            present_snackbar(
+                                ctx,
+                                self_id,
+                                content_id,
+                                dismiss.clone(),
+                                auto_dismiss_after,
+                            );
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                });
+            let overlay_trigger = match trigger {
+                PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
+                PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
+            }
+            .name(label);
+            ctx.add(overlay_trigger)
         } else {
             ctx.add(
                 Button::new_literal(label)

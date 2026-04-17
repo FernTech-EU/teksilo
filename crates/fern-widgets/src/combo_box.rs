@@ -213,7 +213,7 @@ impl Widget for DropdownItem {
         let pad_v =
             ((menu_style.item_height - theme.typography.body.size).max(0.0) * 0.5).max(0.0);
         let padding =
-            Padding::symmetric(pad_v, menu_style.item_padding_horizontal).set_child(text_id);
+            Padding::symmetric(pad_v, menu_style.item_padding_horizontal).child_id(text_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new().bind_background(bg_color);
@@ -302,7 +302,7 @@ impl Widget for DropdownPanel {
         let vstack_id = ctx.add(vstack);
 
         let menu_style = theme.components.menu;
-        let padding = Padding::uniform(4.0).set_child(vstack_id);
+        let padding = Padding::uniform(4.0).child_id(vstack_id);
         let padding_id = ctx.add(padding);
 
         // Dropdown panel — same surface treatment as MenuList (raised + popup radius)
@@ -411,7 +411,7 @@ impl Widget for ComboBox {
             combo_style.padding_horizontal * 0.5,
             combo_style.padding_horizontal,
         )
-        .set_child(row_id);
+        .child_id(row_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
@@ -424,7 +424,7 @@ impl Widget for ComboBox {
         let visual_zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
         let visual_id = ctx.add(visual_zstack);
         let sized_id = ctx.add(
-            crate::primitives::MinSize::new(0.0, combo_style.height).set_child(visual_id),
+            crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id),
         );
 
         // Wrap in a FocusRing — drawn outside the control on keyboard focus.
@@ -432,7 +432,7 @@ impl Widget for ComboBox {
         let root_id = ctx.add(
             crate::primitives::FocusRing::new(focused)
                 .corner_radius(combo_style.corner_radius)
-                .set_child(sized_id),
+                .child_id(sized_id),
         );
         self.root_child_id = Some(root_id);
 

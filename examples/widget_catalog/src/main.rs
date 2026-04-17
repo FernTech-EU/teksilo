@@ -389,7 +389,7 @@ impl Widget for WidgetCatalog {
                 .corner_radius(0.0)
                 .border_width(0.0)
                 .padding(4.0)
-                .set_child(current_line_content),
+                .child_id(current_line_content),
         );
 
         let mock_editor = ctx.add(
@@ -930,7 +930,7 @@ impl Widget for WidgetCatalog {
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
-                        .child(MaxSize::new(f32::MAX, 120.0).set_child(slider_vert)),
+                        .child(MaxSize::new(f32::MAX, 120.0).child_id(slider_vert)),
                 ),
         );
 
@@ -1059,7 +1059,7 @@ impl Widget for WidgetCatalog {
                                 .style(t.tiny.clone())
                                 .color(c.text_secondary),
                         )
-                        .child(MaxSize::new(f32::MAX, 80.0).set_child(pb_vert)),
+                        .child(MaxSize::new(f32::MAX, 80.0).child_id(pb_vert)),
                 ),
         );
 
@@ -1234,11 +1234,11 @@ impl Widget for WidgetCatalog {
                 )
                 .child(
                     Accordion::new_literal("Click to expand", accordion_expanded.clone())
-                        .set_content(acc_content1),
+                        .content_id(acc_content1),
                 )
                 .child(
                     Accordion::new_literal("Already expanded", accordion2_expanded.clone())
-                        .set_content(acc_content2),
+                        .content_id(acc_content2),
                 )
                 .child(Divider::new())
                 .child(
@@ -1390,7 +1390,7 @@ impl Widget for WidgetCatalog {
         let tabs_block = ctx.add(
             FixedSize::new()
                 .bind_height(240.0_f32)
-                .set_child(tabs),
+                .child_id(tabs),
         );
 
         let nav_section = ctx.add(
@@ -1750,14 +1750,14 @@ impl Widget for WidgetCatalog {
                 .child(Divider::new())
                 .add_child(text_input_section),
         );
-        let padded = ctx.add(Padding::uniform(24.0).set_child(content_col));
+        let padded = ctx.add(Padding::uniform(24.0).child_id(content_col));
         let scroll = ctx.add(ScrollArea::from_id(padded));
 
         // Root: Toolbar | ScrollArea (fills remaining space) | StatusBar
         let root = ctx.add(
             VStack::new()
                 .add_child(toolbar)
-                .child(Expand::new().fills_stack().set_child(scroll))
+                .child(Expand::new().fills_stack().child_id(scroll))
                 .child(
                     StatusBar::new().child(
                         TextWidget::new_literal("Milestone 4 -- All widgets demonstrated")

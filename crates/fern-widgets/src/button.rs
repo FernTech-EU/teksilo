@@ -446,7 +446,7 @@ impl fern_core::widget::Widget for Button {
             button_style.padding_vertical,
             button_style.padding_horizontal,
         )
-        .set_child(content_id);
+        .child_id(content_id);
         let padding_id = ctx.add(padding);
 
         // Int UI: border is fixed at 1 dp. Focus is shown via the FocusRing
@@ -464,7 +464,7 @@ impl fern_core::widget::Widget for Button {
         // Int UI buttons are 24 dp tall with a 72 dp minimum width.
         let sized_id = ctx.add(
             crate::primitives::MinSize::new(button_style.min_width, button_style.height)
-                .set_child(zstack_id),
+                .child_id(zstack_id),
         );
 
         // Wrap in a FocusRing so the ring is drawn outside the control.
@@ -474,7 +474,7 @@ impl fern_core::widget::Widget for Button {
         let root_id = ctx.add(
             crate::primitives::FocusRing::new(focused)
                 .corner_radius(button_style.corner_radius)
-                .set_child(sized_id),
+                .child_id(sized_id),
         );
 
         // Attach tooltip if configured. Rich-tooltip source takes

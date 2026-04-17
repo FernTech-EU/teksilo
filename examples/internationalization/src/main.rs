@@ -170,7 +170,7 @@ impl Widget for Root {
                 .add_child(direction_row),
         );
 
-        let root_id = ctx.add(Panel::new().padding(24.0).set_child(column));
+        let root_id = ctx.add(Panel::new().padding(24.0).child_id(column));
         self.root_child_id = Some(root_id);
         vec![root_id]
     }

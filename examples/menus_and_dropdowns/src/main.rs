@@ -364,7 +364,7 @@ impl Widget for Root {
                 .child(Divider::new().thickness(2.0))
                 .add_child(menu_showcase_section),
         );
-        let padded = ctx.add(Padding::uniform(24.0).set_child(content));
+        let padded = ctx.add(Padding::uniform(24.0).child_id(content));
         let scroll = ctx.add(
             ScrollArea::from_id(padded).scroll_bar_style(fern_ui::widgets::ScrollBarMode::Overlay),
         );
@@ -462,7 +462,7 @@ impl Widget for Root {
             VStack::new()
                 .add_child(menu_bar)
                 .add_child(toolbar)
-                .child(Expand::new().fills_stack().set_child(scroll))
+                .child(Expand::new().fills_stack().child_id(scroll))
                 .child(
                     StatusBar::new().child(
                         TextWidget::new_literal("Milestone 4 -- Menus & Dropdowns")

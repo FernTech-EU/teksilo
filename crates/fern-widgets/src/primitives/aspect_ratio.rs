@@ -40,7 +40,7 @@ impl AspectRatio {
         self
     }
 
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -119,7 +119,7 @@ mod tests {
     fn aspect_ratio_constrains_by_width() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 100.0));
-        let ar = tree.add(AspectRatio::new(2.0).set_child(child)); // 2:1
+        let ar = tree.add(AspectRatio::new(2.0).child_id(child)); // 2:1
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -134,7 +134,7 @@ mod tests {
     fn aspect_ratio_constrains_by_height() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 100.0));
-        let ar = tree.add(AspectRatio::new(2.0).set_child(child)); // 2:1
+        let ar = tree.add(AspectRatio::new(2.0).child_id(child)); // 2:1
         tree.layout(SizeProposal {
             width: None,
             height: Some(100.0),
@@ -152,7 +152,7 @@ mod tests {
     fn square_aspect_ratio() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(50.0, 50.0));
-        let ar = tree.add(AspectRatio::square().set_child(child));
+        let ar = tree.add(AspectRatio::square().child_id(child));
         tree.layout(SizeProposal {
             width: None,
             height: Some(100.0),

@@ -26,7 +26,7 @@ const EXPANDED_MAX_HEIGHT: f32 = 10000.0;
 
 /// A collapsible section with a clickable header that toggles content visibility.
 ///
-/// Content must be pre-registered via `set_content(id)`.
+/// Content must be pre-registered via `content_id(id)`.
 pub struct Accordion {
     title: String,
     expanded: Signal<bool>,
@@ -82,7 +82,7 @@ impl Accordion {
     }
 
     /// Set the content widget by pre-registered ID.
-    pub fn set_content(mut self, id: WidgetId) -> Self {
+    pub fn content_id(mut self, id: WidgetId) -> Self {
         self.content_id = Some(id);
         self
     }
@@ -153,7 +153,7 @@ impl Widget for Accordion {
         let header_with_ring = ctx.add(
             crate::primitives::FocusRing::new(kb_focused.clone())
                 .corner_radius(theme.components.accordion.corner_radius)
-                .set_child(header),
+                .child_id(header),
         );
 
         let mut vstack = VStack::new()
@@ -187,7 +187,7 @@ impl Widget for Accordion {
                 MaxSize::new(f32::MAX, EXPANDED_MAX_HEIGHT)
                     .bind_max_width(width_state)
                     .bind_max_height(height_state)
-                    .set_child(content_id),
+                    .child_id(content_id),
             );
             vstack = vstack.add_child(wrapper);
         }
@@ -333,7 +333,7 @@ mod tests {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let content = tree.add(TextWidget::new_literal("Content text"));
-        let acc = tree.add(Accordion::new_literal("Details", expanded.clone()).set_content(content));
+        let acc = tree.add(Accordion::new_literal("Details", expanded.clone()).content_id(content));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
         assert!(b.height > 0.0);
@@ -358,7 +358,7 @@ mod tests {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let content = tree.add(TextWidget::new_literal("Some content text here"));
-        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).set_content(content));
+        let acc = tree.add(Accordion::new_literal("Section", expanded.clone()).content_id(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,

@@ -69,7 +69,7 @@ impl Expand {
     }
 
     /// Set child by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -174,7 +174,7 @@ mod tests {
     fn expand_both_axes() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let expand = tree.add(Expand::new().set_child(child));
+        let expand = tree.add(Expand::new().child_id(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Expand claims 200x100, child centered within
@@ -191,7 +191,7 @@ mod tests {
     fn expand_horizontal_only() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let expand = tree.add(Expand::horizontal().set_child(child));
+        let expand = tree.add(Expand::horizontal().child_id(child));
         tree.layout(SizeProposal {
             width: Some(200.0),
             height: None,
@@ -209,7 +209,7 @@ mod tests {
         let _expand = tree.add(
             Expand::new()
                 .content_alignment(Alignment::TOP_TRAILING)
-                .set_child(child),
+                .child_id(child),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 

@@ -59,7 +59,7 @@ impl GroupBox {
     }
 
     /// Set the content widget by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.content_id = Some(id);
         self
     }
@@ -102,7 +102,7 @@ impl Widget for GroupBox {
         };
 
         let padded_content_id = if let Some(content_id) = self.content_id {
-            ctx.add(Padding::new(0.0, 0.0, 0.0, style.content_indent).set_child(content_id))
+            ctx.add(Padding::new(0.0, 0.0, 0.0, style.content_indent).child_id(content_id))
         } else {
             ctx.add(Padding::new(0.0, 0.0, 0.0, style.content_indent))
         };

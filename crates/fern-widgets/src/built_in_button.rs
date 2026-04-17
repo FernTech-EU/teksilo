@@ -318,7 +318,7 @@ impl fern_core::widget::Widget for BuiltInButton {
             ctx.add(icon)
         };
 
-        let centered_id = ctx.add(Center::new().set_child(icon_content_id));
+        let centered_id = ctx.add(Center::new().child_id(icon_content_id));
 
         // Background rect (no border, rounded corners)
         let bg_id = ctx.add(
@@ -335,7 +335,7 @@ impl fern_core::widget::Widget for BuiltInButton {
             FixedSize::new()
                 .bind_width(button_dim)
                 .bind_height(button_dim)
-                .set_child(zstack_id),
+                .child_id(zstack_id),
         );
 
         // Focus ring
@@ -343,7 +343,7 @@ impl fern_core::widget::Widget for BuiltInButton {
         let root_id = ctx.add(
             crate::primitives::FocusRing::new(focused)
                 .corner_radius(ib_style.corner_radius)
-                .set_child(sized_id),
+                .child_id(sized_id),
         );
 
         // Tooltip

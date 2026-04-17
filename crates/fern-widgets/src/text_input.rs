@@ -354,7 +354,7 @@ impl Widget for TextInput {
         // Horizontal-only padding around the row.
         let padded_id = ctx.add(
             Padding::new(0.0, field_style.padding_horizontal, 0.0, field_style.padding_horizontal)
-                .set_child(row_id),
+                .child_id(row_id),
         );
 
         // Combined signal for border color: merges interaction + validation.
@@ -404,7 +404,7 @@ impl Widget for TextInput {
         // focus indicator (thicker + accent colored), matching Int UI
         // text field convention.
         let root_id = ctx.add(
-            MinSize::new(65.0, field_style.height).set_child(zstack_id),
+            MinSize::new(65.0, field_style.height).child_id(zstack_id),
         );
 
         // Tooltip.

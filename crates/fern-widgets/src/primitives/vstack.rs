@@ -256,7 +256,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let tab_bar = tree.add(FixedLeaf(120.0, 32.0));
         let content = tree.add(FixedLeaf(120.0, 200.0));
-        let filled = tree.add(Expand::vertical().fills_stack().set_child(content));
+        let filled = tree.add(Expand::vertical().fills_stack().child_id(content));
         let inner = tree.add(VStack::new().add_child(tab_bar).add_child(filled));
 
         // Outer VStack with another sibling underneath. Height is

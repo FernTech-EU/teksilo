@@ -77,7 +77,7 @@ impl Widget for StatusBar {
             Panel::new()
                 .background(theme.colors.surface_sunken)
                 .padding(spacing)
-                .set_child(row_id),
+                .child_id(row_id),
         );
         self.root_child_id = Some(root);
         vec![root]

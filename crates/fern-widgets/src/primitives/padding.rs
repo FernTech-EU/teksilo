@@ -36,7 +36,7 @@ impl Padding {
     }
 
     /// Set child by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }

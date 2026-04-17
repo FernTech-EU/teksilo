@@ -232,7 +232,7 @@ impl Widget for MenuList {
         let vstack_id = ctx.add(vstack);
 
         let menu_style = theme.components.menu;
-        let padding = Padding::uniform(4.0).set_child(vstack_id);
+        let padding = Padding::uniform(4.0).child_id(vstack_id);
         let padding_id = ctx.add(padding);
 
         // Themed surface background — Int UI menus use the popup radius (8 dp)

@@ -330,7 +330,7 @@ impl Widget for RichTooltipWidget {
         // plain TooltipWidget uses.
         let padded = ctx.add(
             Padding::symmetric(style.padding_vertical, style.padding_horizontal)
-                .set_child(root_content),
+                .child_id(root_content),
         );
 
         self.root_child_id = Some(padded);

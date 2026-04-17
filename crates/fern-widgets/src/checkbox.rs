@@ -299,7 +299,7 @@ impl Widget for Checkbox {
             FixedSize::new()
                 .bind_width(cb_style.box_visual_size)
                 .bind_height(cb_style.box_visual_size)
-                .set_child(box_id),
+                .child_id(box_id),
         );
 
         let icon_color = {
@@ -343,7 +343,7 @@ impl Widget for Checkbox {
         let check_box = ctx.add(
             crate::primitives::FocusRing::new(focused)
                 .corner_radius(cb_style.corner_radius)
-                .set_child(visual_box),
+                .child_id(visual_box),
         );
 
         let mut row = HStack::new().spacing(cb_style.label_gap).add_child(check_box);
@@ -380,7 +380,7 @@ impl Widget for Checkbox {
 
         let row_id = ctx.add(row);
         let root_id = ctx.add(
-            MinSize::new(cb_style.box_hit_area, cb_style.box_hit_area).set_child(row_id),
+            MinSize::new(cb_style.box_hit_area, cb_style.box_hit_area).child_id(row_id),
         );
 
         if let Some(ref tooltip_text) = self.tooltip_text {

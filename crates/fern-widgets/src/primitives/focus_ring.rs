@@ -20,7 +20,7 @@
 //! let wrapped = ctx.add(
 //!     FocusRing::new(focused)
 //!         .corner_radius(theme.components.button.corner_radius)
-//!         .set_child(visual),
+//!         .child_id(visual),
 //! );
 //! ```
 
@@ -74,7 +74,7 @@ impl FocusRing {
 
     /// Wrap a pre-registered child (recommended — matches the widget's own
     /// subtree-building pattern).
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -124,11 +124,11 @@ impl Widget for FocusRing {
             .border_width(width)
             .corner_radius(CornerRadius::uniform(ring_radius));
         let ring_rect_id = ctx.add(ring_rect);
-        let ring_padded = ctx.add(Padding::uniform(half_stroke).set_child(ring_rect_id));
+        let ring_padded = ctx.add(Padding::uniform(half_stroke).child_id(ring_rect_id));
 
         // Visual: inset by the full envelope so its edge is `offset` away
         // from the ring's inner edge.
-        let visual_padded = ctx.add(Padding::uniform(envelope).set_child(inner_id));
+        let visual_padded = ctx.add(Padding::uniform(envelope).child_id(inner_id));
 
         let root = ctx.add(
             ZStack::new()
@@ -195,7 +195,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let focused = Signal::new(false);
         let leaf = tree.add(FixedLeaf(20.0, 20.0));
-        let wrapped = tree.add(FocusRing::new(focused).set_child(leaf));
+        let wrapped = tree.add(FocusRing::new(focused).child_id(leaf));
         tree.layout(SizeProposal {
             width: None,
             height: None,
@@ -212,7 +212,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let focused = Signal::new(false);
         let leaf = tree.add(FixedLeaf(20.0, 20.0));
-        let _wrapped = tree.add(FocusRing::new(focused.clone()).set_child(leaf));
+        let _wrapped = tree.add(FocusRing::new(focused.clone()).child_id(leaf));
         tree.layout(SizeProposal::exact(28.0, 28.0));
 
         // Rounded-rect strokes land in `shapes` (ShapeQuad with stroke_width > 0).

@@ -8,7 +8,7 @@ use fern_core::overlay::{
     DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
@@ -20,7 +20,7 @@ const SURFACE_PADDING: f32 = 16.0;
 
 struct PopoverSurface {
     content_id: Option<WidgetId>,
-    pending_content: Option<Box<dyn Widget>>,
+    pending_content: Option<PendingChild>,
     placement: OverlayPlacement,
     show_caret: bool,
     caret_size: f32,
@@ -28,7 +28,7 @@ struct PopoverSurface {
 
 impl PopoverSurface {
     fn new(
-        content: Box<dyn Widget>,
+        content: PendingChild,
         placement: OverlayPlacement,
         show_caret: bool,
         caret_size: f32,
@@ -107,8 +107,11 @@ impl std::fmt::Debug for PopoverSurface {
 
 impl Widget for PopoverSurface {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        if let Some(content) = self.pending_content.take() {
-            self.content_id = Some(ctx.add_boxed(content));
+        if let Some(pending) = self.pending_content.take() {
+            self.content_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
         }
         self.children()
     }
@@ -190,8 +193,8 @@ pub struct Popover {
     enabled: bool,
     placement: OverlayPlacement,
     dismiss: DismissBehavior,
-    pending_content: Option<Box<dyn Widget>>,
-    pending_trigger: Option<Box<dyn Widget>>,
+    pending_content: Option<PendingChild>,
+    pending_trigger: Option<PendingChild>,
     show_caret: bool,
     caret_size: f32,
     root_child_id: Option<WidgetId>,
@@ -221,7 +224,12 @@ impl Popover {
     }
 
     pub fn content(mut self, content: impl Widget + 'static) -> Self {
-        self.pending_content = Some(Box::new(content));
+        self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
+        self
+    }
+
+    pub fn content_id(mut self, id: WidgetId) -> Self {
+        self.pending_content = Some(PendingChild::Id(id));
         self
     }
 
@@ -246,7 +254,12 @@ impl Popover {
     }
 
     pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
-        self.pending_trigger = Some(Box::new(trigger));
+        self.pending_trigger = Some(PendingChild::Deferred(Box::new(trigger)));
+        self
+    }
+
+    pub fn trigger_id(mut self, id: WidgetId) -> Self {
+        self.pending_trigger = Some(PendingChild::Id(id));
         self
     }
 
@@ -312,10 +325,7 @@ impl Widget for Popover {
             let key_dismiss = dismiss_callback.clone();
             let action_open = is_open.clone();
             let action_dismiss = dismiss_callback.clone();
-            ctx.add(
-                OverlayTrigger::new(
-                    trigger,
-                    fern_core::widget_builder::HandlerSet::new()
+            let handlers = fern_core::widget_builder::HandlerSet::new()
                         .focusable(true)
                         .cursor(fern_core::widget::CursorIcon::Pointer)
                         .on_tap({
@@ -384,12 +394,15 @@ impl Widget for Popover {
                                     EventResponse::Ignored
                                 }
                             }
-                        }),
-                )
-                .name(label)
-                .has_popup(fern_core::accesskit::HasPopup::Dialog)
-                .expanded_when(is_open.clone()),
-            )
+                        });
+            let overlay_trigger = match trigger {
+                PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
+                PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
+            }
+            .name(label)
+            .has_popup(fern_core::accesskit::HasPopup::Dialog)
+            .expanded_when(is_open.clone());
+            ctx.add(overlay_trigger)
         } else {
             let tap_open = is_open.clone();
             let tap_dismiss = dismiss_callback.clone();

@@ -120,7 +120,7 @@ impl Widget for ControlButton {
             FixedSize::new()
                 .bind_width(self.width)
                 .bind_height(self.height)
-                .set_child(stack),
+                .child_id(stack),
         );
 
         // Self handlers: tap fires the action, hover drives bg_signal.

@@ -359,7 +359,7 @@ impl Widget for SplitButton {
 
         let main_padding_id = ctx.add(
             Padding::symmetric(sb_style.padding_vertical, sb_style.padding_horizontal)
-                .set_child(label_id),
+                .child_id(label_id),
         );
 
         let main_region = {
@@ -368,7 +368,7 @@ impl Widget for SplitButton {
             let int_for_tap = interaction.clone();
             let int_for_hover = interaction.clone();
             MinSize::new(sb_style.min_width, sb_style.height)
-                .set_child(main_padding_id)
+                .child_id(main_padding_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
                     if !enabled {
                         return;
@@ -411,14 +411,14 @@ impl Widget for SplitButton {
             FixedSize::new()
                 .bind_width(sb_style.divider_width)
                 .bind_height(sb_style.height)
-                .set_child(divider_fill_id),
+                .child_id(divider_fill_id),
         );
 
         // ---- Chevron region ----
         let chevron_icon_id = ctx.add(
             IconWidget::chevron_down(sb_style.chevron_icon_size).bind_color(text_color.clone()),
         );
-        let chevron_centered_id = ctx.add(Center::new().set_child(chevron_icon_id));
+        let chevron_centered_id = ctx.add(Center::new().child_id(chevron_icon_id));
 
         let chevron_region = {
             let int_for_tap = interaction.clone();
@@ -426,7 +426,7 @@ impl Widget for SplitButton {
             FixedSize::new()
                 .bind_width(sb_style.chevron_width)
                 .bind_height(sb_style.height)
-                .set_child(chevron_centered_id)
+                .child_id(chevron_centered_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
                     if !enabled {
                         return;
@@ -502,7 +502,7 @@ impl Widget for SplitButton {
         // Enforce an overall minimum size: main min_width + divider + chevron.
         let total_min_width = sb_style.min_width + sb_style.divider_width + sb_style.chevron_width;
         let sized_id = ctx.add(
-            MinSize::new(total_min_width, sb_style.height).set_child(frame_id),
+            MinSize::new(total_min_width, sb_style.height).child_id(frame_id),
         );
 
         // Focus ring is drawn outside the frame on keyboard focus only.
@@ -510,7 +510,7 @@ impl Widget for SplitButton {
         let root_id = ctx.add(
             FocusRing::new(focused)
                 .corner_radius(sb_style.corner_radius)
-                .set_child(sized_id),
+                .child_id(sized_id),
         );
         self.root_child_id = Some(root_id);
 

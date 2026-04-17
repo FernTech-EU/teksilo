@@ -76,7 +76,7 @@ impl Widget for Badge {
             badge_style.padding_vertical,
             badge_style.padding_horizontal,
         )
-        .set_child(text_id);
+        .child_id(text_id);
         let padding_id = ctx.add(padding);
         let bg_id = ctx.add(bg_rect);
 

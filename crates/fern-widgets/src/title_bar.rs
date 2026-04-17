@@ -27,7 +27,9 @@
 use std::rc::Rc;
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
+};
 use fern_core::widget_id::WidgetId;
 use fern_core::{PlatformTitleBarHost, Signal};
 use fern_tokens::{Color, CornerRadius};
@@ -66,9 +68,9 @@ pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 /// Windows and Wayland but not on macOS.
 pub struct TitleBar {
     host: Rc<dyn PlatformTitleBarHost>,
-    leading: Option<Box<dyn Widget>>,
-    center: Option<Box<dyn Widget>>,
-    trailing: Option<Box<dyn Widget>>,
+    leading: Option<PendingChild>,
+    center: Option<PendingChild>,
+    trailing: Option<PendingChild>,
     height: f32,
     background: Color,
     border_color: Color,
@@ -141,7 +143,13 @@ impl TitleBar {
     /// Set the leading-edge content (e.g. app icon, menus). Rendered to the
     /// right of the macOS traffic-light inset.
     pub fn leading(mut self, widget: impl Widget + 'static) -> Self {
-        self.leading = Some(Box::new(widget));
+        self.leading = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Set the leading-edge content by pre-registered ID.
+    pub fn leading_id(mut self, id: WidgetId) -> Self {
+        self.leading = Some(PendingChild::Id(id));
         self
     }
 
@@ -149,14 +157,26 @@ impl TitleBar {
     /// flexible drag region: clicks that are not consumed by the child
     /// initiate a window drag.
     pub fn center(mut self, widget: impl Widget + 'static) -> Self {
-        self.center = Some(Box::new(widget));
+        self.center = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Set the center content by pre-registered ID.
+    pub fn center_id(mut self, id: WidgetId) -> Self {
+        self.center = Some(PendingChild::Id(id));
         self
     }
 
     /// Set the trailing-edge content (e.g. user avatar, notification bell).
     /// Rendered before the window controls.
     pub fn trailing(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing = Some(Box::new(widget));
+        self.trailing = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    /// Set the trailing-edge content by pre-registered ID.
+    pub fn trailing_id(mut self, id: WidgetId) -> Self {
+        self.trailing = Some(PendingChild::Id(id));
         self
     }
 
@@ -193,7 +213,8 @@ impl Widget for TitleBar {
         // in the HStack) that forwards drag / double-tap / right-click to
         // the host. Its child — if any — fills the spacer's full bounds.
         let drag_region = match self.center.take() {
-            Some(child) => DragRegion::with_child(self.host.clone(), child),
+            Some(PendingChild::Deferred(child)) => DragRegion::with_child(self.host.clone(), child),
+            Some(PendingChild::Id(id)) => DragRegion::with_child_id(self.host.clone(), id),
             None => DragRegion::new(self.host.clone()),
         };
 
@@ -223,14 +244,20 @@ impl Widget for TitleBar {
         }
 
         if let Some(leading) = self.leading.take() {
-            let id = ctx.add_boxed(leading);
+            let id = match leading {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            };
             row = row.add_child(id);
         }
 
         row = row.child(drag_region);
 
         if let Some(trailing) = self.trailing.take() {
-            let id = ctx.add_boxed(trailing);
+            let id = match trailing {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            };
             row = row.add_child(id);
         }
 

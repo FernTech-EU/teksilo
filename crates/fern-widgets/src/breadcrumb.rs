@@ -6,7 +6,7 @@ use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::binding::BindingLevel;
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -385,33 +385,50 @@ impl Widget for BreadcrumbSeparator {
     }
 }
 
+enum BreadcrumbSlot {
+    Entry(BreadcrumbEntry),
+    Id(WidgetId),
+}
+
 /// A breadcrumb navigation row.
 pub struct Breadcrumb {
-    entries: Vec<BreadcrumbEntry>,
-    trailing_slot: Option<Box<dyn Widget>>,
+    slots: Vec<BreadcrumbSlot>,
+    trailing_slot: Option<PendingChild>,
     root_child_id: Option<WidgetId>,
 }
 
 impl Breadcrumb {
     pub fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            slots: Vec::new(),
             trailing_slot: None,
             root_child_id: None,
         }
     }
 
     pub fn item(mut self, item: BreadcrumbItem) -> Self {
-        self.entries.push(BreadcrumbEntry {
+        self.slots.push(BreadcrumbSlot::Entry(BreadcrumbEntry {
             label: item.label,
             action: item.action,
             current: item.current,
-        });
+        }));
+        self
+    }
+
+    /// Insert a pre-registered widget as a breadcrumb segment slot.
+    /// The caller is responsible for the segment's visual + interaction.
+    pub fn item_id(mut self, id: WidgetId) -> Self {
+        self.slots.push(BreadcrumbSlot::Id(id));
         self
     }
 
     pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing_slot = Some(Box::new(widget));
+        self.trailing_slot = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    pub fn trailing_slot_id(mut self, id: WidgetId) -> Self {
+        self.trailing_slot = Some(PendingChild::Id(id));
         self
     }
 }
@@ -425,30 +442,40 @@ impl Default for Breadcrumb {
 impl std::fmt::Debug for Breadcrumb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Breadcrumb")
-            .field("item_count", &self.entries.len())
+            .field("item_count", &self.slots.len())
             .finish()
     }
 }
 
 impl Widget for Breadcrumb {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let entries = std::mem::take(&mut self.entries);
-        let entry_count = entries.len();
+        let slots = std::mem::take(&mut self.slots);
+        let slot_count = slots.len();
         let mut row = HStack::new().spacing(4.0);
 
-        for (index, entry) in entries.into_iter().enumerate() {
-            row = row.child(BreadcrumbSegment::new(
-                entry.label,
-                entry.action,
-                entry.current,
-            ));
-            if index + 1 < entry_count {
+        for (index, slot) in slots.into_iter().enumerate() {
+            match slot {
+                BreadcrumbSlot::Entry(entry) => {
+                    row = row.child(BreadcrumbSegment::new(
+                        entry.label,
+                        entry.action,
+                        entry.current,
+                    ));
+                }
+                BreadcrumbSlot::Id(id) => {
+                    row = row.add_child(id);
+                }
+            }
+            if index + 1 < slot_count {
                 row = row.child(BreadcrumbSeparator);
             }
         }
 
         if let Some(trailing) = self.trailing_slot.take() {
-            let trailing_id = ctx.add_boxed(trailing);
+            let trailing_id = match trailing {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            };
             row = row.child(Spacer::new()).add_child(trailing_id);
         }
 

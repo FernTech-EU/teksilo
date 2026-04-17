@@ -54,7 +54,7 @@ impl MinSize {
     }
 
     /// Set child by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -160,7 +160,7 @@ mod tests {
     fn clamps_small_child_to_minimum() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
-        let min = tree.add(MinSize::new(48.0, 48.0).set_child(child));
+        let min = tree.add(MinSize::new(48.0, 48.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
@@ -172,7 +172,7 @@ mod tests {
     fn large_child_is_not_clamped() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 80.0));
-        let min = tree.add(MinSize::new(48.0, 48.0).set_child(child));
+        let min = tree.add(MinSize::new(48.0, 48.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
@@ -184,7 +184,7 @@ mod tests {
     fn min_width_only() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
-        let min = tree.add(MinSize::width(48.0).set_child(child));
+        let min = tree.add(MinSize::width(48.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
@@ -200,7 +200,7 @@ mod tests {
         let min = tree.add(
             MinSize::width(0.0)
                 .bind_min_width(min_w.clone())
-                .set_child(child),
+                .child_id(child),
         );
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(min).width - 48.0).abs() < 0.01);
@@ -236,7 +236,7 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let child = tree.add(WrappingLeaf);
-        let min = tree.add(MinSize::width(100.0).set_child(child));
+        let min = tree.add(MinSize::width(100.0).child_id(child));
         let _stack = tree.add(VStack::new().add_child(min));
         tree.layout(SizeProposal {
             width: None,
@@ -264,7 +264,7 @@ mod tests {
         // against the constraint it will actually be placed into.
         let mut tree = WidgetTree::new();
         let child = tree.add(WrappingLeaf);
-        let min = tree.add(MinSize::width(80.0).set_child(child));
+        let min = tree.add(MinSize::width(80.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);

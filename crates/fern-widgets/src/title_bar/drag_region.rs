@@ -47,6 +47,14 @@ impl DragRegion {
             child_id: None,
         }
     }
+
+    pub fn with_child_id(host: Rc<dyn PlatformTitleBarHost>, id: WidgetId) -> Self {
+        Self {
+            host,
+            pending_child: Some(PendingChild::Id(id)),
+            child_id: None,
+        }
+    }
 }
 
 impl Widget for DragRegion {

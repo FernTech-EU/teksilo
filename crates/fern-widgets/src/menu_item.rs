@@ -332,7 +332,7 @@ impl Widget for MenuItem {
             crate::primitives::FixedSize::new()
                 .bind_width(menu_style.icon_column_width)
                 .bind_height(menu_style.icon_column_width)
-                .set_child(icon_child_id),
+                .child_id(icon_child_id),
         );
         row = row.add_child(icon_column);
 
@@ -344,7 +344,7 @@ impl Widget for MenuItem {
             crate::primitives::FixedSize::new()
                 .bind_width(menu_style.icon_label_gap)
                 .bind_height(1.0_f32)
-                .set_child(icon_label_spacer),
+                .child_id(icon_label_spacer),
         );
         row = row.add_child(icon_label_gap);
 
@@ -381,7 +381,7 @@ impl Widget for MenuItem {
                 crate::primitives::FixedSize::new()
                     .bind_width(menu_style.shortcut_left_gap)
                     .bind_height(1.0_f32)
-                    .set_child(shortcut_gap_spacer),
+                    .child_id(shortcut_gap_spacer),
             );
             row = row.add_child(shortcut_gap);
 
@@ -421,7 +421,7 @@ impl Widget for MenuItem {
             crate::primitives::FixedSize::new()
                 .bind_width(menu_style.item_padding_horizontal)
                 .bind_height(menu_style.icon_column_width)
-                .set_child(chevron_child_id),
+                .child_id(chevron_child_id),
         );
         row = row.add_child(chevron_column);
 
@@ -438,7 +438,7 @@ impl Widget for MenuItem {
             pad_v,                              // bottom
             menu_style.item_padding_horizontal, // left
         )
-        .set_child(row_id);
+        .child_id(row_id);
         let padding_id = ctx.add(padding);
 
         // Background rect

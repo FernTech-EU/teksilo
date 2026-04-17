@@ -42,13 +42,28 @@ impl Card {
         self
     }
 
+    pub fn header_id(mut self, id: WidgetId) -> Self {
+        self.pending_header = Some(PendingChild::Id(id));
+        self
+    }
+
     pub fn content(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_content = Some(PendingChild::Deferred(Box::new(widget)));
         self
     }
 
+    pub fn content_id(mut self, id: WidgetId) -> Self {
+        self.pending_content = Some(PendingChild::Id(id));
+        self
+    }
+
     pub fn footer(mut self, widget: impl Widget + 'static) -> Self {
         self.pending_footer = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    pub fn footer_id(mut self, id: WidgetId) -> Self {
+        self.pending_footer = Some(PendingChild::Id(id));
         self
     }
 

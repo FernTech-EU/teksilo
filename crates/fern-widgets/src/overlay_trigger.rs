@@ -2,13 +2,13 @@ use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 
 pub(crate) struct OverlayTrigger {
     child_id: Option<WidgetId>,
-    pending_child: Option<Box<dyn Widget>>,
+    pending_child: Option<PendingChild>,
     pending_handlers: Option<HandlerSet>,
     name: Option<String>,
     /// Optional `has_popup` hint surfaced on this trigger's a11y
@@ -22,9 +22,17 @@ pub(crate) struct OverlayTrigger {
 
 impl OverlayTrigger {
     pub(crate) fn new(child: Box<dyn Widget>, handlers: HandlerSet) -> Self {
+        Self::from_pending(PendingChild::Deferred(child), handlers)
+    }
+
+    pub(crate) fn from_id(id: WidgetId, handlers: HandlerSet) -> Self {
+        Self::from_pending(PendingChild::Id(id), handlers)
+    }
+
+    fn from_pending(pending: PendingChild, handlers: HandlerSet) -> Self {
         Self {
             child_id: None,
-            pending_child: Some(child),
+            pending_child: Some(pending),
             pending_handlers: Some(handlers),
             name: None,
             has_popup: None,
@@ -58,8 +66,11 @@ impl std::fmt::Debug for OverlayTrigger {
 
 impl Widget for OverlayTrigger {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        if let Some(child) = self.pending_child.take() {
-            self.child_id = Some(ctx.add_boxed(child));
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
         }
         if let Some(handlers) = self.pending_handlers.take() {
             ctx.apply_self_handlers(handlers);

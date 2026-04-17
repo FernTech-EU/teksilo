@@ -8,7 +8,7 @@ use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::binding::BindingLevel;
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -24,14 +24,14 @@ const HEADER_PADDING_V: f32 = 6.0;
 
 struct TabEntry {
     label: String,
-    content: Box<dyn Widget>,
+    content: PendingChild,
     enabled: bool,
 }
 
 /// A single tab definition used by `TabWidget`.
 pub struct TabItem {
     label: String,
-    content: Box<dyn Widget>,
+    content: PendingChild,
     enabled: bool,
 }
 
@@ -52,7 +52,20 @@ impl TabItem {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
             label: ls.resolve_now(),
-            content: Box::new(content),
+            content: PendingChild::Deferred(Box::new(content)),
+            enabled: true,
+        }
+    }
+
+    /// Construct from a pre-registered content widget id.
+    pub fn from_id(
+        label: impl Into<fern_i18n::LocalizedString>,
+        id: WidgetId,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        Self {
+            label: ls.resolve_now(),
+            content: PendingChild::Id(id),
             enabled: true,
         }
     }
@@ -61,6 +74,12 @@ impl TabItem {
     #[doc(hidden)]
     pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
         Self::new(fern_i18n::LocalizedString::literal(label), content)
+    }
+
+    /// Shim for `from_id(...)` accepting a raw string label.
+    #[doc(hidden)]
+    pub fn from_id_literal(label: impl Into<String>, id: WidgetId) -> Self {
+        Self::from_id(fern_i18n::LocalizedString::literal(label), id)
     }
 
     pub fn enabled(mut self, enabled: bool) -> Self {
@@ -79,11 +98,11 @@ enum TabHeaderInteraction {
 struct TabPane {
     label: String,
     child_id: Option<WidgetId>,
-    pending_child: Option<Box<dyn Widget>>,
+    pending_child: Option<PendingChild>,
 }
 
 impl TabPane {
-    fn new(label: String, child: Box<dyn Widget>) -> Self {
+    fn new(label: String, child: PendingChild) -> Self {
         Self {
             label,
             child_id: None,
@@ -94,8 +113,11 @@ impl TabPane {
 
 impl Widget for TabPane {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        if let Some(child) = self.pending_child.take() {
-            self.child_id = Some(ctx.add_boxed(child));
+        if let Some(pending) = self.pending_child.take() {
+            self.child_id = Some(match pending {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            });
         }
         self.child_id.into_iter().collect()
     }
@@ -533,7 +555,7 @@ impl Widget for TabBar {
         let mut row = HStack::new().spacing(8.0).child(
             Expand::horizontal()
                 .fills_stack()
-                .set_child(headers_scroll_id),
+                .child_id(headers_scroll_id),
         );
 
         if let Some(trailing_child_id) = self.trailing_child_id {
@@ -599,7 +621,7 @@ impl Widget for TabBar {
 pub struct TabWidget {
     selected: Signal<usize>,
     entries: Vec<TabEntry>,
-    trailing_slot: Option<Box<dyn Widget>>,
+    trailing_slot: Option<PendingChild>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -621,7 +643,22 @@ impl TabWidget {
         let ls: fern_i18n::LocalizedString = label.into();
         self.entries.push(TabEntry {
             label: ls.resolve_now(),
-            content: Box::new(content),
+            content: PendingChild::Deferred(Box::new(content)),
+            enabled: true,
+        });
+        self
+    }
+
+    /// Add a tab whose content is a pre-registered widget id.
+    pub fn tab_id(
+        mut self,
+        label: impl Into<fern_i18n::LocalizedString>,
+        content_id: WidgetId,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.entries.push(TabEntry {
+            label: ls.resolve_now(),
+            content: PendingChild::Id(content_id),
             enabled: true,
         });
         self
@@ -637,6 +674,12 @@ impl TabWidget {
         self.tab(fern_i18n::LocalizedString::literal(label), content)
     }
 
+    /// Shim for `tab_id(...)` accepting a raw label.
+    #[doc(hidden)]
+    pub fn tab_literal_id(self, label: impl Into<String>, content_id: WidgetId) -> Self {
+        self.tab_id(fern_i18n::LocalizedString::literal(label), content_id)
+    }
+
     pub fn tab_item(mut self, item: TabItem) -> Self {
         self.entries.push(TabEntry {
             label: item.label,
@@ -646,8 +689,19 @@ impl TabWidget {
         self
     }
 
+    /// Alias for `tab_item(...)` accepting a `TabItem` constructed from
+    /// a pre-registered widget id via `TabItem::from_id`.
+    pub fn tab_item_id(self, item: TabItem) -> Self {
+        self.tab_item(item)
+    }
+
     pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing_slot = Some(Box::new(widget));
+        self.trailing_slot = Some(PendingChild::Deferred(Box::new(widget)));
+        self
+    }
+
+    pub fn trailing_slot_id(mut self, id: WidgetId) -> Self {
+        self.trailing_slot = Some(PendingChild::Id(id));
         self
     }
 }
@@ -696,16 +750,16 @@ impl Widget for TabWidget {
             switcher = switcher.child_boxed(Box::new(TabPane::new(entry.label, entry.content)));
         }
 
-        let trailing_child_id = self
-            .trailing_slot
-            .take()
-            .map(|widget| ctx.add_boxed(widget));
+        let trailing_child_id = self.trailing_slot.take().map(|pending| match pending {
+            PendingChild::Id(id) => id,
+            PendingChild::Deferred(w) => ctx.add_boxed(w),
+        });
         let tab_bar_id = ctx.add(TabBar::new(header_ids, trailing_child_id));
         let switcher_id = ctx.add(switcher);
         // Content sits flush under the tab bar — the TabBar paints its own
         // 1 dp bottom separator, and selected tabs overpaint that with
         // their 3 dp underline. No inset, no extra divider.
-        let content_id = ctx.add(Expand::vertical().fills_stack().set_child(switcher_id));
+        let content_id = ctx.add(Expand::vertical().fills_stack().child_id(switcher_id));
 
         let root_id = ctx.add(
             VStack::new()

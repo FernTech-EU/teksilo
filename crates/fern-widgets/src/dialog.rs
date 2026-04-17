@@ -3,7 +3,9 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
-use fern_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget::{
+    EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
+};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::CornerRadius;
@@ -199,8 +201,8 @@ fn queue_dialog_request(
 pub struct DialogContent {
     title: Option<String>,
     supporting_text: Option<String>,
-    pending_body: Option<Box<dyn Widget>>,
-    pending_footer: Option<Box<dyn Widget>>,
+    pending_body: Option<PendingChild>,
+    pending_footer: Option<PendingChild>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -242,12 +244,22 @@ impl DialogContent {
     }
 
     pub fn body(mut self, body: impl Widget + 'static) -> Self {
-        self.pending_body = Some(Box::new(body));
+        self.pending_body = Some(PendingChild::Deferred(Box::new(body)));
+        self
+    }
+
+    pub fn body_id(mut self, id: WidgetId) -> Self {
+        self.pending_body = Some(PendingChild::Id(id));
         self
     }
 
     pub fn footer(mut self, footer: impl Widget + 'static) -> Self {
-        self.pending_footer = Some(Box::new(footer));
+        self.pending_footer = Some(PendingChild::Deferred(Box::new(footer)));
+        self
+    }
+
+    pub fn footer_id(mut self, id: WidgetId) -> Self {
+        self.pending_footer = Some(PendingChild::Id(id));
         self
     }
 }
@@ -294,13 +306,19 @@ impl Widget for DialogContent {
         }
 
         if let Some(body) = self.pending_body.take() {
-            let body_id = ctx.add_boxed(body);
+            let body_id = match body {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            };
             stack = stack.add_child(body_id);
         }
 
         if let Some(footer) = self.pending_footer.take() {
             let divider_id = ctx.add(Divider::new());
-            let footer_id = ctx.add_boxed(footer);
+            let footer_id = match footer {
+                PendingChild::Id(id) => id,
+                PendingChild::Deferred(w) => ctx.add_boxed(w),
+            };
             stack = stack.add_child(divider_id).add_child(footer_id);
         }
 
@@ -352,7 +370,7 @@ pub struct Dialog {
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     content_factory: Option<DialogFactory>,
-    pending_trigger: Option<Box<dyn Widget>>,
+    pending_trigger: Option<PendingChild>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -409,7 +427,12 @@ impl Dialog {
     }
 
     pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
-        self.pending_trigger = Some(Box::new(trigger));
+        self.pending_trigger = Some(PendingChild::Deferred(Box::new(trigger)));
+        self
+    }
+
+    pub fn trigger_id(mut self, id: WidgetId) -> Self {
+        self.pending_trigger = Some(PendingChild::Id(id));
         self
     }
 }
@@ -437,69 +460,69 @@ impl Widget for Dialog {
             .expect("Dialog requires .content(...) — no content factory was set");
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
-            ctx.add(
-                OverlayTrigger::new(
-                    trigger,
-                    fern_core::widget_builder::HandlerSet::new()
-                        .focusable(true)
-                        .cursor(fern_core::widget::CursorIcon::Pointer)
-                        .on_tap({
-                            let label = label.clone();
-                            let content_factory = content_factory.clone();
-                            move |_pos, ctx| {
-                                if !enabled {
-                                    return;
-                                }
-                                queue_dialog_request(
-                                    ctx,
-                                    &content_factory,
-                                    presentation,
-                                    close_behavior,
-                                    &label,
-                                );
-                            }
-                        })
-                        .on_key({
-                            let label = label.clone();
-                            let content_factory = content_factory.clone();
-                            move |event, ctx| match event {
-                                WidgetEvent::KeyUp {
-                                    key: Key::Enter | Key::Space,
-                                    ..
-                                } if enabled => {
-                                    queue_dialog_request(
-                                        ctx,
-                                        &content_factory,
-                                        presentation,
-                                        close_behavior,
-                                        &label,
-                                    );
-                                    EventResponse::Handled
-                                }
-                                _ => EventResponse::Ignored,
-                            }
-                        })
-                        .on_access_action({
-                            let label = label.clone();
-                            let content_factory = content_factory.clone();
-                            move |action, ctx| {
-                                if action == fern_core::accesskit::Action::Click && enabled {
-                                    queue_dialog_request(
-                                        ctx,
-                                        &content_factory,
-                                        presentation,
-                                        close_behavior,
-                                        &label,
-                                    );
-                                    EventResponse::Handled
-                                } else {
-                                    EventResponse::Ignored
-                                }
-                            }
-                        }),
-                )
-                .name(label),
-            )
+            let handlers = fern_core::widget_builder::HandlerSet::new()
+                .focusable(true)
+                .cursor(fern_core::widget::CursorIcon::Pointer)
+                .on_tap({
+                    let label = label.clone();
+                    let content_factory = content_factory.clone();
+                    move |_pos, ctx| {
+                        if !enabled {
+                            return;
+                        }
+                        queue_dialog_request(
+                            ctx,
+                            &content_factory,
+                            presentation,
+                            close_behavior,
+                            &label,
+                        );
+                    }
+                })
+                .on_key({
+                    let label = label.clone();
+                    let content_factory = content_factory.clone();
+                    move |event, ctx| match event {
+                        WidgetEvent::KeyUp {
+                            key: Key::Enter | Key::Space,
+                            ..
+                        } if enabled => {
+                            queue_dialog_request(
+                                ctx,
+                                &content_factory,
+                                presentation,
+                                close_behavior,
+                                &label,
+                            );
+                            EventResponse::Handled
+                        }
+                        _ => EventResponse::Ignored,
+                    }
+                })
+                .on_access_action({
+                    let label = label.clone();
+                    let content_factory = content_factory.clone();
+                    move |action, ctx| {
+                        if action == fern_core::accesskit::Action::Click && enabled {
+                            queue_dialog_request(
+                                ctx,
+                                &content_factory,
+                                presentation,
+                                close_behavior,
+                                &label,
+                            );
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        }
+                    }
+                });
+            let overlay_trigger = match trigger {
+                PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
+                PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
+            }
+            .name(label);
+            ctx.add(overlay_trigger)
         } else {
             ctx.add(
                 Button::new_literal(label)

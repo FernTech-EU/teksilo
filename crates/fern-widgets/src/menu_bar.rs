@@ -171,7 +171,7 @@ impl Widget for MenuBarTrigger {
             4.0,
             menu_style.item_padding_horizontal,
         )
-        .set_child(label_id);
+        .child_id(label_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
@@ -459,7 +459,7 @@ impl Widget for MenuBar {
             .border_width(0.0);
         let bg_id = ctx.add(bg);
 
-        let padding = Padding::symmetric(0.0, 2.0).set_child(row_id);
+        let padding = Padding::symmetric(0.0, 2.0).child_id(row_id);
         let padding_id = ctx.add(padding);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
@@ -1092,7 +1092,7 @@ mod tests {
             VStack::new()
                 .add_child(menu_bar)
                 .add_child(toolbar)
-                .child(Expand::new().fills_stack().set_child(content))
+                .child(Expand::new().fills_stack().child_id(content))
                 .add_child(status_bar),
         );
 

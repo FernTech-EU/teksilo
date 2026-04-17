@@ -20,7 +20,7 @@ impl Center {
     }
 
     /// Set child by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -100,7 +100,7 @@ mod tests {
     fn centers_child() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let _center = tree.add(Center::new().set_child(child));
+        let _center = tree.add(Center::new().child_id(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let cb = tree.bounds(child);
@@ -112,7 +112,7 @@ mod tests {
     fn claims_full_space() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let center = tree.add(Center::new().set_child(child));
+        let center = tree.add(Center::new().child_id(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let cb = tree.bounds(center);

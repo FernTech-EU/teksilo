@@ -54,7 +54,7 @@ impl MaxSize {
     }
 
     /// Set child by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -160,7 +160,7 @@ mod tests {
     fn clamps_large_child_to_maximum() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 600.0));
-        let max = tree.add(MaxSize::new(400.0, 300.0).set_child(child));
+        let max = tree.add(MaxSize::new(400.0, 300.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
@@ -172,7 +172,7 @@ mod tests {
     fn small_child_is_not_clamped() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 50.0));
-        let max = tree.add(MaxSize::new(400.0, 300.0).set_child(child));
+        let max = tree.add(MaxSize::new(400.0, 300.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
@@ -184,7 +184,7 @@ mod tests {
     fn max_width_only() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
-        let max = tree.add(MaxSize::width(400.0).set_child(child));
+        let max = tree.add(MaxSize::width(400.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
@@ -200,7 +200,7 @@ mod tests {
         let max = tree.add(
             MaxSize::width(9999.0)
                 .bind_max_width(max_w.clone())
-                .set_child(child),
+                .child_id(child),
         );
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(max).width - 400.0).abs() < 0.01);

@@ -167,7 +167,7 @@ impl Widget for RadioButton {
             FixedSize::new()
                 .bind_width(radio_style.visual_size)
                 .bind_height(radio_style.visual_size)
-                .set_child(outer_id),
+                .child_id(outer_id),
         );
 
         let dot_color = {
@@ -188,7 +188,7 @@ impl Widget for RadioButton {
             FixedSize::new()
                 .bind_width(radio_style.inner_dot_size)
                 .bind_height(radio_style.inner_dot_size)
-                .set_child(dot_id),
+                .child_id(dot_id),
         );
 
         ctx.visible_when(dot_sized, selected.map(move |s| *s == value));
@@ -201,7 +201,7 @@ impl Widget for RadioButton {
         let radio = ctx.add(
             crate::primitives::FocusRing::new(focused)
                 .corner_radius(theme.shape.radius_pill)
-                .set_child(visual),
+                .child_id(visual),
         );
 
         let mut row = HStack::new().spacing(radio_style.label_gap).add_child(radio);
@@ -238,7 +238,7 @@ impl Widget for RadioButton {
 
         let row_id = ctx.add(row);
         let root_id =
-            ctx.add(MinSize::new(radio_style.hit_area, radio_style.hit_area).set_child(row_id));
+            ctx.add(MinSize::new(radio_style.hit_area, radio_style.hit_area).child_id(row_id));
 
         if let Some(ref tooltip_text) = self.tooltip_text {
             let tw = crate::tooltip::TooltipWidget::new_literal(tooltip_text);

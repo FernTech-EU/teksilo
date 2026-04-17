@@ -73,7 +73,7 @@ impl Widget for Toolbar {
         }
 
         let row_id = ctx.add(row);
-        let root = ctx.add(Panel::new().padding(spacing).set_child(row_id));
+        let root = ctx.add(Panel::new().padding(spacing).child_id(row_id));
         self.root_child_id = Some(root);
         vec![root]
     }

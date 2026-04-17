@@ -39,7 +39,7 @@ impl Panel {
     }
 
     /// Set child by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -179,7 +179,7 @@ mod tests {
         let theme = Theme::light_default();
         let mut tree = WidgetTree::new().with_theme(theme.clone());
         let child = tree.add(FixedLeaf(80.0, 40.0));
-        let panel = tree.add(Panel::new().padding(10.0).set_child(child));
+        let panel = tree.add(Panel::new().padding(10.0).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let pb = tree.bounds(panel);
@@ -191,7 +191,7 @@ mod tests {
     fn panel_child_positioned_with_padding() {
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let child = tree.add(FixedLeaf(80.0, 40.0));
-        let _panel = tree.add(Panel::new().padding(12.0).set_child(child));
+        let _panel = tree.add(Panel::new().padding(12.0).child_id(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let cb = tree.bounds(child);
@@ -207,7 +207,7 @@ mod tests {
             Panel::new()
                 .background(Color::RED)
                 .corner_radius(8.0)
-                .set_child(child),
+                .child_id(child),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let frame = tree.render();

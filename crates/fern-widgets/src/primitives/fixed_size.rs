@@ -27,7 +27,7 @@ impl FixedSize {
     }
 
     /// Set child by pre-registered ID.
-    pub fn set_child(mut self, id: WidgetId) -> Self {
+    pub fn child_id(mut self, id: WidgetId) -> Self {
         self.pending_child = Some(PendingChild::Id(id));
         self
     }
@@ -137,7 +137,7 @@ mod tests {
     fn reports_child_natural_size() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().set_child(child));
+        let fixed = tree.add(FixedSize::new().child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
@@ -149,7 +149,7 @@ mod tests {
     fn ignores_parent_proposal() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().set_child(child));
+        let fixed = tree.add(FixedSize::new().child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
@@ -162,7 +162,7 @@ mod tests {
         let width = Signal::new(150.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().bind_width(width.clone()).set_child(child));
+        let fixed = tree.add(FixedSize::new().bind_width(width.clone()).child_id(child));
         tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
@@ -175,7 +175,7 @@ mod tests {
         let width = Signal::new(200.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().bind_width(width.clone()).set_child(child));
+        let fixed = tree.add(FixedSize::new().bind_width(width.clone()).child_id(child));
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(fixed).width - 200.0).abs() < 0.01);
 

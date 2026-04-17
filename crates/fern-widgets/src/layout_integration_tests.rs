@@ -127,7 +127,7 @@ fn nested_hstack_in_vstack() {
 fn min_size_wrapping_small_widget() {
     let mut tree = WidgetTree::new();
     let small = tree.add(FixedLeaf(20.0, 10.0));
-    let min = tree.add(MinSize::new(48.0, 48.0).set_child(small));
+    let min = tree.add(MinSize::new(48.0, 48.0).child_id(small));
     let _stack = tree.add(HStack::new().add_child(min));
     tree.layout(SizeProposal::exact(200.0, 60.0));
 
@@ -142,7 +142,7 @@ fn expand_horizontal_in_hstack() {
     let mut tree = WidgetTree::new();
     let fixed = tree.add(FixedLeaf(60.0, 30.0));
     let inner = tree.add(FixedLeaf(40.0, 20.0));
-    let expanded = tree.add(Expand::horizontal().set_child(inner));
+    let expanded = tree.add(Expand::horizontal().child_id(inner));
     let _stack = tree.add(HStack::new().add_child(fixed).add_child(expanded));
     tree.layout(SizeProposal::exact(300.0, 50.0));
 
@@ -166,7 +166,7 @@ fn expand_horizontal_in_hstack() {
 fn center_widget() {
     let mut tree = WidgetTree::new();
     let child = tree.add(FixedLeaf(40.0, 20.0));
-    let _center = tree.add(Center::new().set_child(child));
+    let _center = tree.add(Center::new().child_id(child));
     tree.layout(SizeProposal::exact(200.0, 100.0));
 
     let cb = tree.bounds(child);
@@ -178,7 +178,7 @@ fn center_widget() {
 fn fixed_size_in_hstack_resists_stretching() {
     let mut tree = WidgetTree::new();
     let a = tree.add(FixedLeaf(40.0, 20.0));
-    let fixed = tree.add(FixedSize::new().set_child(a));
+    let fixed = tree.add(FixedSize::new().child_id(a));
     let b = tree.add(FixedLeaf(60.0, 30.0));
     let _stack = tree.add(HStack::new().spacing(5.0).add_child(fixed).add_child(b));
     tree.layout(SizeProposal::exact(300.0, 50.0));
@@ -273,7 +273,7 @@ fn demo_layout_no_overlap_between_sections() {
             .add_child(typography)
             .add_child(showcase),
     );
-    let _root = tree.add(Padding::uniform(24.0).set_child(outer));
+    let _root = tree.add(Padding::uniform(24.0).child_id(outer));
     tree.layout(SizeProposal::exact(600.0, 500.0));
 
     // === Check that each section starts BELOW the previous section ===
