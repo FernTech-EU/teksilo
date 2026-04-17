@@ -762,10 +762,50 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
         let root_id = if visible_count > self.max_visible_items {
             let max_height =
                 self.max_visible_items as f32 * menu_style.item_height + 8.0;
-            let scrollable_id = ctx.add(
-                crate::scroll_area::ScrollArea::from_id(padded_id)
-                    .preferred_size(0.0, max_height),
-            );
+            // Keep a clone of the ScrollArea's scroll_y signal so the
+            // selection-observer below can nudge it when the user
+            // arrow-navigates onto an off-screen row.
+            let scrollable = crate::scroll_area::ScrollArea::from_id(padded_id)
+                .preferred_size(0.0, max_height);
+            let scroll_y = scrollable.scroll_y_signal().clone();
+            let scrollable_id = ctx.add(scrollable);
+
+            // Keep the selected row in view. Runs once up-front so a
+            // pre-selected value is scrolled to on open, then fires on
+            // every subsequent `selected` change — the arrow handler
+            // on the parent `DropdownPanel` flips the signal, this
+            // effect translates that into a scroll nudge when the new
+            // row is above or below the visible viewport.
+            let filtered_for_scroll = visible_indices.clone();
+            let source_for_scroll = self.source.clone();
+            let item_height = menu_style.item_height;
+            let outer_padding = 4.0_f32; // matches `Padding::uniform(4.0)` above
+            let viewport_height = self.max_visible_items as f32 * item_height;
+            let scroll_into_view = {
+                let scroll_y = scroll_y.clone();
+                move |sel: &Option<T>| {
+                    let Some(v) = sel.as_ref() else { return };
+                    let Some(pos) = filtered_for_scroll
+                        .iter()
+                        .position(|&i| source_for_scroll.get(i).as_ref() == Some(v))
+                    else {
+                        return;
+                    };
+                    let item_top = outer_padding + pos as f32 * item_height;
+                    let item_bot = item_top + item_height;
+                    let cur_scroll = scroll_y.get();
+                    let cur_bot = cur_scroll + viewport_height;
+                    if item_top < cur_scroll {
+                        scroll_y.set(item_top);
+                    } else if item_bot > cur_bot {
+                        scroll_y.set(item_bot - viewport_height);
+                    }
+                }
+            };
+            // Initial sync so a pre-selected value opens already in view.
+            scroll_into_view(&self.selected.get());
+            ctx.effect(&self.selected, move |sel| scroll_into_view(sel));
+
             ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
         } else {
             padded_id
