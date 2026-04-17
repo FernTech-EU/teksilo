@@ -60,13 +60,14 @@ fern-widgets         ~35 widgets + ~19 layout primitives (Button, ListView, Tree
 fern-text            TextBackend impl via text-typeset (external path dep)
 fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher
 fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by fern-i18n)
+fern-ui-macros       fern! DSL proc macro (re-exported by fern-ui as fern!)
 fern-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
 fern-platform        winit + AccessKit adapter, event translation
 fern-app             FernAppBuilder, WindowManager, event loop, command dispatch
 fern-ui              Umbrella crate with re-exports and feature flags
 ```
 
-Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `canvas → render → platform → app → ui`, `i18n-macros → i18n`
+Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `canvas → render → platform → app → ui`, `i18n-macros → i18n`, `ui-macros → ui`
 
 External path dependency: `text-typeset` lives at `../../../text-typeset` (outside workspace).
 
@@ -208,6 +209,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Accessibility (AccessKit integration at trait level)
 - Animation system (`Signal<f32>::animate_to`, easing, per-frame scheduler)
 - Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal)
+- `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)
 - Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`)
 - Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge
 - Containers: Panel, Card, Accordion, ScrollArea, ScrollBar, Tooltip, SplitView, TabWidget, Dialog, Popover, Snackbar, Wizard, Breadcrumb
@@ -247,6 +249,8 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Data models: [crates/fern-data/src/](crates/fern-data/src/) (`list_model.rs`, `tree_model.rs`, `selection_model.rs`)
 - i18n runtime: [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs), [crates/fern-i18n/src/localized_string.rs](crates/fern-i18n/src/localized_string.rs)
 - i18n macros: [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs)
+- fern! DSL macro: [crates/fern-ui-macros/src/](crates/fern-ui-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/fern-ui/tests/fern_ui/pass/](crates/fern-ui/tests/fern_ui/pass/)
+- fern! reference: [docs/fern-macro-reference.md](docs/fern-macro-reference.md) (user-facing), [docs/fern-language-spec-v3.md](docs/fern-language-spec-v3.md) (design spec)
 - Canvas API: `crates/fern-canvas/src/canvas.rs`
 - Renderer: `crates/fern-render/src/renderer.rs`
 - App builder: `crates/fern-app/src/app.rs`
@@ -320,6 +324,43 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     // ...
 }
 ```
+
+## `fern!` DSL
+
+Block-structured DSL for widget trees. Desugars one-to-one to builder
+calls at macro-expansion time — no runtime, no virtual tree.
+
+```rust
+use fern_ui::prelude::*;
+
+fn build(ctx: &mut BuildContext) -> WidgetId {
+    fern!(ctx =>
+        VStack {
+            spacing: 12.0
+            TextWidget::new_literal("Title") { style: t.body_bold.clone() }
+            open_btn = Button("Open") {
+                on_activate: Cmd::Open
+            }
+            TextWidget("Status") { linked_to: open_btn }
+        }
+    )
+}
+```
+
+Body items are separated by newlines, not commas. `name: value` →
+`.name(value)`. `name = Element` hoists `let name = ctx.add(...)` and
+attaches by id. Bare UpperCamel children at body position → `.child(...)`.
+Structural forms (`if`/`match`/`for`/`let`/`rust { }`/`..spread`) and
+the `#{ expr }` escape work as documented. Category B widgets (Card,
+Dialog, TabWidget, etc.) address content by named slots; a bare child
+there emits a targeted hint pointing at the right slot name.
+
+See [docs/fern-macro-reference.md](docs/fern-macro-reference.md) for
+the full surface language, desugaring cheat sheet, and limitations;
+[docs/fern-language-spec-v3.md](docs/fern-language-spec-v3.md) for the
+design spec with worked translations of the widget-catalog examples.
+Slash command `/fern-macro` loads the skill for read/write/explain/
+translate/debug workflows.
 
 ## App Entry Point Pattern
 
