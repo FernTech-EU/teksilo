@@ -1,0 +1,48 @@
+//! Method chains inside a property value must be wrapped in parens
+//! when the receiver is an UpperCamel-rooted path — the outer `(`
+//! bypasses `peek_element_start` (which requires an Ident as the
+//! first token), so the whole parenthesized expression goes through
+//! the Expr parse path. This is the documented escape hatch for rare
+//! cases where the idiomatic fern! body form doesn't fit.
+
+use fern_ui::prelude::*;
+
+struct Helper(u32);
+impl Helper {
+    fn from(n: u32) -> Self {
+        Self(n)
+    }
+    fn finalize(self) -> u32 {
+        self.0 * 2
+    }
+}
+
+#[derive(Debug, Default)]
+struct Probe {
+    value: Option<u32>,
+}
+
+impl Probe {
+    fn new() -> Self {
+        Self::default()
+    }
+    fn value(mut self, v: u32) -> Self {
+        self.value = Some(v);
+        self
+    }
+}
+
+impl Widget for Probe {
+    fn size_that_fits(&self, p: SizeProposal, _: &LayoutContext) -> Size {
+        p.resolve(0.0, 0.0)
+    }
+}
+
+fn main() {
+    let p: Probe = fern!(
+        Probe {
+            value: (Helper::from(10).finalize())
+        }
+    );
+    assert_eq!(p.value, Some(20));
+}
