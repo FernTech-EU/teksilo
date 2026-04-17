@@ -6,7 +6,7 @@
 //! user token it originated from.
 
 use proc_macro2::Span;
-use syn::{Expr, Ident, Path};
+use syn::{Block, Expr, Ident, Local, Path};
 
 /// The root of a `fern!` invocation.
 pub(crate) struct FernRoot {
@@ -56,6 +56,25 @@ pub(crate) enum BodyItem {
     /// Phase 2 keeps the semantics simple: always WidgetId. The full
     /// `IntoFernChild` routing (widget-or-id dispatch) is Phase 3.
     Escape { expr: Expr, span: Span },
+    /// `let pat = expr;` at body position — spec §5.4. Introduces a
+    /// local whose value is used by subsequent body items. Triggers
+    /// statement-sequence lowering on the enclosing element.
+    Let(Local),
+    /// `rust { ... }` imperative escape — spec §5.6. Two forms:
+    /// expression-producing (block tail has no semicolon, lowered as
+    /// `.child(block)`) and side-effect (block tail ends in `;`,
+    /// emitted inline as a side-effect statement).
+    Rust { block: Block, span: Span, shape: RustShape },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RustShape {
+    /// Block's last statement is an expression without trailing `;` —
+    /// the block's value becomes a child via `.child(block)`.
+    Expression,
+    /// Block has a unit tail (last statement ends in `;` or is a
+    /// `Stmt::Semi`) — emitted as a side-effect statement.
+    SideEffect,
 }
 
 pub(crate) struct FernProperty {

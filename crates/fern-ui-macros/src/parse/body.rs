@@ -15,10 +15,10 @@
 //! out of Phase 2 scope and fall through to a targeted error.
 
 use syn::parse::{ParseStream, Result};
-use syn::{Expr, Token};
+use syn::{Block, Expr, Local, Stmt, Token};
 
 use crate::diag;
-use crate::ir::BodyItem;
+use crate::ir::{BodyItem, RustShape};
 
 use super::{parse_element, parse_property_args, peek_binding, peek_escape};
 
@@ -60,6 +60,20 @@ fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
         return Ok(BodyItem::Binding { name, element });
     }
 
+    // `let pat = expr;` — spec §5.4.
+    if input.peek(Token![let]) {
+        let local = parse_let_local(input)?;
+        return Ok(BodyItem::Let(local));
+    }
+
+    // `rust { ... }` — spec §5.6.
+    if input.peek(syn::Ident) {
+        let ahead: syn::Ident = input.fork().parse()?;
+        if ahead == "rust" && input.peek2(syn::token::Brace) {
+            return parse_rust_block(input);
+        }
+    }
+
     if !input.peek(syn::Ident) {
         let span = input.span();
         return Err(diag::error(
@@ -90,4 +104,38 @@ fn parse_property(input: ParseStream) -> Result<crate::ir::FernProperty> {
     let _colon: Token![:] = input.parse()?;
     let args = parse_property_args(input)?;
     Ok(crate::ir::FernProperty { name, args })
+}
+
+/// Parse a `let` local at body position. Rust's Local grammar covers
+/// patterns, type annotations, initializers, else-branches, and the
+/// trailing semicolon — we delegate to syn's Stmt parser and extract
+/// the Local arm.
+fn parse_let_local(input: ParseStream) -> Result<Local> {
+    let stmt: Stmt = input.parse()?;
+    match stmt {
+        Stmt::Local(local) => Ok(local),
+        other => Err(diag::error(
+            syn::spanned::Spanned::span(&other),
+            "expected a `let` binding at this body position",
+        )),
+    }
+}
+
+/// Parse a `rust { ... }` body item. The shape (expression vs side
+/// effect) is determined by the last statement of the block: a
+/// `Stmt::Expr` with no trailing semicolon is expression form, any
+/// other shape (including an empty block) is side-effect form.
+fn parse_rust_block(input: ParseStream) -> Result<BodyItem> {
+    let ident: syn::Ident = input.parse()?;
+    let span = ident.span();
+    let block: Block = input.parse()?;
+    let shape = classify_block_shape(&block);
+    Ok(BodyItem::Rust { block, span, shape })
+}
+
+fn classify_block_shape(block: &Block) -> RustShape {
+    match block.stmts.last() {
+        Some(Stmt::Expr(_, None)) => RustShape::Expression,
+        _ => RustShape::SideEffect,
+    }
 }
