@@ -938,20 +938,22 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         self.root_child_id = Some(root_id);
 
         // Panel-level key handler: consume Tab / Shift+Tab and dismiss
-        // the overlay. The framework dispatches Tab to the focused
-        // widget first (and bubbles up through its ancestors) before
-        // falling back to built-in focus cycling — returning `Handled`
-        // here both closes the panel and suppresses the default cycle.
-        // The next user action (or Shift+Tab) then moves focus through
-        // the main tree naturally, starting from where focus lived
-        // before the combo opened. `TextInput` itself returns
-        // `Ignored` for Tab, so the bubble reaches the panel whether
-        // focus is in the search field or on an item.
+        // the overlay. `dismiss_top_overlay` (unlike `dismiss_all_overlays`)
+        // restores focus to whatever held it before the overlay was
+        // shown — i.e. the combo trigger — so after the popup closes
+        // the user's next Tab keypress walks the main focus order
+        // normally. The framework dispatches Tab to the focused widget
+        // first and bubbles up through its ancestors before falling
+        // back to built-in focus cycling, so returning `Handled` here
+        // both closes the panel and suppresses the default cycle.
+        // Only reached in searchable mode (focus lives on the inner
+        // `TextInputField` inside the panel); non-searchable combos
+        // handle Tab on the trigger itself.
         let panel_handlers = HandlerSet::new().on_key(|event, ctx| match event {
             WidgetEvent::KeyDown {
                 key: Key::Tab, ..
             } => {
-                ctx.dismiss_all_overlays();
+                ctx.dismiss_top_overlay();
                 EventResponse::Handled
             }
             _ => EventResponse::Ignored,
@@ -1288,6 +1290,27 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                         }
                         WidgetEvent::KeyDown {
                             key: Key::Escape, ..
+                        } => {
+                            if interaction.get() == ComboBoxState::Open {
+                                interaction.set(ComboBoxState::Focused);
+                                ctx.dismiss_all_overlays();
+                                EventResponse::Handled
+                            } else {
+                                EventResponse::Ignored
+                            }
+                        }
+                        // Tab / Shift+Tab while open: dismiss the dropdown
+                        // and let focus flow naturally. The trigger itself
+                        // receives Tab (focus is on the combo, not inside
+                        // the panel) for non-searchable combos, so the
+                        // panel's own Tab handler wouldn't fire here. In
+                        // searchable mode the panel's handler covers it
+                        // because focus is on the inner TextInputField.
+                        // Consuming the event suppresses the framework's
+                        // built-in cycle so nothing else stole focus while
+                        // the overlay tore down.
+                        WidgetEvent::KeyDown {
+                            key: Key::Tab, ..
                         } => {
                             if interaction.get() == ComboBoxState::Open {
                                 interaction.set(ComboBoxState::Focused);
@@ -2227,6 +2250,50 @@ mod tests {
             Some(fern_core::accesskit::AutoComplete::List),
             "searchable combobox must expose aria-autocomplete=list",
         );
+    }
+
+    #[test]
+    fn tab_dismisses_open_simple_dropdown() {
+        // Non-searchable combos have focus on the trigger itself when
+        // the dropdown is open, so the panel-level Tab handler doesn't
+        // get a chance — the trigger's own `on_key` must intercept.
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.focus(cb);
+
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.press_key(Key::Tab, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Tab must close the non-searchable dropdown too"
+        );
+    }
+
+    #[test]
+    fn shift_tab_dismisses_open_simple_dropdown() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let cb = tree.add(ComboBox::new(
+            vec!["Apple", "Banana", "Cherry"],
+            selected.clone(),
+        ));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.focus(cb);
+
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.press_key(Key::Tab, fern_core::event::Modifiers::SHIFT);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        assert!(tree.active_overlays().is_empty());
     }
 
     #[cfg(feature = "rich-text")]
