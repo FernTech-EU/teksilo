@@ -19,7 +19,7 @@ translating between the two forms.
   — design spec with worked translations of 9 widget-catalog examples
   (`§7`). Consult this for canonical patterns.
 - [crates/fern-ui/tests/fern_ui/pass/](../../../crates/fern-ui/tests/fern_ui/pass/)
-  — 23 runnable trybuild fixtures, one per DSL feature. Consult these
+  — runnable trybuild fixtures, one per DSL feature. Consult these
   when you need a minimal self-contained example.
 
 ## Mental model
@@ -72,13 +72,16 @@ When the user asks about `fern!`, match against these situations:
    bare child element inside one produces a targeted compile-time
    error pointing at the right slot name.
 
-4. **`#{ }` vs plain ident as property value**: if the widget's id
-   comes from outside the fern! block AND only appears once, use a
-   property with the id method name directly (`child_id: scroll_id`
-   / `add_child: toolbar_id` / `slot_name_id: some_id`). The escape
-   `#{ }` is only needed when the parser would otherwise try to parse
-   the value as an element. Plain `ident` at property-value position
-   is just a Rust expression — no escape needed.
+4. **`#{ }` vs plain ident as property value**: at a Category B slot,
+   `#{ id_expr }` forces the `_id` routing — `header: #{ toolbar_id }`
+   emits `.header_id(toolbar_id)`. The alternative is writing the `_id`
+   method name directly: `header_id: toolbar_id` emits the same call
+   without the escape. At a multi-child container (VStack, Panel, …),
+   the property form `add_child: toolbar_id` emits `.add_child(toolbar_id)`
+   and is usually the cleanest. Plain idents at property-value positions
+   are just Rust expressions passed to the named method; the escape is
+   only needed when you want the `_id` auto-suffix or when the value
+   looks like an element prefix the parser would commit on.
 
 5. **Bindings (`name = Element`) hoist to the outermost `fern!` block**
    and always use `ctx.add(...)`. `ctx` must be in scope — either via
@@ -140,6 +143,25 @@ fern!(ctx =>
 )
 ```
 
+**Body-form for builder methods on an element arg** (replaces method
+chains — see the limitations section):
+
+```rust
+fern!(ctx =>
+    Menu {
+        item: MenuItem::new_literal("Run") {
+            on_activate: Cmd::Run
+            tooltip_literal: "Runs the thing"
+        }
+    }
+)
+// emits .item(MenuItem::new_literal("Run").on_activate(Cmd::Run).tooltip_literal("..."))
+```
+
+The body reads uniformly with top-level elements — same `name: value`
+shape, no mental switch to Rust's method-chain syntax. Prefer this
+over `item: (MenuItem::new_literal("Run").on_activate(...).tooltip(...))`.
+
 ## Reading `fern!` — translation shortcuts
 
 Scan for these shapes and translate mentally:
@@ -152,7 +174,9 @@ Scan for these shapes and translate mentally:
 - Bare `UpperCamel(...)` at body → `.child(UpperCamel::new(...))`
 - `name = Element` → hoisted `let name = ctx.add(...); ... .add_child(name)`
 - `#{ id }` → routes through `add_child(id)` or `.slot_id(id)` per position
-- `if`/`match`/`for` → `.child_opt` / `FernBranch[N]` / `.children(iter.map(...))`
+- `if cond { E }` (no else) → `.child_opt(if cond { Some(E) } else { None })`
+- `if cond { A } else { B }` / multi-arm `if` / `match` → `.child(FernBranch[N]::...(E))` dispatched by arm index
+- `for pat in iter { E }` → `.children(iter.map(|pat| E))`
 - `..expr` → statement-form spread: `for id in expr { __parent = __parent.add_child(id); }`
 - `rust { ... }` → block either produces a child (no trailing `;`) or runs for side effect
 
