@@ -1,0 +1,18 @@
+[package]
+name = "fern-ui-macros"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# `span-locations` is needed for `Span::start()/end()` line info —
+# used by the property parser to detect the newline boundary between
+# a multi-arg property's arguments and the next body item.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }

@@ -40,6 +40,7 @@ fern-data = { path = "crates/fern-data", version = "0.1.0" }
 fern-widgets = { path = "crates/fern-widgets", version = "0.1.0" }
 fern-i18n = { path = "crates/fern-i18n", version = "0.1.0" }
 fern-i18n-macros = { path = "crates/fern-i18n-macros", version = "0.1.0" }
+fern-ui-macros = { path = "crates/fern-ui-macros", version = "0.1.0" }
 fern-text = { path = "crates/fern-text", version = "0.1.0" }
 fern-render = { path = "crates/fern-render", version = "0.1.0" }
 fern-platform = { path = "crates/fern-platform", version = "0.1.0" }

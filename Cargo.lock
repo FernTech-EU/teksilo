@@ -1123,7 +1123,18 @@ dependencies = [
  "fern-resources",
  "fern-text",
  "fern-tokens",
+ "fern-ui-macros",
  "fern-widgets",
+ "trybuild",
+]
+
+[[package]]
+name = "fern-ui-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

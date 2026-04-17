@@ -58,6 +58,7 @@ fonts-all = ["fern-text?/fonts-all"]
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-core = { workspace = true }
+fern-ui-macros = { workspace = true }
 fern-data = { workspace = true }
 fern-render = { workspace = true }
 fern-platform = { workspace = true }
@@ -74,3 +75,6 @@ fern-widgets = { workspace = true, optional = true }
 fern-text = { path = "../fern-text", version = "0.1.0", optional = true, default-features = false }
 fern-i18n = { workspace = true, optional = true }
 fern-resources = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"

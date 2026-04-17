@@ -5,6 +5,11 @@ pub use fern_data as data;
 pub use fern_platform as platform;
 pub use fern_tokens as tokens;
 
+/// The `fern!` DSL macro. See `docs/fern-language-spec-v3.md` for the
+/// surface language. Re-exported from `fern-ui-macros` so consuming
+/// crates only need `fern-ui` in `[dependencies]`.
+pub use fern_ui_macros::fern;
+
 /// Re-export the `res!` macro so consuming crates only need `fern-ui`
 /// in their `[dependencies]` — same pattern as `serde` re-exporting
 /// `serde_derive`.
@@ -29,12 +34,15 @@ pub use fern_text::text_document;
 pub use fern_i18n as i18n;
 
 pub mod prelude {
+    // DSL entry point
+    pub use fern_ui_macros::fern;
+
     // Core widget types
     pub use fern_core::{
         AccessNodeBuilder, AppCommand, BuildContext, CursorIcon, EventContext, EventResponse,
-        FocusPolicy, Key, LayoutContext, ModalCloseBehavior, ModalPresentation, Modifiers,
-        PaintContext, Prop, Shortcut, ShortcutMap, Signal, Widget, WidgetBuilder, WidgetEvent,
-        WidgetId,
+        FernBranch, FernBranch3, FernBranch4, FocusPolicy, IntoFernChild, Key, LayoutContext,
+        ModalCloseBehavior, ModalPresentation, Modifiers, PaintContext, Prop, Shortcut,
+        ShortcutMap, Signal, Widget, WidgetBuilder, WidgetEvent, WidgetId,
     };
 
     // Geometry (lives in fern-canvas)
