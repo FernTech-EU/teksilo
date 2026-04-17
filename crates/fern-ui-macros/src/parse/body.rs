@@ -30,6 +30,11 @@ pub(crate) fn parse_body(input: ParseStream) -> Result<Vec<BodyItem>> {
     while !input.is_empty() {
         let item = parse_body_item(input)?;
         items.push(item);
+        // Stray `,` between body items — users coming from JSON or
+        // Rust struct literals expect comma separators. Spec §9.2.
+        if input.peek(Token![,]) {
+            return Err(diag::comma_between_body_items(input.span()));
+        }
     }
     Ok(items)
 }

@@ -8,6 +8,5 @@
 fn fern_ui_trybuild() {
     let t = trybuild::TestCases::new();
     t.pass("tests/fern_ui/pass/*.rs");
-    // Phase 4 will populate fail/*.rs. Keep the dir empty for now; no
-    // call to t.compile_fail so trybuild doesn't choke on zero fixtures.
+    t.compile_fail("tests/fern_ui/fail/*.rs");
 }

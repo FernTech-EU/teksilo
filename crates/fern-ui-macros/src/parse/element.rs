@@ -5,7 +5,8 @@ use syn::parse::{ParseStream, Result};
 use syn::punctuated::Punctuated;
 use syn::{Expr, Path, Token, token};
 
-use crate::ir::FernElement;
+use crate::diag;
+use crate::ir::{BodyItem, FernElement};
 
 use super::parse_body;
 
@@ -62,6 +63,24 @@ pub(crate) fn parse_element(input: ParseStream) -> Result<FernElement> {
     } else {
         Vec::new()
     };
+
+    // Category B bare-child pre-empt (spec §9.2). If the parent type's
+    // last path segment names a known Category B widget and the body
+    // contains a bare child element, emit a targeted hint pointing at
+    // a likely slot name. Without this, the user sees the compiler's
+    // generic "no method named `child`" message without knowing which
+    // slot to use.
+    let leaf_name = type_path.segments.last().map(|s| s.ident.to_string());
+    if let Some(name) = leaf_name.as_deref() {
+        if diag::is_category_b_widget(name) {
+            if let Some(child) = body.iter().find_map(|item| match item {
+                BodyItem::Child(c) => Some(c),
+                _ => None,
+            }) {
+                return Err(diag::category_b_bare_child(name, child.head_span));
+            }
+        }
+    }
 
     Ok(FernElement {
         type_path,
