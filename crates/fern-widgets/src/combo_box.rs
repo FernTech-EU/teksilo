@@ -902,9 +902,18 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                     // widget's id from the outside (it lives inside
                     // TextInput's build) just to register
                     // `ctx.visible_when`.
+                    //
+                    // `on_submit` dismisses the overlay on Enter. The
+                    // `TextInputField` consumes `Enter` before it can
+                    // bubble to the panel's own key handler, so we
+                    // rely on this hook instead. The selection
+                    // tracked in `selected` (driven by the panel's
+                    // ArrowDown/ArrowUp handler) is already correct
+                    // when the user confirms.
                     let search_input = crate::text_input::TextInput::new(query.clone())
                         .placeholder("Search…")
-                        .show_clear_button(true);
+                        .show_clear_button(true)
+                        .on_submit_fn(|ctx| ctx.dismiss_top_overlay());
                     let search_id = ctx.add(search_input);
                     self.search_input_slot.set(Some(search_id));
                     let search_wrapped = ctx.add(
@@ -937,26 +946,126 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 
-        // Panel-level key handler: consume Tab / Shift+Tab and dismiss
-        // the overlay. `dismiss_top_overlay` (unlike `dismiss_all_overlays`)
-        // restores focus to whatever held it before the overlay was
-        // shown — i.e. the combo trigger — so after the popup closes
-        // the user's next Tab keypress walks the main focus order
-        // normally. The framework dispatches Tab to the focused widget
-        // first and bubbles up through its ancestors before falling
-        // back to built-in focus cycling, so returning `Handled` here
-        // both closes the panel and suppresses the default cycle.
-        // Only reached in searchable mode (focus lives on the inner
-        // `TextInputField` inside the panel); non-searchable combos
-        // handle Tab on the trigger itself.
-        let panel_handlers = HandlerSet::new().on_key(|event, ctx| match event {
-            WidgetEvent::KeyDown {
-                key: Key::Tab, ..
-            } => {
-                ctx.dismiss_top_overlay();
-                EventResponse::Handled
+        // Panel-level key handler. Events bubble up from the focused
+        // descendant; in practice that's the search `TextInputField`
+        // in searchable mode (non-searchable combos keep focus on the
+        // trigger and navigate there). Handles:
+        //
+        // - Tab / Shift+Tab: close the popup. `dismiss_top_overlay`
+        //   restores focus to whatever held it before the overlay
+        //   opened (the combo trigger), so the user's next Tab walks
+        //   the main focus order from there.
+        // - ArrowDown / ArrowUp / Home / End: navigate the filtered
+        //   item list while the search field retains focus, so the
+        //   user can type a query then arrow through the matches
+        //   without losing the cursor.
+        // - Enter: confirm the current selection and close. The
+        //   `selected` signal was already updated by the arrow keys;
+        //   the item's own tap handler would duplicate that, so here
+        //   we just dismiss.
+        //
+        // Returning `Handled` suppresses both the framework's default
+        // focus cycle (Tab) and the `TextInputField`'s downstream key
+        // handling (arrows would otherwise fall through as printable-
+        // character candidates and be rejected as non-text).
+        let source_for_nav = self.source.clone();
+        let selected_for_nav = self.selected.clone();
+        let item_label_for_nav = self.item_label.clone();
+        #[cfg(feature = "rich-text")]
+        let search_query_for_nav = self.search_query.clone();
+        #[cfg(feature = "rich-text")]
+        let filter_for_nav = self.filter.clone();
+        let panel_handlers = HandlerSet::new().on_key(move |event, ctx| {
+            // `TextInputField` consumes `Enter`, `Home`, and `End` for
+            // its own cursor semantics and never lets them bubble — so
+            // Home/End naturally move the caret inside the search
+            // string (expected text-field behavior), and Enter is
+            // routed through `TextInput::on_submit(..)` set below. Only
+            // `ArrowDown`/`ArrowUp` fall through as unhandled from the
+            // text field and reach this handler; we use them to walk
+            // the filtered item list.
+            let nav_key = match event {
+                WidgetEvent::KeyDown {
+                    key: Key::Tab, ..
+                } => {
+                    ctx.dismiss_top_overlay();
+                    return EventResponse::Handled;
+                }
+                WidgetEvent::KeyDown {
+                    key: k @ (Key::ArrowDown | Key::ArrowUp),
+                    ..
+                } => *k,
+                _ => return EventResponse::Ignored,
+            };
+
+            // Compute the visible-index list under the current filter.
+            // Mirrors `FilteredItemList::build` — kept in sync manually
+            // because the panel's key handler needs to navigate the
+            // same filtered subset without reaching into the child's
+            // internal state.
+            let total = source_for_nav.len();
+            let filtered: Vec<usize> = {
+                #[cfg(feature = "rich-text")]
+                {
+                    if let Some(query) = &search_query_for_nav {
+                        let q = query.get();
+                        if q.is_empty() {
+                            (0..total).collect()
+                        } else {
+                            let q_lower = q.to_lowercase();
+                            (0..total)
+                                .filter(|&i| {
+                                    source_for_nav
+                                        .get(i)
+                                        .map(|v| match &filter_for_nav {
+                                            Some(f) => f(&q, &v),
+                                            None => (item_label_for_nav)(&v)
+                                                .to_lowercase()
+                                                .contains(&q_lower),
+                                        })
+                                        .unwrap_or(false)
+                                })
+                                .collect()
+                        }
+                    } else {
+                        (0..total).collect()
+                    }
+                }
+                #[cfg(not(feature = "rich-text"))]
+                {
+                    (0..total).collect()
+                }
+            };
+            let n = filtered.len();
+            if n == 0 {
+                return EventResponse::Handled;
             }
-            _ => EventResponse::Ignored,
+
+            // Find the currently-selected value's position within the
+            // filtered list. A selection that has been filtered out
+            // counts as no-selection for navigation purposes.
+            let current = selected_for_nav.get();
+            let current_in_filtered = current.as_ref().and_then(|v| {
+                filtered
+                    .iter()
+                    .position(|&i| source_for_nav.get(i).as_ref() == Some(v))
+            });
+
+            let next_idx = match nav_key {
+                Key::ArrowDown => match current_in_filtered {
+                    None => 0,
+                    Some(i) => (i + 1) % n,
+                },
+                Key::ArrowUp => match current_in_filtered {
+                    None | Some(0) => n - 1,
+                    Some(i) => i - 1,
+                },
+                _ => return EventResponse::Handled,
+            };
+            if let Some(v) = source_for_nav.get(filtered[next_idx]) {
+                selected_for_nav.set(Some(v));
+            }
+            EventResponse::Handled
         });
         ctx.apply_self_handlers(panel_handlers);
 
@@ -2339,6 +2448,69 @@ mod tests {
         assert!(
             tree.active_overlays().is_empty(),
             "Shift+Tab should also dismiss the open dropdown"
+        );
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn arrow_keys_navigate_filtered_list_from_search() {
+        // Regression: while typing in the search field, ArrowDown /
+        // ArrowUp must advance the selection through the currently
+        // filtered items. Previously the arrow handling lived only on
+        // the combo trigger, so bubble events from the search input
+        // fell through the framework without moving the highlight.
+        //
+        // Home / End are deliberately NOT asserted here: `TextInput`
+        // consumes them for caret-to-start / caret-to-end, which is
+        // the expected text-field behavior.
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let query = Signal::new(String::new());
+        let cb = tree.add(
+            ComboBox::new(
+                vec!["Apple", "Banana", "Blueberry", "Cherry"],
+                selected.clone(),
+            )
+            .search_query(query.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        // Narrow the filter to just the B-items, then navigate.
+        query.set("B".to_string());
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get().as_deref(), Some("Banana"));
+
+        tree.press_key(Key::ArrowDown, fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get().as_deref(), Some("Blueberry"));
+
+        tree.press_key(Key::ArrowUp, fern_core::event::Modifiers::NONE);
+        assert_eq!(selected.get().as_deref(), Some("Banana"));
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn enter_from_search_field_closes_dropdown() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let query = Signal::new(String::new());
+        let cb = tree.add(
+            ComboBox::new(vec!["Apple", "Banana"], selected.clone())
+                .search_query(query.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "Enter from the search field should close the dropdown"
         );
     }
 

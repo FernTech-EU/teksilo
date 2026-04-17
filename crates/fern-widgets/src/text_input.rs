@@ -326,6 +326,15 @@ impl Widget for TextInput {
         // subpaths and fed them to `Canvas::fill_path`, which fills
         // the enclosed area only — unclosed lines fill nothing, so
         // the button sat visible but empty on screen.
+        //
+        // The interactive affordance (`clear_id`) is wrapped in a
+        // fixed-size reservation (`reserve_id`): `visible_when` sets
+        // `clear_id` dormant when the field is empty, and dormant
+        // widgets collapse to zero size. Without the outer wrapper
+        // the text row width would oscillate as the user typed (empty
+        // → narrow; first character → suddenly 16 px wider). The
+        // `FixedSize` always reports 16×16, so row width stays
+        // stable regardless of whether the inner affordance is alive.
         if self.show_clear_button {
             let icon = (crate::built_in_button::BuiltInIcons::global().clear)()
                 .icon_size(12.0)
@@ -346,7 +355,13 @@ impl Widget for TextInput {
             );
             let visible = text_signal.map(|t| !t.is_empty());
             ctx.visible_when(clear_id, visible);
-            row = row.add_child(clear_id);
+            let reserve_id = ctx.add(
+                crate::primitives::FixedSize::new()
+                    .bind_width(16.0_f32)
+                    .bind_height(16.0_f32)
+                    .child_id(clear_id),
+            );
+            row = row.add_child(reserve_id);
         }
 
         // Trailing slot.
