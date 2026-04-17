@@ -22,6 +22,17 @@ cargo test -p fern-widgets                     # Includes layout integration tes
 cargo doc --no-deps --open                     # Generate docs
 ```
 
+## Tools
+
+```bash
+python3 tools/extract_widget_api.py --list                 # List all widget files
+python3 tools/extract_widget_api.py Button HStack Dialog   # Extract public API + docs for widgets
+python3 tools/extract_widget_api.py --all                  # Every widget
+python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tooling
+```
+
+[tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/fern-widgets/src/](crates/fern-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
+
 The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`).
 
 Tests are fully headless — no Xvfb, no GPU, no display server needed.
