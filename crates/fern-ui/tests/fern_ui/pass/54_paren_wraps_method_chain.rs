@@ -4,6 +4,13 @@
 //! first token), so the whole parenthesized expression goes through
 //! the Expr parse path. This is the documented escape hatch for rare
 //! cases where the idiomatic fern! body form doesn't fit.
+//!
+//! The `deny(unused_parens)` lint guards against the macro emitting
+//! the user's outer parens verbatim into the `.prop((expr))` slot,
+//! which rustc would otherwise warn about. Lowering strips one layer
+//! of `Expr::Paren` before splicing.
+
+#![deny(unused_parens)]
 
 use fern_ui::prelude::*;
 

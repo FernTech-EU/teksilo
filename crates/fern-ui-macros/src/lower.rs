@@ -247,9 +247,15 @@ fn lower_prop_arg(
     hoisted: &mut Vec<TokenStream2>,
 ) -> Result<TokenStream2, syn::Error> {
     match arg {
-        PropArg::Expr(e) => Ok(quote!(#e)),
+        PropArg::Expr(e) => {
+            let unwrapped = strip_outer_parens(e);
+            Ok(quote!(#unwrapped))
+        }
         PropArg::Element(el) => lower_element(el, ctx_tok, hoisted),
-        PropArg::Escape(expr) => Ok(quote!(#expr)),
+        PropArg::Escape(expr) => {
+            let unwrapped = strip_outer_parens(expr);
+            Ok(quote!(#unwrapped))
+        }
         PropArg::Binding { name, element } => {
             let element_expr = lower_element(element, ctx_tok, hoisted)?;
             let name_span = name.span();
@@ -259,6 +265,20 @@ fn lower_prop_arg(
             Ok(quote!(#name))
         }
     }
+}
+
+/// Strip redundant outer parens before emitting the expression into a
+/// function-argument position. Users wrap method chains in parens to
+/// bypass the parser's element-start detection (`peek_element_start`
+/// requires an Ident as the first token); once we're past the parser
+/// and ready to splice the expression back as an arg, the parens are
+/// unused and rustc's `unused_parens` lint flags them.
+fn strip_outer_parens(expr: &syn::Expr) -> &syn::Expr {
+    let mut current = expr;
+    while let syn::Expr::Paren(paren) = current {
+        current = &paren.expr;
+    }
+    current
 }
 
 // ---------------------------------------------------------------------------
