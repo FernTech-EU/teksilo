@@ -1,3 +1,16 @@
+//! Two-pane split container with a draggable divider.
+//!
+//! `SplitView` arranges a `first` and `second` child side-by-side
+//! (or stacked, per [`Orientation`]) with a grabbable gutter between
+//! them. The split position is driven by an external `Signal<f32>` in
+//! the `[0.0, 1.0]` range, so callers can persist, animate, or bind it
+//! to other UI. Minimum pane sizes and gutter thickness default to
+//! `Theme.components.split_view` but can be overridden per-instance.
+//!
+//! The divider is exposed as a standalone internal widget
+//! (`SplitHandle`) so it owns its own interaction state, keyboard
+//! shortcuts, and accessibility node (`Role::Splitter`).
+
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -69,6 +82,20 @@ enum SplitHandleState {
     Dragging,
 }
 
+/// Configuration for a `SplitHandle`. Lets `SplitView` pass theme-
+/// resolved values (thickness, min pane sizes, keyboard step) and the
+/// shared `container_bounds` cell in one grouped argument.
+struct SplitHandleConfig {
+    split: Signal<f32>,
+    orientation: Orientation,
+    min_first_size: f32,
+    min_second_size: f32,
+    divider_thickness: f32,
+    keyboard_step_px: f32,
+    enabled: bool,
+    container_bounds: Rc<Cell<Rect>>,
+}
+
 struct SplitHandle {
     split: Signal<f32>,
     orientation: Orientation,
@@ -82,26 +109,16 @@ struct SplitHandle {
 }
 
 impl SplitHandle {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        split: Signal<f32>,
-        orientation: Orientation,
-        min_first_size: f32,
-        min_second_size: f32,
-        divider_thickness: f32,
-        keyboard_step_px: f32,
-        enabled: bool,
-        container_bounds: Rc<Cell<Rect>>,
-    ) -> Self {
+    fn new(config: SplitHandleConfig) -> Self {
         Self {
-            split,
-            orientation,
-            min_first_size,
-            min_second_size,
-            divider_thickness,
-            keyboard_step_px,
-            enabled,
-            container_bounds,
+            split: config.split,
+            orientation: config.orientation,
+            min_first_size: config.min_first_size,
+            min_second_size: config.min_second_size,
+            divider_thickness: config.divider_thickness,
+            keyboard_step_px: config.keyboard_step_px,
+            enabled: config.enabled,
+            container_bounds: config.container_bounds,
             interaction: Signal::new(SplitHandleState::Idle),
         }
     }
@@ -483,35 +500,33 @@ impl Widget for SplitHandle {
 pub struct SplitView {
     split: Signal<f32>,
     orientation: Orientation,
-    min_first_size: f32,
-    min_second_size: f32,
-    divider_thickness: f32,
-    keyboard_step_px: f32,
-    min_first_override: Option<f32>,
-    min_second_override: Option<f32>,
-    divider_thickness_override: Option<f32>,
+    min_first_size: Option<f32>,
+    min_second_size: Option<f32>,
+    divider_thickness: Option<f32>,
     enabled: bool,
     first_pending: Option<PendingChild>,
     second_pending: Option<PendingChild>,
     first_id: Option<WidgetId>,
     handle_id: Option<WidgetId>,
     second_id: Option<WidgetId>,
+    /// Shared with the `SplitHandle` child so its pointer and keyboard
+    /// handlers can map coordinates back to a split fraction. Written
+    /// by this widget's `place_children`, read by the handle's
+    /// handler closures at event time. An `Rc<Cell<Rect>>` is the
+    /// simplest channel: event handlers run outside the arena and
+    /// can't query layout through `LayoutContext`, and the handle
+    /// needs the *container* bounds (not its own gutter bounds).
     container_bounds: Rc<Cell<Rect>>,
 }
 
 impl SplitView {
     pub fn new(split: Signal<f32>) -> Self {
-        let defaults = fern_tokens::SplitViewStyle::default();
         Self {
             split,
             orientation: Orientation::Horizontal,
-            min_first_size: defaults.min_pane_size,
-            min_second_size: defaults.min_pane_size,
-            divider_thickness: defaults.gutter_thickness,
-            keyboard_step_px: defaults.keyboard_step,
-            min_first_override: None,
-            min_second_override: None,
-            divider_thickness_override: None,
+            min_first_size: None,
+            min_second_size: None,
+            divider_thickness: None,
             enabled: true,
             first_pending: None,
             second_pending: None,
@@ -528,17 +543,17 @@ impl SplitView {
     }
 
     pub fn min_first_size(mut self, size: f32) -> Self {
-        self.min_first_override = Some(size.max(0.0));
+        self.min_first_size = Some(size.max(0.0));
         self
     }
 
     pub fn min_second_size(mut self, size: f32) -> Self {
-        self.min_second_override = Some(size.max(0.0));
+        self.min_second_size = Some(size.max(0.0));
         self
     }
 
     pub fn divider_thickness(mut self, thickness: f32) -> Self {
-        self.divider_thickness_override = Some(thickness.max(1.0));
+        self.divider_thickness = Some(thickness.max(1.0));
         self
     }
 
@@ -567,18 +582,40 @@ impl SplitView {
         self
     }
 
-    fn clamp_fraction(&self, bounds: Rect) -> f32 {
+    /// Resolve theme-driven style values, applying per-instance overrides.
+    /// `keyboard_step_px` is theme-only (not user-overridable). Panes
+    /// and handle all share this resolution path so they stay in sync
+    /// when the theme changes.
+    fn resolved_style(&self, theme: &fern_tokens::Theme) -> ResolvedStyle {
+        let s = theme.components.split_view;
+        ResolvedStyle {
+            min_first_size: self.min_first_size.unwrap_or(s.min_pane_size),
+            min_second_size: self.min_second_size.unwrap_or(s.min_pane_size),
+            divider_thickness: self.divider_thickness.unwrap_or(s.gutter_thickness),
+            keyboard_step_px: s.keyboard_step,
+        }
+    }
+
+    fn clamp_fraction(&self, bounds: Rect, style: &ResolvedStyle) -> f32 {
         SplitBounds::compute(
             bounds,
             self.orientation,
-            self.divider_thickness,
-            self.min_first_size,
-            self.min_second_size,
-            self.keyboard_step_px,
+            style.divider_thickness,
+            style.min_first_size,
+            style.min_second_size,
+            style.keyboard_step_px,
         )
         .map(|sb| sb.clamp(self.split.get()))
         .unwrap_or(0.5)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ResolvedStyle {
+    min_first_size: f32,
+    min_second_size: f32,
+    divider_thickness: f32,
+    keyboard_step_px: f32,
 }
 
 impl std::fmt::Debug for SplitView {
@@ -594,47 +631,49 @@ impl std::fmt::Debug for SplitView {
 impl Widget for SplitView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        let style = ctx.theme().components.split_view;
-        self.divider_thickness = self
-            .divider_thickness_override
-            .unwrap_or(style.gutter_thickness);
-        self.min_first_size = self.min_first_override.unwrap_or(style.min_pane_size);
-        self.min_second_size = self.min_second_override.unwrap_or(style.min_pane_size);
-        self.keyboard_step_px = style.keyboard_step;
+        let style = self.resolved_style(ctx.theme());
 
         let registry = ctx.binding_registry();
         self.split
             .bind_to(self_id, registry, BindingLevel::Relayout);
 
+        // Wrap each user-supplied pane in a `ClipPane` so its content
+        // is clipped to the pane's bounds. Without this, an overflowing
+        // descendant (e.g. a `MinSize` larger than the current split
+        // fraction allows, or a focus ring) would paint over the
+        // gutter and the sibling pane.
         if let Some(pending) = self.first_pending.take() {
-            self.first_id = Some(match pending {
+            let inner = match pending {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(widget) => ctx.add_boxed(widget),
-            });
+            };
+            self.first_id = Some(ctx.add(ClipPane { child_id: inner }));
         }
 
         if let Some(pending) = self.second_pending.take() {
-            self.second_id = Some(match pending {
+            let inner = match pending {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(widget) => ctx.add_boxed(widget),
-            });
+            };
+            self.second_id = Some(ctx.add(ClipPane { child_id: inner }));
         }
 
-        self.handle_id = Some(ctx.add(SplitHandle::new(
-            self.split.clone(),
-            self.orientation,
-            self.min_first_size,
-            self.min_second_size,
-            self.divider_thickness,
-            self.keyboard_step_px,
-            self.enabled,
-            self.container_bounds.clone(),
-        )));
+        self.handle_id = Some(ctx.add(SplitHandle::new(SplitHandleConfig {
+            split: self.split.clone(),
+            orientation: self.orientation,
+            min_first_size: style.min_first_size,
+            min_second_size: style.min_second_size,
+            divider_thickness: style.divider_thickness,
+            keyboard_step_px: style.keyboard_step_px,
+            enabled: self.enabled,
+            container_bounds: self.container_bounds.clone(),
+        })));
 
         self.children()
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let style = self.resolved_style(ctx.theme);
         // Query children with an unbounded primary axis to get their intrinsic
         // size — used only as a fallback when the parent doesn't constrain us.
         let child_proposal = match self.orientation {
@@ -659,8 +698,9 @@ impl Widget for SplitView {
         match self.orientation {
             Orientation::Horizontal => {
                 let intrinsic_width =
-                    first_size.width + self.divider_thickness + second_size.width;
-                let min_width = self.min_first_size + self.divider_thickness + self.min_second_size;
+                    first_size.width + style.divider_thickness + second_size.width;
+                let min_width =
+                    style.min_first_size + style.divider_thickness + style.min_second_size;
                 Size::new(
                     proposal.width.unwrap_or(intrinsic_width).max(min_width),
                     proposal
@@ -670,9 +710,9 @@ impl Widget for SplitView {
             }
             Orientation::Vertical => {
                 let intrinsic_height =
-                    first_size.height + self.divider_thickness + second_size.height;
+                    first_size.height + style.divider_thickness + second_size.height;
                 let min_height =
-                    self.min_first_size + self.divider_thickness + self.min_second_size;
+                    style.min_first_size + style.divider_thickness + style.min_second_size;
                 Size::new(
                     proposal
                         .width
@@ -688,17 +728,24 @@ impl Widget for SplitView {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         self.container_bounds.set(bounds);
+        // Children are laid out in the order returned by `children()`:
+        //   [0] first pane (ClipPane wrapping user's first widget)
+        //   [1] gutter (SplitHandle)
+        //   [2] second pane (ClipPane wrapping user's second widget)
+        // If any is missing (build hasn't set ids), bail out rather
+        // than misplace.
         if children.len() != 3 {
             return;
         }
 
-        let split = self.clamp_fraction(bounds);
+        let style = self.resolved_style(ctx.theme);
+        let split = self.clamp_fraction(bounds, &style);
         let available = match self.orientation {
-            Orientation::Horizontal => (bounds.width - self.divider_thickness).max(0.0),
-            Orientation::Vertical => (bounds.height - self.divider_thickness).max(0.0),
+            Orientation::Horizontal => (bounds.width - style.divider_thickness).max(0.0),
+            Orientation::Vertical => (bounds.height - style.divider_thickness).max(0.0),
         };
         let first_main = available * split;
         let second_main = available - first_main;
@@ -709,10 +756,10 @@ impl Widget for SplitView {
                 children[0].size = Size::new(first_main, bounds.height);
 
                 children[1].origin = Point::new(bounds.x + first_main, bounds.y);
-                children[1].size = Size::new(self.divider_thickness, bounds.height);
+                children[1].size = Size::new(style.divider_thickness, bounds.height);
 
                 children[2].origin =
-                    Point::new(bounds.x + first_main + self.divider_thickness, bounds.y);
+                    Point::new(bounds.x + first_main + style.divider_thickness, bounds.y);
                 children[2].size = Size::new(second_main, bounds.height);
             }
             Orientation::Vertical => {
@@ -720,10 +767,10 @@ impl Widget for SplitView {
                 children[0].size = Size::new(bounds.width, first_main);
 
                 children[1].origin = Point::new(bounds.x, bounds.y + first_main);
-                children[1].size = Size::new(bounds.width, self.divider_thickness);
+                children[1].size = Size::new(bounds.width, style.divider_thickness);
 
                 children[2].origin =
-                    Point::new(bounds.x, bounds.y + first_main + self.divider_thickness);
+                    Point::new(bounds.x, bounds.y + first_main + style.divider_thickness);
                 children[2].size = Size::new(bounds.width, second_main);
             }
         }
@@ -738,6 +785,42 @@ impl Widget for SplitView {
             .into_iter()
             .flatten()
             .collect()
+    }
+}
+
+/// Single-child wrapper used internally by `SplitView` to clip each
+/// pane's content to its placement. Fills whatever bounds the parent
+/// assigns; delegates intrinsic sizing to the wrapped widget.
+#[derive(Debug)]
+struct ClipPane {
+    child_id: WidgetId,
+}
+
+impl Widget for ClipPane {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        ctx.child_size(self.child_id, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn clips_children(&self) -> bool {
+        true
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child_id]
     }
 }
 
@@ -841,6 +924,85 @@ mod tests {
         let second = tree.child_widget(root, 2);
         assert!(tree.bounds(first).width >= 119.99);
         assert!(tree.bounds(second).width >= 119.99);
+    }
+
+    #[test]
+    fn vertical_split_places_panes_and_divider() {
+        let split = Signal::new(0.25_f32);
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let root = tree.add(
+            SplitView::new(split)
+                .orientation(Orientation::Vertical)
+                .first(FixedLeaf(80.0, 100.0))
+                .second(FixedLeaf(80.0, 100.0)),
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+
+        let first = tree.child_widget(root, 0);
+        let handle = tree.child_widget(root, 1);
+        let second = tree.child_widget(root, 2);
+
+        let default_thickness = fern_tokens::SplitViewStyle::default().gutter_thickness;
+        let available = 400.0 - default_thickness;
+        assert!((tree.bounds(first).height - available * 0.25).abs() < 0.01);
+        assert!((tree.bounds(handle).height - default_thickness).abs() < 0.01);
+        assert!((tree.bounds(second).height - available * 0.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn rtl_vertical_split_still_stacks_top_to_bottom() {
+        // Vertical orientation stacks along the Y axis, which is not
+        // affected by layout direction — RTL only mirrors horizontal.
+        let split = Signal::new(0.5_f32);
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.set_layout_direction(fern_core::environment::LayoutDirection::RightToLeft);
+        let root = tree.add(
+            SplitView::new(split)
+                .orientation(Orientation::Vertical)
+                .first(FixedLeaf(80.0, 100.0))
+                .second(FixedLeaf(80.0, 100.0)),
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+
+        let first = tree.child_widget(root, 0);
+        let second = tree.child_widget(root, 2);
+        assert!(
+            tree.bounds(first).y < tree.bounds(second).y,
+            "first pane should remain above second under RTL+vertical"
+        );
+    }
+
+    #[test]
+    fn panes_are_wrapped_in_clipping_container() {
+        // Each pane is wrapped in a ClipPane (clips_children = true) so
+        // an overflowing descendant can't bleed into the gutter or the
+        // sibling pane. Guard the structural invariant: SplitView's
+        // first/second children should each have exactly one child —
+        // the user's widget — sitting underneath the clip.
+        let split = Signal::new(0.5_f32);
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let root = tree.add(
+            SplitView::new(split)
+                .first(FixedLeaf(500.0, 40.0))
+                .second(FixedLeaf(500.0, 40.0)),
+        );
+
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        let first_pane = tree.child_widget(root, 0);
+        let second_pane = tree.child_widget(root, 2);
+        assert_eq!(
+            tree.children(first_pane).len(),
+            1,
+            "first pane should wrap one user widget"
+        );
+        assert_eq!(
+            tree.children(second_pane).len(),
+            1,
+            "second pane should wrap one user widget"
+        );
     }
 
     #[test]

@@ -3095,7 +3095,16 @@ mod tests {
         );
 
         for (label, pane_id) in [("left", split_children[0]), ("right", split_children[2])] {
-            let vstack_children = tree.children(pane_id);
+            // SplitView wraps each pane in a `ClipPane` container so
+            // overflowing content is clipped to the pane bounds — the
+            // actual VStack is one level deeper.
+            let clip_children = tree.children(pane_id);
+            assert_eq!(
+                clip_children.len(),
+                1,
+                "{label} pane is a ClipPane with exactly one child"
+            );
+            let vstack_children = tree.children(clip_children[0]);
             assert_eq!(
                 vstack_children.len(),
                 3,
