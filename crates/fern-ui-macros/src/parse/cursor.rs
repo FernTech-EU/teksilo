@@ -1,7 +1,7 @@
 //! Shared lookahead helpers for the body and property parsers.
 
 use syn::parse::ParseStream;
-use syn::{Ident, Token, token};
+use syn::{Ident, Path, Token, token};
 
 /// Peek whether the current cursor is at an element-start prefix per
 /// spec §3.1 "commit on distinctive prefix":
@@ -12,6 +12,15 @@ use syn::{Ident, Token, token};
 ///
 /// Lowercase idents are not element starts — they are properties or
 /// structural keywords.
+///
+/// One explicit exclusion: paths ending in `UpperCamel::UpperCamel`
+/// (enum-variant shape — `Cmd::Save`, `ImageFit::Contain`,
+/// `TextOverflow::Ellipsis(EllipsisMode::Trailing)`). These are only
+/// treated as element starts if followed by a `{` body block. Without
+/// the body they're Rust expressions: a variant value or a tuple-variant
+/// construction. The macro can't distinguish variants from types at
+/// expansion time, so the UpperCamel::UpperCamel shape is used as a
+/// reliable syntactic signal.
 pub(crate) fn peek_element_start(input: ParseStream) -> bool {
     if !input.peek(Ident) {
         return false;
@@ -23,12 +32,35 @@ pub(crate) fn peek_element_start(input: ParseStream) -> bool {
     if !ident_starts_upper(&ident) {
         return false;
     }
-    // At end of stream with only the UpperCamel ident consumed, it's
-    // still an element (equivalent to empty-parens form, spec §3.2).
-    fork.is_empty()
-        || fork.peek(token::Paren)
-        || fork.peek(token::Brace)
-        || fork.peek(Token![::])
+
+    // When the path has `::`, inspect the whole path to detect the
+    // enum-variant shape.
+    if fork.peek(Token![::]) {
+        let path_fork = input.fork();
+        if let Ok(path) = path_fork.parse::<Path>() {
+            if ends_in_variant_shape(&path) {
+                // `Type::Variant { ... }` is still element syntax
+                // (fern body block); bare `Type::Variant` or
+                // `Type::Variant(args)` is an expression.
+                return path_fork.peek(token::Brace);
+            }
+        }
+        return true;
+    }
+
+    // Single-ident UpperCamel.
+    fork.is_empty() || fork.peek(token::Paren) || fork.peek(token::Brace)
+}
+
+/// Returns true when the path's last two segments are both UpperCamel
+/// — the Rust enum-variant shape (`Cmd::Save`, `ImageFit::Contain`).
+fn ends_in_variant_shape(path: &Path) -> bool {
+    if path.segments.len() < 2 {
+        return false;
+    }
+    let last = &path.segments[path.segments.len() - 1].ident;
+    let second_last = &path.segments[path.segments.len() - 2].ident;
+    ident_starts_upper(last) && ident_starts_upper(second_last)
 }
 
 pub(crate) fn ident_starts_upper(ident: &Ident) -> bool {

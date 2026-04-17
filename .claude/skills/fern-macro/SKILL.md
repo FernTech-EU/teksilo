@@ -145,13 +145,15 @@ Scan for these shapes and translate mentally:
 
 ## Diagnostics
 
-The macro pre-empts two common mistakes with targeted messages:
+The macro pre-empts one common mistake with a targeted message:
 
-- **Stray `,` between body items** → "fern! blocks separate items by
-  newlines, not commas". Fix: remove the comma.
 - **Bare child inside a Category B widget** → "`<Type>` is a Category B
   widget with named slots — use `<slot>: <widget>` instead of a bare
   child element". Fix: use the suggested slot name.
+
+Commas between body items are accepted as optional separators, so
+`Panel { padding: 8.0, color: RED }` on one line works the same as two
+newline-separated properties.
 
 All other errors surface as regular rustc diagnostics under the user's
 token (unknown property → method resolution error on the prop name,
@@ -173,7 +175,12 @@ kicks in.
   on a pre-registered child.
 - **Struct literals as property values need parens** —
   `prop: (MyStruct { field: 1 })` (the macro commits to element parsing
-  on `UpperCamel { ... }`).
+  on `UpperCamel { ... }`). Enum variants (`prop: Type::Variant` or
+  `prop: Type::Variant(inner)`) are recognized as expressions via the
+  `UpperCamel::UpperCamel` shape and don't need parens. Method chains
+  (`prop: MenuItem::new(...).on_activate(cmd).tooltip(t)`) are also
+  recognized as expressions via the trailing `.method()` after an
+  element-shaped head.
 - **Binding hoist scope** — bindings inside `if`/`match`/`for` arms
   hoist to the outermost block, so the widget is created
   unconditionally. Gate construction with `rust { ... }` if it matters.

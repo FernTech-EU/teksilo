@@ -72,7 +72,9 @@ Padding::symmetric(12.0, 8.0)   // → Padding::symmetric(12.0, 8.0)
 
 The `{ ... }` block contains body items: properties, bindings, bare
 children, structural forms, body-position escapes. Items are separated
-by **newlines**, not commas.
+by **newlines**; commas between items are accepted as optional
+separators (so `Panel { padding: 8.0, color: RED }` on one line works
+the same as two newline-separated properties).
 
 ---
 
@@ -461,10 +463,8 @@ is the builder's concern; the DSL does not distinguish.
 
 ## Diagnostics
 
-The macro emits targeted errors for the common mistakes:
+The macro emits one targeted error for the common mistake:
 
-- **Stray comma between body items** — "fern! blocks separate items by
-  newlines, not commas". The error lands on the comma.
 - **Bare child inside a Category B widget** — "`Card` is a Category B
   widget with named slots — use `content: <widget>` instead of a bare
   child element". Points at the misplaced child.
@@ -491,7 +491,15 @@ diagnostic under the user's token, thanks to span-preserving emission.
 - **Struct literals as arg values need parens**: `prop: MyStruct { ... }`
   is parsed as a fern element (per the spec's "commit on distinctive
   prefix" rule). To pass a Rust struct literal, wrap it: `prop: (MyStruct
-  { ... })`.
+  { ... })`. Enum variants don't need this wrapping — `prop: Type::Variant`
+  and `prop: Type::Variant(inner)` are recognized as expressions because
+  of the `UpperCamel::UpperCamel` shape.
+- **Method chains on constructor calls are expressions**: `prop:
+  MenuItem::new("x").on_activate(cmd).tooltip("t")` parses as a Rust
+  method-chain expression. The trailing `.method()` after an
+  element-shaped head disambiguates away from element parsing. If you
+  want the element path instead, write the chain inside a `rust { }`
+  block or wrap in parens.
 - **rust-analyzer**: the macro expands cleanly under rust-analyzer's
   proc-macro server; IDE features work on the expanded code. If you see
   "expected an expression" errors on non-Rust-shaped tokens (`#{ }`,

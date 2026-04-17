@@ -11,16 +11,6 @@ pub(crate) fn error<T: std::fmt::Display>(span: Span, msg: T) -> Error {
     Error::new(span, msg)
 }
 
-/// Spec §9.2: a `,` appearing between body items where the user
-/// probably meant a newline separator.
-pub(crate) fn comma_between_body_items(span: Span) -> Error {
-    Error::new(
-        span,
-        "expected property, binding, or child element, found `,` — \
-         fern! blocks separate items by newlines, not commas",
-    )
-}
-
 /// Spec §9.2: a bare child element at body position inside a Category
 /// B widget whose content is addressed by named slots. The list below
 /// tracks the set of widgets that have no `.child()` method in the V2
