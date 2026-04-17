@@ -31,7 +31,7 @@ mod tests;
 
 use std::rc::Rc;
 
-use fern_canvas::{Path, Point, Rect, Size, SizeProposal};
+use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
@@ -46,7 +46,6 @@ use crate::button::InteractionState;
 use crate::primitives::{
     Expand, HStack, MinSize, Padding, RectWidget, TextWidget, ZStack,
 };
-use crate::primitives::icon_widget::IconWidget;
 use crate::tooltip::{self, RichTooltipSource};
 
 use self::field::TextInputField;
@@ -321,9 +320,16 @@ impl Widget for TextInput {
 
         row = row.add_child(text_column_id);
 
-        // Clear button (opt-in).
+        // Clear button (opt-in). Uses the framework's built-in clear
+        // icon (SVG) rather than a hand-drawn path: the previous
+        // in-file `clear_icon` produced an `×` with two open line
+        // subpaths and fed them to `Canvas::fill_path`, which fills
+        // the enclosed area only — unclosed lines fill nothing, so
+        // the button sat visible but empty on screen.
         if self.show_clear_button {
-            let icon = clear_icon(12.0).color(colors.text_secondary);
+            let icon = (crate::built_in_button::BuiltInIcons::global().clear)()
+                .icon_size(12.0)
+                .color(colors.text_secondary);
             let state_for_clear = shared_state.clone();
             let clear_id = ctx.add(
                 MinSize::new(16.0, 16.0)
@@ -489,13 +495,3 @@ fn derive_border_color(
     })
 }
 
-/// Small × icon for the clear button.
-fn clear_icon(size: f32) -> IconWidget {
-    let mut path = Path::new();
-    let s = size;
-    path.move_to(Point::new(s * 0.28, s * 0.28));
-    path.line_to(Point::new(s * 0.72, s * 0.72));
-    path.move_to(Point::new(s * 0.72, s * 0.28));
-    path.line_to(Point::new(s * 0.28, s * 0.72));
-    IconWidget::from_path(path, size)
-}

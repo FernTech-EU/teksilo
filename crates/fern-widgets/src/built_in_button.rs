@@ -573,7 +573,12 @@ impl BuiltInIcons {
         GLOBAL_ICONS.set(icons).ok();
     }
 
-    fn global() -> &'static Self {
+    /// Access the registered global icon set, falling back to the
+    /// compiled-in SVG defaults. Intended for widgets in this crate
+    /// that need a themed icon without binding to a specific asset
+    /// path — e.g. the clear button inside `TextInput`. Applications
+    /// still use `set_global(..)` to override the defaults.
+    pub(crate) fn global() -> &'static Self {
         GLOBAL_ICONS.get_or_init(Self::defaults)
     }
 }
