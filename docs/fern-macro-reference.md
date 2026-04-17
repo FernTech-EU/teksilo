@@ -447,7 +447,7 @@ is the builder's concern; the DSL does not distinguish.
 `‹E›` stands for the recursive lowering of a nested fern element.
 
 | Surface form | Expansion |
-|---|---|
+| --- | --- |
 | `TypePath(args)` | `TypePath::new(args)` |
 | `TypePath::ctor(args)` | `TypePath::ctor(args)` |
 | `name: value` | `.name(value)` |
@@ -501,12 +501,15 @@ diagnostic under the user's token, thanks to span-preserving emission.
   { ... })`. Enum variants don't need this wrapping — `prop: Type::Variant`
   and `prop: Type::Variant(inner)` are recognized as expressions because
   of the `UpperCamel::UpperCamel` shape.
-- **Method chains on constructor calls are expressions**: `prop:
-  MenuItem::new("x").on_activate(cmd).tooltip("t")` parses as a Rust
-  method-chain expression. The trailing `.method()` after an
-  element-shaped head disambiguates away from element parsing. If you
-  want the element path instead, write the chain inside a `rust { }`
-  block or wrap in parens.
+- **No method chains on widgets at property-arg position**: write
+  `item: MenuItem::new("x").on_activate(cmd).tooltip("t")` as body
+  form — `item: MenuItem::new("x") { on_activate: cmd; tooltip: "t" }`.
+  The body-form reads uniformly with top-level elements and skips the
+  element-vs-expression ambiguity. For non-widget method chains rooted
+  in lowercase paths (`signal.map(...)`, `items.iter().collect()`),
+  no workaround is needed — lowercase paths go through the expression
+  path unconditionally. For UpperCamel-rooted chains that don't fit
+  the body form (rare), wrap in parens: `prop: (MyWrapper::from(x).finalize())`.
 - **rust-analyzer**: the macro expands cleanly under rust-analyzer's
   proc-macro server; IDE features work on the expanded code. If you see
   "expected an expression" errors on non-Rust-shaped tokens (`#{ }`,

@@ -1,11 +1,13 @@
-//! A method chain as a property value parses as a Rust expression
-//! rather than as a fern element. Detection: after an element-shaped
-//! path parses, the presence of `.method()` tokens means we have a
-//! chain on a constructor call, not a fern element.
+//! The fern! body form replaces method chains on widgets. Instead of
+//! `item: MenuItem::new_literal("Run").on_activate(cmd).tooltip_literal("...")`,
+//! the idiomatic syntax is `item: MenuItem::new_literal("Run") { on_activate: cmd; tooltip_literal: "..." }`
+//! — each builder method becomes a body item. The result is a more
+//! uniform DSL (the same name-value shape as top-level elements) and
+//! avoids the element-vs-expression ambiguity that method chains
+//! introduce.
 //!
-//! Covers the `item: MenuItem::new(...).on_activate(...).tooltip(...)`
-//! and `tab_literal: "Overview", Panel::new().padding(16.0).child(...)`
-//! patterns.
+//! This fixture locks in the body-form behavior for element-valued
+//! property arguments.
 
 use fern_ui::prelude::*;
 
@@ -69,10 +71,13 @@ impl Widget for Menu {
 fn main() {
     let m: Menu = fern!(
         Menu {
-            item: MenuItem::new_literal("Run")
-                .on_activate(1)
-                .tooltip_literal("Runs the thing")
-            item: MenuItem::new_literal("Stop").on_activate(2)
+            item: MenuItem::new_literal("Run") {
+                on_activate: 1
+                tooltip_literal: "Runs the thing"
+            }
+            item: MenuItem::new_literal("Stop") {
+                on_activate: 2
+            }
         }
     );
     let items = m.items.borrow();

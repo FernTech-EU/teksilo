@@ -190,10 +190,15 @@ kicks in.
   `prop: (MyStruct { field: 1 })` (the macro commits to element parsing
   on `UpperCamel { ... }`). Enum variants (`prop: Type::Variant` or
   `prop: Type::Variant(inner)`) are recognized as expressions via the
-  `UpperCamel::UpperCamel` shape and don't need parens. Method chains
-  (`prop: MenuItem::new(...).on_activate(cmd).tooltip(t)`) are also
-  recognized as expressions via the trailing `.method()` after an
-  element-shaped head.
+  `UpperCamel::UpperCamel` shape and don't need parens.
+- **Method chains on widgets at prop-arg position are disallowed**:
+  `prop: Widget::ctor(args).method(arg)` doesn't parse as you'd expect
+  because the DSL already provides the body-form equivalent. Rewrite
+  as `prop: Widget::ctor(args) { method: arg }` — that's the canonical
+  fern! way to apply builder methods to a widget value. For lowercase-
+  rooted chains (`prop: signal.map(...)`), no workaround is needed.
+  For UpperCamel chains that can't fit body form, wrap in parens:
+  `prop: (MyWrapper::from(x).finalize())`.
 - **Binding hoist scope** — bindings inside `if`/`match`/`for` arms
   hoist to the outermost block, so the widget is created
   unconditionally. Gate construction with `rust { ... }` if it matters.

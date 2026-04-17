@@ -119,15 +119,8 @@ fn parse_prop_arg(input: ParseStream) -> Result<PropArg> {
     }
 
     if peek_element_start(input) {
-        // An element head followed by `.method(...)` is a method
-        // chain on a constructor expression, not a fern element.
-        // Probe with a forked parse; if a `.` follows the element,
-        // fall through to the Expr path instead of committing.
-        let probe = input.fork();
-        if parse_element(&probe).is_ok() && !probe.peek(Token![.]) {
-            let element = parse_element(input)?;
-            return Ok(PropArg::Element(element));
-        }
+        let element = parse_element(input)?;
+        return Ok(PropArg::Element(element));
     }
 
     let expr: Expr = input.parse()?;
