@@ -601,7 +601,59 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
     }
 }
 
+/// Build the static (unfiltered) item list subtree: a padded `VStack`
+/// of `DropdownItem`s, optionally wrapped in a `ScrollArea` + `MaxSize`
+/// when the item count exceeds the visibility cap. Returns the root id
+/// for insertion into the panel's `ZStack`. Shared by the
+/// non-searchable path of `DropdownPanel` and — indirectly via
+/// `FilteredItemList` — the searchable path.
+fn build_static_item_list<T: Clone + PartialEq + 'static>(
+    ctx: &mut BuildContext,
+    source: &ItemSource<T>,
+    selected: &Signal<Option<T>>,
+    item_label: &Rc<dyn Fn(&T) -> String>,
+    render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    max_visible_items: usize,
+    menu_style: &fern_tokens::MenuStyle,
+) -> WidgetId {
+    let total = source.len();
+    let mut vstack = VStack::new();
+    for i in 0..total {
+        if let Some(value) = source.get(i) {
+            let label = (item_label)(&value);
+            vstack = vstack.child(DropdownItem {
+                value,
+                label,
+                position: i + 1,
+                total,
+                selected_signal: selected.clone(),
+                render: render_item.clone(),
+                root_child_id: None,
+            });
+        }
+    }
+    let vstack_id = ctx.add(vstack);
+    let padded_id = ctx.add(Padding::uniform(4.0).child_id(vstack_id));
+    if total > max_visible_items {
+        let max_height = max_visible_items as f32 * menu_style.item_height + 8.0;
+        let scrollable_id = ctx.add(
+            crate::scroll_area::ScrollArea::from_id(padded_id)
+                .preferred_size(0.0, max_height),
+        );
+        ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
+    } else {
+        padded_id
+    }
+}
+
 /// Dropdown panel content (internal widget — shown as overlay).
+///
+/// In non-searchable mode the panel's own `build` renders the item
+/// `VStack` directly. In searchable mode it instead renders a static
+/// `TextInput` above a `FilteredItemList` child — only the inner list
+/// binds the query signal at `BindingLevel::Rebuild`, so typing a
+/// character re-filters the items without destroying (and un-focusing)
+/// the search field.
 struct DropdownPanel<T: Clone + PartialEq + 'static> {
     source: ItemSource<T>,
     selected: Signal<Option<T>>,
@@ -610,16 +662,143 @@ struct DropdownPanel<T: Clone + PartialEq + 'static> {
     max_visible_items: usize,
     /// Bumped on every model mutation so the panel rebuilds.
     version: Signal<u64>,
-    /// Active search query (searchable mode only). When `Some`, the
-    /// panel renders a `TextInput` bound to this signal above the item
-    /// list and rebuilds on every edit.
+    /// Active search query (searchable mode only).
     #[cfg(feature = "rich-text")]
     search_query: Option<Signal<String>>,
     /// Custom filter predicate for searchable mode. When `None`, the
     /// default is a case-insensitive substring match on the label.
     #[cfg(feature = "rich-text")]
     filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
+    /// Shared slot populated during `build` with the `TextInput`'s
+    /// widget id so the owning `ComboBox` can `ctx.request_focus(..)`
+    /// the field when the overlay opens.
+    #[cfg(feature = "rich-text")]
+    search_input_slot: Rc<Cell<Option<WidgetId>>>,
     root_child_id: Option<WidgetId>,
+}
+
+/// Inner widget for the searchable dropdown's filtered item list.
+/// Binds both the model-version signal and the search-query signal at
+/// `BindingLevel::Rebuild`, while the sibling `TextInput` remains a
+/// stable arena child of `DropdownPanel` across query-driven rebuilds —
+/// so focus stays on the search field as the user types.
+#[cfg(feature = "rich-text")]
+struct FilteredItemList<T: Clone + PartialEq + 'static> {
+    source: ItemSource<T>,
+    selected: Signal<Option<T>>,
+    item_label: Rc<dyn Fn(&T) -> String>,
+    render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    max_visible_items: usize,
+    version: Signal<u64>,
+    search_query: Signal<String>,
+    filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
+    root_child_id: Option<WidgetId>,
+}
+
+#[cfg(feature = "rich-text")]
+impl<T: Clone + PartialEq + 'static> std::fmt::Debug for FilteredItemList<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FilteredItemList")
+            .field("item_count", &self.source.len())
+            .finish()
+    }
+}
+
+#[cfg(feature = "rich-text")]
+impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        use fern_core::binding::BindingLevel;
+        let theme = ctx.theme().clone();
+
+        // Rebuild on model mutation AND on query change. Both bindings
+        // sit here rather than on the outer panel so the sibling
+        // `TextInput` is not torn down on every keystroke.
+        self.version
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        self.search_query
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+
+        let total = self.source.len();
+        let q = self.search_query.get();
+        let visible_indices: Vec<usize> = if q.is_empty() {
+            (0..total).collect()
+        } else {
+            let q_lower = q.to_lowercase();
+            let mut keep = Vec::new();
+            for i in 0..total {
+                if let Some(value) = self.source.get(i) {
+                    let matches = match &self.filter {
+                        Some(f) => f(&q, &value),
+                        None => (self.item_label)(&value).to_lowercase().contains(&q_lower),
+                    };
+                    if matches {
+                        keep.push(i);
+                    }
+                }
+            }
+            keep
+        };
+        let visible_count = visible_indices.len();
+
+        let mut vstack = VStack::new();
+        for (pos, &i) in visible_indices.iter().enumerate() {
+            if let Some(value) = self.source.get(i) {
+                let label = (self.item_label)(&value);
+                vstack = vstack.child(DropdownItem {
+                    value,
+                    label,
+                    position: pos + 1,
+                    total: visible_count,
+                    selected_signal: self.selected.clone(),
+                    render: self.render_item.clone(),
+                    root_child_id: None,
+                });
+            }
+        }
+        let vstack_id = ctx.add(vstack);
+        let padded_id = ctx.add(Padding::uniform(4.0).child_id(vstack_id));
+
+        let menu_style = theme.components.menu;
+        let root_id = if visible_count > self.max_visible_items {
+            let max_height =
+                self.max_visible_items as f32 * menu_style.item_height + 8.0;
+            let scrollable_id = ctx.add(
+                crate::scroll_area::ScrollArea::from_id(padded_id)
+                    .preferred_size(0.0, max_height),
+            );
+            ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
+        } else {
+            padded_id
+        };
+        self.root_child_id = Some(root_id);
+        vec![root_id]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        match self.root_child_id {
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(120.0, 0.0)),
+            None => proposal.resolve(120.0, 0.0),
+        }
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
 }
 
 impl<T: Clone + PartialEq + 'static> std::fmt::Debug for DropdownPanel<T> {
@@ -633,107 +812,96 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for DropdownPanel<T> {
 impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme().clone();
+        let menu_style = theme.components.menu;
 
-        // Rebuild on model changes.
-        use fern_core::binding::BindingLevel;
-        self.version
-            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
-
-        // Searchable mode: bind the search-query signal at `Rebuild`
-        // level so every keystroke in the search field re-runs this
-        // panel's build with a fresh filtered item list.
-        #[cfg(feature = "rich-text")]
-        if let Some(query) = &self.search_query {
-            query.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        // In non-searchable mode the panel itself binds the model-version
+        // signal so the item list rebuilds on mutation. In searchable mode
+        // both the model-version AND query bindings live on the inner
+        // `FilteredItemList`, keeping the panel (and the `TextInput`
+        // inside it) stable across query-driven rebuilds.
+        let searchable = {
+            #[cfg(feature = "rich-text")]
+            {
+                self.search_query.is_some()
+            }
+            #[cfg(not(feature = "rich-text"))]
+            {
+                false
+            }
+        };
+        if !searchable {
+            use fern_core::binding::BindingLevel;
+            self.version.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                BindingLevel::Rebuild,
+            );
         }
 
-        // Decide which item indices are visible given the current query.
-        // When not searchable, every index is included.
-        let total = self.source.len();
-        let visible_indices: Vec<usize> = {
+        // Build the item-list portion of the panel. With `rich-text` +
+        // searchable, that's a `FilteredItemList` child widget that owns
+        // the query binding. Otherwise it's the static padded VStack.
+        let list_id = {
             #[cfg(feature = "rich-text")]
             {
                 if let Some(query) = &self.search_query {
-                    let q = query.get();
-                    if q.is_empty() {
-                        (0..total).collect()
-                    } else {
-                        let filter = self.filter.clone();
-                        let item_label = self.item_label.clone();
-                        let q_lower = q.to_lowercase();
-                        let mut keep = Vec::new();
-                        for i in 0..total {
-                            if let Some(value) = self.source.get(i) {
-                                let matches = match &filter {
-                                    Some(f) => f(&q, &value),
-                                    None => item_label(&value).to_lowercase().contains(&q_lower),
-                                };
-                                if matches {
-                                    keep.push(i);
-                                }
-                            }
-                        }
-                        keep
-                    }
+                    ctx.add(FilteredItemList {
+                        source: self.source.clone(),
+                        selected: self.selected.clone(),
+                        item_label: self.item_label.clone(),
+                        render_item: self.render_item.clone(),
+                        max_visible_items: self.max_visible_items,
+                        version: self.version.clone(),
+                        search_query: query.clone(),
+                        filter: self.filter.clone(),
+                        root_child_id: None,
+                    })
                 } else {
-                    (0..total).collect()
+                    build_static_item_list(
+                        ctx,
+                        &self.source,
+                        &self.selected,
+                        &self.item_label,
+                        &self.render_item,
+                        self.max_visible_items,
+                        &menu_style,
+                    )
                 }
             }
             #[cfg(not(feature = "rich-text"))]
             {
-                (0..total).collect()
+                build_static_item_list(
+                    ctx,
+                    &self.source,
+                    &self.selected,
+                    &self.item_label,
+                    &self.render_item,
+                    self.max_visible_items,
+                    &menu_style,
+                )
             }
         };
-        let visible_count = visible_indices.len();
 
-        let mut vstack = VStack::new();
-        for (pos, &i) in visible_indices.iter().enumerate() {
-            if let Some(value) = self.source.get(i) {
-                let label = (self.item_label)(&value);
-                let item = DropdownItem {
-                    value,
-                    label,
-                    position: pos + 1,
-                    total: visible_count,
-                    selected_signal: self.selected.clone(),
-                    render: self.render_item.clone(),
-                    root_child_id: None,
-                };
-                vstack = vstack.child(item);
-            }
-        }
-        let vstack_id = ctx.add(vstack);
-
-        let menu_style = theme.components.menu;
-        let padded_id = ctx.add(Padding::uniform(4.0).child_id(vstack_id));
-
-        // Only wrap in ScrollArea when the item count actually exceeds
-        // the visibility cap. For the common case (few items), a plain
-        // padded VStack sizes naturally to its content — wrapping in
-        // ScrollArea would impose the ScrollArea's 200px default height
-        // regardless of content, leaving a blank strip below the items.
-        let list_id = if visible_count > self.max_visible_items {
-            // +8 accounts for the 4px outer padding on both sides.
-            let max_height =
-                self.max_visible_items as f32 * menu_style.item_height + 8.0;
-            let scrollable_id = ctx.add(
-                crate::scroll_area::ScrollArea::from_id(padded_id)
-                    .preferred_size(0.0, max_height),
-            );
-            ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
-        } else {
-            padded_id
-        };
-
-        // Searchable mode: prepend a TextInput bound to the query
-        // signal. The filtered item list sits below in a VStack.
+        // Searchable mode: prepend a `TextInput` with a trailing
+        // `BuiltInButton::clear()` so the user can wipe the query back
+        // to empty. Both sit in a VStack above the filtered items. The
+        // input's widget id is captured in a shared slot so the owning
+        // `ComboBox` can programmatically focus it when the overlay opens.
         let content_id = {
             #[cfg(feature = "rich-text")]
             {
                 if let Some(query) = &self.search_query {
+                    let clear_query = query.clone();
+                    let clear_btn = crate::built_in_button::BuiltInButton::clear()
+                        .size(crate::built_in_button::BuiltInButtonSize::Compact)
+                        .on_activate_fn(move |_ctx| {
+                            clear_query.set(String::new());
+                        });
                     let search_input = crate::text_input::TextInput::new(query.clone())
-                        .placeholder("Search…");
+                        .placeholder("Search…")
+                        .trailing_slot(clear_btn);
                     let search_id = ctx.add(search_input);
+                    self.search_input_slot.set(Some(search_id));
                     let search_wrapped = ctx.add(
                         Padding::new(4.0, 4.0, 0.0, 4.0).child_id(search_id),
                     );
@@ -956,6 +1124,12 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             None
         };
 
+        // Shared slot carrying the search `TextInput`'s widget id —
+        // populated by the panel during its own `build` so the open
+        // path below can `ctx.request_focus(..)` the search field as
+        // soon as the overlay activates.
+        #[cfg(feature = "rich-text")]
+        let search_input_slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
         let dropdown_panel = DropdownPanel {
             source: self.source.clone(),
             selected: self.selected.clone(),
@@ -967,6 +1141,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             search_query,
             #[cfg(feature = "rich-text")]
             filter: self.filter.clone(),
+            #[cfg(feature = "rich-text")]
+            search_input_slot: search_input_slot.clone(),
             root_child_id: None,
         };
         let dropdown_id = ctx.add(dropdown_panel);
@@ -997,6 +1173,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let open_overlay = {
             let interaction = interaction.clone();
             let dismiss_callback = dismiss_callback.clone();
+            #[cfg(feature = "rich-text")]
+            let search_input_slot = search_input_slot.clone();
             Rc::new(move |ctx: &mut EventContext| {
                 interaction.set(ComboBoxState::Open);
                 ctx.activate(dropdown_id);
@@ -1009,6 +1187,12 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                     parent_overlay: None,
                     on_dismiss: Some(dismiss_callback.clone()),
                 });
+                // Searchable mode: land focus in the search field so
+                // the user can start typing immediately after opening.
+                #[cfg(feature = "rich-text")]
+                if let Some(input_id) = search_input_slot.get() {
+                    ctx.request_focus(input_id);
+                }
             })
         };
 
