@@ -125,6 +125,21 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     label: Option<String>,
     enabled: bool,
     max_visible_items: usize,
+    /// When `true`, the dropdown panel includes a search field at the top
+    /// and the list is filtered live against the query. Only exposed under
+    /// the `rich-text` feature because it relies on `TextInput`.
+    #[cfg(feature = "rich-text")]
+    searchable: bool,
+    /// Custom match predicate used in searchable mode. If unset, the
+    /// default is a case-insensitive substring match on the label.
+    #[cfg(feature = "rich-text")]
+    filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
+    /// Search query signal, created lazily on the first build when
+    /// `searchable` is enabled. Shared with the `DropdownPanel` so both
+    /// the trigger-side a11y state and the panel's filter see the same
+    /// value.
+    #[cfg(feature = "rich-text")]
+    search_query: Option<Signal<String>>,
     /// Cached index of the currently-selected value in `source`. Validated
     /// on every read; a miss triggers a fresh O(n) scan. Shared across the
     /// keyboard handler and the label-derive closure so both benefit from
@@ -171,6 +186,12 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             label: None,
             enabled: true,
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
+            #[cfg(feature = "rich-text")]
+            searchable: false,
+            #[cfg(feature = "rich-text")]
+            filter: None,
+            #[cfg(feature = "rich-text")]
+            search_query: None,
             interaction: Signal::new(ComboBoxState::Idle),
             root_child_id: None,
             dropdown_content_id: None,
@@ -291,6 +312,53 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+}
+
+/// Searchable-mode builders. Gated behind the `rich-text` feature
+/// because the search field is a `TextInput`, which shares the
+/// `RichTextEditor` engine and therefore the `fern-text` dependency.
+#[cfg(feature = "rich-text")]
+impl<T: Clone + PartialEq + 'static> ComboBox<T> {
+    /// Show a search field at the top of the dropdown panel and filter
+    /// the list live against the user's query. When `true`, items are
+    /// matched by the closure passed to [`filter`](Self::filter), or —
+    /// if no filter is set — by a case-insensitive substring match on
+    /// the [`item_label`](Self::item_label).
+    ///
+    /// The search input becomes a child of the dropdown panel only,
+    /// not of the trigger: the closed combo box looks identical
+    /// whether searchable or not.
+    ///
+    /// The query signal is created internally. Use
+    /// [`search_query`](Self::search_query) to supply your own if you
+    /// want to observe or drive the query externally.
+    pub fn searchable(mut self, enabled: bool) -> Self {
+        self.searchable = enabled;
+        if !enabled {
+            self.search_query = None;
+        }
+        self
+    }
+
+    /// Bind the search field to an external `Signal<String>`. Implies
+    /// [`searchable(true)`](Self::searchable). Useful for observing or
+    /// programmatically setting the query from outside the widget
+    /// (e.g. a "Clear" button, persistence across sessions).
+    pub fn search_query(mut self, query: Signal<String>) -> Self {
+        self.search_query = Some(query);
+        self.searchable = true;
+        self
+    }
+
+    /// Custom match predicate for searchable mode. Called on every
+    /// visible-item pass with the current query string (as typed, not
+    /// normalized) and a reference to the item; return `true` to keep
+    /// the item in the filtered list. Only consulted when
+    /// [`searchable`](Self::searchable) is `true`. Ignored otherwise.
+    pub fn filter(mut self, f: impl Fn(&str, &T) -> bool + 'static) -> Self {
+        self.filter = Some(Rc::new(f));
         self
     }
 }
@@ -542,6 +610,15 @@ struct DropdownPanel<T: Clone + PartialEq + 'static> {
     max_visible_items: usize,
     /// Bumped on every model mutation so the panel rebuilds.
     version: Signal<u64>,
+    /// Active search query (searchable mode only). When `Some`, the
+    /// panel renders a `TextInput` bound to this signal above the item
+    /// list and rebuilds on every edit.
+    #[cfg(feature = "rich-text")]
+    search_query: Option<Signal<String>>,
+    /// Custom filter predicate for searchable mode. When `None`, the
+    /// default is a case-insensitive substring match on the label.
+    #[cfg(feature = "rich-text")]
+    filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -562,16 +639,62 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         self.version
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
 
+        // Searchable mode: bind the search-query signal at `Rebuild`
+        // level so every keystroke in the search field re-runs this
+        // panel's build with a fresh filtered item list.
+        #[cfg(feature = "rich-text")]
+        if let Some(query) = &self.search_query {
+            query.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        }
+
+        // Decide which item indices are visible given the current query.
+        // When not searchable, every index is included.
         let total = self.source.len();
+        let visible_indices: Vec<usize> = {
+            #[cfg(feature = "rich-text")]
+            {
+                if let Some(query) = &self.search_query {
+                    let q = query.get();
+                    if q.is_empty() {
+                        (0..total).collect()
+                    } else {
+                        let filter = self.filter.clone();
+                        let item_label = self.item_label.clone();
+                        let q_lower = q.to_lowercase();
+                        let mut keep = Vec::new();
+                        for i in 0..total {
+                            if let Some(value) = self.source.get(i) {
+                                let matches = match &filter {
+                                    Some(f) => f(&q, &value),
+                                    None => item_label(&value).to_lowercase().contains(&q_lower),
+                                };
+                                if matches {
+                                    keep.push(i);
+                                }
+                            }
+                        }
+                        keep
+                    }
+                } else {
+                    (0..total).collect()
+                }
+            }
+            #[cfg(not(feature = "rich-text"))]
+            {
+                (0..total).collect()
+            }
+        };
+        let visible_count = visible_indices.len();
+
         let mut vstack = VStack::new();
-        for i in 0..total {
+        for (pos, &i) in visible_indices.iter().enumerate() {
             if let Some(value) = self.source.get(i) {
                 let label = (self.item_label)(&value);
                 let item = DropdownItem {
                     value,
                     label,
-                    position: i + 1,
-                    total,
+                    position: pos + 1,
+                    total: visible_count,
                     selected_signal: self.selected.clone(),
                     render: self.render_item.clone(),
                     root_child_id: None,
@@ -589,7 +712,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // padded VStack sizes naturally to its content — wrapping in
         // ScrollArea would impose the ScrollArea's 200px default height
         // regardless of content, leaving a blank strip below the items.
-        let content_id = if total > self.max_visible_items {
+        let list_id = if visible_count > self.max_visible_items {
             // +8 accounts for the 4px outer padding on both sides.
             let max_height =
                 self.max_visible_items as f32 * menu_style.item_height + 8.0;
@@ -600,6 +723,33 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
         } else {
             padded_id
+        };
+
+        // Searchable mode: prepend a TextInput bound to the query
+        // signal. The filtered item list sits below in a VStack.
+        let content_id = {
+            #[cfg(feature = "rich-text")]
+            {
+                if let Some(query) = &self.search_query {
+                    let search_input = crate::text_input::TextInput::new(query.clone())
+                        .placeholder("Search…");
+                    let search_id = ctx.add(search_input);
+                    let search_wrapped = ctx.add(
+                        Padding::new(4.0, 4.0, 0.0, 4.0).child_id(search_id),
+                    );
+                    let col = VStack::new()
+                        .spacing(0.0)
+                        .add_child(search_wrapped)
+                        .add_child(list_id);
+                    ctx.add(col)
+                } else {
+                    list_id
+                }
+            }
+            #[cfg(not(feature = "rich-text"))]
+            {
+                list_id
+            }
         };
 
         // Dropdown panel — same surface treatment as MenuList (raised + popup radius)
@@ -790,6 +940,22 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         if let Some(old_id) = self.dropdown_content_id.take() {
             ctx.destroy_subtree(old_id);
         }
+
+        // Searchable mode: allocate the query signal lazily so toggling
+        // `searchable(true)` → `false` between rebuilds doesn't keep a
+        // stale signal alive, while `true` → `true` preserves the
+        // in-progress query across model mutations.
+        #[cfg(feature = "rich-text")]
+        let search_query = if self.searchable {
+            let existing = self.search_query.clone();
+            let q = existing.unwrap_or_else(|| Signal::new(String::new()));
+            self.search_query = Some(q.clone());
+            Some(q)
+        } else {
+            self.search_query = None;
+            None
+        };
+
         let dropdown_panel = DropdownPanel {
             source: self.source.clone(),
             selected: self.selected.clone(),
@@ -797,6 +963,10 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             render_item: self.render_item.clone(),
             max_visible_items: self.max_visible_items,
             version: panel_version,
+            #[cfg(feature = "rich-text")]
+            search_query,
+            #[cfg(feature = "rich-text")]
+            filter: self.filter.clone(),
             root_child_id: None,
         };
         let dropdown_id = ctx.add(dropdown_panel);
@@ -1089,6 +1259,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // so AT can jump from the combobox into its options.
         if let Some(popup_id) = self.dropdown_content_id {
             builder.push_controlled(widget_id_to_node_id(popup_id));
+        }
+
+        // ARIA combobox pattern: when the popup is a filtered list, mark
+        // `aria-autocomplete="list"` so assistive tech announces the
+        // filter behavior. Only applied in searchable mode.
+        #[cfg(feature = "rich-text")]
+        if self.searchable {
+            builder.set_auto_complete(fern_core::accesskit::AutoComplete::List);
         }
 
         if !self.enabled {
@@ -1753,4 +1931,108 @@ mod tests {
         assert_eq!(node.value(), Some("Banana"));
         assert_eq!(node.placeholder(), None);
     }
+
+    // ─── Searchable mode (rich-text feature) ──────────────────────────
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn searchable_filters_list_to_matching_items() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let query = Signal::new(String::new());
+        let cb = tree.add(
+            ComboBox::new(
+                vec!["Apple", "Banana", "Blueberry", "Cherry"],
+                selected.clone(),
+            )
+            .search_query(query.clone()),
+        );
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        // All four items visible initially.
+        for name in ["Apple", "Banana", "Blueberry", "Cherry"] {
+            assert!(
+                tree.find_by_label(name).is_some(),
+                "expected {name} before filtering",
+            );
+        }
+
+        // Set the query to "B" — only Banana and Blueberry should remain.
+        query.set("B".to_string());
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        assert!(tree.find_by_label("Apple").is_none(), "Apple should be filtered out");
+        assert!(tree.find_by_label("Cherry").is_none(), "Cherry should be filtered out");
+        assert!(tree.find_by_label("Banana").is_some(), "Banana should still be visible");
+        assert!(tree.find_by_label("Blueberry").is_some(), "Blueberry should still be visible");
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn searchable_custom_filter_is_consulted() {
+        // Filter is called with (query, item). Route every item through
+        // a closure that accepts only items whose label length equals
+        // the query length — a contrived but easily-asserted predicate.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        CALLS.store(0, Ordering::SeqCst);
+
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let query = Signal::new(String::new());
+        let cb = tree.add(
+            ComboBox::new(vec!["ab", "abc", "abcd"], selected.clone())
+                .search_query(query.clone())
+                .filter(|q, v: &String| {
+                    CALLS.fetch_add(1, Ordering::SeqCst);
+                    v.len() == q.len()
+                }),
+        );
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+        tree.click(cb);
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        query.set("xyz".to_string()); // length 3 → only "abc" matches
+        tree.layout(SizeProposal::exact(400.0, 500.0));
+
+        assert!(CALLS.load(Ordering::SeqCst) >= 3, "filter should have been called per item");
+        assert!(tree.find_by_label("ab").is_none());
+        assert!(tree.find_by_label("abc").is_some());
+        assert!(tree.find_by_label("abcd").is_none());
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn accessibility_searchable_sets_autocomplete() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let cb = tree.add(ComboBox::new(fruits(), selected.clone()).searchable(true));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        let node = build_raw_a11y_node(&mut tree, cb);
+        assert_eq!(
+            node.auto_complete(),
+            Some(fern_core::accesskit::AutoComplete::List),
+            "searchable combobox must expose aria-autocomplete=list",
+        );
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn accessibility_non_searchable_omits_autocomplete() {
+        let mut tree = light_tree();
+        let selected = Signal::new(None::<String>);
+        let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        let node = build_raw_a11y_node(&mut tree, cb);
+        assert_eq!(
+            node.auto_complete(),
+            None,
+            "non-searchable combobox must not advertise autocomplete",
+        );
+    }
+
 }
