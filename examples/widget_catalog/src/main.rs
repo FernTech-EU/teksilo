@@ -1753,18 +1753,26 @@ impl Widget for WidgetCatalog {
         let padded = ctx.add(Padding::uniform(24.0).child_id(content_col));
         let scroll = ctx.add(ScrollArea::from_id(padded));
 
-        // Root: Toolbar | ScrollArea (fills remaining space) | StatusBar
-        let root = ctx.add(
-            VStack::new()
-                .add_child(toolbar)
-                .child(Expand::new().fills_stack().child_id(scroll))
-                .child(
-                    StatusBar::new().child(
-                        TextWidget::new_literal("Milestone 4 -- All widgets demonstrated")
-                            .style(t.tiny.clone())
-                            .color(c.text_secondary),
-                    ),
-                ),
+        // Root: Toolbar | ScrollArea (fills remaining space) | StatusBar.
+        // Migrated to the fern! DSL per spec §7.8. Expand is a
+        // single-child wrapper (uses `.child_id(id)`, not
+        // `.add_child`) so `scroll` goes through a property call;
+        // VStack and StatusBar are multi-child containers and take
+        // `.add_child(id)` via the `#{ }` id-escape.
+        let root = fern!(ctx =>
+            VStack {
+                #{ toolbar }
+                Expand {
+                    fills_stack
+                    child_id: scroll
+                }
+                StatusBar {
+                    TextWidget::new_literal("Milestone 4 -- All widgets demonstrated") {
+                        style: t.tiny.clone()
+                        color: c.text_secondary
+                    }
+                }
+            }
         );
         self.root_child_id = Some(root);
         vec![root]

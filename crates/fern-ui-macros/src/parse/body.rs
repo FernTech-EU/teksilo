@@ -107,8 +107,11 @@ fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
         ));
     }
 
-    // `ident :` → property.
-    if input.peek2(Token![:]) {
+    // `ident :` → property. `peek2(Token![::])` goes first because
+    // syn's `peek2(Token![:])` also matches the first colon of `::`,
+    // which would misroute `Widget::new_literal(...)` as a property
+    // named `Widget`. Paths fall through to the element branch.
+    if input.peek2(Token![:]) && !input.peek2(Token![::]) {
         return parse_property(input).map(BodyItem::Property);
     }
 

@@ -1,0 +1,5 @@
+error: expected property, binding, or child element, found `,` — fern! blocks separate items by newlines, not commas
+  --> tests/fern_ui/fail/err_comma_separated.rs:41:17
+   |
+41 |             Leaf,
+   |                 ^
