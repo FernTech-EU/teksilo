@@ -361,6 +361,11 @@ impl Widget for SplitButton {
             Padding::symmetric(sb_style.padding_vertical, sb_style.padding_horizontal)
                 .child_id(label_id),
         );
+        // ZStack (default CENTER alignment) centers the padded label within
+        // the MinSize bounds when the region is wider than the text — same
+        // pattern Button uses. Without this, MinSize stretches Padding to
+        // fill and the label pins to the top-left inset corner.
+        let main_content_id = ctx.add(ZStack::new().add_child(main_padding_id));
 
         let main_region = {
             let actions_for_tap = actions_rc.clone();
@@ -368,7 +373,7 @@ impl Widget for SplitButton {
             let int_for_tap = interaction.clone();
             let int_for_hover = interaction.clone();
             MinSize::new(sb_style.min_width, sb_style.height)
-                .child_id(main_padding_id)
+                .child_id(main_content_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
                     if !enabled {
                         return;
