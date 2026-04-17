@@ -159,7 +159,15 @@ impl WidgetTree {
                         .map(|overlay| overlay.bounds)
                 })
                 .unwrap_or(Rect::ZERO);
-            let content_proposal = SizeProposal::exact(intrinsic.width, intrinsic.height);
+            // Use the positioned overlay_bounds for layout, not the intrinsic
+            // size. For `BelowPreferred` (and any future placement that
+            // inflates the overlay rect beyond the content's intrinsic size
+            // to match an anchor, e.g. a combo-box dropdown that must be at
+            // least as wide as its trigger), this lets the content widget
+            // actually fill the overlay rather than sitting as a narrow
+            // strip inside it. All other placements return
+            // overlay_bounds.size() == intrinsic, so this is a no-op there.
+            let content_proposal = SizeProposal::exact(overlay_bounds.width, overlay_bounds.height);
             layout_widget_recursive(
                 &mut self.arena,
                 *content_id,

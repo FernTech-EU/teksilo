@@ -212,6 +212,28 @@ impl<'a> BuildContext<'a> {
         self.tree.set_dormant(id);
     }
 
+    /// Destroy a widget and its entire subtree, removing them from the
+    /// arena and dropping any per-widget subscription / effect handles.
+    ///
+    /// Use this to clean up dormant subtrees that the current widget
+    /// created during a prior build and that live outside its regular
+    /// arena children — e.g., a pre-built popup panel inserted via
+    /// `ctx.add(..)` + `ctx.set_dormant(..)` that becomes stale after a
+    /// rebuild. Regular arena children of the composite (i.e. widgets
+    /// whose ids are returned from `build`) are destroyed automatically
+    /// by the framework's rebuild path and do not need this call.
+    ///
+    /// If an overlay currently references `id` as its content, the
+    /// overlay is dismissed first so the manager does not retain a
+    /// stale content reference.
+    pub fn destroy_subtree(&mut self, id: WidgetId) {
+        let overlay_id = self.tree.overlay_manager().find_by_content(id);
+        if let Some(overlay_id) = overlay_id {
+            self.tree.dismiss_overlay(overlay_id);
+        }
+        self.tree.destroy_subtree(id);
+    }
+
     /// Look up the shortcut label for a command (type-erased).
     /// Returns the display string (e.g. "Ctrl+S") if a shortcut is bound to this command
     /// in the tree's `ShortcutMap`. Used by `MenuItem` for automatic shortcut labels.
