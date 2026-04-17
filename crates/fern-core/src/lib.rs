@@ -20,6 +20,7 @@ pub mod signal;
 pub mod binding;
 pub mod widget;
 pub mod widget_builder;
+pub mod widget_builder_branching;
 pub mod widget_id;
 pub mod widget_tree;
 pub mod window_chrome;
@@ -62,6 +63,7 @@ pub use widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 pub use widget_builder::{HandlerSet, WidgetBuilder, WidgetWithHandlers};
+pub use widget_builder_branching::{FernBranch, FernBranch3, FernBranch4, IntoFernChild};
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 pub use window_chrome::{
