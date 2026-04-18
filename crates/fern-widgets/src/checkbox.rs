@@ -248,7 +248,12 @@ fn resolve_box_border(
     check: CheckState,
     colors: &fern_tokens::ColorTokens,
 ) -> Color {
+    // Focus wins over every other state: even a filled
+    // (Checked / Indeterminate) checkbox still shows the accent
+    // border when keyboard-focused, because that's the only
+    // focus indicator — there is no external ring.
     match state {
+        InteractionState::Focused => colors.focus_ring,
         InteractionState::Disabled => colors.accent_disabled,
         _ if check.is_filled() => Color::TRANSPARENT,
         InteractionState::Hovered => colors.border_strong,
@@ -307,10 +312,21 @@ impl Widget for Checkbox {
         let cb_style = theme.components.checkbox;
         let icon_size = cb_style.box_visual_size * 0.75;
 
+        // Border width — Int UI focus convention: thicken the
+        // existing border to `focus_ring_width` and recolor it to
+        // the accent on focus, instead of wrapping the box in a
+        // separate ring.
+        let normal_bw = theme.shape.border_width;
+        let focus_bw = theme.shape.focus_ring_width;
+        let border_width_signal = interaction.map(move |s| match s {
+            InteractionState::Focused => focus_bw,
+            _ => normal_bw,
+        });
+
         let box_rect = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
-            .border_width(theme.shape.border_width)
+            .bind_border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(cb_style.corner_radius));
         let box_id = ctx.add(box_rect);
         let box_sized = ctx.add(
@@ -349,19 +365,15 @@ impl Widget for Checkbox {
         }
 
         // Compose the visual box with checkmark/dash icons on top.
-        let visual_box = ctx.add(
+        // No external focus ring — the box's own border is the
+        // focus indicator (thickened + accent-colored) per the Int
+        // UI text-field convention, applied uniformly to every
+        // input widget with a resting border.
+        let check_box = ctx.add(
             ZStack::new()
                 .add_child(box_sized)
                 .add_child(checkmark_id)
                 .add_child(dash_id),
-        );
-
-        // Wrap the visual in a FocusRing — drawn outside the box when focused.
-        let focused = interaction.map(|s| *s == InteractionState::Focused);
-        let check_box = ctx.add(
-            crate::primitives::FocusRing::new(focused)
-                .corner_radius(cb_style.corner_radius)
-                .child_id(visual_box),
         );
 
         let mut row = HStack::new().spacing(cb_style.label_gap).add_child(check_box);

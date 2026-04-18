@@ -81,8 +81,10 @@ pub(super) fn resolve_bg(state: ComboBoxState, colors: &fern_tokens::ColorTokens
 }
 
 pub(super) fn resolve_border(state: ComboBoxState, colors: &fern_tokens::ColorTokens) -> Color {
-    // Int UI: focus uses the FocusRing wrapper, not a border color change.
+    // Int UI convention: the border thickens and switches to the
+    // accent color on focus. There is no separate ring.
     match state {
+        ComboBoxState::Focused => colors.focus_ring,
         ComboBoxState::Disabled => colors.accent_disabled,
         _ => colors.border,
     }

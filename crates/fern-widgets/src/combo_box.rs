@@ -442,25 +442,27 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         .child_id(row_id);
         let padding_id = ctx.add(padding);
 
+        // Int UI focus convention: thicken the frame border to
+        // `focus_ring_width` and recolor it to the accent on
+        // focus, instead of wrapping in a separate ring.
+        let normal_bw = theme.shape.border_width;
+        let focus_bw = theme.shape.focus_ring_width;
+        let border_width_signal = interaction.map(move |s| match s {
+            ComboBoxState::Focused => focus_bw,
+            _ => normal_bw,
+        });
+
         let bg = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
-            .border_width(theme.shape.border_width)
+            .bind_border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(combo_style.corner_radius));
         let bg_id = ctx.add(bg);
 
         let visual_zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
         let visual_id = ctx.add(visual_zstack);
-        let sized_id = ctx.add(
-            crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id),
-        );
-
-        // Wrap in a FocusRing — drawn outside the control on keyboard focus.
-        let focused = interaction.map(|s| *s == ComboBoxState::Focused);
         let root_id = ctx.add(
-            crate::primitives::FocusRing::new(focused)
-                .corner_radius(combo_style.corner_radius)
-                .child_id(sized_id),
+            crate::primitives::MinSize::new(0.0, combo_style.height).child_id(visual_id),
         );
         self.root_child_id = Some(root_id);
 

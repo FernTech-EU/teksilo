@@ -291,19 +291,38 @@ fn resolve_text(style: ButtonVariant, state: InteractionState, colors: &ColorTok
 }
 
 fn resolve_border(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
-    // Int UI: borders are always 1 dp; emphasis is color-only. The focus
-    // ring is drawn outside the control by the `FocusRing` wrapper, so
-    // borders never encode focus state.
+    // Int UI convention, applied uniformly: the button's own
+    // border is the focus indicator. On focus the border thickens
+    // (see `resolve_border_width` below) and recolors to the
+    // accent focus-ring color. There is no external focus ring.
+    if state == InteractionState::Focused {
+        return colors.focus_ring;
+    }
     match style {
-        // Default / Flat: no border — the fill (or absence of one) carries
-        // the affordance.
+        // Default / Flat at rest: no visible border — the fill
+        // (or absence of one) carries the affordance.
         ButtonVariant::Default | ButtonVariant::Flat => Color::TRANSPARENT,
-        // Regular: always a visible border. Strong variant on hover/press.
+        // Regular: always a visible 1 dp border. Strong variant on
+        // hover/press.
         ButtonVariant::Regular => match state {
             InteractionState::Disabled => colors.border,
             InteractionState::Hovered | InteractionState::Pressed => colors.border_strong,
             _ => colors.border,
         },
+    }
+}
+
+/// Resolve the button's border width. Focused → `focus_ring_width`
+/// so the accent border is visually distinct; otherwise the
+/// variant-specific rest width (0 dp for Default/Flat, 1 dp for
+/// Regular).
+fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw: f32, focus_bw: f32) -> f32 {
+    if state == InteractionState::Focused {
+        return focus_bw;
+    }
+    match style {
+        ButtonVariant::Default | ButtonVariant::Flat => 0.0,
+        ButtonVariant::Regular => normal_bw,
     }
 }
 
@@ -353,6 +372,11 @@ impl fern_core::widget::Widget for Button {
 
         // Build the widget subtree
         let button_style = theme.components.button;
+        let normal_bw = button_style.border_width;
+        let focus_bw = theme.shape.focus_ring_width;
+        let border_width = interaction.map(move |s| {
+            resolve_border_width(style, *s, normal_bw, focus_bw)
+        });
 
         // Build the content (icon + label) based on icon_location
         let content_id = match self.icon_location {
@@ -437,12 +461,14 @@ impl fern_core::widget::Widget for Button {
         .child_id(content_id);
         let padding_id = ctx.add(padding);
 
-        // Int UI: border is fixed at 1 dp. Focus is shown via the FocusRing
-        // wrapper, not by thickening the border.
+        // Int UI convention: the button's own border is the focus
+        // indicator. Border width reacts to focus via
+        // `resolve_border_width`; color reacts via `resolve_border`.
+        // No external ring.
         let rect = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
-            .border_width(button_style.border_width)
+            .bind_border_width(border_width)
             .corner_radius(CornerRadius::uniform(button_style.corner_radius));
         let rect_id = ctx.add(rect);
 
@@ -450,19 +476,9 @@ impl fern_core::widget::Widget for Button {
         let zstack_id = ctx.add(zstack);
 
         // Int UI buttons are 24 dp tall with a 72 dp minimum width.
-        let sized_id = ctx.add(
+        let root_id = ctx.add(
             crate::primitives::MinSize::new(button_style.min_width, button_style.height)
                 .child_id(zstack_id),
-        );
-
-        // Wrap in a FocusRing so the ring is drawn outside the control.
-        // Only keyboard focus shows the ring — `focused` is derived from the
-        // interaction state.
-        let focused = interaction.map(|s| *s == InteractionState::Focused);
-        let root_id = ctx.add(
-            crate::primitives::FocusRing::new(focused)
-                .corner_radius(button_style.corner_radius)
-                .child_id(sized_id),
         );
 
         // Attach tooltip if configured. Rich-tooltip source takes

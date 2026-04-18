@@ -40,7 +40,7 @@ use crate::button::{ButtonVariant, InteractionState};
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 use crate::primitives::{
-    Center, FixedSize, FocusRing, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget,
+    Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget,
     ZStack,
 };
 
@@ -230,6 +230,9 @@ fn resolve_text(style: ButtonVariant, state: InteractionState, colors: &ColorTok
 }
 
 fn resolve_border(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
+    if state == InteractionState::Focused {
+        return colors.focus_ring;
+    }
     match style {
         ButtonVariant::Default | ButtonVariant::Flat => Color::TRANSPARENT,
         ButtonVariant::Regular => match state {
@@ -237,6 +240,19 @@ fn resolve_border(style: ButtonVariant, state: InteractionState, colors: &ColorT
             InteractionState::Hovered | InteractionState::Pressed => colors.border_strong,
             _ => colors.border,
         },
+    }
+}
+
+/// Border width for the SplitButton frame: thickens to the theme's
+/// `focus_ring_width` on focus, rests at the variant's normal
+/// width otherwise.
+fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw: f32, focus_bw: f32) -> f32 {
+    if state == InteractionState::Focused {
+        return focus_bw;
+    }
+    match style {
+        ButtonVariant::Default | ButtonVariant::Flat => 0.0,
+        ButtonVariant::Regular => normal_bw,
     }
 }
 
@@ -494,11 +510,20 @@ impl Widget for SplitButton {
                 .add_child(chevron_region_id),
         );
 
+        // Border width reacts to focus state — thickens to the
+        // accent `focus_ring_width` on focus, matching the Int UI
+        // convention applied uniformly across all input widgets.
+        let normal_bw = sb_style.border_width;
+        let focus_bw = theme.shape.focus_ring_width;
+        let border_width = interaction.map(move |s| {
+            resolve_border_width(style, *s, normal_bw, focus_bw)
+        });
+
         // ---- Shared frame (single RectWidget behind the row) ----
         let bg_rect = RectWidget::new()
             .bind_background(bg_color)
             .bind_border_color(border_color)
-            .border_width(sb_style.border_width)
+            .bind_border_width(border_width)
             .corner_radius(CornerRadius::uniform(sb_style.corner_radius));
         let bg_id = ctx.add(bg_rect);
 
@@ -506,16 +531,8 @@ impl Widget for SplitButton {
 
         // Enforce an overall minimum size: main min_width + divider + chevron.
         let total_min_width = sb_style.min_width + sb_style.divider_width + sb_style.chevron_width;
-        let sized_id = ctx.add(
-            MinSize::new(total_min_width, sb_style.height).child_id(frame_id),
-        );
-
-        // Focus ring is drawn outside the frame on keyboard focus only.
-        let focused = interaction.map(|s| *s == InteractionState::Focused);
         let root_id = ctx.add(
-            FocusRing::new(focused)
-                .corner_radius(sb_style.corner_radius)
-                .child_id(sized_id),
+            MinSize::new(total_min_width, sb_style.height).child_id(frame_id),
         );
         self.root_child_id = Some(root_id);
 

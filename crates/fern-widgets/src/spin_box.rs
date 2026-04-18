@@ -106,7 +106,7 @@ use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::text_input_field::TextInputField;
 use crate::primitives::{
-    Divider, Expand, HStack, MaxSize, MinSize, Padding, RectWidget, VStack, ZStack,
+    Divider, Expand, HStack, MinSize, Padding, RectWidget, VStack, ZStack,
 };
 
 use self::step_button::StepButton;
@@ -245,6 +245,17 @@ pub struct SpinBox<T: SpinValue> {
     interaction: Signal<InteractionState>,
     can_step_up: Signal<bool>,
     can_step_down: Signal<bool>,
+    /// Cached horizontal cap in pixels, resolved from `width_policy`
+    /// at build time (Chars mode measures the theme font). `None`
+    /// when the policy is `Fill`. Applied by `size_that_fits` by
+    /// narrowing the proposal before delegating to the child — this
+    /// replaces wrapping the subtree in a `MaxSize`, which clips
+    /// children and would truncate the focus-state border stroke
+    /// against its own shape quad.
+    pixel_cap: Option<f32>,
+    /// Floor width so the field and step buttons always fit. Also
+    /// resolved at build from `button_layout`.
+    min_width: f32,
     root_child_id: Option<WidgetId>,
     field_id: Option<WidgetId>,
 }
@@ -295,6 +306,8 @@ impl<T: SpinValue> SpinBox<T> {
             interaction: Signal::new(InteractionState::Idle),
             can_step_up: Signal::new(true),
             can_step_down: Signal::new(true),
+            pixel_cap: None,
+            min_width: MIN_WIDTH_WITH_BUTTONS,
             root_child_id: None,
             field_id: None,
         }
@@ -984,16 +997,20 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         //   MinSize  → enforce a floor so the field and buttons
         //              still fit even when a narrow parent would
         //              otherwise squash the widget.
-        //   MaxSize  → cap horizontal growth when `pixel_cap` is
-        //              `Some`. `Fill` opts out of the cap entirely
-        //              so the widget stretches to the parent.
-        let min_sized_id = ctx.add(
+        //   The horizontal cap (when `pixel_cap` is `Some`) is
+        //   applied by `SpinBox::size_that_fits` narrowing the
+        //   proposal, NOT by wrapping in `MaxSize`. `MaxSize`
+        //   clips its children, which would truncate the outer
+        //   half of the focus-state border stroke against the
+        //   widget's own shape quad (visible as a ring clipped on
+        //   all four sides).
+        let sized_id = ctx.add(
             MinSize::new(min_width, field_style.height).child_id(zstack_id),
         );
-        let sized_id = match pixel_cap {
-            Some(cap) => ctx.add(MaxSize::width(cap).child_id(min_sized_id)),
-            None => min_sized_id,
-        };
+        // Stash the resolved cap + floor on `self` for
+        // `size_that_fits` to read at layout time.
+        self.pixel_cap = pixel_cap;
+        self.min_width = min_width;
 
         // ── Root: attach key + wheel handlers on the outer sized id ─
         //
@@ -1094,9 +1111,24 @@ impl<T: SpinValue> Widget for SpinBox<T> {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        // Narrow the parent's proposal by `pixel_cap` (if any)
+        // before delegating. This enforces the `.width(...)` /
+        // `.width_chars(...)` caps without wrapping the subtree
+        // in a clipping `MaxSize` — the focus-state border stroke
+        // can then extend 1 dp outside the visual bounds
+        // (Int UI focus thickening) without being chopped off
+        // against the shape quad.
+        let effective_proposal = SizeProposal {
+            width: match (proposal.width, self.pixel_cap) {
+                (Some(w), Some(cap)) => Some(w.min(cap).max(self.min_width)),
+                (None, Some(cap)) => Some(cap.max(self.min_width)),
+                (w, None) => w,
+            },
+            height: proposal.height,
+        };
         self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .and_then(|id| ctx.child_size(id, effective_proposal))
+            .unwrap_or_else(|| effective_proposal.resolve(0.0, 0.0))
     }
 
     fn place_children(

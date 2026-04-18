@@ -149,11 +149,30 @@ impl Widget for Accordion {
                 .add_child(chevron_right_id),
         );
 
-        // Focus ring — drawn outside the header on keyboard focus.
+        // Int UI focus convention: an accent-colored border
+        // appears on the header row itself on keyboard focus
+        // instead of a separate ring. Header has no visible
+        // rest-state border, so this border is width-zero at
+        // rest and snaps to `focus_ring_width` on focus.
+        let focus_ring_color = theme.colors.focus_ring;
+        let focus_border_color = kb_focused.map(move |f| {
+            if *f { focus_ring_color } else { fern_tokens::Color::TRANSPARENT }
+        });
+        let focus_bw = theme.shape.focus_ring_width;
+        let focus_border_width =
+            kb_focused.map(move |f| if *f { focus_bw } else { 0.0 });
+        let focus_rect_id = ctx.add(
+            crate::primitives::RectWidget::new()
+                .bind_border_color(focus_border_color)
+                .bind_border_width(focus_border_width)
+                .corner_radius(fern_tokens::CornerRadius::uniform(
+                    theme.components.accordion.corner_radius,
+                )),
+        );
         let header_with_ring = ctx.add(
-            crate::primitives::FocusRing::new(kb_focused.clone())
-                .corner_radius(theme.components.accordion.corner_radius)
-                .child_id(header),
+            crate::primitives::ZStack::new()
+                .add_child(focus_rect_id)
+                .add_child(header),
         );
 
         let mut vstack = VStack::new()

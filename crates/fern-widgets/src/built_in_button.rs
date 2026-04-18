@@ -310,10 +310,26 @@ impl fern_core::widget::Widget for BuiltInButton {
 
         let centered_id = ctx.add(Center::new().child_id(icon_content_id));
 
-        // Background rect (no border, rounded corners)
+        // Int UI convention: the button's own border is the focus
+        // indicator. At rest there's no visible border (transparent
+        // color + 0 dp width); on focus it snaps to an accent
+        // `focus_ring_width` border. No external ring.
+        let focus_ring_color = theme.colors.focus_ring;
+        let border_color = interaction.map(move |s| match s {
+            InteractionState::Focused => focus_ring_color,
+            _ => Color::TRANSPARENT,
+        });
+        let focus_bw = theme.shape.focus_ring_width;
+        let border_width = interaction.map(move |s| match s {
+            InteractionState::Focused => focus_bw,
+            _ => 0.0,
+        });
+
         let bg_id = ctx.add(
             RectWidget::new()
                 .bind_background(bg_color)
+                .bind_border_color(border_color)
+                .bind_border_width(border_width)
                 .corner_radius(CornerRadius::uniform(ib_style.corner_radius)),
         );
 
@@ -321,19 +337,11 @@ impl fern_core::widget::Widget for BuiltInButton {
 
         // Fixed square size
         let button_dim = resolve_size(self.size, &ib_style);
-        let sized_id = ctx.add(
+        let root_id = ctx.add(
             FixedSize::new()
                 .bind_width(button_dim)
                 .bind_height(button_dim)
                 .child_id(zstack_id),
-        );
-
-        // Focus ring
-        let focused = interaction.map(|s| *s == InteractionState::Focused);
-        let root_id = ctx.add(
-            crate::primitives::FocusRing::new(focused)
-                .corner_radius(ib_style.corner_radius)
-                .child_id(sized_id),
         );
 
         // Tooltip

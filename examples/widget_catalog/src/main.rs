@@ -34,9 +34,7 @@
 //! - SplitView (twin-pane demo)
 //! - Theme switching (light/dark)
 
-use std::cell::Cell;
-use std::rc::Rc;
-
+use fern_ui::IntentKind;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
@@ -49,9 +47,14 @@ use fern_ui::widgets::{
 use fern_ui::widgets::tooltip::TooltipContent;
 
 // ---------------------------------------------------------------------------
-// Application commands
+// Application intents
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, IntentKind)]
+enum CatalogIntent {
+    #[name = "catalog.toggle_dark_mode"]
+    ToggleDarkMode,
+}
 
 // ---------------------------------------------------------------------------
 // Shared signal bundle
@@ -252,6 +255,20 @@ impl Widget for WidgetCatalog {
         let c = &theme.colors;
         let sigs = Signals::new(ctx);
 
+        let is_dark = ctx.signal(false);
+        let is_dark_for_action = is_dark.clone();
+        ctx.register_action(
+            Action::new("catalog.toggle_dark_mode").on_invoke(move |_intent, ctx| {
+                let dark = !is_dark_for_action.get();
+                is_dark_for_action.set(dark);
+                ctx.set_theme(if dark {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            }),
+        );
+
         // ============================ LEFT PANE (builder) ============================
         let palette_section = self.palette_builder(ctx, &theme, &sigs);
         let primitives_section = self.primitives_builder(ctx, &theme, &sigs);
@@ -279,7 +296,9 @@ impl Widget for WidgetCatalog {
                     .child(
                         Button::new_literal("Toggle Dark Mode")
                             .style(ButtonVariant::Regular)
-                            .on_activate_fn(|_| println!("ToggleDarkMode")),
+                            .on_activate_fn(|ctx| {
+                                ctx.send_intent(CatalogIntent::ToggleDarkMode);
+                            }),
                     ),
             ),
         );
@@ -387,7 +406,9 @@ impl Widget for WidgetCatalog {
                         Spacer { }
                         Button::new_literal("Toggle Dark Mode") {
                             style: ButtonVariant::Regular
-                            on_activate_fn: |_| println!("ToggleDarkMode")
+                            on_activate_fn: |ctx| {
+                                ctx.send_intent(CatalogIntent::ToggleDarkMode);
+                            }
                         }
                     }
                 }
@@ -2859,9 +2880,6 @@ impl WidgetCatalog {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    let is_dark = Rc::new(Cell::new(false));
-    let is_dark_clone = is_dark.clone();
-
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .window_title("FernUI -- Widget Catalog (Milestone 3)")

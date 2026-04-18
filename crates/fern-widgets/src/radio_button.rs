@@ -129,7 +129,11 @@ fn resolve_circle_border(
     selected: bool,
     colors: &fern_tokens::ColorTokens,
 ) -> Color {
+    // Focus wins: a keyboard-focused radio always draws the
+    // accent ring, even when selected or disabled — it's the only
+    // focus indicator (no external ring).
     match state {
+        InteractionState::Focused => colors.focus_ring,
         InteractionState::Disabled => colors.accent_disabled,
         _ if selected => colors.accent,
         InteractionState::Hovered => colors.border_strong,
@@ -165,9 +169,18 @@ impl Widget for RadioButton {
                 .zip(&is_selected)
                 .map(move |(s, sel)| resolve_circle_border(*s, *sel, &colors))
         };
+        // Int UI focus convention: thicken the existing border to
+        // `focus_ring_width` and recolor it to the accent on
+        // focus, instead of wrapping the circle in a separate ring.
+        let normal_bw = theme.shape.border_width;
+        let focus_bw = theme.shape.focus_ring_width;
+        let border_width_signal = interaction.map(move |s| match s {
+            InteractionState::Focused => focus_bw,
+            _ => normal_bw,
+        });
         let outer = RectWidget::new()
             .bind_border_color(border_color)
-            .border_width(theme.shape.border_width)
+            .bind_border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(theme.shape.radius_pill));
         let outer_id = ctx.add(outer);
         let outer_sized = ctx.add(
@@ -200,16 +213,11 @@ impl Widget for RadioButton {
 
         ctx.visible_when(dot_sized, selected.map(move |s| *s == value));
 
-        // Compose the visual circle with the inner dot.
-        let visual = ctx.add(ZStack::new().add_child(outer_sized).add_child(dot_sized));
-
-        // Wrap in a FocusRing — drawn outside the circle on keyboard focus.
-        let focused = interaction.map(|s| *s == InteractionState::Focused);
-        let radio = ctx.add(
-            crate::primitives::FocusRing::new(focused)
-                .corner_radius(theme.shape.radius_pill)
-                .child_id(visual),
-        );
+        // Compose the visual circle with the inner dot. No
+        // external focus ring — the circle's own border is the
+        // focus indicator (thickened + accent-colored) per the
+        // Int UI convention applied uniformly across widgets.
+        let radio = ctx.add(ZStack::new().add_child(outer_sized).add_child(dot_sized));
 
         let mut row = HStack::new().spacing(radio_style.label_gap).add_child(radio);
         if let Some(ref label) = self.label {

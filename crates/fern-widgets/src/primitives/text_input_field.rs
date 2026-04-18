@@ -8,8 +8,11 @@
 //! Unlike `TextInput`, `TextInputField` paints no frame, no
 //! placeholder overlay, no validation border, and hosts no trailing
 //! slots: it is the focusable text area only. Compose it yourself
-//! with `RectWidget`, `Padding`, `FocusRing`, icons, clear buttons,
-//! etc. to build a styled control.
+//! with `RectWidget`, `Padding`, icons, clear buttons, etc. to
+//! build a styled control. Focus indication is the composite's
+//! responsibility — the Int UI convention is to thicken the
+//! enclosing frame's border to `focus_ring_width` and recolor it
+//! to the accent focus-ring color.
 //!
 //! Features:
 //! - Bound `Signal<String>` for two-way text binding.

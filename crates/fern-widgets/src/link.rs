@@ -14,7 +14,9 @@ use fern_core::widget_id::WidgetId;
 use fern_tokens::Color;
 
 use crate::button::InteractionState;
-use crate::primitives::{RectWidget, TextWidget, VStack};
+use fern_tokens::CornerRadius;
+
+use crate::primitives::{RectWidget, TextWidget, VStack, ZStack};
 
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
@@ -150,12 +152,33 @@ impl Widget for Link {
                 .add_child(underline_sized),
         );
 
-        // Focus ring — drawn outside the link bounds on keyboard focus.
-        let focused = interaction.map(|s| *s == InteractionState::Focused);
+        // Int UI focus convention: the link paints its own
+        // accent-colored border on focus instead of a separate
+        // ring. Link has no visible rest-state border; the focus
+        // state swaps in a `focus_ring_width` outline around the
+        // text.
+        let focus_ring_color = theme.colors.focus_ring;
+        let focus_border_color = interaction.map(move |s| match s {
+            InteractionState::Focused => focus_ring_color,
+            _ => Color::TRANSPARENT,
+        });
+        let focus_bw = theme.shape.focus_ring_width;
+        let focus_border_width = interaction.map(move |s| match s {
+            InteractionState::Focused => focus_bw,
+            _ => 0.0,
+        });
+        let focus_rect_id = ctx.add(
+            RectWidget::new()
+                .bind_border_color(focus_border_color)
+                .bind_border_width(focus_border_width)
+                .corner_radius(CornerRadius::uniform(
+                    theme.components.link.corner_radius,
+                )),
+        );
         let root_id = ctx.add(
-            crate::primitives::FocusRing::new(focused)
-                .corner_radius(theme.components.link.corner_radius)
-                .child_id(content_id),
+            ZStack::new()
+                .add_child(focus_rect_id)
+                .add_child(content_id),
         );
 
         if let Some(source) = self.rich_tooltip_source.take() {
