@@ -100,7 +100,7 @@ use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_text::SharedTypesetter;
-use fern_tokens::{CornerRadius, TextStyle};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextStyle};
 
 use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
@@ -498,13 +498,19 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         );
 
         // SpinBox reads theme tokens once for static layout params
-        // (padding, focus-ring width). Color-bearing leaf widgets below
-        // use `theme_signal.map(...)` so runtime theme switches still
-        // re-paint. Full reactivity of layout params would require
-        // migrating every `Prop<f32>`-accepting primitive used here.
-        let theme_signal = ctx.theme_signal();
-        let theme = theme_signal.get();
+        // (padding, focus-ring width, body typography). Colors resolve
+        // through role props against the current theme at paint time,
+        // so runtime theme switches re-paint without riding through
+        // per-widget zips.
+        //
+        // The snapshot is OWNED (`theme_signal.get()` clones), because the
+        // body typography is read further down in `build()` — past many
+        // `ctx.add(...)` / `ctx.effect(...)` calls that need a mutable
+        // borrow of `ctx`. A `ctx.theme()` borrow would hold `ctx`
+        // immutable across those calls and fail the borrow checker.
+        let theme = ctx.theme_signal().get();
         let field_style = theme.components.text_field;
+        let field_border_width = field_style.border_width;
         let focus_ring_width = theme.shape.focus_ring_width;
 
         // Capture configuration into owned clones for the effect
@@ -939,27 +945,20 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // extra envelope space and clash with row layouts that
         // expect the widget to report its visual footprint as its
         // full size).
-        // Border color tracks both interaction AND theme — zip combines
-        // both roots so focus transitions and runtime theme switches both
-        // refresh the rendered border.
-        let border_color = self
-            .interaction
-            .zip(&theme_signal)
-            .map(|(state, t)| match *state {
-                InteractionState::Focused => t.colors.focus_ring,
-                _ => t.colors.border,
-            });
-        let border_width_signal =
-            self.interaction
-                .zip(&theme_signal)
-                .map(|(state, t)| match *state {
-                    InteractionState::Focused => t.shape.focus_ring_width,
-                    _ => t.components.text_field.border_width,
-                });
-        let _ = focus_ring_width; // retained for the reactive closure above
+        // Border role tracks interaction state; the paint-time resolver
+        // swaps in the right color against the current theme on every
+        // pass, so theme switches refresh for free.
+        let border_role = self.interaction.map(|state| match *state {
+            InteractionState::Focused => BorderRole::Focused,
+            _ => BorderRole::Default,
+        });
+        let border_width_signal = self.interaction.map(move |state| match *state {
+            InteractionState::Focused => focus_ring_width,
+            _ => field_border_width,
+        });
         let bg = RectWidget::new()
-            .background(fern_tokens::SurfaceRole::Content)
-            .border_color(border_color)
+            .background(SurfaceRole::Content)
+            .border_color(border_role)
             .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(field_style.corner_radius));
         let bg_id = ctx.add(bg);

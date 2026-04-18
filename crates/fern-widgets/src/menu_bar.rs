@@ -131,37 +131,35 @@ struct MenuBarTrigger {
 
 impl Widget for MenuBarTrigger {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let menu_style = snapshot.components.menu;
-        let radius_control = snapshot.shape.radius_control;
+        let theme = ctx.theme();
+        let menu_style = theme.components.menu;
+        let radius_control = theme.shape.radius_control;
         let index = self.index;
         let menu_ctx = self.menu_ctx.clone();
 
-        // Background and text color derived from the open_index signal and
-        // the theme signal. zip() registers both upstream roots so either a
-        // menu-state change or a runtime theme switch refreshes the paint.
-        let bg_color = menu_ctx
-            .open_index
-            .zip(&theme_signal)
-            .map(move |(open, t)| {
-                if *open == Some(index) {
-                    t.colors.accent.with_alpha(0.12)
-                } else {
-                    Color::TRANSPARENT
-                }
-            });
+        // Background role: `AccentSubtle` when open (the Int UI token for
+        // highlighted menu-bar entries) or `Transparent` at rest. Replaces
+        // the previous hand-mixed `accent.with_alpha(0.12)` wash.
+        let bg_role = menu_ctx.open_index.map(move |open| {
+            if *open == Some(index) {
+                SurfaceRole::AccentSubtle
+            } else {
+                SurfaceRole::Transparent
+            }
+        });
 
-        let text_color = menu_ctx
-            .open_index
-            .zip(&theme_signal)
-            .map(move |(open, t)| {
-                if *open == Some(index) {
-                    t.colors.text_primary
-                } else {
-                    t.colors.text_primary.with_alpha(0.8)
-                }
-            });
+        // Text color can't collapse to a pure role: the at-rest state is
+        // `text_primary.with_alpha(0.8)` (dimmed primary — distinct from
+        // TextRole::Secondary, which is a different hue). Keep a direct
+        // `theme_signal` map for the blended case.
+        let theme_signal = ctx.theme_signal();
+        let text_color = menu_ctx.open_index.zip(&theme_signal).map(move |(open, t)| {
+            if *open == Some(index) {
+                t.colors.text_primary
+            } else {
+                t.colors.text_primary.with_alpha(0.8)
+            }
+        });
 
         let label = TextWidget::new_literal(&self.label)
             .style(TextStyleRole::Small)
@@ -174,7 +172,7 @@ impl Widget for MenuBarTrigger {
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
-            .bind_background(bg_color)
+            .bind_background(bg_role)
             .corner_radius(fern_tokens::CornerRadius::uniform(radius_control));
         let bg_id = ctx.add(bg);
 

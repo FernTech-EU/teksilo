@@ -29,7 +29,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, ColorTokens, CornerRadius};
+use fern_tokens::{CornerRadius, SurfaceRole, TextRole};
 
 use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
@@ -128,7 +128,6 @@ impl StepButton {
 
 impl Widget for StepButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
         let interaction = self.interaction.clone();
 
         // Register the enabled signal so the button re-renders (and
@@ -143,16 +142,14 @@ impl Widget for StepButton {
         );
 
         let enabled_signal_bg = self.enabled_signal.clone();
-        let bg_color = interaction
-            .zip(&theme_signal)
-            .map(move |(state, t)| resolve_bg(*state, enabled_signal_bg.get(), &t.colors));
+        let bg_role =
+            interaction.map(move |state| resolve_bg_role(*state, enabled_signal_bg.get()));
         let enabled_signal_icon = self.enabled_signal.clone();
-        let icon_color = interaction
-            .zip(&theme_signal)
-            .map(move |(state, t)| resolve_icon(*state, enabled_signal_icon.get(), &t.colors));
+        let icon_role =
+            interaction.map(move |state| resolve_icon_role(*state, enabled_signal_icon.get()));
 
         let bg = RectWidget::new()
-            .bind_background(bg_color)
+            .bind_background(bg_role)
             .corner_radius(self.corner_radius);
         let bg_id = ctx.add(bg);
 
@@ -162,7 +159,7 @@ impl Widget for StepButton {
             &mut self.icon,
             IconWidget::from_path(fern_canvas::Path::new(), 0.0),
         )
-        .bind_color(icon_color);
+        .bind_color(icon_role);
         let icon_id = ctx.add(Center::new().child(sized_icon));
 
         let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(icon_id));
@@ -346,22 +343,22 @@ impl Widget for StepButton {
     }
 }
 
-fn resolve_bg(state: InteractionState, enabled: bool, colors: &ColorTokens) -> Color {
+fn resolve_bg_role(state: InteractionState, enabled: bool) -> SurfaceRole {
     if !enabled {
-        return Color::TRANSPARENT;
+        return SurfaceRole::Transparent;
     }
     match state {
-        InteractionState::Pressed => colors.surface_pressed,
-        InteractionState::Hovered => colors.surface_hover,
-        _ => Color::TRANSPARENT,
+        InteractionState::Pressed => SurfaceRole::Pressed,
+        InteractionState::Hovered => SurfaceRole::Hover,
+        _ => SurfaceRole::Transparent,
     }
 }
 
-fn resolve_icon(_state: InteractionState, enabled: bool, colors: &ColorTokens) -> Color {
+fn resolve_icon_role(_state: InteractionState, enabled: bool) -> TextRole {
     if enabled {
-        colors.text_primary
+        TextRole::Primary
     } else {
-        colors.text_disabled
+        TextRole::Disabled
     }
 }
 

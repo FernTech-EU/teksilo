@@ -33,7 +33,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, ColorTokens, CornerRadius, SurfaceRole, TextRole};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
 
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::TextInputField;
@@ -227,18 +227,14 @@ impl TextInput {
 impl Widget for TextInput {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // TextInput is a heavy composite. We snapshot the theme once for
-        // static layout params (padding, border width, field height) and
-        // migrate leaf color reads to `theme_signal.map(...)` so the
-        // placeholder, clear-icon tint, and border color track runtime
-        // theme switches. Layout params stay frozen to the theme at the
-        // last rebuild — acceptable because they rarely differ between
-        // themes and the composite rebuilds on data changes (text,
-        // validation) that typically coincide with any theme-driven
-        // layout variation a user would notice.
-        let theme_signal = ctx.theme_signal();
-        let theme = theme_signal.get();
-        let colors = theme.colors.clone();
+        // static layout params (padding, border width, field height); the
+        // placeholder, clear-icon tint, and border/width are driven by
+        // roles and state signals, so theme switches repaint via the
+        // paint-time role resolver without riding through a zip here.
+        let theme = ctx.theme();
         let field_style = theme.components.text_field;
+        let field_border_width = field_style.border_width;
+        let focus_ring_width = theme.shape.focus_ring_width;
         let interaction = self.interaction.clone();
         let validation = self.validation.clone();
 
@@ -378,19 +374,18 @@ impl Widget for TextInput {
         // wrapping the control. A validation `Error` / `Warning` state
         // overrides the focus color so a user can't miss a broken field.
         let combined = interaction.zip(&validation);
-        let _ = colors; // still kept as a snapshot; reactive derives use theme_signal below
-        let border_color = derive_border_color(combined.clone(), theme_signal.clone());
-        let border_width = combined.zip(&theme_signal).map(|((state, _val), t)| {
+        let border_role = derive_border_role(combined.clone());
+        let border_width = combined.map(move |(state, _val)| {
             if *state == InteractionState::Focused {
-                t.shape.focus_ring_width
+                focus_ring_width
             } else {
-                t.components.text_field.border_width
+                field_border_width
             }
         });
 
         let bg = RectWidget::new()
-            .background(fern_tokens::SurfaceRole::Content)
-            .border_color(border_color)
+            .background(SurfaceRole::Content)
+            .border_color(border_role)
             .border_width(border_width)
             .corner_radius(CornerRadius::uniform(field_style.corner_radius));
         let bg_id = ctx.add(bg);
@@ -461,22 +456,19 @@ impl Widget for TextInput {
     }
 }
 
-/// Derive the border color from interaction state, validation state, and
-/// the live theme signal. Combining with `theme_signal` means runtime theme
-/// switches refresh the border alongside focus/error transitions — no
-/// rebuild required.
-fn derive_border_color(
+/// Derive the border role from interaction state and validation state.
+/// The paint-time resolver converts the role to a `Color` against the
+/// current theme, so runtime theme switches refresh the border without
+/// riding through a zip here.
+fn derive_border_role(
     combined: Signal<(InteractionState, ValidationState)>,
-    theme_signal: Signal<fern_tokens::Theme>,
-) -> Signal<Color> {
-    combined
-        .zip(&theme_signal)
-        .map(|((state, val), t)| match val {
-            ValidationState::Error(_) => t.colors.border_error,
-            ValidationState::Warning(_) => t.colors.border_warning,
-            _ => match *state {
-                InteractionState::Focused => t.colors.focus_ring,
-                _ => t.colors.border,
-            },
-        })
+) -> Signal<BorderRole> {
+    combined.map(|(state, val)| match val {
+        ValidationState::Error(_) => BorderRole::Error,
+        ValidationState::Warning(_) => BorderRole::Warning,
+        _ => match *state {
+            InteractionState::Focused => BorderRole::Focused,
+            _ => BorderRole::Default,
+        },
+    })
 }

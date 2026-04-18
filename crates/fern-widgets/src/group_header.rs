@@ -16,9 +16,10 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
+use fern_core::color_prop::ColorProp;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, TextStyle};
+use fern_tokens::{Color, TextRole, TextStyle};
 
 use crate::primitives::{Divider, Expand, HStack, TextWidget};
 
@@ -89,18 +90,20 @@ impl std::fmt::Debug for GroupHeader {
 
 impl Widget for GroupHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
         let style = self
             .style
             .clone()
-            .unwrap_or_else(|| theme_signal.get().typography.body.clone());
-        let color_override = self.color;
-        let color_signal =
-            theme_signal.map(move |t| color_override.unwrap_or(t.colors.text_primary));
+            .unwrap_or_else(|| ctx.theme().typography.body.clone());
+        // Caller override (literal Color) wins, otherwise the Primary
+        // text role so the label tracks runtime theme changes.
+        let color: ColorProp = match self.color {
+            Some(c) => c.into(),
+            None => TextRole::Primary.into(),
+        };
 
         let label = TextWidget::new_literal(&self.label)
             .style(style)
-            .bind_color(color_signal)
+            .bind_color(color)
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);

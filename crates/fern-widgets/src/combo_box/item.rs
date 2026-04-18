@@ -11,7 +11,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, SurfaceRole, TextStyleRole};
+use fern_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
@@ -31,7 +31,7 @@ pub(super) fn build_default_item(
 ) -> WidgetId {
     let text = TextWidget::new_literal(label)
         .style(TextStyleRole::Body)
-        .bind_color(ctx.theme_signal().map(|t| t.colors.text_primary))
+        .color(TextRole::Primary)
         .single_line()
         .a11y_hidden();
     let text_id = ctx.add(text);
