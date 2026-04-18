@@ -113,6 +113,7 @@ SwiftUI-style two-phase negotiation: parent proposes size → child responds wit
 ## Signals & Reactivity (V2)
 
 - `Signal<T>` — unified reactive type. `Signal::new(value)` for mutable, `signal.map(|v| ...)` for derived
+- Multi-source combinators: `a.zip(&b)` / `a.zip3(&b, &c)` on any `Signal<T: Clone>`; `a.and(&b)` / `a.or(&b)` / `s.not()` on `Signal<bool>`. Derived signals dirty-track **every** upstream root, so widgets binding to a composite predicate re-render on any source change.
 - `Prop<T>` — widget property type: `Prop::Static(T)` or `Prop::Bound(Signal<T>)`. Methods accept `impl Into<Prop<T>>`
 - `ObserverHandle` — RAII guard. Dropping removes the callback (no memory leak)
 - `BindingLevel::RepaintOnly` (color changes) vs `BindingLevel::Relayout` (size changes)

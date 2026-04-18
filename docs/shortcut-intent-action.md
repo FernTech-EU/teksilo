@@ -102,11 +102,40 @@ Key fields ([source](../crates/fern-core/src/shortcut.rs)):
 - **`enabled_when: Option<Signal<bool>>`** — reactive "is this
   shortcut live?" predicate. When `false`, the shortcut is treated as
   *if not registered* — the keystroke falls through to the focused
-  widget's normal `on_key` dispatch.
+  widget's normal `on_key` dispatch. Compose composite predicates with
+  the [`Signal<bool>` combinators](#composing-enabled_when-predicates)
+  (`and` / `or` / `not`) or [`Signal::zip`](../crates/fern-core/src/signal.rs)
+  for typed tuples.
 - **`propagate_when_disabled: bool`** — controls what happens when the
   matching `Action` is disabled: `true` (default) lets the intent
   continue bubbling; `false` consumes at that level ("owned but
   dormant").
+
+### Composing `enabled_when` predicates
+
+`enabled_when` takes any `Signal<bool>`, and `Signal` ships combinators
+for multi-source predicates that correctly dirty-track every upstream
+root:
+
+```rust
+let editor_focused: Signal<bool> = …;
+let readonly:       Signal<bool> = …;
+let in_editor:      Signal<bool> = …;
+
+// `focus && !readonly && in_editor` — each source registered independently
+// with the binding registry, so widgets observing `when` re-render on any flip.
+let when = editor_focused.and(&readonly.not()).and(&in_editor);
+
+Shortcut::new("edit.format.bold")
+    .primary(KeyStroke::ctrl(Key::B))
+    .enabled_when(when)
+    .build();
+```
+
+Available on `Signal<bool>`: `and`, `or`, `not`. Available on any
+`Signal<T: Clone>`: `zip(&Signal<U>) -> Signal<(T, U)>`,
+`zip3(&Signal<U>, &Signal<V>) -> Signal<(T, U, V)>`, and `map` for
+arbitrary projections. The same combinators work for `Action::enabled_when`.
 
 ---
 
@@ -509,6 +538,8 @@ impl Widget for Root {
 | Register app-level                         | `ctx.register_shortcut_global(shortcut)`                             |
 | Parametric payload                         | `.on_activate(\|ks, ctx\| AppIntent::X(…))`                          |
 | Disable reactively                         | `.enabled_when(signal)`                                              |
+| Composite predicate (AND/OR/NOT)           | `a.and(&b.not())`, `a.or(&b)`, `s.not()` on `Signal<bool>`           |
+| Tuple multi-source signal                  | `a.zip(&b)`, `a.zip3(&b, &c)`                                        |
 | Consume when disabled                      | `.propagate_when_disabled(false)`                                    |
 | Declare a handler                          | `Action::new("id").on_invoke(\|intent, ctx\| …)`                     |
 | Propagate after observing                  | `.on_invoke_with_response(\|i, c\| IntentResponse::Propagated)`      |

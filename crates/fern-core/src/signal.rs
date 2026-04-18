@@ -156,6 +156,21 @@ impl WeakAnimatedSignal {
     }
 }
 
+/// One upstream source a [`SignalKind::Derived`] signal depends on.
+///
+/// A single-source derived signal (the typical `map` case) carries one
+/// entry; multi-source derived signals (`zip`, `zip3`, `and`, `or`)
+/// carry one per observed mutable root. Dirty-tracking walks the whole
+/// vec: `is_dirty` is the OR, `clear_dirty` iterates all clears.
+#[derive(Clone)]
+struct DerivedSource {
+    dirty: Rc<dyn Fn() -> bool>,
+    clear: Rc<dyn Fn()>,
+    /// Stable identity of the upstream mutable root — used by
+    /// [`BindingRegistry`] to dedup repeated `bind_to` calls.
+    source_id: usize,
+}
+
 enum SignalKind<T> {
     Mutable {
         inner: Rc<RefCell<MutableInner<T>>>,
@@ -163,8 +178,10 @@ enum SignalKind<T> {
     },
     Derived {
         compute: Rc<dyn Fn() -> T>,
-        source_dirty: Rc<dyn Fn() -> bool>,
-        source_clear: Rc<dyn Fn()>,
+        /// The upstream mutable roots this derived signal depends on.
+        /// Typically one entry; `zip`/`zip3`/`and`/`or` produce many.
+        /// Deduped by `source_id` at construction.
+        sources: Vec<DerivedSource>,
     },
 }
 
@@ -333,99 +350,122 @@ impl<T: Clone + 'static> Signal<T> {
     /// Create a derived (read-only) signal whose value is computed from
     /// this signal. The closure runs lazily when the derived signal is read.
     pub fn map<U: Clone + 'static>(&self, f: impl Fn(&T) -> U + 'static) -> Signal<U> {
+        let compute = self.as_compute();
+        let sources = self.as_sources();
+        Signal {
+            kind: SignalKind::Derived {
+                compute: Rc::new(move || f(&compute())),
+                sources,
+            },
+        }
+    }
+
+    /// Zip this signal with another, producing a derived signal that
+    /// observes both upstream sources. The resulting signal is marked
+    /// dirty whenever *either* source flips, so widgets binding to it
+    /// correctly re-render on any input change.
+    ///
+    /// Combine with [`Signal::map`] for n-ary predicates:
+    ///
+    /// ```ignore
+    /// let composite = focus.zip(&readonly).map(|(f, r)| *f && !*r);
+    /// ```
+    pub fn zip<U: Clone + 'static>(&self, other: &Signal<U>) -> Signal<(T, U)> {
+        let a = self.as_compute();
+        let b = other.as_compute();
+        let mut sources = self.as_sources();
+        merge_sources(&mut sources, other.as_sources());
+        Signal {
+            kind: SignalKind::Derived {
+                compute: Rc::new(move || (a(), b())),
+                sources,
+            },
+        }
+    }
+
+    /// Zip three signals. See [`Signal::zip`].
+    pub fn zip3<U: Clone + 'static, V: Clone + 'static>(
+        &self,
+        b: &Signal<U>,
+        c: &Signal<V>,
+    ) -> Signal<(T, U, V)> {
+        let fa = self.as_compute();
+        let fb = b.as_compute();
+        let fc = c.as_compute();
+        let mut sources = self.as_sources();
+        merge_sources(&mut sources, b.as_sources());
+        merge_sources(&mut sources, c.as_sources());
+        Signal {
+            kind: SignalKind::Derived {
+                compute: Rc::new(move || (fa(), fb(), fc())),
+                sources,
+            },
+        }
+    }
+
+    /// Borrow a compute closure that reads this signal's current value.
+    /// For mutable signals this clones the inner cell's value; for
+    /// derived signals it clones the parent compute `Rc`.
+    fn as_compute(&self) -> Rc<dyn Fn() -> T> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
                 let source = inner.clone();
-                let dirty_source = inner.clone();
-                let clear_source = inner.clone();
-                Signal {
-                    kind: SignalKind::Derived {
-                        compute: Rc::new(move || {
-                            let guard = source.borrow();
-                            f(&guard.value)
-                        }),
-                        source_dirty: Rc::new(move || dirty_source.borrow().dirty),
-                        source_clear: Rc::new(move || clear_source.borrow_mut().dirty = false),
-                    },
-                }
+                Rc::new(move || source.borrow().value.clone())
             }
-            SignalKind::Derived {
-                compute,
-                source_dirty,
-                source_clear,
-            } => {
-                let parent_compute = compute.clone();
-                let sd = source_dirty.clone();
-                let sc = source_clear.clone();
-                Signal {
-                    kind: SignalKind::Derived {
-                        compute: Rc::new(move || {
-                            let val = parent_compute();
-                            f(&val)
-                        }),
-                        source_dirty: sd,
-                        source_clear: sc,
-                    },
-                }
-            }
+            SignalKind::Derived { compute, .. } => compute.clone(),
         }
     }
 
     /// Bind this signal to a widget at the given dirty-tracking level.
     ///
-    /// Idempotent per `(widget_id, source_id, kind)` tuple: a widget
-    /// that calls `bind_to` on the same signal twice in one build
-    /// doesn't get duplicate entries — the second call promotes the
-    /// existing entry's level if its priority is higher, otherwise
-    /// it's a no-op.
+    /// For a mutable or single-source derived signal this registers one
+    /// binding. For a multi-source derived signal (built via `zip` /
+    /// `zip3` / `and` / `or`) this registers one binding per observed
+    /// mutable root so dirty flips on *any* source correctly re-render
+    /// the widget.
+    ///
+    /// Idempotent per `(widget_id, source_id, bucket)` tuple: duplicate
+    /// calls collapse in the [`BindingRegistry`], promoting the level
+    /// if the incoming one has higher priority.
     pub fn bind_to(&self, widget_id: WidgetId, registry: &BindingRegistry, level: BindingLevel) {
-        let (is_dirty, clear_dirty) = self.dirty_fns();
-        let source_id = self.source_id();
-        if let (Some(is_dirty), Some(clear_dirty)) = (is_dirty, clear_dirty) {
+        for src in self.as_sources() {
             registry.register(Binding {
                 widget_id,
                 level,
-                is_dirty,
-                clear_dirty,
-                source_id,
+                is_dirty: src.dirty,
+                clear_dirty: src.clear,
+                source_id: src.source_id,
             });
         }
     }
 
-    /// Stable identity of the signal's source state, used by
-    /// [`BindingRegistry`] to dedup `bind_to` calls. Mutable signals
-    /// return the address of their shared `Rc<RefCell<Inner>>`;
-    /// derived signals return the address of their shared
-    /// `source_dirty` closure (which is itself cloned from the
-    /// source's dirty `Rc`, so sibling derived signals from the
-    /// same source share identity). Two signals with the same source
-    /// have the same `source_id` regardless of how many intermediate
-    /// derives sit between them.
-    pub fn source_id(&self) -> usize {
-        match &self.kind {
-            SignalKind::Mutable { inner, .. } => Rc::as_ptr(inner) as *const () as usize,
-            SignalKind::Derived { source_dirty, .. } => {
-                Rc::as_ptr(source_dirty) as *const () as usize
-            }
-        }
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn dirty_fns(&self) -> (Option<Rc<dyn Fn() -> bool>>, Option<Rc<dyn Fn()>>) {
+    /// Materialise this signal's upstream sources as a `Vec`. Mutable
+    /// signals yield one entry anchored on their inner `Rc`; derived
+    /// signals clone their existing sources vec.
+    fn as_sources(&self) -> Vec<DerivedSource> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
-                let dirty_inner = inner.clone();
-                let clear_inner = inner.clone();
-                (
-                    Some(Rc::new(move || dirty_inner.borrow().dirty)),
-                    Some(Rc::new(move || clear_inner.borrow_mut().dirty = false)),
-                )
+                let dirty_src = inner.clone();
+                let clear_src = inner.clone();
+                let source_id = Rc::as_ptr(inner) as *const () as usize;
+                vec![DerivedSource {
+                    dirty: Rc::new(move || dirty_src.borrow().dirty),
+                    clear: Rc::new(move || clear_src.borrow_mut().dirty = false),
+                    source_id,
+                }]
             }
-            SignalKind::Derived {
-                source_dirty,
-                source_clear,
-                ..
-            } => (Some(source_dirty.clone()), Some(source_clear.clone())),
+            SignalKind::Derived { sources, .. } => sources.clone(),
+        }
+    }
+}
+
+/// Extend `dst` with entries from `incoming`, deduping by `source_id`
+/// so the same mutable root is never registered twice in a combined
+/// derived signal (e.g. `a.zip(&a.map(...))`).
+fn merge_sources(dst: &mut Vec<DerivedSource>, incoming: Vec<DerivedSource>) {
+    for s in incoming {
+        if !dst.iter().any(|d| d.source_id == s.source_id) {
+            dst.push(s);
         }
     }
 }
@@ -438,15 +478,44 @@ impl<T: 'static> Signal<T> {
     pub fn is_dirty(&self) -> bool {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => inner.borrow().dirty,
-            SignalKind::Derived { source_dirty, .. } => source_dirty(),
+            SignalKind::Derived { sources, .. } => sources.iter().any(|s| (s.dirty)()),
         }
     }
 
     pub fn clear_dirty(&self) {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => inner.borrow_mut().dirty = false,
-            SignalKind::Derived { source_clear, .. } => source_clear(),
+            SignalKind::Derived { sources, .. } => {
+                for s in sources {
+                    (s.clear)();
+                }
+            }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Signal<bool> — boolean combinators for composite enabled_when predicates
+// ---------------------------------------------------------------------------
+
+impl Signal<bool> {
+    /// Logical AND of two boolean signals. The resulting derived signal
+    /// tracks both upstream sources and is marked dirty whenever either
+    /// changes (no short-circuit on the dirty side — semantic correctness
+    /// over micro-optimisation).
+    pub fn and(&self, other: &Signal<bool>) -> Signal<bool> {
+        self.zip(other).map(|(a, b)| *a && *b)
+    }
+
+    /// Logical OR of two boolean signals. Same dirty-tracking semantics
+    /// as [`Signal::and`].
+    pub fn or(&self, other: &Signal<bool>) -> Signal<bool> {
+        self.zip(other).map(|(a, b)| *a || *b)
+    }
+
+    /// Logical NOT of a boolean signal.
+    pub fn not(&self) -> Signal<bool> {
+        self.map(|b| !*b)
     }
 }
 
@@ -650,14 +719,9 @@ impl<T> Clone for Signal<T> {
                     inner: inner.clone(),
                     animation: animation.clone(),
                 },
-                SignalKind::Derived {
-                    compute,
-                    source_dirty,
-                    source_clear,
-                } => SignalKind::Derived {
+                SignalKind::Derived { compute, sources } => SignalKind::Derived {
                     compute: compute.clone(),
-                    source_dirty: source_dirty.clone(),
-                    source_clear: source_clear.clone(),
+                    sources: sources.clone(),
                 },
             },
         }
@@ -933,6 +997,174 @@ mod tests {
         let p2: Prop<i32> = 42.into();
         p2.register_if_bound(fake_id, &registry, BindingLevel::RepaintOnly);
         assert!(registry.flush_dirty().is_empty());
+    }
+
+    // --- Multi-source derived signals (zip / zip3 / and / or / not) -------
+
+    #[test]
+    fn zip_reads_both_sources() {
+        let a = Signal::new(1_i32);
+        let b = Signal::new("x".to_string());
+        let z = a.zip(&b);
+        assert_eq!(z.get(), (1, "x".to_string()));
+        a.set(7);
+        b.set("y".to_string());
+        assert_eq!(z.get(), (7, "y".to_string()));
+    }
+
+    #[test]
+    fn zip_is_dirty_when_either_source_dirty() {
+        let a = Signal::new(0_i32);
+        let b = Signal::new(0_i32);
+        let z = a.zip(&b);
+        assert!(!z.is_dirty());
+
+        a.set(1);
+        assert!(z.is_dirty(), "dirty from first source must propagate");
+        z.clear_dirty();
+        assert!(!z.is_dirty());
+
+        b.set(2);
+        assert!(z.is_dirty(), "dirty from second source must propagate");
+        z.clear_dirty();
+        assert!(!z.is_dirty());
+    }
+
+    #[test]
+    fn zip_clear_dirty_clears_all_sources() {
+        let a = Signal::new(0_i32);
+        let b = Signal::new(0_i32);
+        let z = a.zip(&b);
+        a.set(1);
+        b.set(1);
+        assert!(a.is_dirty() && b.is_dirty() && z.is_dirty());
+        z.clear_dirty();
+        assert!(!a.is_dirty());
+        assert!(!b.is_dirty());
+        assert!(!z.is_dirty());
+    }
+
+    #[test]
+    fn zip3_reads_three_sources() {
+        let a = Signal::new(1_i32);
+        let b = Signal::new(2_i32);
+        let c = Signal::new(3_i32);
+        let z = a.zip3(&b, &c);
+        assert_eq!(z.get(), (1, 2, 3));
+        c.set(30);
+        assert_eq!(z.get(), (1, 2, 30));
+    }
+
+    #[test]
+    fn zip3_is_dirty_when_any_source_dirty() {
+        let a = Signal::new(0_i32);
+        let b = Signal::new(0_i32);
+        let c = Signal::new(0_i32);
+        let z = a.zip3(&b, &c);
+
+        c.set(99);
+        assert!(z.is_dirty());
+        z.clear_dirty();
+
+        b.set(7);
+        assert!(z.is_dirty());
+        z.clear_dirty();
+
+        a.set(1);
+        assert!(z.is_dirty());
+    }
+
+    #[test]
+    fn and_reads_logical_and() {
+        let a = Signal::new(true);
+        let b = Signal::new(false);
+        let anded = a.and(&b);
+        assert!(!anded.get());
+        b.set(true);
+        assert!(anded.get());
+        a.set(false);
+        assert!(!anded.get());
+    }
+
+    #[test]
+    fn or_reads_logical_or() {
+        let a = Signal::new(false);
+        let b = Signal::new(false);
+        let ored = a.or(&b);
+        assert!(!ored.get());
+        a.set(true);
+        assert!(ored.get());
+        a.set(false);
+        b.set(true);
+        assert!(ored.get());
+    }
+
+    #[test]
+    fn not_reads_logical_negation() {
+        let a = Signal::new(true);
+        let n = a.not();
+        assert!(!n.get());
+        a.set(false);
+        assert!(n.get());
+    }
+
+    #[test]
+    fn combined_predicate_fires_binding_on_any_source() {
+        use crate::binding::BindingRegistry;
+        use slotmap::KeyData;
+
+        let reg = BindingRegistry::new();
+        let id: WidgetId = KeyData::from_ffi(1).into();
+
+        let focus = Signal::new(false);
+        let readonly = Signal::new(true);
+        let in_editor = Signal::new(true);
+
+        // Composite: focus && !readonly && in_editor — built with
+        // combinators, bound to a widget at Relayout level.
+        let when = focus.and(&readonly.not()).and(&in_editor);
+        when.bind_to(id, &reg, BindingLevel::Relayout);
+        assert!(!when.get(), "all sources start producing false");
+
+        // Flip any source — the registry must see a dirty binding.
+        focus.set(true);
+        let dirty = reg.flush_dirty();
+        assert_eq!(dirty.len(), 1, "focus change must fire the binding");
+        assert_eq!(dirty[0].0, id);
+
+        // Flip a different source — same widget, same outcome.
+        readonly.set(false);
+        let dirty = reg.flush_dirty();
+        assert_eq!(dirty.len(), 1, "readonly change must fire the binding");
+        // And the predicate now reads true.
+        assert!(when.get());
+
+        // Third source.
+        in_editor.set(false);
+        let dirty = reg.flush_dirty();
+        assert_eq!(dirty.len(), 1, "in_editor change must fire the binding");
+        assert!(!when.get());
+    }
+
+    #[test]
+    fn zip_dedups_identical_source() {
+        // `a.zip(&a.map(|v| v + 1))` shares one upstream mutable root.
+        // The derived should register exactly one binding per widget,
+        // not two.
+        use crate::binding::BindingRegistry;
+        use slotmap::KeyData;
+
+        let reg = BindingRegistry::new();
+        let id: WidgetId = KeyData::from_ffi(1).into();
+        let a = Signal::new(0_i32);
+        let derived = a.map(|v| v + 1);
+        let z = a.zip(&derived);
+        z.bind_to(id, &reg, BindingLevel::RepaintOnly);
+        assert_eq!(
+            reg.len(),
+            1,
+            "duplicate upstream root must register once, not twice"
+        );
     }
 
     #[test]

@@ -26,14 +26,38 @@ mod ir;
 mod lower;
 mod parse;
 
-/// Crate-root token stream used inside emitted code. Internal fern-*
-/// crates route through `::fern_core`; external apps route through
-/// `::fern_ui::core`. Unused in Phase 1 (no `IntoFernChild` routing
-/// yet); wired up in Phase 2 for `#{ expr }` escape.
+/// Crate-root token stream used inside emitted code. Internal fern-ui
+/// workspace library crates (which depend on `fern-core` directly but
+/// typically not on the `fern-ui` umbrella crate) route through
+/// `::fern_core`; everything else — including examples and external
+/// applications that depend on the umbrella crate — routes through
+/// `::fern_ui::core`.
+///
+/// The detection is an explicit allowlist rather than `starts_with("fern-")`
+/// because application crates commonly share the `fern-` prefix (e.g. a
+/// downstream `fern-app` binary), and the `fern-app` binary in this
+/// workspace itself is one such case. A bare prefix match silently routed
+/// them through `::fern_core`, which isn't a direct dependency from an
+/// external app and failed to resolve.
 #[allow(dead_code)]
 pub(crate) fn fern_core_root() -> TokenStream2 {
     let pkg = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
-    if pkg.starts_with("fern-") {
+    let is_internal = matches!(
+        pkg.as_str(),
+        "fern-core"
+            | "fern-canvas"
+            | "fern-tokens"
+            | "fern-widgets"
+            | "fern-data"
+            | "fern-text"
+            | "fern-i18n"
+            | "fern-i18n-macros"
+            | "fern-ui-macros"
+            | "fern-render"
+            | "fern-platform"
+            | "fern-resources"
+    );
+    if is_internal {
         quote!(::fern_core)
     } else {
         quote!(::fern_ui::core)
