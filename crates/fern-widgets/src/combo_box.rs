@@ -49,8 +49,8 @@ mod tests;
 
 use self::panel::DropdownPanel;
 use self::state::{
-    ComboBoxState, DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_bg, resolve_border,
-    resolve_index, resolve_text,
+    ComboBoxState, DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_bg_role,
+    resolve_border_role, resolve_index, resolve_text_role,
 };
 
 /// A dropdown selection widget.
@@ -333,9 +333,10 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for ComboBox<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let combo_style = snapshot.components.combo_box;
+        let theme = ctx.theme();
+        let combo_style = theme.components.combo_box;
+        let border_width = theme.shape.border_width;
+        let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -389,21 +390,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             None => placeholder.clone(),
         });
 
-        let bg_color = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| resolve_bg(*s, &t.colors));
-        let border_color = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| resolve_border(*s, &t.colors));
-        let text_color = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| resolve_text(*s, &t.colors));
+        let bg_role = interaction.map(|s| resolve_bg_role(*s));
+        let border_role = interaction.map(|s| resolve_border_role(*s));
+        let text_role = interaction.map(|s| resolve_text_role(*s));
 
         // Build trigger: [label | Spacer | divider | chevron]
         let label = TextWidget::new_literal("")
             .style(TextStyleRole::Body)
             .bind_text(label_text)
-            .bind_color(text_color)
+            .bind_color(text_role)
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);
@@ -411,18 +406,24 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // Divider between the selected-value area and the chevron,
         // matching the `SplitButton` visual pattern — a thin vertical
         // rule in the `border` token that visually separates the
-        // display region from the dropdown trigger indicator.
-        let divider_width_signal = theme_signal.map(|t| t.shape.border_width);
+        // display region from the dropdown trigger indicator. Width
+        // is snapshotted from the theme: Int UI's 1 dp border width
+        // does not change across themes, so a re-layout on theme
+        // switch is not required here.
         let divider_fill_id =
             ctx.add(RectWidget::new().background(fern_tokens::BorderRole::Default));
         let divider_id = ctx.add(
             crate::primitives::FixedSize::new()
-                .bind_width(divider_width_signal)
+                .bind_width(border_width)
                 .bind_height(combo_style.height * 0.6)
                 .child_id(divider_fill_id),
         );
 
-        let chevron_color = theme_signal.map(|t| t.colors.text_primary.with_alpha(0.5));
+        // Chevron color: `text_primary` at 50% alpha. No role maps to this
+        // blend, so we build a direct `Signal<Color>` from `theme_signal`.
+        let chevron_color = ctx
+            .theme_signal()
+            .map(|t| t.colors.text_primary.with_alpha(0.5));
         let chevron = IconWidget::chevron_down(12.0).bind_color(chevron_color);
         let chevron_id = ctx.add(chevron);
 
@@ -444,14 +445,14 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // Int UI focus convention: thicken the frame border to
         // `focus_ring_width` and recolor it to the accent on
         // focus, instead of wrapping in a separate ring.
-        let border_width_signal = interaction.zip(&theme_signal).map(|(s, t)| match *s {
-            ComboBoxState::Focused => t.shape.focus_ring_width,
-            _ => t.shape.border_width,
+        let border_width_signal = interaction.map(move |s| match *s {
+            ComboBoxState::Focused => focus_ring_width,
+            _ => border_width,
         });
 
         let bg = RectWidget::new()
-            .bind_background(bg_color)
-            .bind_border_color(border_color)
+            .bind_background(bg_role)
+            .bind_border_color(border_role)
             .bind_border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(combo_style.corner_radius));
         let bg_id = ctx.add(bg);

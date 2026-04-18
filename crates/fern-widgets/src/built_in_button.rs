@@ -44,7 +44,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, ColorTokens, CornerRadius};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
 
 use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
@@ -206,21 +206,29 @@ impl std::fmt::Debug for BuiltInButton {
 // The icon dims to text_secondary at rest, brightens to text_primary on
 // hover, and flashes accent on press.
 
-fn resolve_bg(state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_bg_role(state: InteractionState) -> SurfaceRole {
     match state {
-        InteractionState::Idle | InteractionState::Focused => Color::TRANSPARENT,
-        InteractionState::Hovered => colors.surface_hover,
-        InteractionState::Pressed => colors.surface_pressed,
-        InteractionState::Disabled => Color::TRANSPARENT,
+        InteractionState::Idle | InteractionState::Focused | InteractionState::Disabled => {
+            SurfaceRole::Transparent
+        }
+        InteractionState::Hovered => SurfaceRole::Hover,
+        InteractionState::Pressed => SurfaceRole::Pressed,
     }
 }
 
-fn resolve_icon_color(state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_icon_role(state: InteractionState) -> TextRole {
     match state {
-        InteractionState::Idle | InteractionState::Focused => colors.text_secondary,
-        InteractionState::Hovered => colors.text_primary,
-        InteractionState::Pressed => colors.accent,
-        InteractionState::Disabled => colors.text_disabled,
+        InteractionState::Idle | InteractionState::Focused => TextRole::Secondary,
+        InteractionState::Hovered => TextRole::Primary,
+        InteractionState::Pressed => TextRole::Accent,
+        InteractionState::Disabled => TextRole::Disabled,
+    }
+}
+
+fn resolve_border_role(state: InteractionState) -> BorderRole {
+    match state {
+        InteractionState::Focused => BorderRole::Focused,
+        _ => BorderRole::Transparent,
     }
 }
 
@@ -236,8 +244,8 @@ fn resolve_size(size: BuiltInButtonSize, style: &fern_tokens::IconButtonStyle) -
 
 impl fern_core::widget::Widget for BuiltInButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let ib_style = theme_signal.get().components.icon_button;
+        let ib_style = ctx.theme().components.icon_button;
+        let focus_ring_width = ctx.theme().shape.focus_ring_width;
         let enabled = self.enabled;
 
         // Interaction signal
@@ -266,14 +274,11 @@ impl fern_core::widget::Widget for BuiltInButton {
             );
         }
 
-        // Derived reactive colors — combine interaction state with theme
-        // signal so runtime theme switches re-derive the palette.
-        let bg_color = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| resolve_bg(*s, &t.colors));
-        let icon_color = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| resolve_icon_color(*s, &t.colors));
+        // Derived reactive roles — the interaction signal is the only
+        // upstream; the paint layer resolves roles against the current
+        // theme on every pass, so theme switches repaint for free.
+        let bg_role = interaction.map(|s| resolve_bg_role(*s));
+        let icon_role = interaction.map(|s| resolve_icon_role(*s));
 
         // Build the icon content
         let icon_content_id = if let Some(ref toggled) = self.toggled {
@@ -284,13 +289,13 @@ impl fern_core::widget::Widget for BuiltInButton {
                 IconWidget::from_path(Path::new(), 0.0),
             )
             .icon_size(ib_style.icon_size)
-            .bind_color(icon_color.clone());
+            .bind_color(icon_role.clone());
             let alt_icon = self
                 .toggled_icon
                 .take()
                 .unwrap_or_else(|| IconWidget::from_path(Path::new(), 0.0))
                 .icon_size(ib_style.icon_size)
-                .bind_color(icon_color);
+                .bind_color(icon_role);
             ctx.add(
                 Switcher::new(toggled_index)
                     .child(primary_icon)
@@ -303,7 +308,7 @@ impl fern_core::widget::Widget for BuiltInButton {
                 IconWidget::from_path(Path::new(), 0.0),
             )
             .icon_size(ib_style.icon_size)
-            .bind_color(icon_color);
+            .bind_color(icon_role);
             ctx.add(icon)
         };
 
@@ -313,22 +318,19 @@ impl fern_core::widget::Widget for BuiltInButton {
         // indicator. At rest there's no visible border (transparent
         // color + 0 dp width); on focus it snaps to an accent
         // `focus_ring_width` border. No external ring.
-        let border_color = interaction.zip(&theme_signal).map(|(s, t)| match *s {
-            InteractionState::Focused => t.colors.focus_ring,
-            _ => Color::TRANSPARENT,
-        });
-        let border_width = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| if *s == InteractionState::Focused {
-                t.shape.focus_ring_width
+        let border_role = interaction.map(|s| resolve_border_role(*s));
+        let border_width = interaction.map(move |s| {
+            if *s == InteractionState::Focused {
+                focus_ring_width
             } else {
                 0.0
-            });
+            }
+        });
 
         let bg_id = ctx.add(
             RectWidget::new()
-                .bind_background(bg_color)
-                .bind_border_color(border_color)
+                .bind_background(bg_role)
+                .bind_border_color(border_role)
                 .bind_border_width(border_width)
                 .corner_radius(CornerRadius::uniform(ib_style.corner_radius)),
         );

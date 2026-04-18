@@ -184,6 +184,16 @@ pub enum BorderRole {
     DividerStrong,
     /// Tooltip border.
     TooltipBorder,
+    /// Accent-colored border — for "selected but not focused" hollow
+    /// indicators (radio buttons, tab strips). Distinct from `Focused`:
+    /// a theme may tune `accent` and `border_focused` independently even
+    /// though the defaults converge.
+    Accent,
+    /// Disabled-accent border — matches `SurfaceRole::AccentDisabled` so
+    /// a disabled filled control (checkbox, radio, combo box) visibly
+    /// blends its border into its fill. Distinct from `Default` because
+    /// non-filled disabled widgets still use this as their outer ring.
+    AccentDisabled,
     /// Fully transparent border — paints nothing.
     Transparent,
 }
@@ -199,6 +209,8 @@ impl BorderRole {
             BorderRole::Divider => colors.divider,
             BorderRole::DividerStrong => colors.divider_strong,
             BorderRole::TooltipBorder => colors.tooltip_border,
+            BorderRole::Accent => colors.accent,
+            BorderRole::AccentDisabled => colors.accent_disabled,
             BorderRole::Transparent => Color::TRANSPARENT,
         }
     }

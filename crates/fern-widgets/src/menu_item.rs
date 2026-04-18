@@ -15,7 +15,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, TextStyleRole};
+use fern_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
@@ -251,37 +251,31 @@ impl std::fmt::Debug for MenuItem {
     }
 }
 
-fn resolve_bg(state: MenuItemState, hover: Color, pressed: Color) -> Color {
+fn resolve_bg_role(state: MenuItemState) -> SurfaceRole {
     match state {
-        MenuItemState::Idle | MenuItemState::Disabled => Color::TRANSPARENT,
-        MenuItemState::Hovered => hover,
-        MenuItemState::Pressed => pressed,
+        MenuItemState::Idle | MenuItemState::Disabled => SurfaceRole::Transparent,
+        MenuItemState::Hovered => SurfaceRole::Hover,
+        MenuItemState::Pressed => SurfaceRole::Pressed,
     }
 }
 
-fn resolve_text(state: MenuItemState, text_color: Color, disabled_color: Color) -> Color {
+fn resolve_text_role(state: MenuItemState) -> TextRole {
     match state {
-        MenuItemState::Disabled => disabled_color,
-        _ => text_color,
+        MenuItemState::Disabled => TextRole::Disabled,
+        _ => TextRole::Primary,
     }
 }
 
-fn resolve_shortcut(
-    state: MenuItemState,
-    shortcut_color: Color,
-    disabled_color: Color,
-) -> Color {
+fn resolve_shortcut_role(state: MenuItemState) -> TextRole {
     match state {
-        MenuItemState::Disabled => disabled_color,
-        _ => shortcut_color,
+        MenuItemState::Disabled => TextRole::Disabled,
+        _ => TextRole::TooltipShortcut,
     }
 }
 
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let menu_style = snapshot.components.menu;
+        let menu_style = ctx.theme().components.menu;
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -291,15 +285,8 @@ impl Widget for MenuItem {
         });
         self.interaction = interaction.clone();
 
-        // Background: use the Int UI surface_hover / surface_pressed tokens
-        // directly instead of a hand-mixed alpha wash. Tracks theme changes.
-        let bg_color = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| resolve_bg(*s, t.colors.surface_hover, t.colors.surface_pressed));
-
-        let text_color = interaction
-            .zip(&theme_signal)
-            .map(|(s, t)| resolve_text(*s, t.colors.text_primary, t.colors.text_disabled));
+        let bg_role = interaction.map(|s| resolve_bg_role(*s));
+        let text_role = interaction.map(|s| resolve_text_role(*s));
 
         // Row layout:
         //   [icon column][gap][label][Spacer][shortcut?][chevron column]
@@ -328,7 +315,7 @@ impl Widget for MenuItem {
 
         // Icon column — fixed width, optional IconWidget inside.
         let icon_child_id = if let Some(icon) = self.icon.take() {
-            ctx.add(icon.bind_color(text_color.clone()))
+            ctx.add(icon.bind_color(text_role.clone()))
         } else {
             ctx.add(Spacer::new())
         };
@@ -355,7 +342,7 @@ impl Widget for MenuItem {
         // Label
         let label = TextWidget::new_literal(&self.label)
             .style(TextStyleRole::Body)
-            .bind_color(text_color.clone())
+            .bind_color(text_role.clone())
             .single_line()
             .a11y_hidden();
         row = row.child(label);
@@ -402,12 +389,10 @@ impl Widget for MenuItem {
             );
             row = row.add_child(shortcut_gap);
 
-            let shortcut_color = interaction.zip(&theme_signal).map(|(s, t)| {
-                resolve_shortcut(*s, t.colors.tooltip_shortcut, t.colors.text_disabled)
-            });
+            let shortcut_role = interaction.map(|s| resolve_shortcut_role(*s));
             let shortcut = TextWidget::new_literal(shortcut_text)
                 .style(TextStyleRole::Body)
-                .bind_color(shortcut_color)
+                .bind_color(shortcut_role)
                 .single_line()
                 .a11y_hidden();
             row = row.child(shortcut);
@@ -428,7 +413,7 @@ impl Widget for MenuItem {
         // Chevron column — always reserved at `item_padding_horizontal`
         // width so submenu and regular items share the same trailing edge.
         let chevron_child_id = if submenu_content_id.is_some() {
-            ctx.add(IconWidget::chevron_right(12.0).bind_color(text_color.clone()))
+            ctx.add(IconWidget::chevron_right(12.0).bind_color(text_role.clone()))
         } else {
             ctx.add(Spacer::new())
         };
@@ -447,7 +432,7 @@ impl Widget for MenuItem {
         // padding is zero because the chevron column occupies that space.
         // Body text is 13 dp so that's ~5.5 dp top + 5.5 dp bottom.
         // Body size drives the vertical padding of the menu row.
-        let body_size = snapshot.typography.body.size;
+        let body_size = ctx.theme().typography.body.size;
         let pad_v = ((menu_style.item_height - body_size) * 0.5).max(0.0);
         let padding = Padding::new(
             pad_v,                              // top
@@ -459,7 +444,7 @@ impl Widget for MenuItem {
         let padding_id = ctx.add(padding);
 
         // Background rect
-        let rect = RectWidget::new().bind_background(bg_color);
+        let rect = RectWidget::new().bind_background(bg_role);
         let rect_id = ctx.add(rect);
 
         let zstack = ZStack::new().add_child(rect_id).add_child(padding_id);

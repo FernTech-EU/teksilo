@@ -11,7 +11,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, TextStyleRole};
+use fern_tokens::{BorderRole, TextRole, TextStyleRole};
 
 use crate::button::InteractionState;
 use fern_tokens::CornerRadius;
@@ -105,36 +105,42 @@ impl std::fmt::Debug for Link {
     }
 }
 
-fn resolve_link_color(state: InteractionState, colors: &fern_tokens::ColorTokens) -> Color {
+fn resolve_link_role(state: InteractionState) -> TextRole {
     match state {
-        InteractionState::Disabled => colors.text_disabled,
-        InteractionState::Hovered | InteractionState::Pressed => colors.text_link_hover,
-        InteractionState::Focused | InteractionState::Idle => colors.text_link,
+        InteractionState::Disabled => TextRole::Disabled,
+        InteractionState::Hovered | InteractionState::Pressed => TextRole::LinkHover,
+        InteractionState::Focused | InteractionState::Idle => TextRole::Link,
+    }
+}
+
+fn resolve_focus_border_role(state: InteractionState) -> BorderRole {
+    match state {
+        InteractionState::Focused => BorderRole::Focused,
+        _ => BorderRole::Transparent,
     }
 }
 
 impl Widget for Link {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
+        let theme = ctx.theme();
+        let link_corner_radius = theme.components.link.corner_radius;
+        let focus_ring_width = theme.shape.focus_ring_width;
+
         let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = Some(interaction.clone());
 
-        let text_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_link_color(*s, &t.colors));
-        let underline_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_link_color(*s, &t.colors));
+        let text_role = interaction.map(|s| resolve_link_role(*s));
+        let underline_role = interaction.map(|s| resolve_link_role(*s));
 
         let text = TextWidget::new_literal(&self.text)
             .style(TextStyleRole::Body)
-            .bind_color(text_color)
+            .bind_color(text_role)
             .single_line()
             .a11y_hidden();
         let text_id = ctx.add(text);
 
         // 1px underline below the text
-        let underline = RectWidget::new().bind_background(underline_color);
+        let underline = RectWidget::new().bind_background(underline_role);
         let underline_id = ctx.add(underline);
         let underline_sized = ctx.add(
             crate::primitives::FixedSize::new()
@@ -154,18 +160,14 @@ impl Widget for Link {
         // ring. Link has no visible rest-state border; the focus
         // state swaps in a `focus_ring_width` outline around the
         // text.
-        let focus_border_color = interaction.zip(&theme_signal).map(|(s, t)| match *s {
-            InteractionState::Focused => t.colors.focus_ring,
-            _ => Color::TRANSPARENT,
-        });
-        let focus_border_width = interaction.zip(&theme_signal).map(|(s, t)| match *s {
-            InteractionState::Focused => t.shape.focus_ring_width,
+        let focus_border_role = interaction.map(|s| resolve_focus_border_role(*s));
+        let focus_border_width = interaction.map(move |s| match *s {
+            InteractionState::Focused => focus_ring_width,
             _ => 0.0,
         });
-        let link_corner_radius = theme_signal.get().components.link.corner_radius;
         let focus_rect_id = ctx.add(
             RectWidget::new()
-                .bind_border_color(focus_border_color)
+                .bind_border_color(focus_border_role)
                 .bind_border_width(focus_border_width)
                 .corner_radius(CornerRadius::uniform(link_corner_radius)),
         );

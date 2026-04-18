@@ -15,7 +15,9 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, TextRole, TextStyleRole, VAlignment};
+use fern_tokens::{
+    BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment,
+};
 
 use crate::button::InteractionState;
 use crate::primitives::{FixedSize, HStack, MinSize, RectWidget, TextWidget, VStack, ZStack};
@@ -124,29 +126,42 @@ impl std::fmt::Debug for RadioButton {
     }
 }
 
-fn resolve_circle_border(
-    state: InteractionState,
-    selected: bool,
-    colors: &fern_tokens::ColorTokens,
-) -> Color {
+fn resolve_circle_border_role(state: InteractionState, selected: bool) -> BorderRole {
     // Focus wins: a keyboard-focused radio always draws the
     // accent ring, even when selected or disabled — it's the only
     // focus indicator (no external ring).
     match state {
-        InteractionState::Focused => colors.focus_ring,
-        InteractionState::Disabled => colors.accent_disabled,
-        _ if selected => colors.accent,
-        InteractionState::Hovered => colors.border_strong,
-        _ => colors.border,
+        InteractionState::Focused => BorderRole::Focused,
+        InteractionState::Disabled => BorderRole::AccentDisabled,
+        _ if selected => BorderRole::Accent,
+        InteractionState::Hovered => BorderRole::Strong,
+        _ => BorderRole::Default,
+    }
+}
+
+fn resolve_dot_role(state: InteractionState) -> SurfaceRole {
+    // Jewel renders the radio (and its disabled state) as a pre-baked
+    // SVG icon, so there is no canonical token for "disabled dot" to
+    // mirror. We pick `AccentDisabled` because the outer ring already
+    // uses it in the Disabled state, making the whole widget read as
+    // one desaturated-accent block. The previous mapping (`text_disabled`)
+    // left the dot a neutral gray against an accent-disabled ring — a
+    // two-color disabled state that was inconsistent with the rest of
+    // the widget chrome.
+    if state == InteractionState::Disabled {
+        SurfaceRole::AccentDisabled
+    } else {
+        SurfaceRole::Accent
     }
 }
 
 impl Widget for RadioButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let radio_style = snapshot.components.radio;
-        let radius_pill = snapshot.shape.radius_pill;
+        let theme = ctx.theme();
+        let radio_style = theme.components.radio;
+        let radius_pill = theme.shape.radius_pill;
+        let focus_ring_width = theme.shape.focus_ring_width;
+        let border_width = theme.shape.border_width;
         let selected = self.selected.clone();
         let value = self.value;
         let enabled = self.enabled;
@@ -158,22 +173,23 @@ impl Widget for RadioButton {
         });
         self.interaction = Some(interaction.clone());
 
-        // Border color depends on `interaction`, group selection, and theme.
-        // `zip3` registers all three upstream roots so the border refreshes
-        // on hover, sibling flips, and runtime theme switches.
+        // Border role depends on `interaction` and group selection. `zip`
+        // registers both upstream roots; the paint layer resolves the
+        // role against the current theme, so runtime theme switches
+        // refresh colors for free without a third zip.
         let is_selected = selected.map(move |s| *s == value);
-        let border_color = interaction
-            .zip3(&is_selected, &theme_signal)
-            .map(|(s, sel, t)| resolve_circle_border(*s, *sel, &t.colors));
+        let border_role = interaction
+            .zip(&is_selected)
+            .map(|(s, sel)| resolve_circle_border_role(*s, *sel));
         // Int UI focus convention: thicken the existing border to
-        // `focus_ring_width` and recolor it to the accent on
-        // focus, instead of wrapping the circle in a separate ring.
-        let border_width_signal = interaction.zip(&theme_signal).map(|(s, t)| match *s {
-            InteractionState::Focused => t.shape.focus_ring_width,
-            _ => t.shape.border_width,
+        // `focus_ring_width` on focus, instead of wrapping the circle
+        // in a separate ring.
+        let border_width_signal = interaction.map(move |s| match *s {
+            InteractionState::Focused => focus_ring_width,
+            _ => border_width,
         });
         let outer = RectWidget::new()
-            .bind_border_color(border_color)
+            .bind_border_color(border_role)
             .bind_border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(radius_pill));
         let outer_id = ctx.add(outer);
@@ -184,15 +200,9 @@ impl Widget for RadioButton {
                 .child_id(outer_id),
         );
 
-        let dot_color = interaction.zip(&theme_signal).map(|(s, t)| {
-            if *s == InteractionState::Disabled {
-                t.colors.text_disabled
-            } else {
-                t.colors.accent
-            }
-        });
+        let dot_role = interaction.map(|s| resolve_dot_role(*s));
         let dot = RectWidget::new()
-            .bind_background(dot_color)
+            .bind_background(dot_role)
             .corner_radius(CornerRadius::uniform(radius_pill));
         let dot_id = ctx.add(dot);
         let dot_sized = ctx.add(

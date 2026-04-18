@@ -34,7 +34,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, ColorTokens, CornerRadius};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
 
 use crate::button::{ButtonVariant, InteractionState};
 use crate::menu_item::MenuItem;
@@ -200,45 +200,45 @@ impl std::fmt::Debug for SplitButton {
 // and a SplitButton with the same variant look identical. If Button's
 // color tables ever diverge from these, update both sides.
 
-fn resolve_bg(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_bg_role(style: ButtonVariant, state: InteractionState) -> SurfaceRole {
     match (style, state) {
-        (ButtonVariant::Default, InteractionState::Disabled) => colors.accent_disabled,
-        (ButtonVariant::Default, InteractionState::Pressed) => colors.accent_pressed,
-        (ButtonVariant::Default, InteractionState::Hovered) => colors.accent_hover,
-        (ButtonVariant::Default, _) => colors.accent,
+        (ButtonVariant::Default, InteractionState::Disabled) => SurfaceRole::AccentDisabled,
+        (ButtonVariant::Default, InteractionState::Pressed) => SurfaceRole::AccentPressed,
+        (ButtonVariant::Default, InteractionState::Hovered) => SurfaceRole::AccentHover,
+        (ButtonVariant::Default, _) => SurfaceRole::Accent,
 
-        (ButtonVariant::Regular, InteractionState::Pressed) => colors.surface_pressed,
-        (ButtonVariant::Regular, InteractionState::Hovered) => colors.surface_hover,
-        (ButtonVariant::Regular, _) => colors.surface_main,
+        (ButtonVariant::Regular, InteractionState::Pressed) => SurfaceRole::Pressed,
+        (ButtonVariant::Regular, InteractionState::Hovered) => SurfaceRole::Hover,
+        (ButtonVariant::Regular, _) => SurfaceRole::Main,
 
-        (ButtonVariant::Flat, InteractionState::Pressed) => colors.surface_pressed,
-        (ButtonVariant::Flat, InteractionState::Hovered) => colors.surface_hover,
-        (ButtonVariant::Flat, _) => Color::TRANSPARENT,
+        (ButtonVariant::Flat, InteractionState::Pressed) => SurfaceRole::Pressed,
+        (ButtonVariant::Flat, InteractionState::Hovered) => SurfaceRole::Hover,
+        (ButtonVariant::Flat, _) => SurfaceRole::Transparent,
     }
 }
 
-fn resolve_text(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_text_role(style: ButtonVariant, state: InteractionState) -> TextRole {
     match (style, state) {
-        (ButtonVariant::Default, InteractionState::Disabled) => colors.text_disabled,
-        (ButtonVariant::Default, _) => colors.text_on_accent,
+        (ButtonVariant::Default, InteractionState::Disabled) => TextRole::Disabled,
+        (ButtonVariant::Default, _) => TextRole::OnAccent,
 
         (ButtonVariant::Regular | ButtonVariant::Flat, InteractionState::Disabled) => {
-            colors.text_disabled
+            TextRole::Disabled
         }
-        (ButtonVariant::Regular | ButtonVariant::Flat, _) => colors.text_primary,
+        (ButtonVariant::Regular | ButtonVariant::Flat, _) => TextRole::Primary,
     }
 }
 
-fn resolve_border(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_border_role(style: ButtonVariant, state: InteractionState) -> BorderRole {
     if state == InteractionState::Focused {
-        return colors.focus_ring;
+        return BorderRole::Focused;
     }
     match style {
-        ButtonVariant::Default | ButtonVariant::Flat => Color::TRANSPARENT,
+        ButtonVariant::Default | ButtonVariant::Flat => BorderRole::Transparent,
         ButtonVariant::Regular => match state {
-            InteractionState::Disabled => colors.border,
-            InteractionState::Hovered | InteractionState::Pressed => colors.border_strong,
-            _ => colors.border,
+            InteractionState::Disabled => BorderRole::Default,
+            InteractionState::Hovered | InteractionState::Pressed => BorderRole::Strong,
+            _ => BorderRole::Default,
         },
     }
 }
@@ -258,8 +258,9 @@ fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw
 
 impl Widget for SplitButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let sb_style = theme_signal.get().components.split_button;
+        let sb_style = ctx.theme().components.split_button;
+        let normal_bw = sb_style.border_width;
+        let focus_bw = ctx.theme().shape.focus_ring_width;
         let style = self.style;
         let enabled = self.enabled;
 
@@ -331,16 +332,10 @@ impl Widget for SplitButton {
         });
         self.interaction = interaction.clone();
 
-        // ---- Derived reactive colors ----
-        let bg_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_bg(style, *s, &t.colors));
-        let text_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_text(style, *s, &t.colors));
-        let border_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_border(style, *s, &t.colors));
+        // ---- Derived reactive roles ----
+        let bg_role = interaction.map(move |s| resolve_bg_role(style, *s));
+        let text_role = interaction.map(move |s| resolve_text_role(style, *s));
+        let border_role = interaction.map(move |s| resolve_border_role(style, *s));
         // `divider` is a RectWidget used as a 1-dp vertical rule; role-based
         // so it follows theme changes without an intermediate signal.
 
@@ -366,7 +361,7 @@ impl Widget for SplitButton {
         // ---- Main region subtree ----
         let label_widget = TextWidget::new_literal("")
             .bind_text(main_label_text)
-            .bind_color(text_color.clone())
+            .bind_color(text_role.clone())
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label_widget);
@@ -436,7 +431,7 @@ impl Widget for SplitButton {
 
         // ---- Chevron region ----
         let chevron_icon_id = ctx.add(
-            IconWidget::chevron_down(sb_style.chevron_icon_size).bind_color(text_color.clone()),
+            IconWidget::chevron_down(sb_style.chevron_icon_size).bind_color(text_role.clone()),
         );
         let chevron_centered_id = ctx.add(Center::new().child_id(chevron_icon_id));
 
@@ -512,19 +507,13 @@ impl Widget for SplitButton {
         // Border width reacts to focus state — thickens to the
         // accent `focus_ring_width` on focus, matching the Int UI
         // convention applied uniformly across all input widgets.
-        let border_width = interaction.zip(&theme_signal).map(move |(s, t)| {
-            resolve_border_width(
-                style,
-                *s,
-                t.components.split_button.border_width,
-                t.shape.focus_ring_width,
-            )
-        });
+        let border_width = interaction
+            .map(move |s| resolve_border_width(style, *s, normal_bw, focus_bw));
 
         // ---- Shared frame (single RectWidget behind the row) ----
         let bg_rect = RectWidget::new()
-            .bind_background(bg_color)
-            .bind_border_color(border_color)
+            .bind_background(bg_role)
+            .bind_border_color(border_role)
             .bind_border_width(border_width)
             .corner_radius(CornerRadius::uniform(sb_style.corner_radius));
         let bg_id = ctx.add(bg_rect);

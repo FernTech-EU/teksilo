@@ -10,12 +10,13 @@ use std::time::Duration;
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
+use fern_core::color_prop::ColorProp;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, Easing, TextStyle, TextStyleRole};
+use fern_tokens::{BorderRole, Color, Easing, TextRole, TextStyle, TextStyleRole};
 
 use crate::primitives::{HStack, IconWidget, MaxSize, Spacer, TextWidget, VStack};
 
@@ -107,32 +108,34 @@ impl Widget for Accordion {
             self.content_id = Some(ctx.add_boxed(pending));
         }
 
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let accordion_corner_radius = snapshot.components.accordion.corner_radius;
+        let theme = ctx.theme();
+        let accordion_corner_radius = theme.components.accordion.corner_radius;
+        let focus_ring_width = theme.shape.focus_ring_width;
         let expanded = self.expanded.clone();
         let is_expanded = expanded.get();
 
         // Keyboard focus state for focus ring
         let kb_focused = ctx.signal(false);
 
-        // Header foreground: caller override, otherwise theme primary.
-        let title_color = self.title_color;
-        let header_fg_signal =
-            theme_signal.map(move |t| title_color.unwrap_or(t.colors.text_primary));
+        // Header foreground: caller override (literal Color) wins, otherwise
+        // the Primary text role so the title tracks theme changes.
+        let header_fg: ColorProp = match self.title_color {
+            Some(c) => c.into(),
+            None => TextRole::Primary.into(),
+        };
 
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
         let chevron_down_id =
-            ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg_signal.clone()));
+            ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg.clone()));
         let chevron_right_id =
-            ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg_signal.clone()));
+            ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg.clone()));
         ctx.visible_when(chevron_down_id, expanded.clone());
         ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
         // Custom override wins; otherwise use the Body role so the title
         // tracks typography changes across themes.
-        let title_widget = TextWidget::new_literal(&self.title).bind_color(header_fg_signal);
+        let title_widget = TextWidget::new_literal(&self.title).bind_color(header_fg);
         let title_widget = if let Some(style) = self.title_style.clone() {
             title_widget.style(style)
         } else {
@@ -156,19 +159,18 @@ impl Widget for Accordion {
         // instead of a separate ring. Header has no visible
         // rest-state border, so this border is width-zero at
         // rest and snaps to `focus_ring_width` on focus.
-        let focus_border_color = kb_focused.zip(&theme_signal).map(|(f, t)| {
+        let focus_border_role = kb_focused.map(|f| {
             if *f {
-                t.colors.focus_ring
+                BorderRole::Focused
             } else {
-                fern_tokens::Color::TRANSPARENT
+                BorderRole::Transparent
             }
         });
-        let focus_border_width = kb_focused
-            .zip(&theme_signal)
-            .map(|(f, t)| if *f { t.shape.focus_ring_width } else { 0.0 });
+        let focus_border_width =
+            kb_focused.map(move |f| if *f { focus_ring_width } else { 0.0 });
         let focus_rect_id = ctx.add(
             crate::primitives::RectWidget::new()
-                .bind_border_color(focus_border_color)
+                .bind_border_color(focus_border_role)
                 .bind_border_width(focus_border_width)
                 .corner_radius(fern_tokens::CornerRadius::uniform(accordion_corner_radius)),
         );

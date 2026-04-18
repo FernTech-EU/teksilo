@@ -16,7 +16,9 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, TextRole, TextStyleRole, VAlignment};
+use fern_tokens::{
+    BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole, VAlignment,
+};
 
 use crate::button::InteractionState;
 use crate::primitives::{
@@ -227,37 +229,37 @@ impl std::fmt::Debug for Checkbox {
 // Color resolution
 // ---------------------------------------------------------------------------
 
-fn resolve_box_bg(
-    state: InteractionState,
-    check: CheckState,
-    colors: &fern_tokens::ColorTokens,
-) -> Color {
+fn resolve_box_bg_role(state: InteractionState, check: CheckState) -> SurfaceRole {
     match state {
-        InteractionState::Disabled => colors.accent_disabled,
+        InteractionState::Disabled => SurfaceRole::AccentDisabled,
         _ if check.is_filled() => match state {
-            InteractionState::Hovered => colors.accent_hover,
-            InteractionState::Pressed => colors.accent_pressed,
-            _ => colors.accent,
+            InteractionState::Hovered => SurfaceRole::AccentHover,
+            InteractionState::Pressed => SurfaceRole::AccentPressed,
+            _ => SurfaceRole::Accent,
         },
-        _ => Color::TRANSPARENT,
+        _ => SurfaceRole::Transparent,
     }
 }
 
-fn resolve_box_border(
-    state: InteractionState,
-    check: CheckState,
-    colors: &fern_tokens::ColorTokens,
-) -> Color {
+fn resolve_box_border_role(state: InteractionState, check: CheckState) -> BorderRole {
     // Focus wins over every other state: even a filled
     // (Checked / Indeterminate) checkbox still shows the accent
     // border when keyboard-focused, because that's the only
     // focus indicator — there is no external ring.
     match state {
-        InteractionState::Focused => colors.focus_ring,
-        InteractionState::Disabled => colors.accent_disabled,
-        _ if check.is_filled() => Color::TRANSPARENT,
-        InteractionState::Hovered => colors.border_strong,
-        _ => colors.border,
+        InteractionState::Focused => BorderRole::Focused,
+        InteractionState::Disabled => BorderRole::AccentDisabled,
+        _ if check.is_filled() => BorderRole::Transparent,
+        InteractionState::Hovered => BorderRole::Strong,
+        _ => BorderRole::Default,
+    }
+}
+
+fn resolve_icon_role(state: InteractionState) -> TextRole {
+    if state == InteractionState::Disabled {
+        TextRole::Disabled
+    } else {
+        TextRole::OnAccent
     }
 }
 
@@ -280,9 +282,10 @@ fn indeterminate_icon(size: f32) -> IconWidget {
 
 impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let cb_style = snapshot.components.checkbox;
+        let theme = ctx.theme();
+        let cb_style = theme.components.checkbox;
+        let focus_ring_width = theme.shape.focus_ring_width;
+        let border_width = theme.shape.border_width;
         let kind = self.kind.clone();
         let enabled = self.enabled;
 
@@ -293,31 +296,31 @@ impl Widget for Checkbox {
         });
         self.interaction = Some(interaction.clone());
 
-        // Derive box colors from interaction state AND check state AND theme.
-        // `zip3` registers all three upstream roots so the visuals refresh
-        // on click, external check-state flips, or runtime theme switches.
+        // Derive box roles from interaction state AND check state. `zip` on
+        // the two registers both upstream roots so the visuals refresh on
+        // click or external check-state flips; theme switches repaint via
+        // `mark_all_dirty` without needing a separate zip here.
         let check_state = kind.check_state_signal();
-        let bg_color = interaction
-            .zip3(&check_state, &theme_signal)
-            .map(|(s, cs, t)| resolve_box_bg(*s, *cs, &t.colors));
-        let border_color = interaction
-            .zip3(&check_state, &theme_signal)
-            .map(|(s, cs, t)| resolve_box_border(*s, *cs, &t.colors));
+        let bg_role = interaction
+            .zip(&check_state)
+            .map(|(s, cs)| resolve_box_bg_role(*s, *cs));
+        let border_role = interaction
+            .zip(&check_state)
+            .map(|(s, cs)| resolve_box_border_role(*s, *cs));
 
         let icon_size = cb_style.box_visual_size * 0.75;
 
         // Border width — Int UI focus convention: thicken the
-        // existing border to `focus_ring_width` and recolor it to
-        // the accent on focus, instead of wrapping the box in a
-        // separate ring.
-        let border_width_signal = interaction.zip(&theme_signal).map(|(s, t)| match *s {
-            InteractionState::Focused => t.shape.focus_ring_width,
-            _ => t.shape.border_width,
+        // existing border to `focus_ring_width` on focus, instead of
+        // wrapping the box in a separate ring.
+        let border_width_signal = interaction.map(move |s| match *s {
+            InteractionState::Focused => focus_ring_width,
+            _ => border_width,
         });
 
         let box_rect = RectWidget::new()
-            .bind_background(bg_color)
-            .bind_border_color(border_color)
+            .bind_background(bg_role)
+            .bind_border_color(border_role)
             .bind_border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(cb_style.corner_radius));
         let box_id = ctx.add(box_rect);
@@ -328,18 +331,12 @@ impl Widget for Checkbox {
                 .child_id(box_id),
         );
 
-        let icon_color = interaction.zip(&theme_signal).map(|(s, t)| {
-            if *s == InteractionState::Disabled {
-                t.colors.text_disabled
-            } else {
-                t.colors.text_on_accent
-            }
-        });
+        let icon_role = interaction.map(|s| resolve_icon_role(*s));
 
-        let checkmark = IconWidget::checkmark(icon_size).bind_color(icon_color.clone());
+        let checkmark = IconWidget::checkmark(icon_size).bind_color(icon_role.clone());
         let checkmark_id = ctx.add(checkmark);
 
-        let dash = indeterminate_icon(icon_size).bind_color(icon_color);
+        let dash = indeterminate_icon(icon_size).bind_color(icon_role);
         let dash_id = ctx.add(dash);
 
         match &self.kind {

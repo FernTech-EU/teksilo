@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use fern_core::ObserverHandle;
 use fern_data::{DataChange, ListDataSource, ListModel};
-use fern_tokens::Color;
+use fern_tokens::{BorderRole, SurfaceRole, TextRole};
 
 /// Default maximum number of items shown before the dropdown scrolls.
 pub(super) const DEFAULT_MAX_VISIBLE_ITEMS: usize = 8;
@@ -71,29 +71,32 @@ impl<T: Clone + 'static> ItemSource<T> {
     }
 }
 
-pub(super) fn resolve_bg(state: ComboBoxState, colors: &fern_tokens::ColorTokens) -> Color {
+pub(super) fn resolve_bg_role(state: ComboBoxState) -> SurfaceRole {
+    // Hovered/Open previously used a hand-mixed `text_primary.with_alpha(0.04)`
+    // wash, which is visually very close to the Int UI `surface_hover` token.
+    // We switch to the role so the widget stays theme-reactive without
+    // re-deriving the blend in every paint.
     match state {
-        ComboBoxState::Idle | ComboBoxState::Focused => colors.surface_main,
-        ComboBoxState::Hovered => colors.text_primary.with_alpha(0.04),
-        ComboBoxState::Open => colors.text_primary.with_alpha(0.04),
-        ComboBoxState::Disabled => colors.accent_disabled,
+        ComboBoxState::Idle | ComboBoxState::Focused => SurfaceRole::Main,
+        ComboBoxState::Hovered | ComboBoxState::Open => SurfaceRole::Hover,
+        ComboBoxState::Disabled => SurfaceRole::AccentDisabled,
     }
 }
 
-pub(super) fn resolve_border(state: ComboBoxState, colors: &fern_tokens::ColorTokens) -> Color {
+pub(super) fn resolve_border_role(state: ComboBoxState) -> BorderRole {
     // Int UI convention: the border thickens and switches to the
     // accent color on focus. There is no separate ring.
     match state {
-        ComboBoxState::Focused => colors.focus_ring,
-        ComboBoxState::Disabled => colors.accent_disabled,
-        _ => colors.border,
+        ComboBoxState::Focused => BorderRole::Focused,
+        ComboBoxState::Disabled => BorderRole::AccentDisabled,
+        _ => BorderRole::Default,
     }
 }
 
-pub(super) fn resolve_text(state: ComboBoxState, colors: &fern_tokens::ColorTokens) -> Color {
+pub(super) fn resolve_text_role(state: ComboBoxState) -> TextRole {
     match state {
-        ComboBoxState::Disabled => colors.text_disabled,
-        _ => colors.text_primary,
+        ComboBoxState::Disabled => TextRole::Disabled,
+        _ => TextRole::Primary,
     }
 }
 
