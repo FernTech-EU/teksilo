@@ -33,7 +33,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, ColorTokens, CornerRadius};
+use fern_tokens::{Color, ColorTokens, CornerRadius, SurfaceRole, TextRole};
 
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::TextInputField;
@@ -292,7 +292,7 @@ impl Widget for TextInput {
         // so it wins hit-testing (ZStack tests children in reverse order).
         let text_column_id = if !self.placeholder.is_empty() {
             let ph = TextWidget::new(self.placeholder.clone())
-                .bind_color(theme_signal.map(|t| t.colors.text_secondary))
+                .color(TextRole::Secondary)
                 .a11y_hidden();
             let ph_id = ctx.add(
                 Expand::new().fills_stack().child(
@@ -332,7 +332,7 @@ impl Widget for TextInput {
         if self.show_clear_button {
             let icon = (crate::built_in_button::BuiltInIcons::global().clear)()
                 .icon_size(12.0)
-                .bind_color(theme_signal.map(|t| t.colors.text_secondary));
+                .color(TextRole::Secondary);
             let text_for_clear = self.text.clone();
             let clear_id = ctx.add(
                 MinSize::new(16.0, 16.0)

@@ -20,7 +20,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::primitives::{Padding, RectWidget, VStack, ZStack};
 
@@ -452,8 +452,8 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
 
         // Dropdown panel — same surface treatment as MenuList (raised + popup radius)
         let bg = RectWidget::new()
-            .bind_background(theme_signal.map(|t| t.colors.surface_raised))
-            .bind_border_color(theme_signal.map(|t| t.colors.border))
+            .background(SurfaceRole::Raised)
+            .border_color(BorderRole::Default)
             .bind_border_width(menu_style.popup_border_width)
             .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);

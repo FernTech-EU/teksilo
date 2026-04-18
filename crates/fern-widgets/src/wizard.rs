@@ -14,6 +14,7 @@ use crate::button::{Button, ButtonVariant};
 use crate::dialog::ModalContainer;
 use crate::overlay_trigger::OverlayTrigger;
 use crate::primitives::{Divider, HStack, Spacer, Switcher, TextWidget, VStack};
+use fern_tokens::{TextRole};
 
 const DEFAULT_WIZARD_WIDTH: u32 = 640;
 const DEFAULT_WIZARD_HEIGHT: u32 = 420;
@@ -202,14 +203,14 @@ impl Widget for WizardHeader {
             TextWidget::new_literal("")
                 .bind_text(progress)
                 .style(typography_small)
-                .bind_color(theme_signal.map(|t| t.colors.text_secondary))
+                .color(TextRole::Secondary)
                 .single_line(),
         );
         let title_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(title)
                 .style(typography_body_bold)
-                .bind_color(theme_signal.map(|t| t.colors.text_primary))
+                .color(TextRole::Primary)
                 .single_line(),
         );
         // `supporting_text` wraps naturally — it's the caller's
@@ -218,7 +219,7 @@ impl Widget for WizardHeader {
             TextWidget::new_literal("")
                 .bind_text(supporting_text)
                 .style(typography_body)
-                .bind_color(theme_signal.map(|t| t.colors.text_secondary)),
+                .color(TextRole::Secondary),
         );
         ctx.visible_when(supporting_id, show_supporting);
 

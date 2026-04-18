@@ -8,7 +8,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
+use fern_tokens::{CornerRadius, TextRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
@@ -293,7 +293,7 @@ impl Widget for DialogContent {
                 header = header.child(
                     TextWidget::new_literal(title)
                         .style(typography_body_bold)
-                        .bind_color(theme_signal.map(|t| t.colors.text_primary))
+                        .color(TextRole::Primary)
                         .single_line(),
                 );
             }
@@ -301,7 +301,7 @@ impl Widget for DialogContent {
                 header = header.child(
                     TextWidget::new_literal(text)
                         .style(typography_body)
-                        .bind_color(theme_signal.map(|t| t.colors.text_secondary)),
+                        .color(TextRole::Secondary),
                 );
             }
             let header_id = ctx.add(header);

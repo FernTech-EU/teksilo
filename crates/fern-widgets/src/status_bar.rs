@@ -8,6 +8,7 @@ use fern_core::widget_id::WidgetId;
 
 use crate::Panel;
 use crate::primitives::HStack;
+use fern_tokens::{SurfaceRole};
 
 /// A status bar for displaying information at the bottom of a window.
 pub struct StatusBar {
@@ -75,7 +76,7 @@ impl Widget for StatusBar {
         let row_id = ctx.add(row);
         let root = ctx.add(
             Panel::new()
-                .background(theme_signal.map(|t| t.colors.surface_sunken))
+                .background(SurfaceRole::Sunken)
                 .padding(spacing)
                 .child_id(row_id),
         );

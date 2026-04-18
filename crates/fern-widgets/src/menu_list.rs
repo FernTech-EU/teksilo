@@ -13,7 +13,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+use fern_tokens::{BorderRole, Color, CornerRadius, SurfaceRole};
 
 use crate::primitives::{Padding, RectWidget, VStack, ZStack};
 
@@ -240,8 +240,8 @@ impl Widget for MenuList {
         // Themed surface background — Int UI menus use the popup radius (8 dp)
         // and a 1 dp border on the raised surface.
         let bg = RectWidget::new()
-            .bind_background(theme_signal.map(|t| t.colors.surface_raised))
-            .bind_border_color(theme_signal.map(|t| t.colors.border))
+            .background(SurfaceRole::Raised)
+            .border_color(BorderRole::Default)
             .bind_border_width(menu_style.popup_border_width)
             .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);

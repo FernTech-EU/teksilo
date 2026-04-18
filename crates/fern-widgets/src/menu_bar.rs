@@ -27,7 +27,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::Color;
+use fern_tokens::{Color, SurfaceRole};
 
 use crate::menu_context::MenuContext;
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack};
@@ -454,7 +454,7 @@ impl Widget for MenuBar {
         let row_id = ctx.add(row);
 
         let bg = RectWidget::new()
-            .bind_background(theme_signal.map(|t| t.colors.surface_main))
+            .background(SurfaceRole::Main)
             .bind_border_color(theme_signal.map(|t| t.colors.border.with_alpha(0.2)))
             .bind_border_width(0.0_f32);
         let bg_id = ctx.add(bg);

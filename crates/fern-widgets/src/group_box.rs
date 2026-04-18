@@ -17,6 +17,7 @@ use fern_core::widget_id::WidgetId;
 
 use crate::Checkbox;
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
+use fern_tokens::{TextRole};
 
 pub struct GroupBox {
     title: String,
@@ -87,7 +88,7 @@ impl Widget for GroupBox {
 
         let title_label = TextWidget::new_literal(&self.title)
             .style(typography_body_bold)
-            .bind_color(theme_signal.map(|t| t.colors.text_primary))
+            .color(TextRole::Primary)
             .single_line()
             .a11y_hidden();
 

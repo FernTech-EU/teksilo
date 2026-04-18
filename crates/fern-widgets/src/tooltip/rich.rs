@@ -40,7 +40,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
 use fern_core::widget_id::WidgetId;
 use fern_i18n::LocalizedString;
-use fern_tokens::CornerRadius;
+use fern_tokens::{CornerRadius, TextRole};
 
 use crate::accordion::Accordion;
 use crate::primitives::{Grid, Padding, Spacer, TextWidget, TrackSize, VStack};
@@ -253,7 +253,7 @@ impl Widget for RichTooltipWidget {
         // body TextWidget would duplicate it as a child Label node.
         let body_widget = TextWidget::new_literal(body_source)
             .style(theme.typography.small.clone())
-            .bind_color(theme_signal.map(|t| t.colors.tooltip_text))
+            .color(TextRole::TooltipText)
             .markup(true)
             .on_link_click(make_link_click_handler(nested_map.clone(), self_id))
             .a11y_hidden();
@@ -262,7 +262,7 @@ impl Widget for RichTooltipWidget {
         let header: WidgetId = if let Some(shortcut) = shortcut_text {
             let shortcut_widget = TextWidget::new_literal(shortcut)
                 .style(theme.typography.small.clone())
-                .bind_color(theme_signal.map(|t| t.colors.tooltip_shortcut))
+                .color(TextRole::TooltipShortcut)
                 .single_line()
                 .a11y_hidden();
             let shortcut_id = ctx.add(shortcut_widget);
@@ -307,7 +307,7 @@ impl Widget for RichTooltipWidget {
         let footer_left: WidgetId = if let Some(more_text) = more_source {
             let more_widget = TextWidget::new_literal(more_text)
                 .style(theme.typography.small.clone())
-                .bind_color(theme_signal.map(|t| t.colors.tooltip_text))
+                .color(TextRole::TooltipText)
                 .markup(true)
                 .on_link_click(make_link_click_handler(nested_map.clone(), self_id));
             let expanded = ctx.signal(false);

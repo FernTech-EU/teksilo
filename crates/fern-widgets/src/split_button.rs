@@ -341,7 +341,8 @@ impl Widget for SplitButton {
         let border_color = interaction
             .zip(&theme_signal)
             .map(move |(s, t)| resolve_border(style, *s, &t.colors));
-        let divider_color_signal = theme_signal.map(|t| t.colors.border);
+        // `divider` is a RectWidget used as a 1-dp vertical rule; role-based
+        // so it follows theme changes without an intermediate signal.
 
         // ---- Main-region label bound to `selected` ----
         let main_label_text = {
@@ -424,7 +425,8 @@ impl Widget for SplitButton {
         }
 
         // ---- Divider between main and chevron regions ----
-        let divider_fill_id = ctx.add(RectWidget::new().bind_background(divider_color_signal));
+        let divider_fill_id =
+            ctx.add(RectWidget::new().background(fern_tokens::BorderRole::Default));
         let divider_id = ctx.add(
             FixedSize::new()
                 .bind_width(sb_style.divider_width)

@@ -15,7 +15,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, VAlignment};
+use fern_tokens::{Color, CornerRadius, TextRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::primitives::{FixedSize, HStack, MinSize, RectWidget, TextWidget, VStack, ZStack};
@@ -216,7 +216,7 @@ impl Widget for RadioButton {
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
                 .style(typography_body)
-                .bind_color(theme_signal.map(|t| t.colors.text_primary))
+                .color(TextRole::Primary)
                 .single_line()
                 .a11y_hidden();
             let label_id = ctx.add(label_widget);
@@ -224,7 +224,7 @@ impl Widget for RadioButton {
             let label_column_id = if let Some(ref caption) = self.caption {
                 let caption_widget = TextWidget::new_literal(caption)
                     .style(typography_small)
-                    .bind_color(theme_signal.map(|t| t.colors.text_secondary))
+                    .color(TextRole::Secondary)
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
                 ctx.add(

@@ -413,9 +413,9 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // matching the `SplitButton` visual pattern — a thin vertical
         // rule in the `border` token that visually separates the
         // display region from the dropdown trigger indicator.
-        let divider_bg = theme_signal.map(|t| t.colors.border);
         let divider_width_signal = theme_signal.map(|t| t.shape.border_width);
-        let divider_fill_id = ctx.add(RectWidget::new().bind_background(divider_bg));
+        let divider_fill_id =
+            ctx.add(RectWidget::new().background(fern_tokens::BorderRole::Default));
         let divider_id = ctx.add(
             crate::primitives::FixedSize::new()
                 .bind_width(divider_width_signal)
