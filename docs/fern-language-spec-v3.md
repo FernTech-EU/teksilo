@@ -113,7 +113,7 @@ Naming a widget binds its `WidgetId` to a local so it can be referenced later. B
 fern!(ctx =>
     VStack {
         open_btn = Button("Open") {
-            on_activate: Cmd::Open
+            on_activate_fn: |ctx| ctx.send_intent(AppIntent::Open)
         }
         TextWidget("Status") {
             linked_to: open_btn
@@ -127,7 +127,7 @@ Desugars to:
 ```rust
 {
     let open_btn: WidgetId = ctx.add(
-        Button::new("Open").on_activate(Cmd::Open)
+        Button::new("Open").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Open))
     );
     ctx.add(
         VStack::new()
@@ -285,17 +285,17 @@ Handler attachment is a property. The grammar does not distinguish handlers from
 
 ```rust
 Button("Click") {
-    on_activate: Cmd::Submit
+    on_activate_fn: |ctx| ctx.send_intent(AppIntent::Submit)
 }
 
 Button("Click") {
-    on_tap: |_, ctx| ctx.emit(Cmd::Submit)
+    on_tap: |_, ctx| ctx.send_intent(AppIntent::Submit)
 }
 
 Button("Click") {
     on_tap: move |_, ctx| {
         if some_signal.get() > 0 {
-            ctx.emit(Cmd::Submit);
+            ctx.send_intent(AppIntent::Submit);
         }
     }
 }
@@ -365,7 +365,7 @@ Scrolling: ScrollArea (post-refactor; see Appendix A).
 VStack {
     spacing: 12.0
     TextWidget("Hello")
-    Button("Click") { on_activate: Cmd::Go }
+    Button("Click") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Go) }
 }
 ```
 
@@ -398,7 +398,7 @@ Card {
         TextWidget("Line one")
         TextWidget("Line two")
     }
-    footer: Button("OK") { on_activate: Cmd::Ok }
+    footer: Button("OK") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Ok) }
     padding: 16.0
 }
 ```
@@ -428,7 +428,7 @@ VStack {
     if is_logged_in {
         ProfileCard(user.clone())
     } else {
-        Button("Sign in") { on_activate: Cmd::SignIn }
+        Button("Sign in") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::SignIn) }
     }
 }
 
@@ -468,7 +468,7 @@ VStack {
         let id = item.id;
         let title = item.title.clone();
         ListItem(title) {
-            on_tap: move |_, ctx| ctx.emit(Cmd::Select(id))
+            on_tap: move |_, ctx| ctx.send_intent(AppIntent::Select(id))
         }
     }
 }
@@ -480,7 +480,7 @@ VStack::new()
         let id = item.id;
         let title = item.title.clone();
         ListItem::new(title)
-            .on_tap(move |_, ctx| ctx.emit(Cmd::Select(id)))
+            .on_tap(move |_, ctx| ctx.send_intent(AppIntent::Select(id)))
     }))
 ```
 
@@ -649,7 +649,7 @@ Source:
     tree.add(
         Button::new_literal("Click Me")
             .style(ButtonVariant::Default)
-            .on_activate(DemoCmd::ButtonClicked)
+            .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ButtonClicked))
             .tooltip_literal("This is a simple button. Click it to see a message in the console."),
     )
 })
@@ -661,7 +661,7 @@ With `fern!`:
 .root(|tree| fern!(tree =>
     Button::new_literal("Click Me") {
         style: ButtonVariant::Default
-        on_activate: DemoCmd::ButtonClicked
+        on_activate_fn: |ctx| ctx.send_intent(AppIntent::ButtonClicked)
         tooltip_literal: "This is a simple button. Click it to see a message in the console."
     }
 ))
@@ -689,7 +689,7 @@ let root = ctx.add(
                     .child(
                         Button::new_literal("Toggle Dark Mode")
                             .style(ButtonVariant::Regular)
-                            .on_activate(Cmd::ToggleDarkMode),
+                            .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ToggleDarkMode)),
                     ),
             ),
     ),
@@ -711,7 +711,7 @@ let root = fern!(ctx =>
                 Spacer
                 Button::new_literal("Toggle Dark Mode") {
                     style: ButtonVariant::Regular
-                    on_activate: Cmd::ToggleDarkMode
+                    on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleDarkMode)
                 }
             }
         }
@@ -790,7 +790,7 @@ TitleBar::new(host)
             .style(theme.typography.small.clone())
             .color(theme.colors.text_secondary),
     )
-    .close_action(|ctx| ctx.emit(DemoCmd::Close))
+    .close_action(|ctx| ctx.close_window())
 ```
 
 With `fern!`:
@@ -809,7 +809,7 @@ fern!(
             style: theme.typography.small.clone()
             color: theme.colors.text_secondary
         }
-        close_action: |ctx| ctx.emit(DemoCmd::Close)
+        close_action: |ctx| ctx.close_window()
     }
 )
 ```
@@ -838,7 +838,7 @@ let trailing = HStack::new()
     .child(
         Button::new_literal("Toggle Theme")
             .style(ButtonVariant::Flat)
-            .on_activate(Cmd::ToggleTheme),
+            .on_activate_fn(|ctx| ctx.send_intent(AppIntent::ToggleTheme)),
     );
 
 let tabs = ctx.add(
@@ -874,7 +874,7 @@ let trailing = fern!(
         }
         Button::new_literal("Toggle Theme") {
             style: ButtonVariant::Flat
-            on_activate: Cmd::ToggleTheme
+            on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleTheme)
         }
     }
 );
@@ -1104,15 +1104,15 @@ let root = fern!(ctx =>
                 }
                 Button(tr!(lang_english())) {
                     style: ButtonVariant::Regular
-                    on_activate: LangCmd::SetEnglish
+                    on_activate_fn: |ctx| ctx.send_intent(AppIntent::SetEnglish)
                 }
                 Button(tr!(lang_french())) {
                     style: ButtonVariant::Regular
-                    on_activate: LangCmd::SetFrench
+                    on_activate_fn: |ctx| ctx.send_intent(AppIntent::SetFrench)
                 }
                 Button(tr!(lang_arabic())) {
                     style: ButtonVariant::Regular
-                    on_activate: LangCmd::SetArabic
+                    on_activate_fn: |ctx| ctx.send_intent(AppIntent::SetArabic)
                 }
             }
             HStack {
@@ -1257,7 +1257,7 @@ impl Widget for App {
                 }
                 Button(tr!(add_item_appcommand_button())) {
                     style: ButtonVariant::Default
-                    on_activate: Cmd::AddItem
+                    on_activate_fn: |ctx| ctx.send_intent(AppIntent::AddItem)
                 }
                 TextWidget(tr!(add_item_label())) {
                     bind_text: item_label_for_bind
@@ -1266,7 +1266,7 @@ impl Widget for App {
                 }
                 Button(tr!(toggle_dark_mode_button())) {
                     style: ButtonVariant::Regular
-                    on_activate: Cmd::ToggleDarkMode
+                    on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleDarkMode)
                 }
                 Expand { fills_stack }
                 StatusBar {
@@ -1308,7 +1308,7 @@ let card = Card::new()
                     .on_tap(move |_, ctx| ctx.focus(title_id)),
             ),
     )
-    .footer(Button::new("Save").on_activate(Cmd::SaveTitle))
+    .footer(Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::SaveTitle)))
     .padding(16.0);
 ```
 
@@ -1328,7 +1328,7 @@ fern!(
                 on_tap: move |_, ctx| ctx.focus(title)
             }
         }
-        footer: Button("Save") { on_activate: Cmd::SaveTitle }
+        footer: Button("Save") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::SaveTitle) }
         padding: 16.0
     }
 )

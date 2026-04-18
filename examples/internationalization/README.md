@@ -18,7 +18,7 @@ and the direction note at the top updates accordingly.
 - Zero-arg and arg-bearing messages (`tr!(greeting(name = name))`)
 - Three compiled-in locales (`en-US`, `fr-FR`, `ar-SA`)
 - RTL layout flip via `rtl_from_locale` + `HAlignment::resolve(rtl)`
-- `CommandContext::set_locale(...)` broadcasting to every tree
+- `EventContext::set_locale(...)` broadcasting to every tree
 - `fern_widgets::framework_locales()` registration so a11y strings
   like *Dialog* and *Status* are available in fr-FR (Phase E / Step 4)
 
@@ -81,8 +81,8 @@ Editing either file reloads that locale's bundle independently.
 
 - **Same-locale reloads only.** The watcher never changes the active
   locale or layout direction. Switching from French to Arabic still
-  goes through the language selector (which emits a `LangCmd` →
-  `CommandContext::set_locale` → composite rebuild). Hot-reload is
+  goes through the language selector (button `on_activate_fn` →
+  `EventContext::set_locale` → composite rebuild). Hot-reload is
   purely for content changes within a locale.
 - **File must exist at startup.** If a path is missing, the watcher
   logs and skips that entry — the compile-in bundle stays in place

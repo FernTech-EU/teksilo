@@ -162,8 +162,11 @@ lands).
 
 winit 0.30 has no `Window::request_close` and we hold an
 `Arc<winit::Window>` we can't drop from inside the host. The workaround
-in the demo is `TitleBar::close_action(|ctx| ctx.emit(MyCmd::Close))`
-where the application's command handler calls `ctx.close_window(…)`.
+in the demo is `TitleBar::close_action(|ctx| ctx.close_window())` —
+the closure calls `EventContext::close_window` directly. Applications
+that want a central close-window hook can instead send an `Intent` and
+handle it with a root-level `Action` that calls `ctx.close_window()`
+(see [shortcut-intent-action.md](shortcut-intent-action.md)).
 M3 should make this work out of the box:
 
 1. Add an `Rc<EventLoopProxy<AppEvent>>` (or similar) to `WaylandHost`

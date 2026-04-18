@@ -5,9 +5,10 @@
 //! - **ListView** — virtualized list with selection and drag reordering
 //! - **TreeView** — hierarchical tree with expand/collapse and drag reparenting
 //!
-//! Shows both activation patterns:
-//! - `on_activate(Cmd::RemoveTag)` — typed command routed to central handler
-//! - `on_activate_fn(move |_| { ... })` — closure escape hatch (Section 9.2.6)
+//! Uses the `on_activate_fn(|ctx| …)` handler for button activation.
+//! Handlers can fire typed intents via `ctx.send_intent(AppIntent::X)`
+//! for source → root dispatch, or run closures directly for local
+//! effects. See `docs/shortcut-intent-action.md`.
 //!
 //! Run with: `cargo run -p data-collections`
 

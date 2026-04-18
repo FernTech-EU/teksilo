@@ -134,12 +134,12 @@ VStack {
     spacing: 12.0
     TextWidget("Title") { style: t.body_bold.clone() }
     TextWidget("Body")
-    Button("OK") { on_activate: Cmd::Submit }
+    Button("OK") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Submit) }
 }
 // ↓ VStack::new().spacing(12.0)
 //      .child(TextWidget::new("Title").style(t.body_bold.clone()))
 //      .child(TextWidget::new("Body"))
-//      .child(Button::new("OK").on_activate(Cmd::Submit))
+//      .child(Button::new("OK").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Submit)))
 ```
 
 Body items are emitted in source order — you can interleave properties
@@ -161,7 +161,7 @@ Card {
         TextWidget("Line one")
         TextWidget("Line two")
     }
-    footer: Button("OK") { on_activate: Cmd::Ok }
+    footer: Button("OK") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Ok) }
     padding: 16.0
 }
 ```
@@ -181,7 +181,7 @@ it later. Bindings hoist to the enclosing `fern!` block:
 fern!(ctx =>
     VStack {
         open_btn = Button("Open") {
-            on_activate: Cmd::Open
+            on_activate_fn: |ctx| ctx.send_intent(AppIntent::Open)
         }
         TextWidget("Status") {
             linked_to: open_btn
@@ -190,7 +190,7 @@ fern!(ctx =>
 )
 // ↓
 {
-    let open_btn: WidgetId = ctx.add(Button::new("Open").on_activate(Cmd::Open));
+    let open_btn: WidgetId = ctx.add(Button::new("Open").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Open)));
     ctx.add(
         VStack::new()
             .add_child(open_btn)
@@ -288,7 +288,7 @@ VStack {
     if is_logged_in {
         ProfileCard(user)
     } else {
-        Button("Sign in") { on_activate: Cmd::SignIn }
+        Button("Sign in") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::SignIn) }
     }
 }
 
@@ -334,14 +334,14 @@ VStack {
         let id = item.id;
         let title = item.title.clone();
         ListItem(title) {
-            on_tap: move |_, ctx| ctx.emit(Cmd::Select(id))
+            on_tap: move |_, ctx| ctx.send_intent(AppIntent::Select(id))
         }
     }
 }
 // ↓ .children(items.iter().map(|item| {
 //       let id = item.id;
 //       let title = item.title.clone();
-//       ListItem::new(title).on_tap(move |_, ctx| ctx.emit(Cmd::Select(id)))
+//       ListItem::new(title).on_tap(move |_, ctx| ctx.send_intent(AppIntent::Select(id)))
 //   }))
 ```
 
@@ -421,17 +421,17 @@ which doesn't expose per-widget setters.
 
 ```rust
 Button("Click") {
-    on_activate: Cmd::Submit
+    on_activate_fn: |ctx| ctx.send_intent(AppIntent::Submit)
 }
 
 Button("Click") {
-    on_tap: |_, ctx| ctx.emit(Cmd::Submit)
+    on_tap: |_, ctx| ctx.send_intent(AppIntent::Submit)
 }
 
 Button("Click") {
     on_tap: move |_, ctx| {
         if counter.get() > 0 {
-            ctx.emit(Cmd::Submit);
+            ctx.send_intent(AppIntent::Submit);
         }
     }
 }

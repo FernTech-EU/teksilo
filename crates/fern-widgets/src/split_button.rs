@@ -16,10 +16,10 @@
 //!
 //! ```ignore
 //! SplitButton::new()
-//!     .item(MenuItem::new_literal("Run").on_activate(Cmd::Run))
-//!     .item(MenuItem::new_literal("Run Tests").on_activate(Cmd::RunTests))
+//!     .item(MenuItem::new_literal("Run").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)))
+//!     .item(MenuItem::new_literal("Run Tests").on_activate_fn(|ctx| ctx.send_intent(AppIntent::RunTests)))
 //!     .separator()
-//!     .item(MenuItem::new_literal("Debug").on_activate(Cmd::Debug))
+//!     .item(MenuItem::new_literal("Debug").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Debug)))
 //!     .style(ButtonVariant::Regular)
 //! ```
 

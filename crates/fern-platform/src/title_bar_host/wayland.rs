@@ -63,10 +63,11 @@ impl PlatformTitleBarHost for WaylandHost {
         // observes `WindowEvent::CloseRequested` and tears down the
         // `PlatformWindow`. The closest equivalent is to drop the window,
         // which we cannot do from behind a shared `Arc`. Instead, the
-        // application is expected to wire `close()` to its own command
-        // dispatcher (e.g. via the title bar widget's `.on_tap` handler
-        // emitting a `CloseWindow` `AppCommand`). Until that wiring exists
-        // we leave this as a no-op.
+        // application is expected to wire its title-bar close button
+        // through `TitleBar::close_action`, whose closure receives an
+        // `EventContext` and can call `EventContext::close_window`
+        // directly (or dispatch an `Intent` whose root `Action` does).
+        // Until that wiring exists we leave this as a no-op.
     }
 
     fn is_maximized(&self) -> bool {

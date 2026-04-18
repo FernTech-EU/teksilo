@@ -20,7 +20,7 @@
 //!     .placeholder("Search...")
 //!     .show_clear_button(true)
 //!     .leading_slot(IconWidget::from_svg(SEARCH_ICON))
-//!     .on_submit_fn(|ctx| ctx.send_intent(AppCmd::Search))
+//!     .on_submit_fn(|ctx| ctx.send_intent(AppIntent::Search))
 //! ```
 
 #[cfg(test)]

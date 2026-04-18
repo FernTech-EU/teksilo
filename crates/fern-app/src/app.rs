@@ -982,7 +982,7 @@ impl FernAppBuilder {
     /// FernAppBuilder::new()
     ///     .register_tooltips(vec![
     ///         TooltipContent::new("save-as", tr!(save_as_tooltip))
-    ///             .with_command(MyCmd::SaveAs),
+    ///             .for_shortcut("app.save_as"),
     ///         TooltipContent::new("autosave", tr!(autosave_tooltip))
     ///             .with_more(tr!(autosave_tooltip_more)),
     ///     ])

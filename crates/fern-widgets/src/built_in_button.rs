@@ -7,7 +7,7 @@
 //! ```ignore
 //! BuiltInButton::new(IconWidget::from_svg(MY_SVG))
 //!     .tooltip(tr!("Browse..."))
-//!     .on_activate(Cmd::Browse)
+//!     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse))
 //! ```
 //!
 //! ## Predefined constructors
@@ -15,9 +15,9 @@
 //! Common built-in button types ship with appropriate icons and i18n tooltips:
 //!
 //! ```ignore
-//! BuiltInButton::browse().on_activate(Cmd::Browse)
-//! BuiltInButton::clear().on_activate(Cmd::Clear)
-//! BuiltInButton::search().on_activate(Cmd::Search)
+//! BuiltInButton::browse().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse))
+//! BuiltInButton::clear().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear))
+//! BuiltInButton::search().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Search))
 //! BuiltInButton::visibility_toggle(visible_signal)
 //! ```
 //!
@@ -29,8 +29,8 @@
 //! ```ignore
 //! TextInput::new(value)
 //!     .trailing_slot(HStack::new().spacing(0.0)
-//!         .child(BuiltInButton::clear().on_activate(Cmd::Clear))
-//!         .child(BuiltInButton::browse().on_activate(Cmd::Browse))
+//!         .child(BuiltInButton::clear().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Clear)))
+//!         .child(BuiltInButton::browse().on_activate_fn(|ctx| ctx.send_intent(AppIntent::Browse)))
 //!     )
 //! ```
 

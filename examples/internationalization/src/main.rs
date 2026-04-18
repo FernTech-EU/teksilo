@@ -11,9 +11,10 @@
 //!   runtime through the active `I18nManager`.
 //! - A `greeting` message with a `{ $name }` argument, demonstrating
 //!   the per-arg `let`-binding + `clone` pattern the macro emits.
-//! - A language selector (three `Button`s) that emits `LangCmd`
-//!   variants; the command handler calls `CommandContext::set_locale`
-//!   to broadcast the switch through `WindowManager::set_locale`.
+//! - A language selector (three `Button`s) that call
+//!   `EventContext::set_locale(...)` directly from their
+//!   `on_activate_fn` — no intent plumbing needed for ambient
+//!   framework mutations.
 //! - Arabic (`ar-SA`) triggers an RTL layout direction flip, so the
 //!   bottom row of `HStack(Leading, Trailing)` visibly swaps its
 //!   children. English and French are both LTR, so switching between
@@ -29,10 +30,6 @@
 use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{Button, ButtonVariant, HStack, Panel, TextWidget, VStack};
-
-// ---------------------------------------------------------------------------
-// Application commands — one per language.
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Root composite widget.

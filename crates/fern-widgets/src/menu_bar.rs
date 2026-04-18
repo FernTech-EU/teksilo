@@ -5,16 +5,16 @@
 //! MenuBar::new()
 //!     .menu_literal("File", || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new_literal("New").on_activate(Cmd::New))
+//!             .item(MenuItem::new_literal("New").on_activate_fn(|ctx| ctx.send_intent(AppIntent::New)))
 //!             .separator()
-//!             .item(MenuItem::new_literal("Quit").on_activate(Cmd::Quit))
+//!             .item(MenuItem::new_literal("Quit").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Quit)))
 //!     ))
 //!     .menu_literal("Edit", || Box::new(
 //!         MenuList::new()
-//!             .item(MenuItem::new_literal("Cut").on_activate(Cmd::Cut))
-//!             .item(MenuItem::new_literal("Copy").on_activate(Cmd::Copy))
+//!             .item(MenuItem::new_literal("Cut").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
+//!             .item(MenuItem::new_literal("Copy").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Copy)))
 //!     ))
-//!     .trailing_slot(Button::new_literal("Settings").on_activate(Cmd::Settings))
+//!     .trailing_slot(Button::new_literal("Settings").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Settings)))
 //! ```
 
 use fern_canvas::{Rect, Size, SizeProposal};

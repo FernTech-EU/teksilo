@@ -84,10 +84,11 @@ pub enum IconLocation {
 /// ```ignore
 /// Button::new_literal("Save")
 ///     .style(ButtonVariant::Default)
-///     .on_activate(AppCmd::Save)
+///     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
 /// ```
-/// Type-erased command factory — captures the concrete command type
-/// and produces a fresh ErasedCommand each time (since ErasedCommand isn't Clone).
+/// Type-erased activation closure. Stored as `Box<dyn Fn>` so the
+/// same button type works for any handler — typed intent send,
+/// direct side effect, window mutation, etc.
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 pub struct Button {

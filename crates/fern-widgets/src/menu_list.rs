@@ -135,9 +135,9 @@ impl Widget for KeyboardHighlightWrapper {
 ///
 /// ```ignore
 /// MenuList::new()
-///     .item(MenuItem::new_literal("Cut").on_activate(AppCmd::Cut))
+///     .item(MenuItem::new_literal("Cut").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Cut)))
 ///     .separator()
-///     .item(MenuItem::new_literal("Paste").on_activate(AppCmd::Paste))
+///     .item(MenuItem::new_literal("Paste").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Paste)))
 /// ```
 pub struct MenuList {
     entries: Vec<MenuEntry>,

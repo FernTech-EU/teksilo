@@ -34,7 +34,7 @@ A production-quality button widget.
 
 - `label`: `String` — The text displayed on the button.
 - `style`: `ButtonVariant` — Visual style of the button.
-- `action`: `Option<CommandFactory>` — Closure to execute on activation.
+- `action`: `Option<Box<dyn Fn(&mut EventContext)>>` — Closure to run on activation.
 - `enabled`: `bool` — Whether the button is enabled.
 - `tooltip_text`: `Option<String>` — Tooltip text to display on hover.
 - `interaction`: `Signal<InteractionState>` — Signal for interaction state.
@@ -50,13 +50,9 @@ Creates a new `Button` with the given label.
 
 Sets the visual style of the button.
 
-##### `on_activate<C: AppCommand>(mut self, command: C) -> Self`
-
-Sets the command to emit when the button is activated.
-
 ##### `on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self`
 
-Sets a custom closure to execute on activation.
+Sets the closure that runs when the button is activated. Typical pattern: fire an `Intent` via `ctx.send_intent(AppIntent::X)` so an ancestor `Action` can handle it. See [shortcut-intent-action.md](shortcut-intent-action.md) for the full pipeline.
 
 ##### `tooltip(mut self, text: impl Into<String>) -> Self`
 
@@ -69,9 +65,16 @@ Sets whether the button is enabled.
 ## Example Usage
 
 ```rust
+use fern_ui::IntentKind;
+
+#[derive(Debug, IntentKind)]
+enum AppIntent {
+    #[name = "app.save"] Save,
+}
+
 Button::new("Save")
     .style(ButtonVariant::Default)
-    .on_activate(AppCmd::Save)
+    .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
 ```
 
 ## Implementation Details

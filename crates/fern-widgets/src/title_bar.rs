@@ -83,8 +83,8 @@ pub struct TitleBar {
     /// Optional override for the close button. When set, the close button
     /// invokes this closure instead of `host.close()`. Use this on Wayland
     /// where `host.close()` is currently a no-op — the application can
-    /// emit a typed `AppCommand` whose handler calls
-    /// `CommandContext::close_window`.
+    /// call `EventContext::close_window` directly from the closure, or
+    /// send a typed `Intent` whose root-level `Action` handler calls it.
     close_action: Option<CloseAction>,
     root_child_id: Option<WidgetId>,
 }
@@ -184,8 +184,8 @@ impl TitleBar {
     /// this closure instead of `host.close()`. Required on Wayland where
     /// the host's `close()` is a no-op (winit 0.30 has no
     /// `Window::request_close`); the application typically wires this to
-    /// emit a typed `AppCommand` whose handler calls
-    /// `CommandContext::close_window`.
+    /// call `EventContext::close_window` directly, or to send an
+    /// `Intent` whose root-level `Action` handler calls it.
     pub fn close_action(mut self, action: impl Fn(&mut EventContext) + 'static) -> Self {
         self.close_action = Some(Rc::new(action));
         self

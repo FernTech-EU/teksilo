@@ -5,6 +5,32 @@
 **Author:** Cyril Jacquet, with architectural design by Claude (Anthropic)  
 **Status:** Pre-implementation reference document
 
+> **Status note — command / action layer superseded.** Sections 9.2
+> ("Typed Command Flow") and 11 ("Shortcuts") describe the original
+> `AppCommand` trait + `FernAppBuilder::on_command` centralised dispatch
+> design, and the initial `ShortcutMap<C: AppCommand>` keyboard binding.
+> Both were replaced by the Shortcut / Intent / Action pipeline:
+>
+> - `AppCommand` trait → `IntentKind` trait (usually derived with
+>   `#[derive(IntentKind)]` and `#[name = "..."]` on each variant).
+> - `ctx.emit(cmd)` → `ctx.send_intent(AppIntent::X)`.
+> - `FernAppBuilder::on_command` → `Action::new("id").on_invoke(...)`
+>   registered inside a root widget via `ctx.register_action(...)`.
+> - `CommandContext::{set_theme, set_locale, close_window}` → same
+>   methods on `EventContext`, available from every handler.
+> - `ShortcutMap<C: AppCommand>` → `ShortcutRegistry` with two-layer
+>   defaults + per-slot user overrides and graveyard semantics.
+>
+> The surface in those sections is historical. For the current
+> system see [`shortcut-intent-action.md`](shortcut-intent-action.md)
+> and the working demo at
+> [`examples/shortcuts_demo`](../examples/shortcuts_demo/src/main.rs).
+> The *design rationale* (single source of truth for app behavior,
+> testable dispatch, rebindable keystrokes, platform-independent
+> formatting) survives unchanged — only the Rust API it lands on has
+> moved. Individual examples below have been updated where a stale
+> snippet would actively mislead.
+
 ---
 
 ## 1. Vision and Positioning
@@ -257,8 +283,8 @@ TabWidget::new()
     .tab("Chapter 1", || chapter_editor(1))
     .trailing_slot(|ctx| {
         HStack::new()
-            .child(Button::icon_only(Icon::Plus).on_activate(AppCmd::AddChapter))
-            .child(Button::icon_only(Icon::ChevronDown).on_activate(AppCmd::OpenChapterMenu))
+            .child(Button::icon_only(Icon::Plus).on_activate_fn(|ctx| ctx.send_intent(AppIntent::AddChapter)))
+            .child(Button::icon_only(Icon::ChevronDown).on_activate_fn(|ctx| ctx.send_intent(AppIntent::OpenChapterMenu)))
     })
 ```
 
@@ -434,6 +460,16 @@ Platform input from winit is translated into high-level `WidgetEvent` variants a
 Pointer events are routed via hit testing against the layout tree. Keyboard events are routed to the focused widget. AccessKit actions (from screen readers) are routed to the target widget as `WidgetEvent::AccessAction`, flowing through the same event system as pointer and keyboard input.
 
 ### 9.2 Typed Application Commands
+
+> **Historical record.** The `AppCommand` trait and
+> `FernAppBuilder::on_command` described below were replaced by the
+> Shortcut / Intent / Action pipeline. The design goals of this
+> section — typed, exhaustive, centrally-routed application behavior
+> with rebindable shortcuts and test-friendly dispatch — all survive
+> in the new system; the trait shape and dispatcher entry point
+> changed. See [`shortcut-intent-action.md`](shortcut-intent-action.md)
+> for the current API and the examples at the top of this document
+> for the migration mapping.
 
 Widgets communicate with the application layer through typed command enums. The command type is defined by the application, not by FernUI. FernUI imposes only a trait bound:
 
@@ -1052,15 +1088,16 @@ impl Widget for WorkspaceLabel {
 
 App state mutations come from three places, each with a clear pattern:
 
-**Direct mutation from the UI thread.** A command handler, an `on_activate_fn` closure, or any other UI-thread code that holds a reference to the globals struct mutates the signal directly:
+**Direct mutation from the UI thread.** An `Action` handler, an `on_activate_fn` closure, or any other UI-thread code that holds a reference to the globals struct mutates the signal directly:
 
 ```rust
-.on_command(move |cmd: &Cmd, _ctx| match cmd {
-    Cmd::SetLoading(loading) => {
-        globals.is_loading.set(*loading);
-    }
-    // ...
-})
+ctx.register_action(Action::new("app.set_loading").on_invoke(
+    move |intent, _ctx| {
+        if let Some(AppIntent::SetLoading(loading)) = AppIntent::from_intent(intent) {
+            globals.is_loading.set(*loading);
+        }
+    },
+));
 ```
 
 The closure captures `Rc<AppGlobals>` from the enclosing scope. The signal mutation propagates through the binding system as usual; widgets that observe `is_loading` repaint on the next frame.
@@ -1177,6 +1214,15 @@ Gesture recognizers are pure state machines with no platform dependencies, makin
 ---
 
 ## 11. Keyboard Shortcuts
+
+> **Historical record.** The initial `ShortcutMap<C: AppCommand>`
+> described below was superseded by the `Shortcut` / `ShortcutRegistry`
+> design (two-layer defaults + per-slot user overrides, graveyard
+> semantics, typed `IntentKind` DTOs, source → root dispatch). The
+> rationale preserved here — interception before widget dispatch,
+> rebindability as first-class data, automatic menu-label refresh —
+> still holds. See [`shortcut-intent-action.md`](shortcut-intent-action.md)
+> for the current API.
 
 ### 11.1 The ShortcutMap
 
@@ -2429,17 +2475,17 @@ Nodes without overrides inherit from their parent with no per-node storage cost.
 
 Subtree overrides participate in the composite rebuild mechanism (Section 7.1.2). When the application-level theme changes, all subtree overrides are re-applied on top of the new base theme during the rebuild pass. A dark sidebar override that sets `colors = ColorTokens::dark_default()` will still produce dark colors regardless of whether the base theme was light or dark — the override replaces the color tokens entirely.
 
-### 19.5 Theme Switching from Command Handlers
+### 19.5 Theme Switching from Handlers
 
-Theme switching is an application-level action triggered by the user (selecting a theme in preferences, toggling dark mode). In FernUI's architecture, this action flows through the typed command system like any other user action.
+Theme switching is an application-level action triggered by the user (selecting a theme in preferences, toggling dark mode). In FernUI's architecture, this action flows through a handler like any other user action — typically an `Action` keyed by an intent name, fired by a button or shortcut.
 
-The `CommandContext` (the context object received by the application's command handler) exposes a `set_theme()` method. This method does not apply the theme immediately — it queues the theme change as a pending operation. The `WindowManager` applies the pending theme change after the command handler returns, before the next frame's layout pass. This mirrors how `create_window()` and `close_window()` work on the `CommandContext` — they queue operations rather than executing them mid-handler.
+`EventContext` (the context object received by every widget handler and every `Action`) exposes a `set_theme()` method. This method does not apply the theme immediately — it queues the theme change as a pending operation. The `WindowManager` applies the pending theme change after the handler returns, before the next frame's layout pass. This mirrors how `close_window()` behaves on the same context — they queue operations rather than executing them mid-handler.
 
 When the theme change is applied, the following cascade occurs. The `WindowManager` stores the new theme as the application-level theme. For each active window, the `WindowManager` updates the window's `WidgetTree` environment with the new theme. The framework marks all composite widgets across all windows as needing reconstruction (Section 7.1.2). During the next frame, `build()` is re-run for each composite, creating fresh derived state closures that capture the new theme tokens. Subtree overrides are re-applied on top of the new base theme. Layout reruns because typography and spacing tokens may have changed. Paint reruns because color and shape tokens have changed. AccessKit nodes are re-synced because widget names and states may have changed (high-contrast themes may affect accessibility properties).
 
 The full cascade — rebuild all composites, relayout all trees, repaint all windows — is expensive but occurs at most a few times per application session. It is never on the keystroke path.
 
-For the locale system (`set_locale()`), the same mechanism applies: `CommandContext` exposes `set_locale()`, the change is queued, and a full composite rebuild is triggered across all windows.
+For the locale system (`set_locale()`), the same mechanism applies: `EventContext` exposes `set_locale()`, the change is queued, and a full composite rebuild is triggered across all windows.
 
 ### 19.6 Built-In Themes
 
@@ -2552,23 +2598,21 @@ Keyboard shortcuts are handled per-window during the preview pass, but the resul
 
 Each window's `WidgetTree` has its own independent `FocusManager`. OS-level focus determines which window receives keyboard events; widget-level focus within that window operates as designed. When a window is deactivated, its focused widget retains its focus state but does not receive keyboard events. When the window is reactivated, the previously focused widget resumes receiving input.
 
-### 22.5 Command Context and Window Identity
+### 22.5 EventContext and Window Identity
 
-Commands emitted by widgets carry a `source_window` identifier through the `EventContext`. The application's command handler can use this to distinguish window-specific commands (close window, zoom in) from window-agnostic commands (save document, toggle bold):
+Intents dispatched by widgets carry a `source_window` identifier through the `EventContext`. The `Action` handler can use this to distinguish window-specific intents (close window, zoom in) from window-agnostic intents (save document, toggle bold):
 
 ```rust
-app.on_command(|cmd, ctx| match cmd {
-    AppCmd::CloseWindow => {
-        ctx.close_window(ctx.source_window());
-    }
-    AppCmd::ZoomIn => {
-        ctx.window(ctx.source_window()).set_zoom(current + 0.1);
-    }
-    AppCmd::DocumentSave => {
-        // Window-agnostic — operates on the domain model.
-        document_controller::save(&db, &hub, &mut undo)?;
-    }
-});
+ctx.register_action(Action::new("app.close_window").on_invoke(|_i, ctx| {
+    ctx.close_window();
+}));
+ctx.register_action(Action::new("app.zoom_in").on_invoke(|_i, ctx| {
+    ctx.window(ctx.source_window()).set_zoom(current + 0.1);
+}));
+ctx.register_action(Action::new("app.document_save").on_invoke(|_i, _ctx| {
+    // Window-agnostic — operates on the domain model.
+    document_controller::save(&db, &hub, &mut undo).ok();
+}));
 ```
 
 ### 22.6 Data Source Sharing
@@ -2579,23 +2623,22 @@ Data models are application-level objects, not window-level. Multiple windows ca
 
 A modal dialog is a window that blocks interaction with its parent window until dismissed. The `WindowConfig` accepts a `modal` flag and a `parent` window reference. When a modal is active, `fern-platform` sets the OS-level parent relationship via winit's window builder (so the OS handles input blocking and correct Z-ordering) and ignores events for the parent window.
 
-Modal dialogs participate in the overlay stack conceptually — dismissing a modal by pressing Escape or clicking a "Cancel" button follows the same dismissal pattern as overlay menus. The modal window's `WidgetTree` emits commands through the same shared command handler, and results are communicated back to the parent window through application state (data sources, `State<T>` handles shared between the two trees, or direct command-handler logic).
+Modal dialogs participate in the overlay stack conceptually — dismissing a modal by pressing Escape or clicking a "Cancel" button follows the same dismissal pattern as overlay menus. The modal window's `WidgetTree` dispatches intents that ancestor `Action` handlers consume, and results are communicated back to the parent window through application state (data sources, `Signal<T>` handles shared between the two trees, or direct Action logic).
 
 ```rust
-app.on_command(|cmd, ctx| match cmd {
-    AppCmd::ShowPreferences => {
-        ctx.create_window(
-            WindowConfig::new()
-                .title(tr!("window-preferences"))
-                .size(600, 400)
-                .modal(true)
-                .parent(ctx.source_window())
-                .root(|| build_preferences_ui())
-        );
-    }
-    AppCmd::ClosePreferences => {
-        ctx.close_window(ctx.source_window());
-    }
+ctx.register_action(Action::new("app.show_preferences").on_invoke(|_i, ctx| {
+    ctx.create_window(
+        WindowConfig::new()
+            .title(tr!("window-preferences"))
+            .size(600, 400)
+            .modal(true)
+            .parent(ctx.source_window())
+            .root(|| build_preferences_ui()),
+    );
+}));
+ctx.register_action(Action::new("app.close_preferences").on_invoke(|_i, ctx| {
+    ctx.close_window();
+}));
 });
 ```
 
@@ -2617,14 +2660,24 @@ The widget tree runs without a window, without GPU, and without winit. All five 
 
 ```rust
 #[test]
-fn button_click_fires_command() {
+fn button_click_fires_action() {
+    use std::cell::Cell;
+    use std::rc::Rc;
     let mut tree = WidgetTree::new();
-    let mut clicked = false;
-    tree.on_command(|cmd| if let AppCmd::Save = cmd { clicked = true; });
-    let button = tree.add(Button::new("Save").command(AppCmd::Save));
+    let clicked = Rc::new(Cell::new(false));
+    let clicked_flag = clicked.clone();
+    let root = tree.add(FillWidget::new());
+    tree.push_action(
+        root,
+        Action::new("app.save").on_invoke(move |_i, _c| clicked_flag.set(true)),
+    );
+    let button = tree.add_child(
+        root,
+        Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)),
+    );
     tree.layout(SizeProposal::exact(200.0, 40.0));
     tree.click(button);
-    assert!(clicked);
+    assert!(clicked.get());
 }
 ```
 
@@ -2936,6 +2989,18 @@ These are higher-level widgets built from primitives, providing themed visual fr
 **SelectionModel** — new utility (not a widget). A `Signal<SelectionSet>` that tracks which items are selected, with methods for single-select (click), toggle (Ctrl+click), range-select (Shift+click), and select-all (Ctrl+A). Consumed by ListView and TreeView. The SelectionSet stores selected indices as a `BTreeSet<usize>`. The SelectionModel emits selection change notifications through the Signal binding system.
 
 ### 27.10 Text Editing (`fern-widgets/src/`, feature-gated)
+
+> **Note on `AppCommand` in this section.** The API surface below
+> (event callbacks typed as `Fn(...) -> Box<dyn AppCommand>`, typed
+> command enums for editor events) was written against the original
+> command system. The rich text editor has not yet been implemented.
+> When it lands, the equivalent hooks will return `Intent` / use
+> `EventContext::send_intent(AppIntent::X)` so the same intent walks
+> through the source → root dispatch chain as every other widget
+> handler. The information architecture the section describes —
+> constructor-function closures that build a typed DTO from runtime
+> data (URL, image name, undo/redo flags) — carries over verbatim,
+> just with `Intent` in place of `Box<dyn AppCommand>`.
 
 This section is longer than other widget catalog entries because the rich text editor is the most architecturally distinctive widget in FernUI. It cannot use ScrollArea, it cannot delegate text layout to TextWidget, and its frame loop has to bridge text-document's deferred event model into FernUI's reactive Signal model. The design below is informed by `godot-rich-text`, a working reference implementation of the same `text-document` + `text-typeset` integration in Godot 4 (~2,100 lines of editor logic, plus a 780-line read-only viewer).
 
@@ -3511,7 +3576,7 @@ Instead of implementing a monolithic `event()` method with a match on every even
 // At the widget construction site or inside build():
 MinSize::new(48.0, 48.0)
     .child(content)
-    .on_tap(|ctx| { ctx.emit(Cmd::Clicked); })
+    .on_tap(|ctx| { ctx.send_intent(AppIntent::Clicked); })
     .on_hover(|entered, ctx| {
         interaction.set(if entered { Hovered } else { Idle });
     })
@@ -3743,7 +3808,7 @@ ctx.add(
             HStack::new().spacing(4.0)
                 .child(Checkbox::new(checked).label("Accept"))
                 .child(Spacer::new())
-                .child(Button::new("Submit").on_activate(Cmd::Submit))
+                .child(Button::new("Submit").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Submit)))
         )
 )
 
@@ -3754,7 +3819,7 @@ fern! {
         HStack(spacing: 4) {
             Checkbox(checked, label: "Accept")
             Spacer
-            Button("Submit", on_activate: Cmd::Submit)
+            Button("Submit", on_activate_fn: |ctx| ctx.send_intent(AppIntent::Submit))
         }
     }
 }

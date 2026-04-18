@@ -109,7 +109,7 @@ fern!(ctx =>
     VStack {
         spacing: 12.0
         TextWidget::new_literal("Title") { style: t.body_bold.clone() }
-        Button("OK") { on_activate: Cmd::Ok }
+        Button("OK") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Ok) }
     }
 )
 ```
@@ -150,17 +150,17 @@ chains — see the limitations section):
 fern!(ctx =>
     Menu {
         item: MenuItem::new_literal("Run") {
-            on_activate: Cmd::Run
+            on_activate_fn: |ctx| ctx.send_intent(AppIntent::Run)
             tooltip_literal: "Runs the thing"
         }
     }
 )
-// emits .item(MenuItem::new_literal("Run").on_activate(Cmd::Run).tooltip_literal("..."))
+// emits .item(MenuItem::new_literal("Run").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)).tooltip_literal("..."))
 ```
 
 The body reads uniformly with top-level elements — same `name: value`
 shape, no mental switch to Rust's method-chain syntax. Prefer this
-over `item: (MenuItem::new_literal("Run").on_activate(...).tooltip(...))`.
+over `item: (MenuItem::new_literal("Run").on_activate_fn(...).tooltip(...))`.
 
 ## Reading `fern!` — translation shortcuts
 
