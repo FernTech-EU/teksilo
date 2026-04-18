@@ -1338,4 +1338,115 @@ mod tests {
         assert!((bounds.width - 200.0).abs() < 0.01);
         assert!((bounds.height - 100.0).abs() < 0.01);
     }
+
+    // --- theme/locale rebuild should not reset scroll offset ---
+
+    #[test]
+    fn scroll_survives_theme_switch_at_root() {
+        use fern_tokens::Theme;
+        let mut tree = WidgetTree::new();
+        let scroll = tree.add(ScrollArea::new().child(TallLeaf::new(200.0, 500.0)));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Scroll partway down
+        tree.pointer_move(Point::new(50.0, 50.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let content = tree.children(scroll)[0];
+        let content_y_before = tree.bounds(content).y;
+        assert!(
+            content_y_before < -100.0,
+            "Content should have scrolled; got y={}",
+            content_y_before
+        );
+
+        // Switch theme — should NOT reset scroll
+        tree.set_theme(Theme::dark_default());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let content = tree.children(scroll)[0];
+        let content_y_after = tree.bounds(content).y;
+        assert!(
+            (content_y_after - content_y_before).abs() < 0.01,
+            "Scroll offset should survive theme switch: before={}, after={}",
+            content_y_before,
+            content_y_after
+        );
+    }
+
+    /// Composite parent that wraps a ScrollArea via ctx.add(ScrollArea::new()...).
+    /// Simulates a typical user widget: its build() runs on every theme change,
+    /// so a naive ScrollArea::new() inside would lose its scroll offset.
+    #[derive(Debug)]
+    struct ScrollParent {
+        scroll_id: Option<WidgetId>,
+    }
+    impl ScrollParent {
+        fn new() -> Self {
+            Self { scroll_id: None }
+        }
+    }
+    impl Widget for ScrollParent {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let id = ctx.add(ScrollArea::new().child(TallLeaf::new(200.0, 500.0)));
+            self.scroll_id = Some(id);
+            vec![id]
+        }
+        fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+            self.scroll_id
+                .and_then(|id| ctx.child_size(id, proposal))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+        }
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            if let Some(child) = children.first_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+    }
+
+    #[test]
+    fn scroll_survives_theme_switch_inside_composite() {
+        use fern_tokens::Theme;
+        let mut tree = WidgetTree::new();
+        let parent = tree.add(ScrollParent::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.pointer_move(Point::new(50.0, 50.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+        });
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let scroll_before = tree.children(parent)[0];
+        let content_before = tree.children(scroll_before)[0];
+        let y_before = tree.bounds(content_before).y;
+        assert!(
+            y_before < -100.0,
+            "Content should have scrolled; got y={}",
+            y_before
+        );
+
+        tree.set_theme(Theme::dark_default());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let scroll_after = tree.children(parent)[0];
+        let content_after = tree.children(scroll_after)[0];
+        let y_after = tree.bounds(content_after).y;
+        assert!(
+            (y_after - y_before).abs() < 0.01,
+            "Scroll offset should survive theme switch inside composite: before={}, after={}",
+            y_before,
+            y_after
+        );
+    }
 }

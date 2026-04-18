@@ -109,7 +109,10 @@ impl Widget for Accordion {
             self.content_id = Some(ctx.add_boxed(pending));
         }
 
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let accordion_corner_radius = snapshot.components.accordion.corner_radius;
+        let typography_body = snapshot.typography.body.clone();
         let expanded = self.expanded.clone();
         let is_expanded = expanded.get();
 
@@ -117,24 +120,23 @@ impl Widget for Accordion {
         let kb_focused = ctx.signal(false);
 
         // Header foreground: caller override, otherwise theme primary.
-        let header_fg = self.title_color.unwrap_or(theme.colors.text_primary);
+        let title_color = self.title_color;
+        let header_fg_signal =
+            theme_signal.map(move |t| title_color.unwrap_or(t.colors.text_primary));
 
         // Header: title + spacer + chevron icon
         // Use two chevrons with visible_when so the icon updates reactively
         let chevron_down_id =
-            ctx.add(IconWidget::chevron_down(16.0).color(header_fg));
+            ctx.add(IconWidget::chevron_down(16.0).bind_color(header_fg_signal.clone()));
         let chevron_right_id =
-            ctx.add(IconWidget::chevron_right(16.0).color(header_fg));
+            ctx.add(IconWidget::chevron_right(16.0).bind_color(header_fg_signal.clone()));
         ctx.visible_when(chevron_down_id, expanded.clone());
         ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
-        let title_style = self
-            .title_style
-            .clone()
-            .unwrap_or_else(|| theme.typography.body.clone());
+        let title_style = self.title_style.clone().unwrap_or(typography_body);
         let title_widget = TextWidget::new_literal(&self.title)
             .style(title_style)
-            .color(header_fg)
+            .bind_color(header_fg_signal)
             .single_line()
             .a11y_hidden();
         let title_id = ctx.add(title_widget);
@@ -154,20 +156,21 @@ impl Widget for Accordion {
         // instead of a separate ring. Header has no visible
         // rest-state border, so this border is width-zero at
         // rest and snaps to `focus_ring_width` on focus.
-        let focus_ring_color = theme.colors.focus_ring;
-        let focus_border_color = kb_focused.map(move |f| {
-            if *f { focus_ring_color } else { fern_tokens::Color::TRANSPARENT }
+        let focus_border_color = kb_focused.zip(&theme_signal).map(|(f, t)| {
+            if *f {
+                t.colors.focus_ring
+            } else {
+                fern_tokens::Color::TRANSPARENT
+            }
         });
-        let focus_bw = theme.shape.focus_ring_width;
-        let focus_border_width =
-            kb_focused.map(move |f| if *f { focus_bw } else { 0.0 });
+        let focus_border_width = kb_focused
+            .zip(&theme_signal)
+            .map(|(f, t)| if *f { t.shape.focus_ring_width } else { 0.0 });
         let focus_rect_id = ctx.add(
             crate::primitives::RectWidget::new()
                 .bind_border_color(focus_border_color)
                 .bind_border_width(focus_border_width)
-                .corner_radius(fern_tokens::CornerRadius::uniform(
-                    theme.components.accordion.corner_radius,
-                )),
+                .corner_radius(fern_tokens::CornerRadius::uniform(accordion_corner_radius)),
         );
         let header_with_ring = ctx.add(
             crate::primitives::ZStack::new()

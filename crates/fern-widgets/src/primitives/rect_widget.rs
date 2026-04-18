@@ -2,14 +2,19 @@ use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_tokens::{Color, CornerRadius};
 
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
 use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
 
 /// A leaf widget that paints a filled and/or stroked rounded rectangle.
-/// Properties can be static values or bound to reactive state.
+///
+/// All visual props accept `impl Into<ColorProp>` (colors/roles/signals) or
+/// `impl Into<Prop<f32 | CornerRadius>>` (static or reactive) — so the
+/// common "fill with theme surface, border with theme border" setup is just
+/// `.background(SurfaceRole::Main).border_color(BorderRole::Default)`.
 pub struct RectWidget {
-    background: Prop<Color>,
-    border_color: Prop<Color>,
+    background: ColorProp,
+    border_color: ColorProp,
     border_width: Prop<f32>,
     corner_radius: Prop<CornerRadius>,
 }
@@ -17,55 +22,55 @@ pub struct RectWidget {
 impl RectWidget {
     pub fn new() -> Self {
         Self {
-            background: Prop::Static(Color::TRANSPARENT),
-            border_color: Prop::Static(Color::TRANSPARENT),
+            background: ColorProp::Static(Color::TRANSPARENT),
+            border_color: ColorProp::Static(Color::TRANSPARENT),
             border_width: Prop::Static(0.0),
             corner_radius: Prop::Static(CornerRadius::ZERO),
         }
     }
 
-    pub fn background(mut self, color: Color) -> Self {
-        self.background = Prop::Static(color);
+    /// Fill color. Accepts `Color`, a theme role (`SurfaceRole`, etc.),
+    /// or a `Signal<Color>`.
+    pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
+        self.background = color.into();
         self
     }
 
-    pub fn border_color(mut self, color: Color) -> Self {
-        self.border_color = Prop::Static(color);
+    /// Border color. Accepts `Color`, a theme role (`BorderRole`, etc.),
+    /// or a `Signal<Color>`.
+    pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.border_color = color.into();
         self
     }
 
-    pub fn border_width(mut self, width: f32) -> Self {
-        self.border_width = Prop::Static(width);
+    pub fn border_width(mut self, width: impl Into<Prop<f32>>) -> Self {
+        self.border_width = width.into();
         self
     }
 
-    pub fn corner_radius(mut self, radius: CornerRadius) -> Self {
-        self.corner_radius = Prop::Static(radius);
+    pub fn corner_radius(mut self, radius: impl Into<Prop<CornerRadius>>) -> Self {
+        self.corner_radius = radius.into();
         self
     }
 
-    /// Bind the background color to a reactive state.
-    pub fn bind_background(mut self, state: impl Into<Prop<Color>>) -> Self {
-        self.background = state.into();
-        self
+    /// Compatibility shim — `.bind_background(signal)` → `.background(signal)`.
+    pub fn bind_background(self, state: impl Into<ColorProp>) -> Self {
+        self.background(state)
     }
 
-    /// Bind the border color to a reactive state.
-    pub fn bind_border_color(mut self, state: impl Into<Prop<Color>>) -> Self {
-        self.border_color = state.into();
-        self
+    /// Compatibility shim — `.bind_border_color(signal)` → `.border_color(signal)`.
+    pub fn bind_border_color(self, state: impl Into<ColorProp>) -> Self {
+        self.border_color(state)
     }
 
-    /// Bind the border width to a reactive state.
-    pub fn bind_border_width(mut self, state: impl Into<Prop<f32>>) -> Self {
-        self.border_width = state.into();
-        self
+    /// Compatibility shim — `.bind_border_width(signal)` → `.border_width(signal)`.
+    pub fn bind_border_width(self, state: impl Into<Prop<f32>>) -> Self {
+        self.border_width(state)
     }
 
-    /// Bind the corner radius to a reactive state.
-    pub fn bind_corner_radius(mut self, state: impl Into<Prop<CornerRadius>>) -> Self {
-        self.corner_radius = state.into();
-        self
+    /// Compatibility shim — `.bind_corner_radius(signal)` → `.corner_radius(signal)`.
+    pub fn bind_corner_radius(self, state: impl Into<Prop<CornerRadius>>) -> Self {
+        self.corner_radius(state)
     }
 }
 
@@ -117,14 +122,14 @@ impl Widget for RectWidget {
         proposal.resolve(0.0, 0.0)
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
-        let bg = self.background.get();
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let bg = self.background.resolve(ctx.theme);
         let radius = self.corner_radius.get();
         if bg.a() > 0.0 {
             canvas.fill_rounded_rect(bounds, radius, bg);
         }
         let bw = self.border_width.get();
-        let bc = self.border_color.get();
+        let bc = self.border_color.resolve(ctx.theme);
         if bw > 0.0 && bc.a() > 0.0 {
             canvas.stroke_rounded_rect(bounds, radius, bc, bw);
         }

@@ -631,7 +631,11 @@ impl std::fmt::Debug for SplitView {
 impl Widget for SplitView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        let style = self.resolved_style(ctx.theme());
+        // SplitView style drives layout math (min sizes, divider thickness,
+        // keyboard step). These rarely change between themes, so a one-time
+        // snapshot is adequate — paint-time lookups in SplitHandle keep
+        // colors reactive.
+        let style = self.resolved_style(&ctx.theme_signal().get());
 
         let registry = ctx.binding_registry();
         self.split

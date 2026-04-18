@@ -52,7 +52,7 @@ impl Root {
 
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
         let name = self.user_name.clone();
 
         // A `Signal<String>` that tracks which direction the tree is

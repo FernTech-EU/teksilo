@@ -52,8 +52,9 @@ impl std::fmt::Debug for Toolbar {
 
 impl Widget for Toolbar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let spacing = theme.components.toolbar.separator_inset;
+        let theme_signal = ctx.theme_signal();
+        let spacing = theme_signal.get().components.toolbar.separator_inset;
+        let padding_signal = theme_signal.map(|t| t.components.toolbar.separator_inset);
 
         // Resolve pending children
         let pending = std::mem::take(&mut self.pending);
@@ -73,7 +74,7 @@ impl Widget for Toolbar {
         }
 
         let row_id = ctx.add(row);
-        let root = ctx.add(Panel::new().padding(spacing).child_id(row_id));
+        let root = ctx.add(Panel::new().padding(padding_signal).child_id(row_id));
         self.root_child_id = Some(root);
         vec![root]
     }

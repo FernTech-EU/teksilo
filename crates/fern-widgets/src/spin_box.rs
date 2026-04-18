@@ -497,7 +497,13 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             "SpinBox min must be <= max"
         );
 
-        let theme = ctx.theme().clone();
+        // SpinBox reads theme tokens once for static layout params
+        // (padding, focus-ring width). Color-bearing leaf widgets below
+        // use `theme_signal.map(...)` so runtime theme switches still
+        // re-paint. Full reactivity of layout params would require
+        // migrating every `Prop<f32>`-accepting primitive used here.
+        let theme_signal = ctx.theme_signal();
+        let theme = theme_signal.get();
         let colors = theme.colors.clone();
         let field_style = theme.components.text_field;
         let focus_ring_width = theme.shape.focus_ring_width;
@@ -897,7 +903,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 // the click targets read as distinct affordances.
                 let divider = Divider::vertical()
                     .thickness(1.0)
-                    .color(colors.border);
+                    .color(fern_tokens::BorderRole::Default);
                 let divider_id = ctx.add(
                     Padding::new(2.0, 0.0, 2.0, 0.0).child(divider),
                 );
@@ -934,22 +940,28 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // extra envelope space and clash with row layouts that
         // expect the widget to report its visual footprint as its
         // full size).
-        let border_color = {
-            let colors = colors.clone();
-            self.interaction.map(move |state| match state {
-                InteractionState::Focused => colors.focus_ring,
-                _ => colors.border,
-            })
-        };
-        let normal_bw = field_style.border_width;
-        let border_width_signal = self.interaction.map(move |state| match state {
-            InteractionState::Focused => focus_ring_width,
-            _ => normal_bw,
-        });
+        // Border color tracks both interaction AND theme — zip combines
+        // both roots so focus transitions and runtime theme switches both
+        // refresh the rendered border.
+        let border_color = self
+            .interaction
+            .zip(&theme_signal)
+            .map(|(state, t)| match *state {
+                InteractionState::Focused => t.colors.focus_ring,
+                _ => t.colors.border,
+            });
+        let border_width_signal =
+            self.interaction
+                .zip(&theme_signal)
+                .map(|(state, t)| match *state {
+                    InteractionState::Focused => t.shape.focus_ring_width,
+                    _ => t.components.text_field.border_width,
+                });
+        let _ = focus_ring_width; // retained for the reactive closure above
         let bg = RectWidget::new()
-            .background(colors.surface_content)
-            .bind_border_color(border_color)
-            .bind_border_width(border_width_signal)
+            .background(fern_tokens::SurfaceRole::Content)
+            .border_color(border_color)
+            .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(field_style.corner_radius));
         let bg_id = ctx.add(bg);
 

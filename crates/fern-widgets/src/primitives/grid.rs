@@ -5,6 +5,7 @@
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
@@ -24,8 +25,8 @@ pub enum TrackSize {
 pub struct Grid {
     columns: Vec<TrackSize>,
     rows: Vec<TrackSize>,
-    column_gap: f32,
-    row_gap: f32,
+    column_gap: Prop<f32>,
+    row_gap: Prop<f32>,
     child_ids: Vec<WidgetId>,
     pending: Vec<PendingChild>,
 }
@@ -36,8 +37,8 @@ impl Grid {
         Self {
             columns: vec![TrackSize::Auto],
             rows: vec![TrackSize::Auto],
-            column_gap: 0.0,
-            row_gap: 0.0,
+            column_gap: Prop::Static(0.0),
+            row_gap: Prop::Static(0.0),
             child_ids: Vec::new(),
             pending: Vec::new(),
         }
@@ -53,13 +54,15 @@ impl Grid {
         self
     }
 
-    pub fn column_gap(mut self, gap: f32) -> Self {
-        self.column_gap = gap;
+    /// Set the inter-column gap. Accepts static `f32` or `Signal<f32>`.
+    pub fn column_gap(mut self, gap: impl Into<Prop<f32>>) -> Self {
+        self.column_gap = gap.into();
         self
     }
 
-    pub fn row_gap(mut self, gap: f32) -> Self {
-        self.row_gap = gap;
+    /// Set the inter-row gap. Accepts static `f32` or `Signal<f32>`.
+    pub fn row_gap(mut self, gap: impl Into<Prop<f32>>) -> Self {
+        self.row_gap = gap.into();
         self
     }
 
@@ -178,8 +181,10 @@ impl Widget for Grid {
         }
 
         // Resolve column tracks against the parent's width proposal.
+        let col_gap = self.column_gap.get();
+        let row_gap = self.row_gap.get();
         let col_sizes =
-            Self::resolve_tracks(&self.columns, self.column_gap, proposal.width, &col_max);
+            Self::resolve_tracks(&self.columns, col_gap, proposal.width, &col_max);
 
         // Pass 2: for every child whose column is *narrower* than its
         // intrinsic width (typical of Fractional columns receiving the
@@ -207,10 +212,10 @@ impl Widget for Grid {
             }
         }
 
-        let row_sizes = Self::resolve_tracks(&self.rows, self.row_gap, proposal.height, &row_max);
+        let row_sizes = Self::resolve_tracks(&self.rows, row_gap, proposal.height, &row_max);
 
-        let total_col_gap = self.column_gap * (num_cols as f32 - 1.0).max(0.0);
-        let total_row_gap = self.row_gap * (num_rows as f32 - 1.0).max(0.0);
+        let total_col_gap = col_gap * (num_cols as f32 - 1.0).max(0.0);
+        let total_row_gap = row_gap * (num_rows as f32 - 1.0).max(0.0);
         let width = col_sizes.iter().sum::<f32>() + total_col_gap;
         let height = row_sizes.iter().sum::<f32>() + total_row_gap;
 
@@ -257,8 +262,10 @@ impl Widget for Grid {
             }
         }
 
+        let col_gap = self.column_gap.get();
+        let row_gap = self.row_gap.get();
         let col_sizes =
-            Self::resolve_tracks(&self.columns, self.column_gap, Some(bounds.width), &col_max);
+            Self::resolve_tracks(&self.columns, col_gap, Some(bounds.width), &col_max);
 
         // Pass 2: re-measure Fractional cells whose column shrank, so
         // their row height reflects wrap-induced growth.
@@ -281,7 +288,7 @@ impl Widget for Grid {
         }
 
         let row_sizes =
-            Self::resolve_tracks(&self.rows, self.row_gap, Some(bounds.height), &row_max);
+            Self::resolve_tracks(&self.rows, row_gap, Some(bounds.height), &row_max);
 
         // Compute cell origins
         let mut col_origins = Vec::with_capacity(num_cols);
@@ -290,7 +297,7 @@ impl Widget for Grid {
             col_origins.push(x);
             x += w;
             if i < num_cols - 1 {
-                x += self.column_gap;
+                x += col_gap;
             }
         }
 
@@ -300,7 +307,7 @@ impl Widget for Grid {
             row_origins.push(y);
             y += h;
             if i < num_rows - 1 {
-                y += self.row_gap;
+                y += row_gap;
             }
         }
 
@@ -337,6 +344,15 @@ impl Widget for Grid {
                 })
                 .collect();
         }
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.column_gap.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
+        self.row_gap
+            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         self.child_ids.clone()
     }
 }

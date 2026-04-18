@@ -281,7 +281,10 @@ impl std::fmt::Debug for DialogContent {
 
 impl Widget for DialogContent {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let typography_body_bold = snapshot.typography.body_bold.clone();
+        let typography_body = snapshot.typography.body.clone();
         let mut stack = VStack::new().spacing(16.0);
 
         if self.title.is_some() || self.supporting_text.is_some() {
@@ -289,16 +292,16 @@ impl Widget for DialogContent {
             if let Some(title) = self.title.clone() {
                 header = header.child(
                     TextWidget::new_literal(title)
-                        .style(theme.typography.body_bold.clone())
-                        .color(theme.colors.text_primary)
+                        .style(typography_body_bold)
+                        .bind_color(theme_signal.map(|t| t.colors.text_primary))
                         .single_line(),
                 );
             }
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
                     TextWidget::new_literal(text)
-                        .style(theme.typography.body.clone())
-                        .color(theme.colors.text_secondary),
+                        .style(typography_body)
+                        .bind_color(theme_signal.map(|t| t.colors.text_secondary)),
                 );
             }
             let header_id = ctx.add(header);

@@ -131,52 +131,52 @@ struct MenuBarTrigger {
 
 impl Widget for MenuBarTrigger {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let menu_style = snapshot.components.menu;
+        let radius_control = snapshot.shape.radius_control;
+        let typography_small = snapshot.typography.small.clone();
         let index = self.index;
         let menu_ctx = self.menu_ctx.clone();
 
-        // Background and text color derived from the shared open_index signal.
-        // Single signal source → binding registry handles repaints automatically.
-        let bg_color = menu_ctx.open_index.map({
-            let primary = theme.colors.accent;
-            move |open| {
+        // Background and text color derived from the open_index signal and
+        // the theme signal. zip() registers both upstream roots so either a
+        // menu-state change or a runtime theme switch refreshes the paint.
+        let bg_color = menu_ctx
+            .open_index
+            .zip(&theme_signal)
+            .map(move |(open, t)| {
                 if *open == Some(index) {
-                    primary.with_alpha(0.12)
+                    t.colors.accent.with_alpha(0.12)
                 } else {
                     Color::TRANSPARENT
                 }
-            }
-        });
+            });
 
-        let text_color = menu_ctx.open_index.map({
-            let on_surface = theme.colors.text_primary;
-            move |open| {
+        let text_color = menu_ctx
+            .open_index
+            .zip(&theme_signal)
+            .map(move |(open, t)| {
                 if *open == Some(index) {
-                    on_surface
+                    t.colors.text_primary
                 } else {
-                    on_surface.with_alpha(0.8)
+                    t.colors.text_primary.with_alpha(0.8)
                 }
-            }
-        });
+            });
 
         let label = TextWidget::new_literal(&self.label)
-            .style(theme.typography.small.clone())
+            .style(typography_small)
             .bind_color(text_color)
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);
 
-        let menu_style = theme.components.menu;
-        let padding = Padding::symmetric(
-            4.0,
-            menu_style.item_padding_horizontal,
-        )
-        .child_id(label_id);
+        let padding = Padding::symmetric(4.0, menu_style.item_padding_horizontal).child_id(label_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
             .bind_background(bg_color)
-            .corner_radius(fern_tokens::CornerRadius::uniform(theme.shape.radius_control));
+            .corner_radius(fern_tokens::CornerRadius::uniform(radius_control));
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
@@ -383,7 +383,7 @@ impl Widget for MenuOverlayHost {
 
 impl Widget for MenuBar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
 
         let open_index: Signal<Option<usize>> = ctx.signal(None);
         let menu_ctx = MenuContext::new(open_index);
@@ -454,9 +454,9 @@ impl Widget for MenuBar {
         let row_id = ctx.add(row);
 
         let bg = RectWidget::new()
-            .background(theme.colors.surface_main)
-            .border_color(theme.colors.border.with_alpha(0.2))
-            .border_width(0.0);
+            .bind_background(theme_signal.map(|t| t.colors.surface_main))
+            .bind_border_color(theme_signal.map(|t| t.colors.border.with_alpha(0.2)))
+            .bind_border_width(0.0_f32);
         let bg_id = ctx.add(bg);
 
         let padding = Padding::symmetric(0.0, 2.0).child_id(row_id);

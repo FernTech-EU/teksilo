@@ -89,17 +89,18 @@ impl std::fmt::Debug for GroupHeader {
 
 impl Widget for GroupHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-
+        let theme_signal = ctx.theme_signal();
         let style = self
             .style
             .clone()
-            .unwrap_or_else(|| theme.typography.body.clone());
-        let color = self.color.unwrap_or(theme.colors.text_primary);
+            .unwrap_or_else(|| theme_signal.get().typography.body.clone());
+        let color_override = self.color;
+        let color_signal =
+            theme_signal.map(move |t| color_override.unwrap_or(t.colors.text_primary));
 
         let label = TextWidget::new_literal(&self.label)
             .style(style)
-            .color(color)
+            .bind_color(color_signal)
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);

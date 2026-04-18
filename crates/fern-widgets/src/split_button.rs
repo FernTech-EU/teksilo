@@ -258,8 +258,8 @@ fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw
 
 impl Widget for SplitButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let sb_style = theme.components.split_button;
+        let theme_signal = ctx.theme_signal();
+        let sb_style = theme_signal.get().components.split_button;
         let style = self.style;
         let enabled = self.enabled;
 
@@ -332,19 +332,16 @@ impl Widget for SplitButton {
         self.interaction = interaction.clone();
 
         // ---- Derived reactive colors ----
-        let bg_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_bg(style, *s, &colors))
-        };
-        let text_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_text(style, *s, &colors))
-        };
-        let border_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_border(style, *s, &colors))
-        };
-        let divider_color = theme.colors.border;
+        let bg_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_bg(style, *s, &t.colors));
+        let text_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_text(style, *s, &t.colors));
+        let border_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_border(style, *s, &t.colors));
+        let divider_color_signal = theme_signal.map(|t| t.colors.border);
 
         // ---- Main-region label bound to `selected` ----
         let main_label_text = {
@@ -427,7 +424,7 @@ impl Widget for SplitButton {
         }
 
         // ---- Divider between main and chevron regions ----
-        let divider_fill_id = ctx.add(RectWidget::new().background(divider_color));
+        let divider_fill_id = ctx.add(RectWidget::new().bind_background(divider_color_signal));
         let divider_id = ctx.add(
             FixedSize::new()
                 .bind_width(sb_style.divider_width)
@@ -513,10 +510,13 @@ impl Widget for SplitButton {
         // Border width reacts to focus state — thickens to the
         // accent `focus_ring_width` on focus, matching the Int UI
         // convention applied uniformly across all input widgets.
-        let normal_bw = sb_style.border_width;
-        let focus_bw = theme.shape.focus_ring_width;
-        let border_width = interaction.map(move |s| {
-            resolve_border_width(style, *s, normal_bw, focus_bw)
+        let border_width = interaction.zip(&theme_signal).map(move |(s, t)| {
+            resolve_border_width(
+                style,
+                *s,
+                t.components.split_button.border_width,
+                t.shape.focus_ring_width,
+            )
         });
 
         // ---- Shared frame (single RectWidget behind the row) ----

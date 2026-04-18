@@ -110,7 +110,14 @@ impl std::fmt::Debug for ShortcutSettings {
 
 impl Widget for ShortcutSettings {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        // Snapshot the theme once for static style access. Full theme
+        // reactivity would require threading theme_signal into every
+        // helper; since ShortcutSettings already rebuilds on shortcut
+        // registry changes (bind below), a theme-change triggered
+        // rebuild is also cheap — but we leave that to the framework
+        // dirty pass (mark_all_dirty in set_theme) rather than forcing
+        // a rebuild binding here.
+        let theme = ctx.theme_signal().get();
 
         // Rebuild on any registry change (register, rebind, clear).
         ctx.shortcut_version().bind_to(

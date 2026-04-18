@@ -42,9 +42,9 @@ impl RootContent {
 
 impl Widget for RootContent {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let t = &theme.typography;
-        let c = &theme.colors;
+        // Snapshot typography (static tokens not expressible as a role);
+        // colors use roles and resolve reactively at paint time.
+        let t = ctx.theme_signal().get().typography;
 
         let root = ctx.add(
             Padding::uniform(24.0).child(
@@ -56,7 +56,7 @@ impl Widget for RootContent {
                             .child(
                                 TextWidget::new_literal("Text & Layout")
                                     .style(t.body_bold.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(Spacer::new())
                             .child({
@@ -81,35 +81,35 @@ impl Widget for RootContent {
                             .child(
                                 TextWidget::new_literal("Typography Styles")
                                     .style(t.body_bold.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "Body text (14px) — the default reading style for content.",
                                 )
                                 .style(t.body.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "Body small (12px) — secondary information and descriptions.",
                                 )
                                 .style(t.small.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "Caption (11px) — timestamps, footnotes, and fine print.",
                                 )
                                 .style(t.tiny.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "LABEL (12px medium, +0.5 tracking) — form labels and tags.",
                                 )
                                 .style(t.small.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                             ),
                     )
                     // Layout showcase
@@ -119,38 +119,38 @@ impl Widget for RootContent {
                             .child(
                                 TextWidget::new_literal("Layout Primitives")
                                     .style(t.body_bold.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 HStack::new()
                                     .spacing(8.0)
-                                    .child(build_color_box(c.accent, "A"))
-                                    .child(build_color_box(c.accent_subtle_bg, "B"))
-                                    .child(build_color_box(c.text_error, "C")),
+                                    .child(build_color_box(SurfaceRole::Accent, "A"))
+                                    .child(build_color_box(SurfaceRole::AccentSubtle, "B"))
+                                    .child(build_color_box(TextRole::Error, "C")),
                             )
                             .child(
                                 TextWidget::new_literal("HStack with spacing — three colored boxes")
                                     .style(t.tiny.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 HStack::new()
                                     .child(
                                         TextWidget::new_literal("Leading")
                                             .style(t.body.clone())
-                                            .color(c.text_primary),
+                                            .color(TextRole::Primary),
                                     )
                                     .child(Spacer::new())
                                     .child(
                                         TextWidget::new_literal("Trailing")
                                             .style(t.body.clone())
-                                            .color(c.text_primary),
+                                            .color(TextRole::Primary),
                                     ),
                             )
                             .child(
                                 TextWidget::new_literal("Spacer pushing items to edges")
                                     .style(t.tiny.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             ),
                     ),
             ),
@@ -171,7 +171,7 @@ impl Widget for RootContent {
 
 /// Helper — returns a widget value, not a WidgetId.
 /// Works with the inline child() pattern.
-fn build_color_box(color: Color, label: &str) -> Panel {
+fn build_color_box(color: impl Into<fern_ui::core::ColorProp>, label: &str) -> Panel {
     Panel::new()
         .background(color)
         .corner_radius(6.0)

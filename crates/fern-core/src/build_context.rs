@@ -132,6 +132,22 @@ impl<'a> BuildContext<'a> {
         self.tree.theme()
     }
 
+    /// Reactive handle on the current theme. Fires observers when
+    /// `tree.set_theme(...)` is called. Build implementations that want
+    /// theme-driven values to update without a rebuild should use this
+    /// instead of cloning tokens from `self.theme()` — for example,
+    /// `ctx.theme_signal().map(|t| t.colors.primary)` or combining with
+    /// interaction state via `zip(...)`.
+    pub fn theme_signal(&self) -> crate::signal::Signal<fern_tokens::Theme> {
+        self.tree.theme_signal().clone()
+    }
+
+    /// Reactive handle on the current locale. Fires observers when
+    /// `tree.set_locale(...)` is called.
+    pub fn locale_signal(&self) -> crate::signal::Signal<Option<String>> {
+        self.tree.locale_signal().clone()
+    }
+
     /// Retrieve an application-scoped value of type `T` registered via
     /// `FernAppBuilder::app_state` (architecture §9.5). Returns `None` if
     /// no value of that type was registered. The returned reference

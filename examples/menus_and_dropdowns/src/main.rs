@@ -36,7 +36,7 @@ impl Root {
 
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
         let t = &theme.typography;
         let c = &theme.colors;
 
@@ -57,7 +57,7 @@ impl Widget for Root {
                 .child(
                     TextWidget::new_literal("ComboBox / Dropdown")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal(
@@ -67,7 +67,7 @@ impl Widget for Root {
                          list live.",
                     )
                     .style(t.body.clone())
-                    .color(c.text_primary),
+                    .color(TextRole::Primary),
                 )
                 .child(
                     HStack::new()
@@ -78,7 +78,7 @@ impl Widget for Root {
                                 .child(
                                     TextWidget::new_literal("Fruit")
                                         .style(t.small.clone())
-                                        .color(c.text_primary),
+                                        .color(TextRole::Primary),
                                 )
                                 .child(
                                     ComboBox::new(
@@ -102,7 +102,7 @@ impl Widget for Root {
                                 .child(
                                     TextWidget::new_literal("Color")
                                         .style(t.small.clone())
-                                        .color(c.text_primary),
+                                        .color(TextRole::Primary),
                                 )
                                 .child(ComboBox::new(
                                     vec!["Red", "Green", "Blue", "Yellow", "Purple"],
@@ -115,7 +115,7 @@ impl Widget for Root {
                                 .child(
                                     TextWidget::new_literal("Size (disabled)")
                                         .style(t.small.clone())
-                                        .color(c.text_primary),
+                                        .color(TextRole::Primary),
                                 )
                                 .child(
                                     ComboBox::new(
@@ -132,7 +132,7 @@ impl Widget for Root {
                                 .child(
                                     TextWidget::new_literal("Country (searchable)")
                                         .style(t.small.clone())
-                                        .color(c.text_primary),
+                                        .color(TextRole::Primary),
                                 )
                                 .child(
                                     ComboBox::new(
@@ -186,7 +186,7 @@ impl Widget for Root {
                 .child(
                     TextWidget::new_literal("Context Menu")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal(
@@ -194,14 +194,14 @@ impl Widget for Root {
                          Each panel has a different menu.",
                     )
                     .style(t.body.clone())
-                    .color(c.text_primary),
+                    .color(TextRole::Primary),
                 )
                 .child(
                     HStack::new()
                         .spacing(16.0)
                         .child(
                             Panel::new()
-                                .background(c.surface_main)
+                                .background(SurfaceRole::Main)
                                 .corner_radius(8.0)
                                 .padding(20.0)
                                 .child(
@@ -210,12 +210,12 @@ impl Widget for Root {
                                         .child(
                                             TextWidget::new_literal("Edit Menu")
                                                 .style(t.small.clone())
-                                                .color(c.text_primary),
+                                                .color(TextRole::Primary),
                                         )
                                         .child(
                                             TextWidget::new_literal("Right-click for Cut/Copy/Paste")
                                                 .style(t.body.clone())
-                                                .color(c.text_primary),
+                                                .color(TextRole::Primary),
                                         ),
                                 )
                                 .context_menu(|| {
@@ -280,7 +280,7 @@ impl Widget for Root {
                         )
                         .child(
                             Panel::new()
-                                .background(c.surface_main)
+                                .background(SurfaceRole::Main)
                                 .corner_radius(8.0)
                                 .padding(20.0)
                                 .child(
@@ -289,12 +289,12 @@ impl Widget for Root {
                                         .child(
                                             TextWidget::new_literal("File Menu")
                                                 .style(t.small.clone())
-                                                .color(c.text_primary),
+                                                .color(TextRole::Primary),
                                         )
                                         .child(
                                             TextWidget::new_literal("Right-click for file operations")
                                                 .style(t.body.clone())
-                                                .color(c.text_primary),
+                                                .color(TextRole::Primary),
                                         ),
                                 )
                                 .context_menu(|| {
@@ -331,7 +331,7 @@ impl Widget for Root {
                 .child(
                     TextWidget::new_literal("Menu Items (inline)")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal(
@@ -339,12 +339,12 @@ impl Widget for Root {
                          their visual styles and interaction states.",
                     )
                     .style(t.body.clone())
-                    .color(c.text_primary),
+                    .color(TextRole::Primary),
                 )
                 .child(
                     Panel::new()
-                        .background(c.surface_main)
-                        .border_color(c.border)
+                        .background(SurfaceRole::Main)
+                        .border_color(BorderRole::Default)
                         .border_width(1.0)
                         .corner_radius(8.0)
                         .child(
@@ -376,7 +376,7 @@ impl Widget for Root {
                     .child(
                         TextWidget::new_literal("Menus & Dropdowns")
                             .style(t.body_bold.clone())
-                            .color(c.text_primary),
+                            .color(TextRole::Primary),
                     )
                     .child(Spacer::new())
                     .child(
@@ -403,7 +403,7 @@ impl Widget for Root {
 
         let menu_bar = ctx.add(
             MenuBar::new()
-                .leading_slot(IconWidget::chevron_right(16.0).color(c.accent))
+                .leading_slot(IconWidget::chevron_right(16.0).color(TextRole::Accent))
                 .menu_literal("File", || {
                     Box::new(
                         MenuList::new()
@@ -499,7 +499,7 @@ impl Widget for Root {
                     StatusBar::new().child(
                         TextWidget::new_literal("Milestone 4 -- Menus & Dropdowns")
                             .style(t.tiny.clone())
-                            .color(c.text_primary),
+                            .color(TextRole::Primary),
                     ),
                 ),
         );

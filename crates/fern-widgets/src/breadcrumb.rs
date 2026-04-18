@@ -367,7 +367,10 @@ impl Widget for BreadcrumbSeparator {
             size,
             size,
         );
-        let icon = IconWidget::chevron_right(size).color(ctx.theme.colors.text_secondary);
+        // Role-based: IconWidget resolves against the current theme at paint,
+        // so this stays reactive across theme switches without a build-time
+        // capture.
+        let icon = IconWidget::chevron_right(size).color(fern_tokens::TextRole::Secondary);
         icon.paint(icon_bounds, canvas, ctx);
     }
 

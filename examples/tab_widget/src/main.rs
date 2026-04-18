@@ -26,7 +26,7 @@ impl Root {
 
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
         let selected = ctx.signal(0_usize);
         let selected_label = selected.map(|index| match *index {
             0 => "Overview".to_string(),

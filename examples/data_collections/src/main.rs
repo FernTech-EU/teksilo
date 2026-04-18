@@ -336,7 +336,7 @@ impl Root {
 
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
         let selected_tab = ctx.signal(0_usize);
 
         let repeater_tab = self.build_repeater_tab(&theme);

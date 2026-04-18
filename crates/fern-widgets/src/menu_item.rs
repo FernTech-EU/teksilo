@@ -279,8 +279,10 @@ fn resolve_shortcut(
 
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let menu_style = theme.components.menu;
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let menu_style = snapshot.components.menu;
+        let typography_body = snapshot.typography.body.clone();
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -292,17 +294,13 @@ impl Widget for MenuItem {
 
         // Background: use the Int UI surface_hover / surface_pressed tokens
         // directly instead of a hand-mixed alpha wash. Tracks theme changes.
-        let bg_color = {
-            let hover = theme.colors.surface_hover;
-            let pressed = theme.colors.surface_pressed;
-            interaction.map(move |s| resolve_bg(*s, hover, pressed))
-        };
+        let bg_color = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| resolve_bg(*s, t.colors.surface_hover, t.colors.surface_pressed));
 
-        let text_color = {
-            let text = theme.colors.text_primary;
-            let disabled = theme.colors.text_disabled;
-            interaction.map(move |s| resolve_text(*s, text, disabled))
-        };
+        let text_color = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| resolve_text(*s, t.colors.text_primary, t.colors.text_disabled));
 
         // Row layout:
         //   [icon column][gap][label][Spacer][shortcut?][chevron column]
@@ -357,7 +355,7 @@ impl Widget for MenuItem {
 
         // Label
         let label = TextWidget::new_literal(&self.label)
-            .style(theme.typography.body.clone())
+            .style(typography_body.clone())
             .bind_color(text_color.clone())
             .single_line()
             .a11y_hidden();
@@ -405,13 +403,11 @@ impl Widget for MenuItem {
             );
             row = row.add_child(shortcut_gap);
 
-            let shortcut_color = {
-                let shortcut = theme.colors.tooltip_shortcut;
-                let disabled = theme.colors.text_disabled;
-                interaction.map(move |s| resolve_shortcut(*s, shortcut, disabled))
-            };
+            let shortcut_color = interaction.zip(&theme_signal).map(|(s, t)| {
+                resolve_shortcut(*s, t.colors.tooltip_shortcut, t.colors.text_disabled)
+            });
             let shortcut = TextWidget::new_literal(shortcut_text)
-                .style(theme.typography.body.clone())
+                .style(typography_body.clone())
                 .bind_color(shortcut_color)
                 .single_line()
                 .a11y_hidden();
@@ -451,7 +447,7 @@ impl Widget for MenuItem {
         // (24 dp); left padding uses `item_padding_horizontal`; RIGHT
         // padding is zero because the chevron column occupies that space.
         // Body text is 13 dp so that's ~5.5 dp top + 5.5 dp bottom.
-        let pad_v = ((menu_style.item_height - theme.typography.body.size) * 0.5).max(0.0);
+        let pad_v = ((menu_style.item_height - typography_body.size) * 0.5).max(0.0);
         let padding = Padding::new(
             pad_v,                              // top
             0.0,                                // right — chevron column fills this

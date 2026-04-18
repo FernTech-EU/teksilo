@@ -43,7 +43,16 @@ impl AnimatedRegistration {
 #[allow(clippy::type_complexity)]
 pub struct WidgetTree {
     arena: WidgetArena,
+    /// Current theme value cached for `&Theme` accessors used by layout/paint
+    /// contexts and by widgets that need an immediate read. The reactive source
+    /// of truth is `theme_signal`; both are updated in lockstep by `set_theme`.
     theme: Theme,
+    /// Reactive theme signal. Widgets that want their visual or derived state
+    /// to track theme changes bind to this signal or build derived signals via
+    /// `zip`/`map`. `set_theme` updates the signal (firing observers) without
+    /// rebuilding the widget tree, so interaction state (focus, scroll, expanded
+    /// panels, …) survives theme switches.
+    theme_signal: crate::signal::Signal<Theme>,
     text_backend: Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
     focused: Option<WidgetId>,
     hovered: Option<WidgetId>,
@@ -121,10 +130,14 @@ pub struct WidgetTree {
     /// fern-app installs a populated context when an event source is
     /// registered on the builder. See architecture §9.4.
     pub(crate) app_context: Rc<crate::event_source::TreeAppContext>,
-    /// Active locale identifier. fern-i18n is still a stub, so the tree
-    /// only stores the value and rebuilds composite widgets on change —
-    /// translation lookup happens entirely in user code today.
+    /// Active locale identifier. Cached for `Option<&str>` accessors; the
+    /// reactive source of truth is `locale_signal`. Both are updated in
+    /// lockstep by `set_locale`.
     pub(crate) locale: Option<String>,
+    /// Reactive locale signal. Widgets and `LocalizedString` adapters bind to
+    /// this signal to react to locale changes; `set_locale` updates the signal
+    /// without rebuilding the widget tree.
+    pub(crate) locale_signal: crate::signal::Signal<Option<String>>,
     /// Per-frame delta-seconds signal, advanced by `layout()` **only when
     /// a widget has explicitly requested a frame** via `request_frame()`.
     /// This preserves FernUI's draw-when-needed model: idle trees stay
@@ -200,9 +213,11 @@ struct PendingDelayedOverlay {
 
 impl WidgetTree {
     pub fn new() -> Self {
+        let initial_theme = Theme::light_default();
         Self {
             arena: WidgetArena::new(),
-            theme: Theme::light_default(),
+            theme: initial_theme.clone(),
+            theme_signal: crate::signal::Signal::new(initial_theme),
             text_backend: None,
             focused: None,
             hovered: None,
@@ -235,6 +250,7 @@ impl WidgetTree {
             title_bar_host: None,
             app_context: Rc::new(crate::event_source::TreeAppContext::empty()),
             locale: None,
+            locale_signal: crate::signal::Signal::new(None),
             frame_tick: crate::signal::Signal::new(0.0_f32),
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
@@ -342,39 +358,32 @@ impl WidgetTree {
         &self.app_context
     }
 
-    /// Switch the tree-level locale at runtime. Rebuilds all composite
-    /// widgets so that any tr! lookups picked up at build time are
-    /// re-evaluated against the new locale, and marks all widgets dirty.
+    /// Switch the tree-level locale at runtime.
     ///
-    /// **Rebuild policy (architecture §12.7).** A composite rebuild is
-    /// only strictly required when the layout direction flips (because
-    /// child order and leading/trailing resolution are decided inside
-    /// `build()`). For same-direction locale switches, the reactive
-    /// binding system alone is sufficient: every `LocalizedString` that
-    /// went through `to_signal()` observes the i18n manager's version
-    /// counter and re-resolves automatically, and the framework only
-    /// needs to mark bound widgets dirty for repaint/relayout.
-    ///
-    /// This method currently always rebuilds for safety, matching the
-    /// Phase G / Phase H exit state. A later optimization — skip the
-    /// rebuild when the caller already applied a direction change (or
-    /// when no direction change is needed) — is tracked as a follow-up.
-    /// The optimization requires proving that every composite widget
-    /// which builds translated children does so through a
-    /// `LocalizedString::to_signal()` binding, not by resolving text
-    /// eagerly inside `build()` into a static `String`.
+    /// Updates `locale_signal` (a reactive `Signal<Option<String>>`) and marks
+    /// all widgets dirty for relayout and repaint. Widgets are **not** rebuilt:
+    /// per-string reactivity flows through `LocalizedString::to_signal()` which
+    /// observes the fern-i18n manager, and anything else that depends on the
+    /// tree-level locale can bind to `locale_signal()`.
     pub fn set_locale(&mut self, locale: String) {
         if self.locale.as_deref() == Some(locale.as_str()) {
             return;
         }
-        self.locale = Some(locale);
-        self.rebuild_built_widgets();
+        let new = Some(locale);
+        self.locale = new.clone();
+        self.locale_signal.set(new);
         self.arena.mark_all_dirty();
     }
 
     /// Currently active locale identifier, if any.
     pub fn locale(&self) -> Option<&str> {
         self.locale.as_deref()
+    }
+
+    /// Reactive handle on the current locale. Mirrors `locale()` but updates
+    /// observers when `set_locale` is called.
+    pub fn locale_signal(&self) -> &crate::signal::Signal<Option<String>> {
+        &self.locale_signal
     }
 
     fn pointer_inside_overlay_region(
@@ -589,6 +598,14 @@ impl WidgetTree {
         &self.theme
     }
 
+    /// Reactive handle on the current theme. Updates fire when `set_theme`
+    /// is called; widgets that want theme-derived values to stay live should
+    /// build derived signals via `theme_signal.map(...)` or combine with
+    /// other inputs using `.zip(...)`.
+    pub fn theme_signal(&self) -> &crate::signal::Signal<Theme> {
+        &self.theme_signal
+    }
+
     /// Whether any widget needs layout or paint (i.e., a redraw would be useful).
     pub fn needs_redraw(&self) -> bool {
         self.arena.any_needs_layout()
@@ -732,36 +749,47 @@ impl WidgetTree {
     }
 
     /// Switch the tree-level theme at runtime.
-    /// Rebuilds all composite widgets (their derived state closures capture theme
-    /// tokens at build time) and marks all widgets as needing layout and repaint.
+    ///
+    /// Updates `theme_signal` (a reactive `Signal<Theme>`) and marks all widgets
+    /// dirty for relayout and repaint. Widgets are **not** rebuilt: the
+    /// `LayoutContext` and `PaintContext` already resolve the current theme on
+    /// every pass, and any widget that derives state from theme tokens should
+    /// do so through a `theme_signal()` subscription rather than a build-time
+    /// capture. Preserves focus, scroll offsets, and other interaction state.
     pub fn set_theme(&mut self, theme: Theme) {
-        self.theme = theme;
-        self.focused = None;
-        self.hovered = None;
-        self.focus_origin = None;
+        self.theme = theme.clone();
+        self.theme_signal.set(theme);
         self.tooltips.clear();
-        self.rebuild_built_widgets();
         self.arena.mark_all_dirty();
     }
 
-    /// Reconstruct all widgets that have `has_built_children == true`.
-    /// Called when the environment changes (theme switch, locale switch).
-    fn rebuild_built_widgets(&mut self) {
-        let ids: Vec<WidgetId> = self
-            .arena
-            .active_ids()
-            .into_iter()
-            .filter(|id| self.arena.get(*id).is_some_and(|n| n.has_built_children))
-            .collect();
-
-        for widget_id in ids {
-            self.rebuild_single_widget(widget_id);
+    /// After a rebuild that destroyed subtrees, drop any interaction state
+    /// (focus, hover) whose target `WidgetId` is no longer valid. Preserves
+    /// state when the target still exists in the arena. Called from
+    /// data-driven rebuild paths (`process_state_changes`); theme and locale
+    /// switches no longer rebuild.
+    pub(crate) fn revalidate_interaction_state(&mut self) {
+        if let Some(id) = self.focused
+            && !self.arena.is_active(id)
+        {
+            self.focused = None;
+            self.focus_origin = None;
+        }
+        if self.focused.is_none() {
+            self.focus_origin = None;
+        }
+        if let Some(id) = self.hovered
+            && !self.arena.is_active(id)
+        {
+            self.hovered = None;
         }
     }
 
     /// Rebuild a single composite widget: destroy old children, re-run `build()`,
-    /// and wire up new children. Used by both `rebuild_built_widgets()` (environment
-    /// changes) and `process_state_changes()` (data-driven rebuild).
+    /// and wire up new children. Called from `process_state_changes()` when a
+    /// binding at `BindingLevel::Rebuild` fires (data-driven rebuild). Theme
+    /// and locale changes do **not** rebuild — they update reactive signals
+    /// that widgets bind to via `theme_signal()` / `locale_signal()`.
     pub(crate) fn rebuild_single_widget(&mut self, widget_id: WidgetId) {
         // Per §9.4.5, drop the source handle first (stops further source-side
         // dispatch) and then remove the UI-side callback. Either order gives

@@ -1,5 +1,6 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::VAlignment;
@@ -11,7 +12,7 @@ use fern_tokens::VAlignment;
 pub struct HStack {
     child_ids: Vec<WidgetId>,
     pending: Vec<PendingChild>,
-    spacing: f32,
+    spacing: Prop<f32>,
     alignment: VAlignment,
 }
 
@@ -20,13 +21,16 @@ impl HStack {
         Self {
             child_ids: Vec::new(),
             pending: Vec::new(),
-            spacing: 0.0,
+            spacing: Prop::Static(0.0),
             alignment: VAlignment::Center,
         }
     }
 
-    pub fn spacing(mut self, spacing: f32) -> Self {
-        self.spacing = spacing;
+    /// Set inter-child spacing. Accepts a static `f32` or a reactive
+    /// `Signal<f32>` — use a signal derived from
+    /// `ctx.theme_signal()` to track theme-driven spacing changes.
+    pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self {
+        self.spacing = spacing.into();
         self
     }
 
@@ -98,7 +102,8 @@ impl Widget for HStack {
         }
 
         let n = self.child_ids.len();
-        let total_spacing = self.spacing * (n as f32 - 1.0).max(0.0);
+        let spacing = self.spacing.get();
+        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
         total_width += total_spacing;
 
         // Primary axis: if we have spacers AND the parent gave us a width,
@@ -158,7 +163,8 @@ impl Widget for HStack {
         }
 
         // Distribute remaining space among spacers
-        let total_spacing = self.spacing * (n as f32 - 1.0).max(0.0);
+        let spacing = self.spacing.get();
+        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
         let remaining = (bounds.width - total_non_spacer_width - total_spacing).max(0.0);
         let spacer_width = if spacer_count > 0 {
             remaining / spacer_count as f32
@@ -187,7 +193,7 @@ impl Widget for HStack {
                 x -= w;
                 child.origin = Point::new(x, bounds.y + y_offset);
                 child.size = Size::new(w, h);
-                x -= self.spacing;
+                x -= spacing;
             }
         } else {
             let mut x = bounds.x;
@@ -206,7 +212,7 @@ impl Widget for HStack {
 
                 child.origin = Point::new(x, bounds.y + y_offset);
                 child.size = Size::new(w, h);
-                x += w + self.spacing;
+                x += w + spacing;
             }
         }
     }
@@ -232,6 +238,12 @@ impl Widget for HStack {
                 })
                 .collect();
         }
+        // Register the spacing prop for dirty-tracking so theme-driven
+        // signals trigger a relayout when they change.
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.spacing
+            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         self.child_ids.clone()
     }
 }

@@ -213,7 +213,7 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for FilteredItemList<T> {
 impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use fern_core::binding::BindingLevel;
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
 
         // Rebuild on model mutation AND on query change. Both bindings
         // sit here rather than on the outer panel so the sibling
@@ -327,8 +327,8 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for DropdownPanel<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let menu_style = theme.components.menu;
+        let theme_signal = ctx.theme_signal();
+        let menu_style = theme_signal.get().components.menu;
 
         // In non-searchable mode the panel itself binds the model-version
         // signal so the item list rebuilds on mutation. In searchable mode
@@ -452,9 +452,9 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
 
         // Dropdown panel — same surface treatment as MenuList (raised + popup radius)
         let bg = RectWidget::new()
-            .background(theme.colors.surface_raised)
-            .border_color(theme.colors.border)
-            .border_width(menu_style.popup_border_width)
+            .bind_background(theme_signal.map(|t| t.colors.surface_raised))
+            .bind_border_color(theme_signal.map(|t| t.colors.border))
+            .bind_border_width(menu_style.popup_border_width)
             .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);
 

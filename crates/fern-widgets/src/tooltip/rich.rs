@@ -176,7 +176,13 @@ impl Widget for RichTooltipWidget {
             return vec![id];
         };
 
-        let theme = ctx.theme().clone();
+        // Snapshot the theme once for static text styles; reactive colors
+        // are piped into leaf widgets via `theme_signal.map(...)` below.
+        // Rich tooltips are short-lived overlays, so a theme switch that
+        // happens while one is already visible refreshes the next time
+        // it's re-shown (or immediately for the signal-bound colors).
+        let theme_signal = ctx.theme_signal();
+        let theme = theme_signal.get();
         let style = theme.components.tooltip;
         let self_id = ctx.self_id();
 
@@ -247,7 +253,7 @@ impl Widget for RichTooltipWidget {
         // body TextWidget would duplicate it as a child Label node.
         let body_widget = TextWidget::new_literal(body_source)
             .style(theme.typography.small.clone())
-            .color(theme.colors.tooltip_text)
+            .bind_color(theme_signal.map(|t| t.colors.tooltip_text))
             .markup(true)
             .on_link_click(make_link_click_handler(nested_map.clone(), self_id))
             .a11y_hidden();
@@ -256,7 +262,7 @@ impl Widget for RichTooltipWidget {
         let header: WidgetId = if let Some(shortcut) = shortcut_text {
             let shortcut_widget = TextWidget::new_literal(shortcut)
                 .style(theme.typography.small.clone())
-                .color(theme.colors.tooltip_shortcut)
+                .bind_color(theme_signal.map(|t| t.colors.tooltip_shortcut))
                 .single_line()
                 .a11y_hidden();
             let shortcut_id = ctx.add(shortcut_widget);
@@ -301,7 +307,7 @@ impl Widget for RichTooltipWidget {
         let footer_left: WidgetId = if let Some(more_text) = more_source {
             let more_widget = TextWidget::new_literal(more_text)
                 .style(theme.typography.small.clone())
-                .color(theme.colors.tooltip_text)
+                .bind_color(theme_signal.map(|t| t.colors.tooltip_text))
                 .markup(true)
                 .on_link_click(make_link_click_handler(nested_map.clone(), self_id));
             let expanded = ctx.signal(false);

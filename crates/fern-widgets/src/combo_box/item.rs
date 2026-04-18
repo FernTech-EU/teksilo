@@ -31,7 +31,7 @@ pub(super) fn build_default_item(
 ) -> WidgetId {
     let text = TextWidget::new_literal(label)
         .style(theme.typography.body.clone())
-        .color(theme.colors.text_primary)
+        .bind_color(ctx.theme_signal().map(|t| t.colors.text_primary))
         .single_line()
         .a11y_hidden();
     let text_id = ctx.add(text);
@@ -78,7 +78,8 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for DropdownItem<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let theme = theme_signal.get();
         let selected_signal = self.selected_signal.clone();
         let value_for_tap = self.value.clone();
 
@@ -94,14 +95,11 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
             });
         }
 
-        let bg_color = highlighted.map({
-            let primary = theme.colors.accent;
-            move |h| {
-                if *h {
-                    primary.with_alpha(0.12)
-                } else {
-                    Color::TRANSPARENT
-                }
+        let bg_color = highlighted.zip(&theme_signal).map(|(h, t)| {
+            if *h {
+                t.colors.accent.with_alpha(0.12)
+            } else {
+                Color::TRANSPARENT
             }
         });
 

@@ -80,12 +80,14 @@ impl Widget for GroupBox {
             self.content_id = Some(ctx.add_boxed(pending));
         }
 
-        let theme = ctx.theme().clone();
-        let style = theme.components.group_box;
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let style = snapshot.components.group_box;
+        let typography_body_bold = snapshot.typography.body_bold.clone();
 
         let title_label = TextWidget::new_literal(&self.title)
-            .style(theme.typography.body_bold.clone())
-            .color(theme.colors.text_primary)
+            .style(typography_body_bold)
+            .bind_color(theme_signal.map(|t| t.colors.text_primary))
             .single_line()
             .a11y_hidden();
 
@@ -112,8 +114,8 @@ impl Widget for GroupBox {
         // ancestor-enabled check already blocks interaction; this overlay is
         // purely a visual cue.
         let content_wrapper_id = if let Some(ref checked) = self.checked {
-            let dim_color = theme.colors.surface_main.with_alpha(0.6);
-            let dim_overlay_id = ctx.add(RectWidget::new().background(dim_color));
+            let dim_color = theme_signal.map(|t| t.colors.surface_main.with_alpha(0.6));
+            let dim_overlay_id = ctx.add(RectWidget::new().bind_background(dim_color));
             ctx.visible_when(dim_overlay_id, checked.map(|v| !*v));
             ctx.enabled_when(padded_content_id, checked.clone());
             ctx.add(

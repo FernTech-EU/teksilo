@@ -236,8 +236,8 @@ fn resolve_size(size: BuiltInButtonSize, style: &fern_tokens::IconButtonStyle) -
 
 impl fern_core::widget::Widget for BuiltInButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let ib_style = theme.components.icon_button;
+        let theme_signal = ctx.theme_signal();
+        let ib_style = theme_signal.get().components.icon_button;
         let enabled = self.enabled;
 
         // Interaction signal
@@ -266,15 +266,14 @@ impl fern_core::widget::Widget for BuiltInButton {
             );
         }
 
-        // Derived reactive colors
-        let bg_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_bg(*s, &colors))
-        };
-        let icon_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_icon_color(*s, &colors))
-        };
+        // Derived reactive colors — combine interaction state with theme
+        // signal so runtime theme switches re-derive the palette.
+        let bg_color = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| resolve_bg(*s, &t.colors));
+        let icon_color = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| resolve_icon_color(*s, &t.colors));
 
         // Build the icon content
         let icon_content_id = if let Some(ref toggled) = self.toggled {
@@ -314,16 +313,17 @@ impl fern_core::widget::Widget for BuiltInButton {
         // indicator. At rest there's no visible border (transparent
         // color + 0 dp width); on focus it snaps to an accent
         // `focus_ring_width` border. No external ring.
-        let focus_ring_color = theme.colors.focus_ring;
-        let border_color = interaction.map(move |s| match s {
-            InteractionState::Focused => focus_ring_color,
+        let border_color = interaction.zip(&theme_signal).map(|(s, t)| match *s {
+            InteractionState::Focused => t.colors.focus_ring,
             _ => Color::TRANSPARENT,
         });
-        let focus_bw = theme.shape.focus_ring_width;
-        let border_width = interaction.map(move |s| match s {
-            InteractionState::Focused => focus_bw,
-            _ => 0.0,
-        });
+        let border_width = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| if *s == InteractionState::Focused {
+                t.shape.focus_ring_width
+            } else {
+                0.0
+            });
 
         let bg_id = ctx.add(
             RectWidget::new()

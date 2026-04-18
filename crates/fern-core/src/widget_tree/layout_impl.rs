@@ -64,9 +64,16 @@ impl WidgetTree {
     /// layout pass get rebuilt *this* frame rather than the next.
     pub(super) fn process_pending_rebuilds(&mut self) {
         let to_rebuild = self.arena.collect_needs_rebuild();
+        if to_rebuild.is_empty() {
+            return;
+        }
         for widget_id in to_rebuild {
             self.rebuild_single_widget(widget_id);
         }
+        // Rebuild destroys old child subtrees and allocates fresh WidgetIds;
+        // drop any focus/hover state whose target is no longer valid so we
+        // don't dispatch to dead widgets on the next event.
+        self.revalidate_interaction_state();
     }
 
     /// Run the layout pass with the given size proposal.

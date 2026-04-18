@@ -1,5 +1,6 @@
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::HAlignment;
@@ -11,7 +12,7 @@ use fern_tokens::HAlignment;
 pub struct VStack {
     child_ids: Vec<WidgetId>,
     pending: Vec<PendingChild>,
-    spacing: f32,
+    spacing: Prop<f32>,
     alignment: HAlignment,
 }
 
@@ -20,13 +21,15 @@ impl VStack {
         Self {
             child_ids: Vec::new(),
             pending: Vec::new(),
-            spacing: 0.0,
+            spacing: Prop::Static(0.0),
             alignment: HAlignment::Leading,
         }
     }
 
-    pub fn spacing(mut self, spacing: f32) -> Self {
-        self.spacing = spacing;
+    /// Set inter-child spacing. Accepts a static `f32` or a reactive
+    /// `Signal<f32>`.
+    pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self {
+        self.spacing = spacing.into();
         self
     }
 
@@ -99,7 +102,8 @@ impl Widget for VStack {
         }
 
         let n = self.child_ids.len();
-        let total_spacing = self.spacing * (n as f32 - 1.0).max(0.0);
+        let spacing = self.spacing.get();
+        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
         total_height += total_spacing;
 
         let width = proposal.width.unwrap_or(max_width);
@@ -160,7 +164,8 @@ impl Widget for VStack {
         }
 
         // Distribute remaining space among spacers
-        let total_spacing = self.spacing * (n as f32 - 1.0).max(0.0);
+        let spacing = self.spacing.get();
+        let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
         let remaining = (bounds.height - total_non_spacer_height - total_spacing).max(0.0);
         let spacer_height = if spacer_count > 0 {
             remaining / spacer_count as f32
@@ -188,7 +193,7 @@ impl Widget for VStack {
 
             child.origin = Point::new(bounds.x + x_offset, y);
             child.size = Size::new(w, h);
-            y += h + self.spacing;
+            y += h + spacing;
         }
     }
 
@@ -213,6 +218,10 @@ impl Widget for VStack {
                 })
                 .collect();
         }
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.spacing
+            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         self.child_ids.clone()
     }
 }

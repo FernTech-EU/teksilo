@@ -52,8 +52,8 @@ impl std::fmt::Debug for StatusBar {
 
 impl Widget for StatusBar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let spacing = theme.components.status_bar.item_gap;
+        let theme_signal = ctx.theme_signal();
+        let spacing = theme_signal.get().components.status_bar.item_gap;
 
         // Resolve pending children
         let pending = std::mem::take(&mut self.pending);
@@ -75,7 +75,7 @@ impl Widget for StatusBar {
         let row_id = ctx.add(row);
         let root = ctx.add(
             Panel::new()
-                .background(theme.colors.surface_sunken)
+                .background(theme_signal.map(|t| t.colors.surface_sunken))
                 .padding(spacing)
                 .child_id(row_id),
         );

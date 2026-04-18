@@ -5,16 +5,19 @@
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal, StrokeStyle};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
-use fern_tokens::{Color, Orientation};
+#[cfg(test)]
+use fern_tokens::Color;
+use fern_tokens::Orientation;
 
 /// A themed separator line. Thickness defaults to `DividerStyle::thickness`
-/// and the color defaults to `colors.divider`; both can be overridden.
+/// and the color defaults to `BorderRole::Divider`; both can be overridden.
 #[derive(Debug)]
 pub struct Divider {
     orientation: Orientation,
     thickness: Option<f32>,
-    color: Option<Color>,
+    color: Option<ColorProp>,
 }
 
 impl Divider {
@@ -42,8 +45,10 @@ impl Divider {
         self
     }
 
-    pub fn color(mut self, color: Color) -> Self {
-        self.color = Some(color);
+    /// Override the line color. Accepts `Color`, a role (typically
+    /// [`BorderRole`](fern_tokens::BorderRole)), or a `Signal<Color>`.
+    pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.color = Some(color.into());
         self
     }
 
@@ -75,7 +80,11 @@ impl Widget for Divider {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let color = self.color.unwrap_or(ctx.theme.colors.divider);
+        let color = self
+            .color
+            .as_ref()
+            .map(|c| c.resolve(ctx.theme))
+            .unwrap_or(ctx.theme.colors.divider);
         let thickness = self.resolved_thickness(ctx.theme);
         let (from, to) = match self.orientation {
             Orientation::Horizontal => {

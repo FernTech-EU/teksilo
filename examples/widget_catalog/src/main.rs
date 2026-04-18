@@ -119,7 +119,13 @@ impl Signals {
 // Free helpers
 // ---------------------------------------------------------------------------
 
-fn surface_swatch(theme: &Theme, bg: Color, name: &str, text_role: &str, text_color: Color) -> VStack {
+fn surface_swatch(
+    theme: &Theme,
+    bg: impl Into<ColorProp>,
+    name: &str,
+    text_role: &str,
+    text_color: impl Into<ColorProp>,
+) -> VStack {
     let t = &theme.typography;
     let c = &theme.colors;
     VStack::new()
@@ -127,7 +133,7 @@ fn surface_swatch(theme: &Theme, bg: Color, name: &str, text_role: &str, text_co
         .child(
             Panel::new()
                 .background(bg)
-                .border_color(c.border_strong)
+                .border_color(BorderRole::Strong)
                 .border_width(1.0)
                 .corner_radius(4.0)
                 .padding(10.0)
@@ -140,11 +146,16 @@ fn surface_swatch(theme: &Theme, bg: Color, name: &str, text_role: &str, text_co
         .child(
             TextWidget::new_literal(text_role)
                 .style(t.tiny.clone())
-                .color(c.text_secondary),
+                .color(TextRole::Secondary),
         )
 }
 
-fn text_sample(theme: &Theme, name: &str, color: Color, description: &str) -> HStack {
+fn text_sample(
+    theme: &Theme,
+    name: &str,
+    color: impl Into<ColorProp>,
+    description: &str,
+) -> HStack {
     let t = &theme.typography;
     let c = &theme.colors;
     HStack::new()
@@ -158,12 +169,12 @@ fn text_sample(theme: &Theme, name: &str, color: Color, description: &str) -> HS
         .child(
             TextWidget::new_literal(name)
                 .style(t.tiny.clone())
-                .color(c.text_secondary),
+                .color(TextRole::Secondary),
         )
         .child(
             TextWidget::new_literal(description)
                 .style(t.tiny.clone())
-                .color(c.text_secondary),
+                .color(TextRole::Secondary),
         )
 }
 
@@ -178,17 +189,22 @@ fn editor_line(theme: &Theme, line_no: &str, code: &str) -> HStack {
                 .child(
                     TextWidget::new_literal(line_no)
                         .style(t.mono.clone())
-                        .color(c.editor_gutter_fg),
+                        .color(TextRole::EditorGutterFg),
                 ),
         )
         .child(
             TextWidget::new_literal(code)
                 .style(t.mono.clone())
-                .color(c.editor_fg),
+                .color(TextRole::EditorFg),
         )
 }
 
-fn editor_swatch(theme: &Theme, bg: Color, name: &str, sample_color: Color) -> VStack {
+fn editor_swatch(
+    theme: &Theme,
+    bg: impl Into<ColorProp>,
+    name: &str,
+    sample_color: impl Into<ColorProp>,
+) -> VStack {
     let t = &theme.typography;
     let c = &theme.colors;
     VStack::new()
@@ -196,7 +212,7 @@ fn editor_swatch(theme: &Theme, bg: Color, name: &str, sample_color: Color) -> V
         .child(
             Panel::new()
                 .background(bg)
-                .border_color(c.border_strong)
+                .border_color(BorderRole::Strong)
                 .border_width(1.0)
                 .corner_radius(4.0)
                 .padding(10.0)
@@ -209,11 +225,11 @@ fn editor_swatch(theme: &Theme, bg: Color, name: &str, sample_color: Color) -> V
         .child(
             TextWidget::new_literal(name)
                 .style(t.tiny.clone())
-                .color(c.text_secondary),
+                .color(TextRole::Secondary),
         )
 }
 
-fn build_color_cell(color: Color, label: &str) -> Panel {
+fn build_color_cell(color: impl Into<ColorProp>, label: &str) -> Panel {
     Panel::new()
         .background(color)
         .corner_radius(4.0)
@@ -250,7 +266,7 @@ impl WidgetCatalog {
 
 impl Widget for WidgetCatalog {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
         let t = &theme.typography;
         let c = &theme.colors;
         let sigs = Signals::new(ctx);
@@ -290,7 +306,7 @@ impl Widget for WidgetCatalog {
                     .child(
                         TextWidget::new_literal("Widget Catalog -- builder")
                             .style(t.body_bold.clone())
-                            .color(c.text_primary),
+                            .color(TextRole::Primary),
                     )
                     .child(Spacer::new())
                     .child(
@@ -343,7 +359,7 @@ impl Widget for WidgetCatalog {
                     StatusBar::new().child(
                         TextWidget::new_literal("Builder -- .child() / .add_child() chains")
                             .style(t.tiny.clone())
-                            .color(c.text_secondary),
+                            .color(TextRole::Secondary),
                     ),
                 ),
         );
@@ -401,7 +417,7 @@ impl Widget for WidgetCatalog {
                     HStack {
                         TextWidget::new_literal("Widget Catalog -- fern!") {
                             style: t.body_bold.clone()
-                            color: c.text_primary
+                            color: TextRole::Primary
                         }
                         Spacer { }
                         Button::new_literal("Toggle Dark Mode") {
@@ -419,7 +435,7 @@ impl Widget for WidgetCatalog {
                 StatusBar {
                     TextWidget::new_literal("fern! -- DSL body items") {
                         style: t.tiny.clone()
-                        color: c.text_secondary
+                        color: TextRole::Secondary
                     }
                 }
             }
@@ -469,39 +485,39 @@ impl WidgetCatalog {
                 .column_gap(12.0)
                 .row_gap(12.0)
                 .rows(vec![TrackSize::Auto, TrackSize::Auto])
-                .child(surface_swatch(theme, c.surface_main, "surface_main", "text_primary", c.text_primary))
-                .child(surface_swatch(theme, c.surface_content, "surface_content", "text_primary", c.text_primary))
-                .child(surface_swatch(theme, c.surface_raised, "surface_raised", "text_primary", c.text_primary))
-                .child(surface_swatch(theme, c.surface_sunken, "surface_sunken", "text_secondary", c.text_secondary))
-                .child(surface_swatch(theme, c.surface_hover, "surface_hover", "text_primary", c.text_primary))
-                .child(surface_swatch(theme, c.surface_pressed, "surface_pressed", "text_primary", c.text_primary))
-                .child(surface_swatch(theme, c.surface_selected, "surface_selected", "selection_text_active", c.selection_text_active))
-                .child(surface_swatch(theme, c.surface_selected_inactive, "surface_selected_inactive", "selection_text_inactive", c.selection_text_inactive)),
+                .child(surface_swatch(theme, SurfaceRole::Main, "surface_main", "text_primary", TextRole::Primary))
+                .child(surface_swatch(theme, SurfaceRole::Content, "surface_content", "text_primary", TextRole::Primary))
+                .child(surface_swatch(theme, SurfaceRole::Raised, "surface_raised", "text_primary", TextRole::Primary))
+                .child(surface_swatch(theme, SurfaceRole::Sunken, "surface_sunken", "text_secondary", TextRole::Secondary))
+                .child(surface_swatch(theme, SurfaceRole::Hover, "surface_hover", "text_primary", TextRole::Primary))
+                .child(surface_swatch(theme, SurfaceRole::Pressed, "surface_pressed", "text_primary", TextRole::Primary))
+                .child(surface_swatch(theme, SurfaceRole::Selected, "surface_selected", "selection_text_active", Color::WHITE))
+                .child(surface_swatch(theme, SurfaceRole::SelectedInactive, "surface_selected_inactive", "selection_text_inactive", TextRole::Primary)),
         );
 
         let text_samples = ctx.add(
             Panel::new()
-                .background(c.surface_main)
-                .border_color(c.border)
+                .background(SurfaceRole::Main)
+                .border_color(BorderRole::Default)
                 .border_width(1.0)
                 .corner_radius(8.0)
                 .padding(16.0)
                 .child(
                     VStack::new()
                         .spacing(6.0)
-                        .child(text_sample(theme, "text_primary", c.text_primary, "body, main labels"))
-                        .child(text_sample(theme, "text_secondary", c.text_secondary, "hints, captions, placeholders"))
-                        .child(text_sample(theme, "text_disabled", c.text_disabled, "disabled labels"))
-                        .child(text_sample(theme, "text_link", c.text_link, "hyperlinks"))
-                        .child(text_sample(theme, "text_error", c.text_error, "validation errors"))
-                        .child(text_sample(theme, "text_warning", c.text_warning, "validation warnings"))
-                        .child(text_sample(theme, "text_success", c.text_success, "success messages")),
+                        .child(text_sample(theme, "text_primary", TextRole::Primary, "body, main labels"))
+                        .child(text_sample(theme, "text_secondary", TextRole::Secondary, "hints, captions, placeholders"))
+                        .child(text_sample(theme, "text_disabled", TextRole::Disabled, "disabled labels"))
+                        .child(text_sample(theme, "text_link", TextRole::Link, "hyperlinks"))
+                        .child(text_sample(theme, "text_error", TextRole::Error, "validation errors"))
+                        .child(text_sample(theme, "text_warning", TextRole::Warning, "validation warnings"))
+                        .child(text_sample(theme, "text_success", TextRole::Success, "success messages")),
                 ),
         );
 
         let text_on_accent_row = ctx.add(
             Panel::new()
-                .background(c.accent)
+                .background(SurfaceRole::Accent)
                 .corner_radius(4.0)
                 .padding(12.0)
                 .child(
@@ -510,13 +526,13 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Default button label")
                                 .style(t.body.clone())
-                                .color(c.text_on_accent),
+                                .color(TextRole::OnAccent),
                         )
                         .child(Spacer::new())
                         .child(
                             TextWidget::new_literal("text_on_accent on accent")
                                 .style(t.tiny.clone())
-                                .color(c.text_on_accent),
+                                .color(TextRole::OnAccent),
                         ),
                 ),
         );
@@ -531,17 +547,17 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("2")
                                 .style(mono.clone())
-                                .color(c.editor_gutter_fg),
+                                .color(TextRole::EditorGutterFg),
                         ),
                 )
                 .child(
                     TextWidget::new_literal("    let ")
                         .style(mono.clone())
-                        .color(c.editor_fg),
+                        .color(TextRole::EditorFg),
                 )
                 .child(
                     Panel::new()
-                        .background(c.editor_selection_bg)
+                        .background(SurfaceRole::EditorSelectionBg)
                         .corner_radius(2.0)
                         .padding(0.0)
                         .border_width(0.0)
@@ -549,14 +565,14 @@ impl WidgetCatalog {
                             Padding::symmetric(1.0, 2.0).child(
                                 TextWidget::new_literal("x")
                                     .style(mono.clone())
-                                    .color(c.editor_fg),
+                                    .color(TextRole::EditorFg),
                             ),
                         ),
                 )
                 .child(
                     TextWidget::new_literal(" = 42;")
                         .style(mono.clone())
-                        .color(c.editor_fg),
+                        .color(TextRole::EditorFg),
                 )
                 .child(
                     FixedSize::new()
@@ -564,7 +580,7 @@ impl WidgetCatalog {
                         .bind_height(16.0_f32)
                         .child(
                             Panel::new()
-                                .background(c.editor_caret)
+                                .background(SurfaceRole::EditorCaret)
                                 .corner_radius(0.0)
                                 .border_width(0.0)
                                 .padding(0.0)
@@ -574,7 +590,7 @@ impl WidgetCatalog {
         );
         let current_line_bg = ctx.add(
             Panel::new()
-                .background(c.editor_current_line_bg)
+                .background(SurfaceRole::EditorCurrentLineBg)
                 .corner_radius(0.0)
                 .border_width(0.0)
                 .padding(4.0)
@@ -583,8 +599,8 @@ impl WidgetCatalog {
 
         let mock_editor = ctx.add(
             Panel::new()
-                .background(c.editor_bg)
-                .border_color(c.border_strong)
+                .background(SurfaceRole::EditorBg)
+                .border_color(BorderRole::Strong)
                 .border_width(1.0)
                 .corner_radius(6.0)
                 .padding(8.0)
@@ -609,12 +625,12 @@ impl WidgetCatalog {
                 .column_gap(12.0)
                 .row_gap(12.0)
                 .rows(vec![TrackSize::Auto, TrackSize::Auto])
-                .child(editor_swatch(theme, c.editor_bg, "editor_bg", c.editor_fg))
-                .child(editor_swatch(theme, c.editor_fg, "editor_fg", c.editor_bg))
-                .child(editor_swatch(theme, c.editor_caret, "editor_caret", c.editor_bg))
-                .child(editor_swatch(theme, c.editor_current_line_bg, "editor_current_line_bg", c.editor_fg))
-                .child(editor_swatch(theme, c.editor_gutter_fg, "editor_gutter_fg", c.editor_bg))
-                .child(editor_swatch(theme, c.editor_selection_bg, "editor_selection_bg", c.editor_fg)),
+                .child(editor_swatch(theme, SurfaceRole::EditorBg, "editor_bg", TextRole::EditorFg))
+                .child(editor_swatch(theme, TextRole::EditorFg, "editor_fg", SurfaceRole::EditorBg))
+                .child(editor_swatch(theme, SurfaceRole::EditorCaret, "editor_caret", SurfaceRole::EditorBg))
+                .child(editor_swatch(theme, SurfaceRole::EditorCurrentLineBg, "editor_current_line_bg", TextRole::EditorFg))
+                .child(editor_swatch(theme, TextRole::EditorGutterFg, "editor_gutter_fg", SurfaceRole::EditorBg))
+                .child(editor_swatch(theme, SurfaceRole::EditorSelectionBg, "editor_selection_bg", TextRole::EditorFg)),
         );
 
         ctx.add(
@@ -623,25 +639,25 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Theme Palette")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Surfaces")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(surfaces_grid)
                 .child(
                     TextWidget::new_literal("Text")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(text_samples)
                 .add_child(text_on_accent_row)
                 .child(
                     TextWidget::new_literal("Editor")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(mock_editor)
                 .add_child(editor_swatches),
@@ -661,7 +677,7 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("H")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(Divider::new()),
                 )
@@ -671,9 +687,9 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("V")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
-                        .child(Divider::vertical().thickness(2.0).color(c.accent)),
+                        .child(Divider::vertical().thickness(2.0).color(TextRole::Accent)),
                 )
                 .child(
                     VStack::new()
@@ -681,18 +697,18 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Thick")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
-                        .child(Divider::new().thickness(4.0).color(c.text_error)),
+                        .child(Divider::new().thickness(4.0).color(TextRole::Error)),
                 ),
         );
 
         let icon_row = ctx.add(
             HStack::new()
                 .spacing(12.0)
-                .child(IconWidget::checkmark(24.0).color(c.accent))
-                .child(IconWidget::chevron_down(24.0).color(c.accent_subtle_bg))
-                .child(IconWidget::chevron_right(24.0).color(c.text_error)),
+                .child(IconWidget::checkmark(24.0).color(TextRole::Accent))
+                .child(IconWidget::chevron_down(24.0).color(SurfaceRole::AccentSubtle))
+                .child(IconWidget::chevron_right(24.0).color(TextRole::Error)),
         );
 
         ctx.add(
@@ -701,18 +717,18 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Primitives")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Divider (horizontal, vertical, thick, colored)")
                         .style(t.tiny.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(div_row)
                 .child(
                     TextWidget::new_literal("IconWidget (checkmark, chevrons)")
                         .style(t.tiny.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(icon_row),
         )
@@ -728,12 +744,12 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Layout Primitives")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)")
                         .style(t.tiny.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     Grid::new()
@@ -745,17 +761,17 @@ impl WidgetCatalog {
                         .rows(vec![TrackSize::Auto, TrackSize::Auto])
                         .column_gap(8.0)
                         .row_gap(8.0)
-                        .child(build_color_cell(c.accent, "A1"))
-                        .child(build_color_cell(c.accent_subtle_bg, "B1"))
-                        .child(build_color_cell(c.text_error, "C1"))
-                        .child(build_color_cell(c.status_info_fg, "A2"))
-                        .child(build_color_cell(c.text_success, "B2"))
+                        .child(build_color_cell(SurfaceRole::Accent, "A1"))
+                        .child(build_color_cell(SurfaceRole::AccentSubtle, "B1"))
+                        .child(build_color_cell(TextRole::Error, "C1"))
+                        .child(build_color_cell(TextRole::Accent, "A2"))
+                        .child(build_color_cell(TextRole::Success, "B2"))
                         .child(build_color_cell(c.text_warning, "C2")),
                 )
                 .child(
                     TextWidget::new_literal("Wrap (flow layout, 8px spacing)")
                         .style(t.tiny.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     Wrap::new()
@@ -995,19 +1011,19 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Horizontal")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(Slider::new(sigs.slider_value.clone(), 0.0, 100.0))
                         .child(
                             TextWidget::new_literal("Stepped (25)")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(Slider::new(sigs.slider_stepped.clone(), 0.0, 100.0).step(25.0))
                         .child(
                             TextWidget::new_literal("Disabled")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(Slider::new(sigs.slider_disabled_state.clone(), 0.0, 100.0).enabled(false)),
                 )
@@ -1017,7 +1033,7 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Vertical")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(MaxSize::new(f32::MAX, 120.0).child_id(slider_vert)),
                 ),
@@ -1038,7 +1054,7 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Checkbox")
                                 .style(t.small.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .add_child(checkbox_group),
                 )
@@ -1048,7 +1064,7 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("RadioButton")
                                 .style(t.small.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .add_child(radio_group),
                 )
@@ -1058,7 +1074,7 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Toggle")
                                 .style(t.small.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .add_child(toggle_group),
                 ),
@@ -1070,12 +1086,12 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Form Controls")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Button")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(buttons_group)
                 .child(Divider::new())
@@ -1084,14 +1100,14 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Slider")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(slider_section)
                 .child(Divider::new())
                 .child(
                     TextWidget::new_literal("SegmentedControl")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(SegmentedControl::new(
                     vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()],
@@ -1118,19 +1134,19 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Determinate (65%)")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(ProgressBar::new(0.65))
                         .child(
                             TextWidget::new_literal("Indeterminate")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(ProgressBar::indeterminate())
                         .child(
                             TextWidget::new_literal("Custom colors + thick")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(
                             ProgressBar::new(0.4)
@@ -1145,7 +1161,7 @@ impl WidgetCatalog {
                         .child(
                             TextWidget::new_literal("Vertical")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .child(MaxSize::new(f32::MAX, 80.0).child_id(pb_vert)),
                 ),
@@ -1157,27 +1173,27 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Display Widgets")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("ProgressBar")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(progress_section)
                 .child(Divider::new())
                 .child(
                     TextWidget::new_literal("Badge")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
                         .spacing(8.0)
                         .child(Badge::new_literal("Default"))
-                        .child(Badge::new_literal("3").color(c.text_error).text_color(Color::WHITE))
-                        .child(Badge::new_literal("New").color(c.text_success).text_color(Color::WHITE))
-                        .child(Badge::new_literal("Beta").color(c.text_warning)),
+                        .child(Badge::new_literal("3").color(TextRole::Error).text_color(Color::WHITE))
+                        .child(Badge::new_literal("New").color(TextRole::Success).text_color(Color::WHITE))
+                        .child(Badge::new_literal("Beta").color(TextRole::Warning)),
                 ),
         )
     }
@@ -1200,47 +1216,47 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Text overflow")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary)
+                        .color(TextRole::Primary)
                         .single_line(),
                 )
                 .child(
                     TextWidget::new_literal("Wrap (default) — grows vertically")
                         .style(t.small.clone())
-                        .color(c.text_secondary)
+                        .color(TextRole::Secondary)
                         .single_line(),
                 )
                 .child(
                     FixedSize::new().bind_width(360.0_f32).child(
                         TextWidget::new_literal(LOREM)
                             .style(t.body.clone())
-                            .color(c.text_primary),
+                            .color(TextRole::Primary),
                     ),
                 )
                 .child(
                     TextWidget::new_literal("Wrap capped at 2 lines")
                         .style(t.small.clone())
-                        .color(c.text_secondary)
+                        .color(TextRole::Secondary)
                         .single_line(),
                 )
                 .child(
                     FixedSize::new().bind_width(360.0_f32).child(
                         TextWidget::new_literal(LOREM)
                             .style(t.body.clone())
-                            .color(c.text_primary)
+                            .color(TextRole::Primary)
                             .max_lines(2),
                     ),
                 )
                 .child(
                     TextWidget::new_literal("Ellipsis — trailing / middle / leading")
                         .style(t.small.clone())
-                        .color(c.text_secondary)
+                        .color(TextRole::Secondary)
                         .single_line(),
                 )
                 .child(
                     FixedSize::new().bind_width(280.0_f32).child(
                         TextWidget::new_literal(LONG_TITLE)
                             .style(t.body.clone())
-                            .color(c.text_primary)
+                            .color(TextRole::Primary)
                             .overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing)),
                     ),
                 )
@@ -1248,7 +1264,7 @@ impl WidgetCatalog {
                     FixedSize::new().bind_width(280.0_f32).child(
                         TextWidget::new_literal(LONG_TITLE)
                             .style(t.body.clone())
-                            .color(c.text_primary)
+                            .color(TextRole::Primary)
                             .overflow(TextOverflow::Ellipsis(EllipsisMode::Middle)),
                     ),
                 )
@@ -1256,7 +1272,7 @@ impl WidgetCatalog {
                     FixedSize::new().bind_width(280.0_f32).child(
                         TextWidget::new_literal(LONG_TITLE)
                             .style(t.body.clone())
-                            .color(c.text_primary)
+                            .color(TextRole::Primary)
                             .overflow(TextOverflow::Ellipsis(EllipsisMode::Leading)),
                     ),
                 ),
@@ -1270,12 +1286,12 @@ impl WidgetCatalog {
         let acc_content1 = ctx.add(
             TextWidget::new_literal("This content is revealed with an animated expand.")
                 .style(t.body.clone())
-                .color(c.text_primary),
+                .color(TextRole::Primary),
         );
         let acc_content2 = ctx.add(
             TextWidget::new_literal("This section starts expanded and can be collapsed.")
                 .style(t.body.clone())
-                .color(c.text_primary),
+                .color(TextRole::Primary),
         );
 
         ctx.add(
@@ -1284,36 +1300,36 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Containers")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Card")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     Card::new()
                         .header(
                             TextWidget::new_literal("Card Header")
                                 .style(t.small.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         )
                         .content(
                             TextWidget::new_literal("Card content with shadow and themed background.")
                                 .style(t.body.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                         )
                         .footer(
                             TextWidget::new_literal("Footer text")
                                 .style(t.tiny.clone())
-                                .color(c.text_secondary),
+                                .color(TextRole::Secondary),
                         ),
                 )
                 .child(Divider::new())
                 .child(
                     TextWidget::new_literal("Accordion")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     Accordion::new_literal("Click to expand", sigs.accordion_expanded.clone())
@@ -1327,7 +1343,7 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("GroupBox")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     GroupBox::new_literal("Appearance").child(
@@ -1336,12 +1352,12 @@ impl WidgetCatalog {
                             .child(
                                 TextWidget::new_literal("Indented content under a bold title.")
                                     .style(t.body.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal("No border, no frame — Int UI style.")
                                     .style(t.body.clone())
-                                    .color(c.text_secondary),
+                                    .color(TextRole::Secondary),
                             ),
                     ),
                 )
@@ -1356,7 +1372,7 @@ impl WidgetCatalog {
                                         "Uncheck the title to disable this whole subtree.",
                                     )
                                     .style(t.body.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                                 )
                                 .child(
                                     Button::new_literal("Inside — tap me")
@@ -1381,7 +1397,7 @@ impl WidgetCatalog {
                             .child(
                                 TextWidget::new_literal("Overview")
                                     .style(t.body_bold.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
@@ -1391,7 +1407,7 @@ impl WidgetCatalog {
                                      they're re-activated.",
                                 )
                                 .style(t.body.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                             )
                             .child(
                                 HStack::new()
@@ -1410,7 +1426,7 @@ impl WidgetCatalog {
                             .child(
                                 TextWidget::new_literal("Usage")
                                     .style(t.body_bold.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
@@ -1419,7 +1435,7 @@ impl WidgetCatalog {
                                      Disabled tabs are skipped by keyboard navigation.",
                                 )
                                 .style(t.body.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                             ),
                     ),
                 )
@@ -1431,7 +1447,7 @@ impl WidgetCatalog {
                             .child(
                                 TextWidget::new_literal("Structure")
                                     .style(t.body_bold.clone())
-                                    .color(c.text_primary),
+                                    .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
@@ -1441,7 +1457,7 @@ impl WidgetCatalog {
                                      overpaints the tab bar's own 1 dp separator.",
                                 )
                                 .style(t.body.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                             ),
                     ),
                 )
@@ -1454,7 +1470,7 @@ impl WidgetCatalog {
                                  cannot be activated by click or keyboard.",
                             )
                             .style(t.body.clone())
-                            .color(c.text_primary),
+                            .color(TextRole::Primary),
                         ),
                     )
                     .enabled(false),
@@ -1477,18 +1493,18 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Navigation")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("TabWidget")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .add_child(tabs_block)
                 .child(
                     TextWidget::new_literal("Link")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1516,7 +1532,7 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Rich Tooltips")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal(
@@ -1524,7 +1540,7 @@ impl WidgetCatalog {
                          open nested tooltips; `https://` links open in the browser.",
                     )
                     .style(t.small.clone())
-                    .color(c.text_secondary),
+                    .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1555,12 +1571,12 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Menus & Dropdowns")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("ComboBox")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new().spacing(16.0).child(
@@ -1574,17 +1590,17 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Context Menu (right-click the panel below)")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     Panel::new()
-                        .background(c.surface_main)
+                        .background(SurfaceRole::Main)
                         .corner_radius(8.0)
                         .padding(16.0)
                         .child(
                             TextWidget::new_literal("Right-click here for a context menu")
                                 .style(t.body.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                         )
                         .context_menu(|| {
                             Box::new(
@@ -1623,12 +1639,12 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Image Widget")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Full-color WebP photo, Contain fit, 300x200 display")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     ImageWidget::new(tree_img)
@@ -1653,12 +1669,12 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Built-in Buttons")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Predefined (browse, expand, search, copy, clear, add)")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1673,7 +1689,7 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Visibility toggle")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1683,13 +1699,13 @@ impl WidgetCatalog {
                             TextWidget::new_literal("Hidden")
                                 .bind_text(vis_label)
                                 .style(t.body.clone())
-                                .color(c.text_primary),
+                                .color(TextRole::Primary),
                         ),
                 )
                 .child(
                     TextWidget::new_literal("Size variants (compact, default, large)")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1709,7 +1725,7 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Disabled")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1720,7 +1736,7 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Custom icon")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     BuiltInButton::new(IconWidget::checkmark(16.0))
@@ -1740,19 +1756,19 @@ impl WidgetCatalog {
                 .child(
                     TextWidget::new_literal("Text Input")
                         .style(t.body_bold.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 )
                 .child(
                     TextWidget::new_literal("Single-line text editing with placeholder, clear button, slots")
                         .style(t.small.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                 )
                 .child(
                     TextInput::new(sigs.search_text.clone())
                         .placeholder("Search...")
                         .show_clear_button(true)
                         .leading_slot(
-                            IconWidget::checkmark(14.0).color(c.text_secondary),
+                            IconWidget::checkmark(14.0).color(TextRole::Secondary),
                         ),
                 )
                 .child(
@@ -1784,11 +1800,11 @@ impl WidgetCatalog {
                 spacing: 12.0
                 TextWidget::new_literal("Theme Palette") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Surfaces") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 Grid {
                     columns: vec![
@@ -1800,60 +1816,60 @@ impl WidgetCatalog {
                     column_gap: 12.0
                     row_gap: 12.0
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
-                    child: surface_swatch(theme, c.surface_main, "surface_main", "text_primary", c.text_primary)
-                    child: surface_swatch(theme, c.surface_content, "surface_content", "text_primary", c.text_primary)
-                    child: surface_swatch(theme, c.surface_raised, "surface_raised", "text_primary", c.text_primary)
-                    child: surface_swatch(theme, c.surface_sunken, "surface_sunken", "text_secondary", c.text_secondary)
-                    child: surface_swatch(theme, c.surface_hover, "surface_hover", "text_primary", c.text_primary)
-                    child: surface_swatch(theme, c.surface_pressed, "surface_pressed", "text_primary", c.text_primary)
-                    child: surface_swatch(theme, c.surface_selected, "surface_selected", "selection_text_active", c.selection_text_active)
-                    child: surface_swatch(theme, c.surface_selected_inactive, "surface_selected_inactive", "selection_text_inactive", c.selection_text_inactive)
+                    child: surface_swatch(theme, SurfaceRole::Main, "surface_main", "text_primary", TextRole::Primary)
+                    child: surface_swatch(theme, SurfaceRole::Content, "surface_content", "text_primary", TextRole::Primary)
+                    child: surface_swatch(theme, SurfaceRole::Raised, "surface_raised", "text_primary", TextRole::Primary)
+                    child: surface_swatch(theme, SurfaceRole::Sunken, "surface_sunken", "text_secondary", TextRole::Secondary)
+                    child: surface_swatch(theme, SurfaceRole::Hover, "surface_hover", "text_primary", TextRole::Primary)
+                    child: surface_swatch(theme, SurfaceRole::Pressed, "surface_pressed", "text_primary", TextRole::Primary)
+                    child: surface_swatch(theme, SurfaceRole::Selected, "surface_selected", "selection_text_active", Color::WHITE)
+                    child: surface_swatch(theme, SurfaceRole::SelectedInactive, "surface_selected_inactive", "selection_text_inactive", TextRole::Primary)
                 }
                 TextWidget::new_literal("Text") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 Panel {
-                    background: c.surface_main
-                    border_color: c.border
+                    background: SurfaceRole::Main
+                    border_color: BorderRole::Default
                     border_width: 1.0
                     corner_radius: 8.0
                     padding: 16.0
                     VStack {
                         spacing: 6.0
-                        child: text_sample(theme, "text_primary", c.text_primary, "body, main labels")
-                        child: text_sample(theme, "text_secondary", c.text_secondary, "hints, captions, placeholders")
-                        child: text_sample(theme, "text_disabled", c.text_disabled, "disabled labels")
-                        child: text_sample(theme, "text_link", c.text_link, "hyperlinks")
-                        child: text_sample(theme, "text_error", c.text_error, "validation errors")
-                        child: text_sample(theme, "text_warning", c.text_warning, "validation warnings")
-                        child: text_sample(theme, "text_success", c.text_success, "success messages")
+                        child: text_sample(theme, "text_primary", TextRole::Primary, "body, main labels")
+                        child: text_sample(theme, "text_secondary", TextRole::Secondary, "hints, captions, placeholders")
+                        child: text_sample(theme, "text_disabled", TextRole::Disabled, "disabled labels")
+                        child: text_sample(theme, "text_link", TextRole::Link, "hyperlinks")
+                        child: text_sample(theme, "text_error", TextRole::Error, "validation errors")
+                        child: text_sample(theme, "text_warning", TextRole::Warning, "validation warnings")
+                        child: text_sample(theme, "text_success", TextRole::Success, "success messages")
                     }
                 }
                 Panel {
-                    background: c.accent
+                    background: SurfaceRole::Accent
                     corner_radius: 4.0
                     padding: 12.0
                     HStack {
                         spacing: 12.0
                         TextWidget::new_literal("Default button label") {
                             style: t.body.clone()
-                            color: c.text_on_accent
+                            color: TextRole::OnAccent
                         }
                         Spacer { }
                         TextWidget::new_literal("text_on_accent on accent") {
                             style: t.tiny.clone()
-                            color: c.text_on_accent
+                            color: TextRole::OnAccent
                         }
                     }
                 }
                 TextWidget::new_literal("Editor") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 Panel {
-                    background: c.editor_bg
-                    border_color: c.border_strong
+                    background: SurfaceRole::EditorBg
+                    border_color: BorderRole::Strong
                     border_width: 1.0
                     corner_radius: 6.0
                     padding: 8.0
@@ -1861,7 +1877,7 @@ impl WidgetCatalog {
                         spacing: 2.0
                         child: editor_line(theme, "1", "fn main() {")
                         Panel {
-                            background: c.editor_current_line_bg
+                            background: SurfaceRole::EditorCurrentLineBg
                             corner_radius: 0.0
                             border_width: 0.0
                             padding: 4.0
@@ -1871,34 +1887,34 @@ impl WidgetCatalog {
                                     bind_width: 24.0_f32
                                     TextWidget::new_literal("2") {
                                         style: mono.clone()
-                                        color: c.editor_gutter_fg
+                                        color: TextRole::EditorGutterFg
                                     }
                                 }
                                 TextWidget::new_literal("    let ") {
                                     style: mono.clone()
-                                    color: c.editor_fg
+                                    color: TextRole::EditorFg
                                 }
                                 Panel {
-                                    background: c.editor_selection_bg
+                                    background: SurfaceRole::EditorSelectionBg
                                     corner_radius: 2.0
                                     padding: 0.0
                                     border_width: 0.0
                                     Padding::symmetric(1.0, 2.0) {
                                         TextWidget::new_literal("x") {
                                             style: mono.clone()
-                                            color: c.editor_fg
+                                            color: TextRole::EditorFg
                                         }
                                     }
                                 }
                                 TextWidget::new_literal(" = 42;") {
                                     style: mono.clone()
-                                    color: c.editor_fg
+                                    color: TextRole::EditorFg
                                 }
                                 FixedSize {
                                     bind_width: 1.5_f32
                                     bind_height: 16.0_f32
                                     Panel {
-                                        background: c.editor_caret
+                                        background: SurfaceRole::EditorCaret
                                         corner_radius: 0.0
                                         border_width: 0.0
                                         padding: 0.0
@@ -1921,12 +1937,12 @@ impl WidgetCatalog {
                     column_gap: 12.0
                     row_gap: 12.0
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
-                    child: editor_swatch(theme, c.editor_bg, "editor_bg", c.editor_fg)
-                    child: editor_swatch(theme, c.editor_fg, "editor_fg", c.editor_bg)
-                    child: editor_swatch(theme, c.editor_caret, "editor_caret", c.editor_bg)
-                    child: editor_swatch(theme, c.editor_current_line_bg, "editor_current_line_bg", c.editor_fg)
-                    child: editor_swatch(theme, c.editor_gutter_fg, "editor_gutter_fg", c.editor_bg)
-                    child: editor_swatch(theme, c.editor_selection_bg, "editor_selection_bg", c.editor_fg)
+                    child: editor_swatch(theme, SurfaceRole::EditorBg, "editor_bg", TextRole::EditorFg)
+                    child: editor_swatch(theme, TextRole::EditorFg, "editor_fg", SurfaceRole::EditorBg)
+                    child: editor_swatch(theme, SurfaceRole::EditorCaret, "editor_caret", SurfaceRole::EditorBg)
+                    child: editor_swatch(theme, SurfaceRole::EditorCurrentLineBg, "editor_current_line_bg", TextRole::EditorFg)
+                    child: editor_swatch(theme, TextRole::EditorGutterFg, "editor_gutter_fg", SurfaceRole::EditorBg)
+                    child: editor_swatch(theme, SurfaceRole::EditorSelectionBg, "editor_selection_bg", TextRole::EditorFg)
                 }
             }
         )
@@ -1941,11 +1957,11 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Primitives") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Divider (horizontal, vertical, thick, colored)") {
                     style: t.tiny.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 16.0
@@ -1953,7 +1969,7 @@ impl WidgetCatalog {
                         spacing: 4.0
                         TextWidget::new_literal("H") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         Divider { }
                     }
@@ -1961,34 +1977,34 @@ impl WidgetCatalog {
                         spacing: 4.0
                         TextWidget::new_literal("V") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         Divider::vertical() {
                             thickness: 2.0
-                            color: c.accent
+                            color: TextRole::Accent
                         }
                     }
                     VStack {
                         spacing: 4.0
                         TextWidget::new_literal("Thick") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         Divider {
                             thickness: 4.0
-                            color: c.text_error
+                            color: TextRole::Error
                         }
                     }
                 }
                 TextWidget::new_literal("IconWidget (checkmark, chevrons)") {
                     style: t.tiny.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 12.0
-                    IconWidget::checkmark(24.0) { color: c.accent }
-                    IconWidget::chevron_down(24.0) { color: c.accent_subtle_bg }
-                    IconWidget::chevron_right(24.0) { color: c.text_error }
+                    IconWidget::checkmark(24.0) { color: TextRole::Accent }
+                    IconWidget::chevron_down(24.0) { color: SurfaceRole::AccentSubtle }
+                    IconWidget::chevron_right(24.0) { color: TextRole::Error }
                 }
             }
         )
@@ -2003,11 +2019,11 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Layout Primitives") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Grid (Fixed 80px | 1fr | 2fr, with 8px gap)") {
                     style: t.tiny.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 Grid {
                     columns: vec![
@@ -2018,16 +2034,16 @@ impl WidgetCatalog {
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
                     column_gap: 8.0
                     row_gap: 8.0
-                    child: build_color_cell(c.accent, "A1")
-                    child: build_color_cell(c.accent_subtle_bg, "B1")
-                    child: build_color_cell(c.text_error, "C1")
-                    child: build_color_cell(c.status_info_fg, "A2")
-                    child: build_color_cell(c.text_success, "B2")
+                    child: build_color_cell(SurfaceRole::Accent, "A1")
+                    child: build_color_cell(SurfaceRole::AccentSubtle, "B1")
+                    child: build_color_cell(TextRole::Error, "C1")
+                    child: build_color_cell(TextRole::Accent, "A2")
+                    child: build_color_cell(TextRole::Success, "B2")
                     child: build_color_cell(c.text_warning, "C2")
                 }
                 TextWidget::new_literal("Wrap (flow layout, 8px spacing)") {
                     style: t.tiny.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 Wrap {
                     spacing: 8.0
@@ -2059,11 +2075,11 @@ impl WidgetCatalog {
                 spacing: 12.0
                 TextWidget::new_literal("Form Controls") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Button") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 VStack {
                     spacing: 8.0
@@ -2189,7 +2205,7 @@ impl WidgetCatalog {
                         spacing: 4.0
                         TextWidget::new_literal("Checkbox") {
                             style: t.small.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         VStack {
                             spacing: 8.0
@@ -2216,7 +2232,7 @@ impl WidgetCatalog {
                         spacing: 4.0
                         TextWidget::new_literal("RadioButton") {
                             style: t.small.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         VStack {
                             spacing: 8.0
@@ -2238,7 +2254,7 @@ impl WidgetCatalog {
                         spacing: 4.0
                         TextWidget::new_literal("Toggle") {
                             style: t.small.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         VStack {
                             spacing: 8.0
@@ -2255,7 +2271,7 @@ impl WidgetCatalog {
                 Divider { }
                 TextWidget::new_literal("Slider") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 16.0
@@ -2263,19 +2279,19 @@ impl WidgetCatalog {
                         spacing: 8.0
                         TextWidget::new_literal("Horizontal") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         Slider(sigs.slider_value.clone(), 0.0, 100.0)
                         TextWidget::new_literal("Stepped (25)") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         Slider(sigs.slider_stepped.clone(), 0.0, 100.0) {
                             step: 25.0
                         }
                         TextWidget::new_literal("Disabled") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         Slider(sigs.slider_disabled_state.clone(), 0.0, 100.0) {
                             enabled: false
@@ -2285,7 +2301,7 @@ impl WidgetCatalog {
                         spacing: 4.0
                         TextWidget::new_literal("Vertical") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         slider_vert = Slider(sigs.slider_v_value.clone(), 0.0, 1.0) {
                             orientation: Orientation::Vertical
@@ -2298,7 +2314,7 @@ impl WidgetCatalog {
                 Divider { }
                 TextWidget::new_literal("SegmentedControl") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 SegmentedControl(
                     vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()],
@@ -2317,11 +2333,11 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Display Widgets") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("ProgressBar") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 16.0
@@ -2329,29 +2345,29 @@ impl WidgetCatalog {
                         spacing: 8.0
                         TextWidget::new_literal("Determinate (65%)") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         ProgressBar(0.65)
                         TextWidget::new_literal("Indeterminate") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         ProgressBar::indeterminate()
                         TextWidget::new_literal("Custom colors + thick") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         ProgressBar(0.4) {
                             thickness: 8.0
-                            fill_color: c.text_success
-                            track_color: c.surface_sunken
+                            fill_color: TextRole::Success
+                            track_color: SurfaceRole::Sunken
                         }
                     }
                     VStack {
                         spacing: 4.0
                         TextWidget::new_literal("Vertical") {
                             style: t.tiny.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                         pb_vert = ProgressBar(0.7) {
                             orientation: Orientation::Vertical
@@ -2365,21 +2381,21 @@ impl WidgetCatalog {
                 Divider { }
                 TextWidget::new_literal("Badge") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 8.0
                     Badge::new_literal("Default")
                     Badge::new_literal("3") {
-                        color: c.text_error
+                        color: TextRole::Error
                         text_color: Color::WHITE
                     }
                     Badge::new_literal("New") {
-                        color: c.text_success
+                        color: TextRole::Success
                         text_color: Color::WHITE
                     }
                     Badge::new_literal("Beta") {
-                        color: c.text_warning
+                        color: TextRole::Warning
                     }
                 }
             }
@@ -2403,44 +2419,44 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Text overflow") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                     single_line
                 }
                 TextWidget::new_literal("Wrap (default) — grows vertically") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                     single_line
                 }
                 FixedSize {
                     bind_width: 360.0_f32
                     TextWidget::new_literal(LOREM) {
                         style: t.body.clone()
-                        color: c.text_primary
+                        color: TextRole::Primary
                     }
                 }
                 TextWidget::new_literal("Wrap capped at 2 lines") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                     single_line
                 }
                 FixedSize {
                     bind_width: 360.0_f32
                     TextWidget::new_literal(LOREM) {
                         style: t.body.clone()
-                        color: c.text_primary
+                        color: TextRole::Primary
                         max_lines: 2
                     }
                 }
                 TextWidget::new_literal("Ellipsis — trailing / middle / leading") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                     single_line
                 }
                 FixedSize {
                     bind_width: 280.0_f32
                     TextWidget::new_literal(LONG_TITLE) {
                         style: t.body.clone()
-                        color: c.text_primary
+                        color: TextRole::Primary
                         overflow: TextOverflow::Ellipsis(EllipsisMode::Trailing)
                     }
                 }
@@ -2448,7 +2464,7 @@ impl WidgetCatalog {
                     bind_width: 280.0_f32
                     TextWidget::new_literal(LONG_TITLE) {
                         style: t.body.clone()
-                        color: c.text_primary
+                        color: TextRole::Primary
                         overflow: TextOverflow::Ellipsis(EllipsisMode::Middle)
                     }
                 }
@@ -2456,7 +2472,7 @@ impl WidgetCatalog {
                     bind_width: 280.0_f32
                     TextWidget::new_literal(LONG_TITLE) {
                         style: t.body.clone()
-                        color: c.text_primary
+                        color: TextRole::Primary
                         overflow: TextOverflow::Ellipsis(EllipsisMode::Leading)
                     }
                 }
@@ -2473,39 +2489,39 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Containers") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Card") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 Card {
                     header: TextWidget::new_literal("Card Header") {
                         style: t.small.clone()
-                        color: c.text_secondary
+                        color: TextRole::Secondary
                     }
-                    content: (TextWidget::new_literal("Card content with shadow and themed background.").style(t.body.clone()).color(c.text_primary))
+                    content: (TextWidget::new_literal("Card content with shadow and themed background.").style(t.body.clone()).color(TextRole::Primary))
                     
                     footer: TextWidget::new_literal("Footer text") {
                         style: t.tiny.clone()
-                        color: c.text_secondary
+                        color: TextRole::Secondary
                     }
                 }
                 Divider { }
                 TextWidget::new_literal("Accordion") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 acc_content1 = TextWidget::new_literal("This content is revealed with an animated expand.") {
                     style: t.body.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 Accordion::new_literal("Click to expand", sigs.accordion_expanded.clone()) {
                     content_id: acc_content1
                 }
                 acc_content2 = TextWidget::new_literal("This section starts expanded and can be collapsed.") {
                     style: t.body.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 Accordion::new_literal("Already expanded", sigs.accordion2_expanded.clone()) {
                     content_id: acc_content2
@@ -2513,18 +2529,18 @@ impl WidgetCatalog {
                 Divider { }
                 TextWidget::new_literal("GroupBox") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 GroupBox::new_literal("Appearance") {
                     child: VStack {
                         spacing: 4.0
                         TextWidget::new_literal("Indented content under a bold title.") {
                             style: t.body.clone()
-                            color: c.text_primary
+                            color: TextRole::Primary
                         }
                         TextWidget::new_literal("No border, no frame — Int UI style.") {
                             style: t.body.clone()
-                            color: c.text_secondary
+                            color: TextRole::Secondary
                         }
                     }
                 }
@@ -2536,7 +2552,7 @@ impl WidgetCatalog {
                             "Uncheck the title to disable this whole subtree.",
                         ) {
                             style: t.body.clone()
-                            color: c.text_primary
+                            color: TextRole::Primary
                         }
                         Button::new_literal("Inside — tap me") {
                             style: ButtonVariant::Default
@@ -2556,11 +2572,11 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Navigation") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("TabWidget") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 FixedSize {
                     bind_height: 240.0_f32
@@ -2571,7 +2587,7 @@ impl WidgetCatalog {
                                 spacing: 8.0
                                 TextWidget::new_literal("Overview") {
                                     style: t.body_bold.clone()
-                                    color: c.text_primary
+                                    color: TextRole::Primary
                                 }
                                 TextWidget::new_literal(
                                     "TabWidget is a retained container with dormant panes: \
@@ -2580,7 +2596,7 @@ impl WidgetCatalog {
                                      they're re-activated."
                                 ) {
                                     style: t.body.clone()
-                                    color: c.text_primary
+                                    color: TextRole::Primary
                                 }
                                 HStack {
                                     spacing: 8.0
@@ -2596,7 +2612,7 @@ impl WidgetCatalog {
                                 spacing: 8.0
                                 TextWidget::new_literal("Usage") {
                                     style: t.body_bold.clone()
-                                    color: c.text_primary
+                                    color: TextRole::Primary
                                 }
                                 TextWidget::new_literal(
                                     "Press Tab to move focus into the tab strip, then \
@@ -2604,7 +2620,7 @@ impl WidgetCatalog {
                                      Disabled tabs are skipped by keyboard navigation."
                                 ) {
                                     style: t.body.clone()
-                                    color: c.text_primary
+                                    color: TextRole::Primary
                                 }
                             }
                         }
@@ -2614,7 +2630,7 @@ impl WidgetCatalog {
                                 spacing: 8.0
                                 TextWidget::new_literal("Structure") {
                                     style: t.body_bold.clone()
-                                    color: c.text_primary
+                                    color: TextRole::Primary
                                 }
                                 TextWidget::new_literal(
                                     "Int UI tabs: flat headers, no rounded corners, no \
@@ -2623,7 +2639,7 @@ impl WidgetCatalog {
                                      overpaints the tab bar's own 1 dp separator."
                                 ) {
                                     style: t.body.clone()
-                                    color: c.text_primary
+                                    color: TextRole::Primary
                                 }
                             }
                         }
@@ -2633,7 +2649,7 @@ impl WidgetCatalog {
                                 TextWidget::new_literal(
                                     "Disabled panes are still listed in the tab bar but \
                                      cannot be activated by click or keyboard."
-                                ).style(t.body.clone()).color(c.text_primary)
+                                ).style(t.body.clone()).color(TextRole::Primary)
                             )
                         ) {
                             enabled: false
@@ -2646,7 +2662,7 @@ impl WidgetCatalog {
                 }
                 TextWidget::new_literal("Link") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 16.0
@@ -2671,14 +2687,14 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Rich Tooltips") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal(
                     "Hover the buttons below. Inline `[label](:key)` links \
                      open nested tooltips; `https://` links open in the browser."
                 ) {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 12.0
@@ -2699,11 +2715,11 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Menus & Dropdowns") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("ComboBox") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 16.0
@@ -2716,10 +2732,10 @@ impl WidgetCatalog {
                 }
                 TextWidget::new_literal("Context Menu (right-click the panel below)") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 Panel {
-                    background: c.surface_main
+                    background: SurfaceRole::Main
                     corner_radius: 8.0
                     padding: 16.0
                     context_menu: || Box::new(
@@ -2732,7 +2748,7 @@ impl WidgetCatalog {
                     )
                     TextWidget::new_literal("Right-click here for a context menu") {
                         style: t.body.clone()
-                        color: c.text_primary
+                        color: TextRole::Primary
                     }
                 }
             }
@@ -2749,11 +2765,11 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Image Widget") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Full-color WebP photo, Contain fit, 300x200 display") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 ImageWidget(tree_img) {
                     size: 300.0, 200.0
@@ -2777,11 +2793,11 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Built-in Buttons") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Predefined (browse, expand, search, copy, clear, add)") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 4.0
@@ -2794,7 +2810,7 @@ impl WidgetCatalog {
                 }
                 TextWidget::new_literal("Visibility toggle") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 8.0
@@ -2802,12 +2818,12 @@ impl WidgetCatalog {
                     TextWidget::new_literal("Hidden") {
                         bind_text: vis_label
                         style: t.body.clone()
-                        color: c.text_primary
+                        color: TextRole::Primary
                     }
                 }
                 TextWidget::new_literal("Size variants (compact, default, large)") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 8.0
@@ -2823,7 +2839,7 @@ impl WidgetCatalog {
                 }
                 TextWidget::new_literal("Disabled") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 4.0
@@ -2832,7 +2848,7 @@ impl WidgetCatalog {
                 }
                 TextWidget::new_literal("Custom icon") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 BuiltInButton(IconWidget::checkmark(16.0)) {
                     tooltip_literal: "Custom checkmark"
@@ -2851,16 +2867,16 @@ impl WidgetCatalog {
                 spacing: 8.0
                 TextWidget::new_literal("Text Input") {
                     style: t.body_bold.clone()
-                    color: c.text_primary
+                    color: TextRole::Primary
                 }
                 TextWidget::new_literal("Single-line text editing with placeholder, clear button, slots") {
                     style: t.small.clone()
-                    color: c.text_secondary
+                    color: TextRole::Secondary
                 }
                 TextInput(sigs.search_text.clone()) {
                     placeholder: "Search..."
                     show_clear_button: true
-                    leading_slot: IconWidget::checkmark(14.0) { color: c.text_secondary }
+                    leading_slot: IconWidget::checkmark(14.0) { color: TextRole::Secondary }
                 }
                 TextInput(sigs.username_text.clone()) {
                     placeholder: "Username"
@@ -3004,6 +3020,202 @@ mod tests {
         assert_ne!(
             frame_light.shapes, frame_dark.shapes,
             "theme switch should produce different output"
+        );
+    }
+
+    /// Diagnostic helper exposing theme-switch coverage. Run with
+    /// `cargo test -p widget-catalog catalog_theme_switch_coverage -- --nocapture`
+    /// to see how many unique shape/glyph colors survive vs. update on switch.
+    #[test]
+    fn catalog_theme_switch_coverage() {
+        let typesetter = SharedTypesetter::new_with_default_font();
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(typesetter.as_text_backend());
+        tree.add(WidgetCatalog::new());
+        tree.layout(SizeProposal::exact(1600.0, 900.0));
+        let frame_light = tree.render();
+        let light_shape_count = frame_light.shapes.len();
+        let light_glyph_count = frame_light.glyphs.len();
+        let light_shape_palette: std::collections::HashSet<[u8; 4]> = frame_light
+            .shapes
+            .iter()
+            .map(|s| {
+                [
+                    (s.color[0] * 255.0) as u8,
+                    (s.color[1] * 255.0) as u8,
+                    (s.color[2] * 255.0) as u8,
+                    (s.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+        let light_glyph_palette: std::collections::HashSet<[u8; 4]> = frame_light
+            .glyphs
+            .iter()
+            .map(|g| {
+                [
+                    (g.color[0] * 255.0) as u8,
+                    (g.color[1] * 255.0) as u8,
+                    (g.color[2] * 255.0) as u8,
+                    (g.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+
+        tree.set_theme(Theme::dark_default());
+        tree.layout(SizeProposal::exact(1600.0, 900.0));
+        let frame_dark = tree.render();
+        let dark_shape_palette: std::collections::HashSet<[u8; 4]> = frame_dark
+            .shapes
+            .iter()
+            .map(|s| {
+                [
+                    (s.color[0] * 255.0) as u8,
+                    (s.color[1] * 255.0) as u8,
+                    (s.color[2] * 255.0) as u8,
+                    (s.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+        let dark_glyph_palette: std::collections::HashSet<[u8; 4]> = frame_dark
+            .glyphs
+            .iter()
+            .map(|g| {
+                [
+                    (g.color[0] * 255.0) as u8,
+                    (g.color[1] * 255.0) as u8,
+                    (g.color[2] * 255.0) as u8,
+                    (g.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+
+        let shape_shared = light_shape_palette
+            .intersection(&dark_shape_palette)
+            .count();
+        let glyph_shared = light_glyph_palette
+            .intersection(&dark_glyph_palette)
+            .count();
+
+        let mut shared_glyphs: Vec<_> = light_glyph_palette
+            .intersection(&dark_glyph_palette)
+            .copied()
+            .collect();
+        shared_glyphs.sort();
+        eprintln!("shared glyph colors (present in both light and dark):");
+        for cc in &shared_glyphs {
+            eprintln!(
+                "  #{:02X}{:02X}{:02X}{:02X}",
+                cc[0], cc[1], cc[2], cc[3]
+            );
+        }
+
+        eprintln!("widget-catalog theme switch coverage:");
+        eprintln!(
+            "  shapes: {} ops, palette {}→{} (shared {}, changed light→dark {})",
+            light_shape_count,
+            light_shape_palette.len(),
+            dark_shape_palette.len(),
+            shape_shared,
+            light_shape_palette.len() - shape_shared,
+        );
+        eprintln!(
+            "  glyphs: {} ops, palette {}→{} (shared {}, changed light→dark {})",
+            light_glyph_count,
+            light_glyph_palette.len(),
+            dark_glyph_palette.len(),
+            glyph_shared,
+            light_glyph_palette.len() - glyph_shared,
+        );
+
+        // The assertion isn't strict — it exists only to guarantee that theme
+        // switching visibly changes SOMETHING in the catalog. If both palettes
+        // were identical, this test would fail and flag a regression.
+        assert!(
+            light_shape_palette != dark_shape_palette
+                || light_glyph_palette != dark_glyph_palette,
+            "theme switch must change either shape or glyph palette"
+        );
+    }
+
+    /// Diagnostic: quantify how much of the render actually reflects the new
+    /// theme. Shape colors (panel / rect backgrounds) and glyph colors
+    /// should both change. If the widget catalog ever regresses to
+    /// build-time-frozen colors, this test flags which bucket is stuck.
+    #[test]
+    fn catalog_theme_switch_affects_shapes_and_glyphs() {
+        let typesetter = SharedTypesetter::new_with_default_font();
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(typesetter.as_text_backend());
+        tree.add(WidgetCatalog::new());
+        tree.layout(SizeProposal::exact(1600.0, 900.0));
+        let frame_light = tree.render();
+
+        tree.set_theme(Theme::dark_default());
+        tree.layout(SizeProposal::exact(1600.0, 900.0));
+        let frame_dark = tree.render();
+
+        let shape_colors_light: std::collections::HashSet<[u8; 4]> = frame_light
+            .shapes
+            .iter()
+            .map(|s| {
+                [
+                    (s.color[0] * 255.0) as u8,
+                    (s.color[1] * 255.0) as u8,
+                    (s.color[2] * 255.0) as u8,
+                    (s.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+        let shape_colors_dark: std::collections::HashSet<[u8; 4]> = frame_dark
+            .shapes
+            .iter()
+            .map(|s| {
+                [
+                    (s.color[0] * 255.0) as u8,
+                    (s.color[1] * 255.0) as u8,
+                    (s.color[2] * 255.0) as u8,
+                    (s.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+        assert!(
+            !shape_colors_light.is_subset(&shape_colors_dark),
+            "shape palette should change: light={} dark={}",
+            shape_colors_light.len(),
+            shape_colors_dark.len()
+        );
+
+        let glyph_colors_light: std::collections::HashSet<[u8; 4]> = frame_light
+            .glyphs
+            .iter()
+            .map(|g| {
+                [
+                    (g.color[0] * 255.0) as u8,
+                    (g.color[1] * 255.0) as u8,
+                    (g.color[2] * 255.0) as u8,
+                    (g.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+        let glyph_colors_dark: std::collections::HashSet<[u8; 4]> = frame_dark
+            .glyphs
+            .iter()
+            .map(|g| {
+                [
+                    (g.color[0] * 255.0) as u8,
+                    (g.color[1] * 255.0) as u8,
+                    (g.color[2] * 255.0) as u8,
+                    (g.color[3] * 255.0) as u8,
+                ]
+            })
+            .collect();
+        assert_ne!(
+            glyph_colors_light, glyph_colors_dark,
+            "glyph (text) colors should change on theme switch — \
+             this flags TextWidgets that captured light-theme colors at build time \
+             (use .bind_color with a theme_signal-derived Signal instead of .color(...))"
         );
     }
 

@@ -9,20 +9,24 @@
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
+use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+use fern_tokens::CornerRadius;
+#[cfg(test)]
+use fern_tokens::Color;
 
 /// A themed container with background, border, corner radius, and padding.
 #[derive(Debug)]
 pub struct Panel {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
-    background: Option<Color>,
-    border_color: Option<Color>,
-    border_width: Option<f32>,
-    corner_radius: Option<f32>,
-    padding: Option<f32>,
+    background: Option<ColorProp>,
+    border_color: Option<ColorProp>,
+    border_width: Option<Prop<f32>>,
+    corner_radius: Option<Prop<f32>>,
+    padding: Option<Prop<f32>>,
 }
 
 impl Panel {
@@ -50,38 +54,46 @@ impl Panel {
         self
     }
 
-    /// Override the background color (default: theme `surface_secondary`).
-    pub fn background(mut self, color: Color) -> Self {
-        self.background = Some(color);
+    /// Override the background. Accepts `Color`, a [`SurfaceRole`](fern_tokens::SurfaceRole),
+    /// or a `Signal<Color>`. Default (unset) is `SurfaceRole::Main`.
+    pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
+        self.background = Some(color.into());
         self
     }
 
-    /// Override the border color (default: theme `border`).
-    pub fn border_color(mut self, color: Color) -> Self {
-        self.border_color = Some(color);
+    /// Override the border color. Accepts `Color`, a [`BorderRole`](fern_tokens::BorderRole),
+    /// or a `Signal<Color>`. Default (unset) is `BorderRole::Default`.
+    pub fn border_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.border_color = Some(color.into());
         self
     }
 
     /// Override the border width (default: 0 — no border).
-    pub fn border_width(mut self, width: f32) -> Self {
-        self.border_width = Some(width);
+    /// Accepts a static `f32` or a reactive `Signal<f32>`.
+    pub fn border_width(mut self, width: impl Into<Prop<f32>>) -> Self {
+        self.border_width = Some(width.into());
         self
     }
 
-    /// Override the corner radius (default: theme `radius_md`).
-    pub fn corner_radius(mut self, radius: f32) -> Self {
-        self.corner_radius = Some(radius);
+    /// Override the corner radius (default: theme `radius_popup`).
+    /// Accepts a static `f32` or a reactive `Signal<f32>`.
+    pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self {
+        self.corner_radius = Some(radius.into());
         self
     }
 
-    /// Override the padding (default: theme `content_padding`).
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.padding = Some(padding);
+    /// Override the padding (default: theme `components.panel.padding`).
+    /// Accepts a static `f32` or a reactive `Signal<f32>`.
+    pub fn padding(mut self, padding: impl Into<Prop<f32>>) -> Self {
+        self.padding = Some(padding.into());
         self
     }
 
     fn resolve_padding(&self, theme: &fern_tokens::Theme) -> f32 {
-        self.padding.unwrap_or(theme.components.panel.padding)
+        self.padding
+            .as_ref()
+            .map(|p| p.get())
+            .unwrap_or(theme.components.panel.padding)
     }
 }
 
@@ -98,6 +110,25 @@ impl Widget for Panel {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             });
+        }
+        // Register dirty-tracking on any reactive props so signal updates
+        // (e.g. theme signal changes) trigger a repaint / relayout.
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        if let Some(p) = &self.background {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        }
+        if let Some(p) = &self.border_color {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        }
+        if let Some(p) = &self.border_width {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        }
+        if let Some(p) = &self.corner_radius {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        }
+        if let Some(p) = &self.padding {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         }
         self.child_id.into_iter().collect()
     }
@@ -139,14 +170,24 @@ impl Widget for Panel {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let bg = self
             .background
+            .as_ref()
+            .map(|p| p.resolve(ctx.theme))
             .unwrap_or(ctx.theme.colors.surface_main);
-        let radius = self.corner_radius.unwrap_or(ctx.theme.shape.radius_popup);
-        let border_w = self.border_width.unwrap_or(0.0);
+        let radius = self
+            .corner_radius
+            .as_ref()
+            .map(|p| p.get())
+            .unwrap_or(ctx.theme.shape.radius_popup);
+        let border_w = self.border_width.as_ref().map(|p| p.get()).unwrap_or(0.0);
 
         canvas.fill_rounded_rect(bounds, CornerRadius::uniform(radius), bg);
 
         if border_w > 0.0 {
-            let border = self.border_color.unwrap_or(ctx.theme.colors.border);
+            let border = self
+                .border_color
+                .as_ref()
+                .map(|p| p.resolve(ctx.theme))
+                .unwrap_or(ctx.theme.colors.border);
             canvas.stroke_rounded_rect(bounds, CornerRadius::uniform(radius), border, border_w);
         }
     }

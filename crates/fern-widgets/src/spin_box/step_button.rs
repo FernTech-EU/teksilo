@@ -128,8 +128,7 @@ impl StepButton {
 
 impl Widget for StepButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let colors = theme.colors.clone();
+        let theme_signal = ctx.theme_signal();
         let interaction = self.interaction.clone();
 
         // Register the enabled signal so the button re-renders (and
@@ -143,16 +142,14 @@ impl Widget for StepButton {
             fern_core::binding::BindingLevel::RepaintOnly,
         );
 
-        let bg_color = {
-            let colors = colors.clone();
-            let enabled_signal = self.enabled_signal.clone();
-            interaction.map(move |state| resolve_bg(*state, enabled_signal.get(), &colors))
-        };
-        let icon_color = {
-            let colors = colors.clone();
-            let enabled_signal = self.enabled_signal.clone();
-            interaction.map(move |state| resolve_icon(*state, enabled_signal.get(), &colors))
-        };
+        let enabled_signal_bg = self.enabled_signal.clone();
+        let bg_color = interaction
+            .zip(&theme_signal)
+            .map(move |(state, t)| resolve_bg(*state, enabled_signal_bg.get(), &t.colors));
+        let enabled_signal_icon = self.enabled_signal.clone();
+        let icon_color = interaction
+            .zip(&theme_signal)
+            .map(move |(state, t)| resolve_icon(*state, enabled_signal_icon.get(), &t.colors));
 
         let bg = RectWidget::new()
             .bind_background(bg_color)

@@ -217,7 +217,7 @@ impl Widget for Root {
         }));
 
         // ---- UI layout -------------------------------------------
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
 
         // Menu items demonstrate different variant shapes:
         //   - Save / Quit / Bold / Italic / Find / Help: unit variants

@@ -22,7 +22,7 @@ impl OverlayDemo {
 
 impl Widget for OverlayDemo {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme = ctx.theme_signal().get();
         let t = &theme.typography;
         let c = &theme.colors;
 
@@ -33,14 +33,14 @@ impl Widget for OverlayDemo {
             .child(
                 TextWidget::new_literal("Popover")
                     .style(t.small.clone())
-                    .color(c.text_primary),
+                    .color(TextRole::Primary),
             )
             .child(
                 TextWidget::new_literal(
                     "Use popovers for compact contextual actions without leaving the current surface.",
                 )
                 .style(t.body.clone())
-                .color(c.text_secondary),
+                .color(TextRole::Secondary),
             )
             .child(
                 HStack::new()
@@ -55,7 +55,7 @@ impl Widget for OverlayDemo {
             .child(
                 TextWidget::new_literal("Autosave complete")
                     .style(t.body.clone())
-                    .color(c.tooltip_text),
+                    .color(TextRole::TooltipText),
             )
             .child(
                 Button::new_literal("Dismiss")
@@ -70,7 +70,7 @@ impl Widget for OverlayDemo {
                 .child(
                     TextWidget::new_literal("Popover actions")
                         .style(t.small.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 ),
         );
 
@@ -81,7 +81,7 @@ impl Widget for OverlayDemo {
                 .child(
                     TextWidget::new_literal("Review changes")
                         .style(t.small.clone())
-                        .color(c.text_primary),
+                        .color(TextRole::Primary),
                 ),
         );
 
@@ -101,7 +101,7 @@ impl Widget for OverlayDemo {
                                 "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets FernUI resolve it.",
                             )
                             .style(t.body.clone())
-                            .color(c.text_secondary),
+                            .color(TextRole::Secondary),
                         )
                         .footer(
                             Button::new_literal("Close")
@@ -119,14 +119,14 @@ impl Widget for OverlayDemo {
                     .child(
                         TextWidget::new_literal("Dialogs and Popovers")
                             .style(t.body_bold.clone())
-                            .color(c.text_primary),
+                            .color(TextRole::Primary),
                     )
                     .child(
                         TextWidget::new_literal(
                             "FernUI now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.",
                         )
                         .style(t.body.clone())
-                        .color(c.text_secondary),
+                        .color(TextRole::Secondary),
                     )
                     .child(
                         Panel::new().padding(20.0).child(
@@ -153,7 +153,7 @@ impl Widget for OverlayDemo {
                                                         "This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout.",
                                                     )
                                                     .style(t.body.clone())
-                                                    .color(c.text_secondary),
+                                                    .color(TextRole::Secondary),
                                                 )
                                                 .footer(
                                                     HStack::new()
@@ -187,14 +187,14 @@ impl Widget for OverlayDemo {
                                 .child(
                                     TextWidget::new_literal("Notes")
                                         .style(t.body_bold.clone())
-                                        .color(c.text_primary),
+                                        .color(TextRole::Primary),
                                 )
                                 .child(
                                     TextWidget::new_literal(
                                         "Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether FernUI resolved it to an in-tree overlay or a native modal child window.",
                                     )
                                     .style(t.body.clone())
-                                    .color(c.text_secondary),
+                                    .color(TextRole::Secondary),
                                 ),
                         ),
                     ),

@@ -341,4 +341,42 @@ mod tests {
         tree.press_key(Key::Tab, Modifiers::SHIFT);
         assert_eq!(tree.focused(), Some(a));
     }
+
+    #[test]
+    fn focus_survives_theme_switch() {
+        use fern_tokens::Theme;
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let _b = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.focus(a);
+        assert_eq!(tree.focused(), Some(a));
+
+        tree.set_theme(Theme::dark_default());
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        assert_eq!(
+            tree.focused(),
+            Some(a),
+            "theme switch must not clobber focus"
+        );
+    }
+
+    #[test]
+    fn focus_survives_locale_switch() {
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.focus(a);
+        tree.set_locale("fr-FR".to_string());
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        assert_eq!(
+            tree.focused(),
+            Some(a),
+            "locale switch must not clobber focus"
+        );
+    }
 }

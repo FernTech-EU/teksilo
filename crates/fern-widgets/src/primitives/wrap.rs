@@ -3,14 +3,15 @@
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 
 /// A horizontal flow layout that wraps children to the next line.
 #[derive(Debug)]
 pub struct Wrap {
-    spacing: f32,
-    line_spacing: f32,
+    spacing: Prop<f32>,
+    line_spacing: Prop<f32>,
     child_ids: Vec<WidgetId>,
     pending: Vec<PendingChild>,
 }
@@ -18,22 +19,24 @@ pub struct Wrap {
 impl Wrap {
     pub fn new() -> Self {
         Self {
-            spacing: 0.0,
-            line_spacing: 0.0,
+            spacing: Prop::Static(0.0),
+            line_spacing: Prop::Static(0.0),
             child_ids: Vec::new(),
             pending: Vec::new(),
         }
     }
 
-    /// Horizontal spacing between items on the same line.
-    pub fn spacing(mut self, spacing: f32) -> Self {
-        self.spacing = spacing;
+    /// Horizontal spacing between items on the same line. Accepts a static
+    /// `f32` or a reactive `Signal<f32>`.
+    pub fn spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self {
+        self.spacing = spacing.into();
         self
     }
 
-    /// Vertical spacing between lines.
-    pub fn line_spacing(mut self, spacing: f32) -> Self {
-        self.line_spacing = spacing;
+    /// Vertical spacing between lines. Accepts a static `f32` or a
+    /// reactive `Signal<f32>`.
+    pub fn line_spacing(mut self, spacing: impl Into<Prop<f32>>) -> Self {
+        self.line_spacing = spacing.into();
         self
     }
 
@@ -73,6 +76,7 @@ impl Wrap {
         let mut sizes = Vec::with_capacity(children.len());
         let mut line_breaks = vec![false; children.len()];
         let mut x = 0.0_f32;
+        let spacing = self.spacing.get();
 
         for (i, &child_id) in children.iter().enumerate() {
             let size = ctx
@@ -81,12 +85,12 @@ impl Wrap {
             sizes.push(size);
 
             if i > 0 {
-                let needed = x + self.spacing + size.width;
+                let needed = x + spacing + size.width;
                 if needed > available_width {
                     line_breaks[i] = true;
                     x = size.width;
                 } else {
-                    x += self.spacing + size.width;
+                    x += spacing + size.width;
                 }
             } else {
                 x = size.width;
@@ -111,6 +115,8 @@ impl Widget for Wrap {
         let available_width = proposal.width.unwrap_or(f32::MAX);
         let (sizes, line_breaks) = self.compute_layout(available_width, &self.child_ids, ctx);
 
+        let spacing = self.spacing.get();
+        let line_spacing = self.line_spacing.get();
         let mut max_line_width = 0.0_f32;
         let mut line_width = 0.0_f32;
         let mut line_height = 0.0_f32;
@@ -127,7 +133,7 @@ impl Widget for Wrap {
                 line_width = size.width;
                 line_height = size.height;
             } else {
-                line_width += self.spacing + size.width;
+                line_width += spacing + size.width;
                 line_height = line_height.max(size.height);
             }
         }
@@ -136,7 +142,7 @@ impl Widget for Wrap {
         total_height += line_height;
         line_count += 1;
 
-        let total_line_gap = self.line_spacing * (line_count as f32 - 1.0).max(0.0);
+        let total_line_gap = line_spacing * (line_count as f32 - 1.0).max(0.0);
         Size::new(max_line_width, total_height + total_line_gap)
     }
 
@@ -153,6 +159,8 @@ impl Widget for Wrap {
 
         let active_ids: Vec<WidgetId> = children.iter().map(|c| c.id).collect();
         let (sizes, line_breaks) = self.compute_layout(bounds.width, &active_ids, ctx);
+        let spacing = self.spacing.get();
+        let line_spacing = self.line_spacing.get();
         let mut x = bounds.x;
         let mut y = bounds.y;
         let mut line_height = 0.0_f32;
@@ -162,7 +170,7 @@ impl Widget for Wrap {
                 break;
             }
             if line_breaks[i] {
-                y += line_height + self.line_spacing;
+                y += line_height + line_spacing;
                 x = bounds.x;
                 line_height = 0.0;
             }
@@ -171,7 +179,7 @@ impl Widget for Wrap {
             child.size = sizes[i];
             line_height = line_height.max(sizes[i].height);
 
-            x += sizes[i].width + self.spacing;
+            x += sizes[i].width + spacing;
         }
     }
 
@@ -196,6 +204,15 @@ impl Widget for Wrap {
                 })
                 .collect();
         }
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.spacing
+            .register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
+        self.line_spacing.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
         self.child_ids.clone()
     }
 }

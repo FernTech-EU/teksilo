@@ -2,6 +2,8 @@
 
 use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
+use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Shadow};
@@ -16,9 +18,9 @@ pub struct Card {
     pending_content: Option<PendingChild>,
     pending_footer: Option<PendingChild>,
     shadow: Option<Shadow>,
-    background: Option<Color>,
-    corner_radius: Option<f32>,
-    padding: Option<f32>,
+    background: Option<ColorProp>,
+    corner_radius: Option<Prop<f32>>,
+    padding: Option<Prop<f32>>,
 }
 
 impl Card {
@@ -72,23 +74,32 @@ impl Card {
         self
     }
 
-    pub fn background(mut self, color: Color) -> Self {
-        self.background = Some(color);
+    /// Override the background. Default (unset) is `SurfaceRole::Main`.
+    /// Accepts `Color`, a role (`SurfaceRole`, …), or `Signal<Color>`.
+    pub fn background(mut self, color: impl Into<ColorProp>) -> Self {
+        self.background = Some(color.into());
         self
     }
 
-    pub fn corner_radius(mut self, radius: f32) -> Self {
-        self.corner_radius = Some(radius);
+    /// Override the corner radius (default: theme `shape.radius_popup`).
+    /// Accepts a static `f32` or a reactive `Signal<f32>`.
+    pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self {
+        self.corner_radius = Some(radius.into());
         self
     }
 
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.padding = Some(padding);
+    /// Override the padding (default: theme `components.card.padding`).
+    /// Accepts a static `f32` or a reactive `Signal<f32>`.
+    pub fn padding(mut self, padding: impl Into<Prop<f32>>) -> Self {
+        self.padding = Some(padding.into());
         self
     }
 
     fn resolve_padding(&self, theme: &fern_tokens::Theme) -> f32 {
-        self.padding.unwrap_or(theme.components.card.padding)
+        self.padding
+            .as_ref()
+            .map(|p| p.get())
+            .unwrap_or(theme.components.card.padding)
     }
 }
 
@@ -117,6 +128,18 @@ impl Widget for Card {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             });
+        }
+        // Register reactive props for dirty-tracking.
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        if let Some(p) = &self.background {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        }
+        if let Some(p) = &self.corner_radius {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::RepaintOnly);
+        }
+        if let Some(p) = &self.padding {
+            p.register_if_bound(self_id, registry, fern_core::binding::BindingLevel::Relayout);
         }
         [self.header_id, self.content_id, self.footer_id]
             .into_iter()
@@ -181,7 +204,11 @@ impl Widget for Card {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let radius = self.corner_radius.unwrap_or(ctx.theme.shape.radius_popup);
+        let radius = self
+            .corner_radius
+            .as_ref()
+            .map(|p| p.get())
+            .unwrap_or(ctx.theme.shape.radius_popup);
         let cr = CornerRadius::uniform(radius);
 
         // Shadow
@@ -189,7 +216,11 @@ impl Widget for Card {
         canvas.draw_shadow(bounds, cr, &shadow);
 
         // Background
-        let bg = self.background.unwrap_or(ctx.theme.colors.surface_main);
+        let bg = self
+            .background
+            .as_ref()
+            .map(|p| p.resolve(ctx.theme))
+            .unwrap_or(ctx.theme.colors.surface_main);
         canvas.fill_rounded_rect(bounds, cr, bg);
     }
 

@@ -121,8 +121,12 @@ impl Widget for Slider {
 
         // Capture the thumb radius at build time. The event handlers need
         // it for hit-testing, but they only receive `EventContext` and can't
-        // reach the theme at event time.
-        let thumb_radius = ctx.theme().components.slider.thumb_diameter * 0.5;
+        // reach the theme at event time. Theme changes between builds
+        // would give a slightly stale hit region (single-digit pixels);
+        // paint-time reads via `ctx.theme` keep the rendered thumb
+        // correct. Trade-off accepted here rather than threading
+        // `theme_signal` through every event handler closure.
+        let thumb_radius = ctx.theme_signal().get().components.slider.thumb_diameter * 0.5;
 
         let value = self.value.clone();
         let min = self.min;

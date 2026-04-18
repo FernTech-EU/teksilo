@@ -280,7 +280,11 @@ fn indeterminate_icon(size: f32) -> IconWidget {
 
 impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let cb_style = snapshot.components.checkbox;
+        let typography_body = snapshot.typography.body.clone();
+        let typography_small = snapshot.typography.small.clone();
         let kind = self.kind.clone();
         let enabled = self.enabled;
 
@@ -291,36 +295,26 @@ impl Widget for Checkbox {
         });
         self.interaction = Some(interaction.clone());
 
-        // Derive box colors from interaction state AND check state.
-        // `zip` registers both upstream roots so the visuals refresh
-        // whether a click moves `interaction` or an external setter
-        // flips the underlying check state directly.
+        // Derive box colors from interaction state AND check state AND theme.
+        // `zip3` registers all three upstream roots so the visuals refresh
+        // on click, external check-state flips, or runtime theme switches.
         let check_state = kind.check_state_signal();
-        let bg_color = {
-            let colors = theme.colors.clone();
-            interaction
-                .zip(&check_state)
-                .map(move |(s, cs)| resolve_box_bg(*s, *cs, &colors))
-        };
-        let border_color = {
-            let colors = theme.colors.clone();
-            interaction
-                .zip(&check_state)
-                .map(move |(s, cs)| resolve_box_border(*s, *cs, &colors))
-        };
+        let bg_color = interaction
+            .zip3(&check_state, &theme_signal)
+            .map(|(s, cs, t)| resolve_box_bg(*s, *cs, &t.colors));
+        let border_color = interaction
+            .zip3(&check_state, &theme_signal)
+            .map(|(s, cs, t)| resolve_box_border(*s, *cs, &t.colors));
 
-        let cb_style = theme.components.checkbox;
         let icon_size = cb_style.box_visual_size * 0.75;
 
         // Border width — Int UI focus convention: thicken the
         // existing border to `focus_ring_width` and recolor it to
         // the accent on focus, instead of wrapping the box in a
         // separate ring.
-        let normal_bw = theme.shape.border_width;
-        let focus_bw = theme.shape.focus_ring_width;
-        let border_width_signal = interaction.map(move |s| match s {
-            InteractionState::Focused => focus_bw,
-            _ => normal_bw,
+        let border_width_signal = interaction.zip(&theme_signal).map(|(s, t)| match *s {
+            InteractionState::Focused => t.shape.focus_ring_width,
+            _ => t.shape.border_width,
         });
 
         let box_rect = RectWidget::new()
@@ -336,16 +330,13 @@ impl Widget for Checkbox {
                 .child_id(box_id),
         );
 
-        let icon_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| {
-                if *s == InteractionState::Disabled {
-                    colors.text_disabled
-                } else {
-                    colors.text_on_accent
-                }
-            })
-        };
+        let icon_color = interaction.zip(&theme_signal).map(|(s, t)| {
+            if *s == InteractionState::Disabled {
+                t.colors.text_disabled
+            } else {
+                t.colors.text_on_accent
+            }
+        });
 
         let checkmark = IconWidget::checkmark(icon_size).bind_color(icon_color.clone());
         let checkmark_id = ctx.add(checkmark);
@@ -379,16 +370,16 @@ impl Widget for Checkbox {
         let mut row = HStack::new().spacing(cb_style.label_gap).add_child(check_box);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_primary)
+                .style(typography_body)
+                .bind_color(theme_signal.map(|t| t.colors.text_primary))
                 .single_line()
                 .a11y_hidden();
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
                 let caption_widget = TextWidget::new_literal(caption)
-                    .style(theme.typography.small.clone())
-                    .color(theme.colors.text_secondary)
+                    .style(typography_small)
+                    .bind_color(theme_signal.map(|t| t.colors.text_secondary))
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
                 ctx.add(

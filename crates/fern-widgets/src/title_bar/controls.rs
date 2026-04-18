@@ -98,7 +98,7 @@ impl Widget for ControlButton {
         &mut self,
         ctx: &mut fern_core::build_context::BuildContext,
     ) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let typography_body = ctx.theme_signal().get().typography.body.clone();
 
         // Reactive hover background: starts transparent, flips to
         // `hover_bg` while the pointer is inside, back to transparent on
@@ -109,7 +109,7 @@ impl Widget for ControlButton {
         let bg_rect = ctx.add(RectWidget::new().bind_background(bg_signal.clone()));
 
         let glyph_text = TextWidget::new_literal(self.glyph)
-            .style(theme.typography.body.clone())
+            .style(typography_body)
             .color(self.fg)
             .single_line()
             .a11y_hidden();
@@ -216,7 +216,12 @@ impl Widget for WindowControls {
         &mut self,
         ctx: &mut fern_core::build_context::BuildContext,
     ) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        // Window controls are painted once during build — swapping the
+        // `Color` fields on a new build would be wasted allocation when
+        // the glyph/hover colors follow the theme. We read a snapshot and
+        // leave fine-grained reactive repaint to `mark_all_dirty` on the
+        // static `.color(...)` values inside each `ControlButton`.
+        let theme = ctx.theme_signal().get();
         let fg = theme.colors.text_primary;
         let hover_bg = theme.colors.surface_hover;
         let close_hover = theme.colors.status_error_bg;

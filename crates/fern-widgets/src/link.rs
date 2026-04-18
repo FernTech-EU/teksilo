@@ -115,22 +115,20 @@ fn resolve_link_color(state: InteractionState, colors: &fern_tokens::ColorTokens
 
 impl Widget for Link {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let typography_body = theme_signal.get().typography.body.clone();
         let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = Some(interaction.clone());
 
-        let text_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_link_color(*s, &colors))
-        };
-
-        let underline_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_link_color(*s, &colors))
-        };
+        let text_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_link_color(*s, &t.colors));
+        let underline_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_link_color(*s, &t.colors));
 
         let text = TextWidget::new_literal(&self.text)
-            .style(theme.typography.body.clone())
+            .style(typography_body)
             .bind_color(text_color)
             .single_line()
             .a11y_hidden();
@@ -157,23 +155,20 @@ impl Widget for Link {
         // ring. Link has no visible rest-state border; the focus
         // state swaps in a `focus_ring_width` outline around the
         // text.
-        let focus_ring_color = theme.colors.focus_ring;
-        let focus_border_color = interaction.map(move |s| match s {
-            InteractionState::Focused => focus_ring_color,
+        let focus_border_color = interaction.zip(&theme_signal).map(|(s, t)| match *s {
+            InteractionState::Focused => t.colors.focus_ring,
             _ => Color::TRANSPARENT,
         });
-        let focus_bw = theme.shape.focus_ring_width;
-        let focus_border_width = interaction.map(move |s| match s {
-            InteractionState::Focused => focus_bw,
+        let focus_border_width = interaction.zip(&theme_signal).map(|(s, t)| match *s {
+            InteractionState::Focused => t.shape.focus_ring_width,
             _ => 0.0,
         });
+        let link_corner_radius = theme_signal.get().components.link.corner_radius;
         let focus_rect_id = ctx.add(
             RectWidget::new()
                 .bind_border_color(focus_border_color)
                 .bind_border_width(focus_border_width)
-                .corner_radius(CornerRadius::uniform(
-                    theme.components.link.corner_radius,
-                )),
+                .corner_radius(CornerRadius::uniform(link_corner_radius)),
         );
         let root_id = ctx.add(
             ZStack::new()

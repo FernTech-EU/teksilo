@@ -349,15 +349,35 @@ impl Widget for TextInputField {
             st.needs_full_layout = true;
         }
 
-        // Apply theme colors to the (possibly freshly swapped-in)
-        // engine. Setting them before the swap would be lost.
+        // Apply theme colors to the (possibly freshly swapped-in) engine.
+        // Setting them before the swap would be lost. The rich-text
+        // engine stores colors in GPU-ready form, so we register an
+        // effect on the theme signal that re-applies the palette on
+        // every theme switch instead of capturing a single snapshot.
+        let theme_signal = ctx.theme_signal();
         {
-            let theme = ctx.theme();
+            let theme = theme_signal.get();
             let colors = &theme.colors;
             let mut st = self.state().borrow_mut();
             st.engine.set_text_color(colors.text_primary.to_array());
             st.engine.set_cursor_color(colors.text_primary.to_array());
             st.engine.set_selection_color(colors.selection_bg_active.to_array());
+        }
+        {
+            let state = self.state().clone();
+            ctx.effect(&theme_signal, move |theme| {
+                let colors = &theme.colors;
+                let mut st = state.borrow_mut();
+                st.engine.set_text_color(colors.text_primary.to_array());
+                st.engine.set_cursor_color(colors.text_primary.to_array());
+                st.engine
+                    .set_selection_color(colors.selection_bg_active.to_array());
+                if let Some(ref mut suffix_engine) = st.suffix_engine {
+                    let secondary = colors.text_secondary.to_array();
+                    suffix_engine.set_text_color(secondary);
+                    suffix_engine.set_cursor_color(secondary);
+                }
+            });
         }
 
         // Suffix engine: second independent `RichTextEngine` used
@@ -388,7 +408,7 @@ impl Widget for TextInputField {
             };
             suffix_engine.set_wrap_mode(fern_text::WrapMode::None);
             {
-                let theme = ctx.theme();
+                let theme = theme_signal.get();
                 let secondary = theme.colors.text_secondary.to_array();
                 suffix_engine.set_text_color(secondary);
                 suffix_engine.set_cursor_color(secondary);

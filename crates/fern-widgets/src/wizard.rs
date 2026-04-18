@@ -163,7 +163,11 @@ impl Widget for WizardHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let steps = self.steps.clone();
         let current_step = self.current_step.clone();
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let typography_small = snapshot.typography.small.clone();
+        let typography_body_bold = snapshot.typography.body_bold.clone();
+        let typography_body = snapshot.typography.body.clone();
 
         let progress = current_step.map({
             let steps = steps.clone();
@@ -197,15 +201,15 @@ impl Widget for WizardHeader {
         let progress_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(progress)
-                .style(theme.typography.small.clone())
-                .color(theme.colors.text_secondary)
+                .style(typography_small)
+                .bind_color(theme_signal.map(|t| t.colors.text_secondary))
                 .single_line(),
         );
         let title_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(title)
-                .style(theme.typography.body_bold.clone())
-                .color(theme.colors.text_primary)
+                .style(typography_body_bold)
+                .bind_color(theme_signal.map(|t| t.colors.text_primary))
                 .single_line(),
         );
         // `supporting_text` wraps naturally — it's the caller's
@@ -213,8 +217,8 @@ impl Widget for WizardHeader {
         let supporting_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(supporting_text)
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_secondary),
+                .style(typography_body)
+                .bind_color(theme_signal.map(|t| t.colors.text_secondary)),
         );
         ctx.visible_when(supporting_id, show_supporting);
 

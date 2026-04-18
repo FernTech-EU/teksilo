@@ -333,7 +333,10 @@ impl<T: Clone + PartialEq + 'static> std::fmt::Debug for ComboBox<T> {
 
 impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let combo_style = snapshot.components.combo_box;
+        let typography_body = snapshot.typography.body.clone();
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -387,22 +390,19 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             None => placeholder.clone(),
         });
 
-        let bg_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_bg(*s, &colors))
-        };
-        let border_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_border(*s, &colors))
-        };
-        let text_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_text(*s, &colors))
-        };
+        let bg_color = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| resolve_bg(*s, &t.colors));
+        let border_color = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| resolve_border(*s, &t.colors));
+        let text_color = interaction
+            .zip(&theme_signal)
+            .map(|(s, t)| resolve_text(*s, &t.colors));
 
         // Build trigger: [label | Spacer | divider | chevron]
         let label = TextWidget::new_literal("")
-            .style(theme.typography.body.clone())
+            .style(typography_body)
             .bind_text(label_text)
             .bind_color(text_color)
             .single_line()
@@ -413,18 +413,18 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // matching the `SplitButton` visual pattern — a thin vertical
         // rule in the `border` token that visually separates the
         // display region from the dropdown trigger indicator.
-        let combo_style = theme.components.combo_box;
-        let divider_fill_id =
-            ctx.add(RectWidget::new().background(theme.colors.border));
+        let divider_bg = theme_signal.map(|t| t.colors.border);
+        let divider_width_signal = theme_signal.map(|t| t.shape.border_width);
+        let divider_fill_id = ctx.add(RectWidget::new().bind_background(divider_bg));
         let divider_id = ctx.add(
             crate::primitives::FixedSize::new()
-                .bind_width(theme.shape.border_width)
+                .bind_width(divider_width_signal)
                 .bind_height(combo_style.height * 0.6)
                 .child_id(divider_fill_id),
         );
 
-        let chevron =
-            IconWidget::chevron_down(12.0).color(theme.colors.text_primary.with_alpha(0.5));
+        let chevron_color = theme_signal.map(|t| t.colors.text_primary.with_alpha(0.5));
+        let chevron = IconWidget::chevron_down(12.0).bind_color(chevron_color);
         let chevron_id = ctx.add(chevron);
 
         let row = HStack::new()
@@ -445,11 +445,9 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // Int UI focus convention: thicken the frame border to
         // `focus_ring_width` and recolor it to the accent on
         // focus, instead of wrapping in a separate ring.
-        let normal_bw = theme.shape.border_width;
-        let focus_bw = theme.shape.focus_ring_width;
-        let border_width_signal = interaction.map(move |s| match s {
-            ComboBoxState::Focused => focus_bw,
-            _ => normal_bw,
+        let border_width_signal = interaction.zip(&theme_signal).map(|(s, t)| match *s {
+            ComboBoxState::Focused => t.shape.focus_ring_width,
+            _ => t.shape.border_width,
         });
 
         let bg = RectWidget::new()

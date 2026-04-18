@@ -8,11 +8,14 @@
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
 use fern_core::signal::{Prop, Signal};
 use fern_core::binding::BindingLevel;
 use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, Easing, Orientation};
+#[cfg(test)]
+use fern_tokens::Color;
+use fern_tokens::{CornerRadius, Easing, Orientation};
 use std::time::Duration;
 
 const DEFAULT_THICKNESS: f32 = 4.0;
@@ -28,8 +31,8 @@ pub struct ProgressBar {
     indeterminate_pos: Signal<f32>,
     orientation: Orientation,
     thickness: f32,
-    track_color: Option<Color>,
-    fill_color: Option<Color>,
+    track_color: Option<ColorProp>,
+    fill_color: Option<ColorProp>,
 }
 
 impl ProgressBar {
@@ -79,13 +82,17 @@ impl ProgressBar {
         self
     }
 
-    pub fn track_color(mut self, color: Color) -> Self {
-        self.track_color = Some(color);
+    /// Override the track background. Default (unset) is `SurfaceRole::Sunken`.
+    /// Accepts `Color`, roles, or `Signal<Color>`.
+    pub fn track_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.track_color = Some(color.into());
         self
     }
 
-    pub fn fill_color(mut self, color: Color) -> Self {
-        self.fill_color = Some(color);
+    /// Override the fill color. Default (unset) is `SurfaceRole::Accent`.
+    /// Accepts `Color`, roles, or `Signal<Color>`.
+    pub fn fill_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.fill_color = Some(color.into());
         self
     }
 }
@@ -149,8 +156,14 @@ impl Widget for ProgressBar {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let track_color = self
             .track_color
+            .as_ref()
+            .map(|c| c.resolve(ctx.theme))
             .unwrap_or(ctx.theme.colors.surface_sunken);
-        let fill_color = self.fill_color.unwrap_or(ctx.theme.colors.accent);
+        let fill_color = self
+            .fill_color
+            .as_ref()
+            .map(|c| c.resolve(ctx.theme))
+            .unwrap_or(ctx.theme.colors.accent);
         let radius = CornerRadius::uniform(ctx.theme.components.progress_bar.corner_radius);
 
         // Track

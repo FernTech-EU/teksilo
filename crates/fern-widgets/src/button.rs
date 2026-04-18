@@ -329,7 +329,8 @@ fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw
 
 impl fern_core::widget::Widget for Button {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let button_style = theme_signal.get().components.button;
         let style = self.style;
         let enabled = self.enabled;
 
@@ -357,26 +358,25 @@ impl fern_core::widget::Widget for Button {
             );
         }
 
-        // Derived reactive colors via Signal::map
-        let bg_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_bg(style, *s, &colors))
-        };
-        let text_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_text(style, *s, &colors))
-        };
-        let border_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| resolve_border(style, *s, &colors))
-        };
-
-        // Build the widget subtree
-        let button_style = theme.components.button;
-        let normal_bw = button_style.border_width;
-        let focus_bw = theme.shape.focus_ring_width;
-        let border_width = interaction.map(move |s| {
-            resolve_border_width(style, *s, normal_bw, focus_bw)
+        // Derived reactive colors — combine interaction state with the tree
+        // theme signal so both interaction transitions and runtime theme
+        // switches re-derive the rendered colors.
+        let bg_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_bg(style, *s, &t.colors));
+        let text_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_text(style, *s, &t.colors));
+        let border_color = interaction
+            .zip(&theme_signal)
+            .map(move |(s, t)| resolve_border(style, *s, &t.colors));
+        let border_width = interaction.zip(&theme_signal).map(move |(s, t)| {
+            resolve_border_width(
+                style,
+                *s,
+                t.components.button.border_width,
+                t.shape.focus_ring_width,
+            )
         });
 
         // Build the content (icon + label) based on icon_location

@@ -6,10 +6,12 @@ use fern_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOve
 use fern_tokens::{Color, TextStyle};
 
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
 use fern_core::signal::Prop;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget};
 use fern_core::widget_builder::HandlerSet;
 use fern_i18n::LocalizedString;
+use fern_tokens::TextRole;
 
 /// A leaf widget that renders text via the TextBackend.
 ///
@@ -25,7 +27,10 @@ type LinkHoverHandler = Rc<dyn Fn(&str, bool, Rect, &mut EventContext)>;
 
 pub struct TextWidget {
     text: Prop<String>,
-    color: Prop<Color>,
+    /// Foreground color. Defaults to [`TextRole::Primary`], which the paint
+    /// pass resolves against the current theme — so `TextWidget::new("...")`
+    /// follows theme switches without any explicit binding.
+    color: ColorProp,
     style: TextStyle,
     overflow: TextOverflow,
     max_lines: Option<usize>,
@@ -78,7 +83,7 @@ impl TextWidget {
         let ls: LocalizedString = text.into();
         Self {
             text: Prop::from(ls),
-            color: Prop::Static(Color::BLACK),
+            color: ColorProp::TextRole(TextRole::Primary),
             style: TextStyle::default(),
             overflow: TextOverflow::default(),
             max_lines: None,
@@ -103,8 +108,18 @@ impl TextWidget {
         Self::new(LocalizedString::literal(text))
     }
 
-    pub fn color(mut self, color: Color) -> Self {
-        self.color = Prop::Static(color);
+    /// Set the text color. Accepts any `impl Into<ColorProp>`:
+    ///
+    /// - A raw `Color` — a frozen literal.
+    /// - A [`TextRole`] — resolved against the theme at paint time
+    ///   (reactive across theme switches).
+    /// - A `Signal<Color>` — reactive state (typically interaction-driven).
+    ///
+    /// The default role is [`TextRole::Primary`], so `.color(...)` is only
+    /// needed when a label wants a non-default theme role (Secondary,
+    /// Error, Accent, ...) or a custom color.
+    pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.color = color.into();
         self
     }
 
@@ -147,10 +162,12 @@ impl TextWidget {
         self
     }
 
-    /// Bind the text color to a reactive state.
-    pub fn bind_color(mut self, state: impl Into<Prop<Color>>) -> Self {
-        self.color = state.into();
-        self
+    /// Compatibility shim: `.bind_color(signal)` is equivalent to
+    /// `.color(signal)` now that `.color(...)` accepts `impl Into<ColorProp>`.
+    /// New code should prefer `.color(TextRole::X)` for theme-driven colors
+    /// and `.color(signal)` for reactive state.
+    pub fn bind_color(self, state: impl Into<ColorProp>) -> Self {
+        self.color(state)
     }
 
     /// Get the current text value (resolves from state if bound).
@@ -432,7 +449,7 @@ impl Widget for TextWidget {
         self.last_bounds.set(bounds);
 
         let text = self.text.get();
-        let color = self.color.get();
+        let color = self.color.resolve(ctx.theme);
 
         // Markup path: re-measure through the markup pipeline (the
         // backend's cache makes this a no-op after the size pass) and

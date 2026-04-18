@@ -3,17 +3,18 @@
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
+use fern_core::color_prop::ColorProp;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+use fern_tokens::CornerRadius;
 
 use crate::primitives::{Padding, RectWidget, TextWidget, ZStack};
 
 /// A pill-shaped label for displaying tags, counts, or status.
 pub struct Badge {
     label: String,
-    color: Option<Color>,
-    text_color: Option<Color>,
+    color: Option<ColorProp>,
+    text_color: Option<ColorProp>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -34,13 +35,18 @@ impl Badge {
         Self::new(fern_i18n::LocalizedString::literal(label))
     }
 
-    pub fn color(mut self, color: Color) -> Self {
-        self.color = Some(color);
+    /// Override the badge background. Accepts `Color`, a
+    /// [`SurfaceRole`](fern_tokens::SurfaceRole) / [`TextRole`](fern_tokens::TextRole),
+    /// or a `Signal<Color>`. Default (unset) is `SurfaceRole::AccentSubtle`.
+    pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.color = Some(color.into());
         self
     }
 
-    pub fn text_color(mut self, color: Color) -> Self {
-        self.text_color = Some(color);
+    /// Override the badge text color. Accepts `Color`, a role, or a signal.
+    /// Default (unset) is the theme's `status_info_fg`.
+    pub fn text_color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.text_color = Some(color.into());
         self
     }
 }
@@ -53,17 +59,28 @@ impl std::fmt::Debug for Badge {
 
 impl Widget for Badge {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
-        let badge_style = theme.components.badge;
-        // Badges are tinted by default — use status_info_bg for the soft fill
-        // and the matching foreground for text. Both can be overridden.
-        let bg = self
+        use fern_tokens::SurfaceRole;
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let badge_style = snapshot.components.badge;
+        let typography_tiny = snapshot.typography.tiny.clone();
+
+        // Defaults: soft accent tint + status_info_fg (reactive via theme
+        // signal). Callers override with `.color(...)` / `.text_color(...)`;
+        // either branch is a reactive `ColorProp`, so roles, signals, and
+        // static colors all work.
+        let bg: ColorProp = self
             .color
-            .unwrap_or(theme.colors.accent_subtle_bg);
-        let text = self.text_color.unwrap_or(theme.colors.status_info_fg);
+            .take()
+            .unwrap_or(ColorProp::SurfaceRole(SurfaceRole::AccentSubtle));
+        let text: ColorProp = self.text_color.take().unwrap_or_else(|| {
+            // No matching role — use a derived signal so theme changes
+            // still propagate.
+            ColorProp::Bound(theme_signal.map(|t| t.colors.status_info_fg))
+        });
 
         let text_widget = TextWidget::new_literal(&self.label)
-            .style(theme.typography.tiny.clone())
+            .style(typography_tiny)
             .color(text)
             .single_line()
             .a11y_hidden();

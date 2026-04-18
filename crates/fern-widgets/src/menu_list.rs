@@ -66,24 +66,26 @@ struct KeyboardHighlightWrapper {
 
 impl Widget for KeyboardHighlightWrapper {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
         let index = self.index;
 
         // Keyboard focus highlight uses the dedicated `surface_selected`
         // token (not an alpha wash over `accent`) so it tracks theme
         // changes and stays distinct from mouse hover (`surface_hover`).
         // When the keyboard focus moves to a row, this wrapper paints a
-        // solid `surface_selected` fill behind the MenuItem.
-        let bg_color = self.focused_index.map({
-            let selected = theme.colors.surface_selected;
-            move |focused| {
+        // solid `surface_selected` fill behind the MenuItem. Zipping with
+        // the theme signal keeps the highlight color reactive across
+        // runtime theme switches.
+        let bg_color = self
+            .focused_index
+            .zip(&theme_signal)
+            .map(move |(focused, t)| {
                 if *focused == Some(index) {
-                    selected
+                    t.colors.surface_selected
                 } else {
                     Color::TRANSPARENT
                 }
-            }
-        });
+            });
 
         let bg = RectWidget::new().bind_background(bg_color);
         let bg_id = ctx.add(bg);
@@ -193,7 +195,8 @@ impl std::fmt::Debug for MenuList {
 
 impl Widget for MenuList {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let menu_style = theme_signal.get().components.menu;
 
         // Keyboard-focused item index (shared with the key handler and wrappers).
         // The binding registry propagates repaints when this changes.
@@ -231,16 +234,15 @@ impl Widget for MenuList {
 
         let vstack_id = ctx.add(vstack);
 
-        let menu_style = theme.components.menu;
         let padding = Padding::uniform(4.0).child_id(vstack_id);
         let padding_id = ctx.add(padding);
 
         // Themed surface background — Int UI menus use the popup radius (8 dp)
         // and a 1 dp border on the raised surface.
         let bg = RectWidget::new()
-            .background(theme.colors.surface_raised)
-            .border_color(theme.colors.border)
-            .border_width(menu_style.popup_border_width)
+            .bind_background(theme_signal.map(|t| t.colors.surface_raised))
+            .bind_border_color(theme_signal.map(|t| t.colors.border))
+            .bind_border_width(menu_style.popup_border_width)
             .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);
 

@@ -15,9 +15,10 @@ use std::borrow::Cow;
 use fern_canvas::{AnimatedIcon, Canvas, Path, PathCommand, Point, Rect, RasterIcon, Size, SizeProposal};
 use fern_canvas::svg::SvgIcon;
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::color_prop::ColorProp;
 use fern_core::signal::{Prop, Signal};
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
-use fern_tokens::{Color, Easing};
+use fern_tokens::{Color, Easing, TextRole};
 
 /// Whether an icon is rendered as a theme-tinted mask or in its original colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,8 +64,9 @@ pub struct IconWidget {
     /// Display size: what the icon reports for layout (size_that_fits).
     /// Defaults to `design_size` but can be overridden via `icon_size()`.
     display_size: f32,
-    /// Fill/tint color.
-    color: Prop<Color>,
+    /// Fill/tint color. Defaults to [`TextRole::Primary`] so icons follow
+    /// the surrounding text color across theme switches without binding.
+    color: ColorProp,
     /// Rendering mode.
     mode: IconMode,
 }
@@ -92,7 +94,7 @@ impl IconWidget {
             source: IconSource::Path(path),
             design_size: size,
             display_size: size,
-            color: Prop::Static(Color::BLACK),
+            color: ColorProp::TextRole(TextRole::Primary),
             mode: IconMode::Tintable,
         }
     }
@@ -153,7 +155,7 @@ impl IconWidget {
             source: IconSource::Svg(icon.clone()),
             design_size: vb_size,
             display_size: vb_size,
-            color: Prop::Static(Color::BLACK),
+            color: ColorProp::TextRole(TextRole::Primary),
             mode: IconMode::Tintable,
         }
     }
@@ -171,7 +173,7 @@ impl IconWidget {
                     source: IconSource::Raster { name, icon, upload_pixels },
                     design_size: size,
                     display_size: size,
-                    color: Prop::Static(Color::BLACK),
+                    color: ColorProp::TextRole(TextRole::Primary),
                     mode,
                 }
             }
@@ -205,7 +207,7 @@ impl IconWidget {
                 },
                 design_size: size,
                 display_size: size,
-                color: Prop::Static(Color::BLACK),
+                color: ColorProp::TextRole(TextRole::Primary),
                 mode,
             };
         }
@@ -218,7 +220,7 @@ impl IconWidget {
                     source: IconSource::Raster { name, icon, upload_pixels },
                     design_size: size,
                     display_size: size,
-                    color: Prop::Static(Color::BLACK),
+                    color: ColorProp::TextRole(TextRole::Primary),
                     mode,
                 }
             }
@@ -240,7 +242,7 @@ impl IconWidget {
             source: IconSource::Raster { name, icon: icon.clone(), upload_pixels },
             design_size: size,
             display_size: size,
-            color: Prop::Static(Color::BLACK),
+            color: ColorProp::TextRole(TextRole::Primary),
             mode,
         }
     }
@@ -264,7 +266,7 @@ impl IconWidget {
             },
             design_size: size,
             display_size: size,
-            color: Prop::Static(Color::BLACK),
+            color: ColorProp::TextRole(TextRole::Primary),
             mode,
         }
     }
@@ -292,16 +294,20 @@ impl IconWidget {
         self
     }
 
-    /// Set the icon fill/tint color.
-    pub fn color(mut self, color: Color) -> Self {
-        self.color = Prop::Static(color);
+    /// Set the tint. Accepts any `impl Into<ColorProp>`:
+    ///
+    /// - A raw `Color` — a frozen literal.
+    /// - A [`TextRole`] / `SurfaceRole` / `BorderRole` — resolved against
+    ///   the theme at paint time (reactive across theme switches).
+    /// - A `Signal<Color>` — reactive state (usually interaction-driven).
+    pub fn color(mut self, color: impl Into<ColorProp>) -> Self {
+        self.color = color.into();
         self
     }
 
-    /// Bind the icon color to a reactive state.
-    pub fn bind_color(mut self, state: impl Into<Prop<Color>>) -> Self {
-        self.color = state.into();
-        self
+    /// Compatibility shim. Prefer `.color(signal)` or `.color(role)` in new code.
+    pub fn bind_color(self, state: impl Into<ColorProp>) -> Self {
+        self.color(state)
     }
 
     /// Set the display size of the icon. The path/image is scaled to fit
@@ -479,8 +485,8 @@ impl Widget for IconWidget {
         Size::new(self.display_size, self.display_size)
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
-        let color = self.color.get();
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let color = self.color.resolve(ctx.theme);
 
         match &self.source {
             IconSource::Path(_) | IconSource::Svg(_) => {

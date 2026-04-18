@@ -143,7 +143,12 @@ fn resolve_circle_border(
 
 impl Widget for RadioButton {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        let theme_signal = ctx.theme_signal();
+        let snapshot = theme_signal.get();
+        let radio_style = snapshot.components.radio;
+        let typography_body = snapshot.typography.body.clone();
+        let typography_small = snapshot.typography.small.clone();
+        let radius_pill = snapshot.shape.radius_pill;
         let selected = self.selected.clone();
         let value = self.value;
         let enabled = self.enabled;
@@ -155,33 +160,24 @@ impl Widget for RadioButton {
         });
         self.interaction = Some(interaction.clone());
 
-        let radio_style = theme.components.radio;
-
-        // Border color depends on both `interaction` and whether this
-        // button is the group's selected one. `zip` registers both
-        // upstream roots so the border refreshes whenever a sibling
-        // flips `selected`, not only when this button's own
-        // interaction state moves.
+        // Border color depends on `interaction`, group selection, and theme.
+        // `zip3` registers all three upstream roots so the border refreshes
+        // on hover, sibling flips, and runtime theme switches.
         let is_selected = selected.map(move |s| *s == value);
-        let border_color = {
-            let colors = theme.colors.clone();
-            interaction
-                .zip(&is_selected)
-                .map(move |(s, sel)| resolve_circle_border(*s, *sel, &colors))
-        };
+        let border_color = interaction
+            .zip3(&is_selected, &theme_signal)
+            .map(|(s, sel, t)| resolve_circle_border(*s, *sel, &t.colors));
         // Int UI focus convention: thicken the existing border to
         // `focus_ring_width` and recolor it to the accent on
         // focus, instead of wrapping the circle in a separate ring.
-        let normal_bw = theme.shape.border_width;
-        let focus_bw = theme.shape.focus_ring_width;
-        let border_width_signal = interaction.map(move |s| match s {
-            InteractionState::Focused => focus_bw,
-            _ => normal_bw,
+        let border_width_signal = interaction.zip(&theme_signal).map(|(s, t)| match *s {
+            InteractionState::Focused => t.shape.focus_ring_width,
+            _ => t.shape.border_width,
         });
         let outer = RectWidget::new()
             .bind_border_color(border_color)
             .bind_border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_pill));
+            .corner_radius(CornerRadius::uniform(radius_pill));
         let outer_id = ctx.add(outer);
         let outer_sized = ctx.add(
             FixedSize::new()
@@ -190,19 +186,16 @@ impl Widget for RadioButton {
                 .child_id(outer_id),
         );
 
-        let dot_color = {
-            let colors = theme.colors.clone();
-            interaction.map(move |s| {
-                if *s == InteractionState::Disabled {
-                    colors.text_disabled
-                } else {
-                    colors.accent
-                }
-            })
-        };
+        let dot_color = interaction.zip(&theme_signal).map(|(s, t)| {
+            if *s == InteractionState::Disabled {
+                t.colors.text_disabled
+            } else {
+                t.colors.accent
+            }
+        });
         let dot = RectWidget::new()
             .bind_background(dot_color)
-            .corner_radius(CornerRadius::uniform(theme.shape.radius_pill));
+            .corner_radius(CornerRadius::uniform(radius_pill));
         let dot_id = ctx.add(dot);
         let dot_sized = ctx.add(
             FixedSize::new()
@@ -222,16 +215,16 @@ impl Widget for RadioButton {
         let mut row = HStack::new().spacing(radio_style.label_gap).add_child(radio);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
-                .style(theme.typography.body.clone())
-                .color(theme.colors.text_primary)
+                .style(typography_body)
+                .bind_color(theme_signal.map(|t| t.colors.text_primary))
                 .single_line()
                 .a11y_hidden();
             let label_id = ctx.add(label_widget);
 
             let label_column_id = if let Some(ref caption) = self.caption {
                 let caption_widget = TextWidget::new_literal(caption)
-                    .style(theme.typography.small.clone())
-                    .color(theme.colors.text_secondary)
+                    .style(typography_small)
+                    .bind_color(theme_signal.map(|t| t.colors.text_secondary))
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
                 ctx.add(

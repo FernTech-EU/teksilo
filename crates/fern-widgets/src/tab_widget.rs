@@ -537,11 +537,14 @@ impl Widget for TabBar {
         // — it reserves the focus-ring envelope on all four sides. The
         // ScrollArea's preferred height must match, or the 38-dp-tall
         // headers get clipped inside a 30-dp viewport, causing visible
-        // pixel shifts in labels whenever layout is re-run.
-        let shape = &ctx.theme().shape;
+        // pixel shifts in labels whenever layout is re-run. The snapshot
+        // is read once at build time because the enclosing ScrollArea
+        // keeps its preferred size frozen; theme-driven size changes are
+        // picked up on the next rebuild.
+        let snapshot = ctx.theme_signal().get();
+        let shape = &snapshot.shape;
         let envelope = shape.focus_ring_offset + shape.focus_ring_width;
-        let header_min_height =
-            ctx.theme().components.tab.editor_tab_height + envelope * 2.0;
+        let header_min_height = snapshot.components.tab.editor_tab_height + envelope * 2.0;
         let headers_scroll_id = ctx.add(
             ScrollArea::new()
                 .child(headers)
