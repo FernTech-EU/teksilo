@@ -115,9 +115,10 @@ SwiftUI-style two-phase negotiation: parent proposes size → child responds wit
 - `Signal<T>` — unified reactive type. `Signal::new(value)` for mutable, `signal.map(|v| ...)` for derived
 - Multi-source combinators: `a.zip(&b)` / `a.zip3(&b, &c)` on any `Signal<T: Clone>`; `a.and(&b)` / `a.or(&b)` / `s.not()` on `Signal<bool>`. Derived signals dirty-track **every** upstream root, so widgets binding to a composite predicate re-render on any source change.
 - `Prop<T>` — widget property type: `Prop::Static(T)` or `Prop::Bound(Signal<T>)`. Methods accept `impl Into<Prop<T>>`
+- `ColorProp` / `TextStyleProp` — theme-aware prop types for colors and text styles. See **Theming** below.
 - `ObserverHandle` — RAII guard. Dropping removes the callback (no memory leak)
 - `BindingLevel::RepaintOnly` (color changes) vs `BindingLevel::Relayout` (size changes)
-- Property methods accept both plain values and signals: `TextWidget::new("Hello").color(Color::RED)` or `.color(signal)`
+- Color-accepting methods take `impl Into<ColorProp>` — accepts `Color`, a role (`TextRole`, `SurfaceRole`, `BorderRole`), a `Signal<Color>`, or a `Signal<Role>`. Prefer roles for theme-driven colors; a bare `Color` is frozen.
 - `ctx.signal(value)` — create in build(), `ctx.effect(&signal, |v| ...)` — scoped effect (auto-cleaned on rebuild)
 - `Signal<f32>::animate_to(target, duration, easing)` — smooth animation
 
@@ -221,15 +222,30 @@ Three wgpu pipelines: `rect_pipeline`, `sdf_pipeline`, `quad_pipeline`.
 
 ## Theming
 
-`Theme` struct with five token groups:
+`Theme` struct with five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`) plus `ComponentStyles`. Built-in presets: `Theme::light_default()`, `Theme::dark_default()`. Runtime switching via `ctx.set_theme(new)` or `tree.set_theme(new)`.
 
-- `ColorTokens` — semantic roles (surface, primary, error, etc.) with interaction variants
-- `SpacingTokens` — scale (xs→xxl) + semantic (widget_padding, content_padding)
-- `TypographyTokens` — body, heading_1-3, label, caption, monospace
-- `ShapeTokens` — corner radii, border widths, shadows
-- `MotionTokens` — animation durations, easing curves
+**Theme is reactive.** `set_theme` updates an internal `Signal<Theme>` and dirty-marks every node — no rebuild. Focus, scroll offsets, and all interaction state survive theme changes.
 
-Built-in: `Theme::light_default()`, `Theme::dark_default()`. Runtime switching via `ctx.set_theme()`.
+Three knobs that matter in widget code:
+
+1. **Roles** — `TextRole`, `SurfaceRole`, `BorderRole`, `TextStyleRole` in `fern-tokens`. Name *what* a value represents, not which literal. Resolved against the current theme at paint/layout.
+2. **`ColorProp`** — unified color-builder input: `Static(Color) | Bound(Signal<Color>) | TextRole | SurfaceRole | BorderRole | DynamicTextRole(Signal<TextRole>) | DynamicSurfaceRole(..) | DynamicBorderRole(..)`. Widget builders accept `impl Into<ColorProp>`.
+3. **`TextStyleProp`** — same idea for typography: `Static(TextStyle) | Role(TextStyleRole)`.
+
+Defaults: `TextWidget::new("...")` is `TextRole::Primary` + `TextStyleRole::Body`; `Panel::new()` is `SurfaceRole::Main` + `BorderRole::Default` when unset.
+
+Interaction-driven colors use the `Signal<Role>` pattern — no `theme_signal` zip:
+
+```rust
+let bg_role = interaction.map(|s| match s {
+    InteractionState::Hovered => SurfaceRole::Hover,
+    InteractionState::Pressed => SurfaceRole::Pressed,
+    _ => SurfaceRole::Transparent,
+});
+RectWidget::new().background(bg_role)
+```
+
+`ctx.theme_signal()` / `ctx.locale_signal()` are still available for the cases no role covers (alpha blends, rich-text engine palette sync, layout-constant snapshots) — use them sparingly. Full reference: [docs/reactive-theme.md](../docs/reactive-theme.md).
 
 ## Testing Patterns
 
@@ -317,7 +333,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 ```rust
 // Inline children (most common) — .child() accepts impl Widget + 'static
 VStack::new().spacing(10.0)
-    .child(TextWidget::new("Hello").style(theme.typography.heading_1.clone()))
+    .child(TextWidget::new("Hello").style(TextStyleRole::BodyBold))
     .child(Button::new("Click").on_activate_fn(|ctx| ctx.send_intent(MyIntent::DoThing)))
 
 // Pre-registered children (when you need the ID) — .add_child() takes WidgetId
@@ -345,9 +361,9 @@ struct MyWidget {
 
 impl Widget for MyWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme().clone();
+        // No theme snapshot needed — roles resolve at paint/layout time.
         let root = ctx.add(VStack::new()
-            .child(TextWidget::new("Hello").style(theme.typography.heading_1.clone()))
+            .child(TextWidget::new("Hello").style(TextStyleRole::BodyBold))
         );
         self.root_child_id = Some(root);
         vec![root]
