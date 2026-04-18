@@ -504,7 +504,6 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // migrating every `Prop<f32>`-accepting primitive used here.
         let theme_signal = ctx.theme_signal();
         let theme = theme_signal.get();
-        let colors = theme.colors.clone();
         let field_style = theme.components.text_field;
         let focus_ring_width = theme.shape.focus_ring_width;
 

@@ -36,7 +36,7 @@ use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetP
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_data::{DataChange, ListDataSource, ListModel};
-use fern_tokens::CornerRadius;
+use fern_tokens::{CornerRadius, TextStyleRole};
 
 use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
@@ -336,7 +336,6 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let theme_signal = ctx.theme_signal();
         let snapshot = theme_signal.get();
         let combo_style = snapshot.components.combo_box;
-        let typography_body = snapshot.typography.body.clone();
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -402,7 +401,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         // Build trigger: [label | Spacer | divider | chevron]
         let label = TextWidget::new_literal("")
-            .style(typography_body)
+            .style(TextStyleRole::Body)
             .bind_text(label_text)
             .bind_color(text_color)
             .single_line()

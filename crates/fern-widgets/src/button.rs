@@ -16,7 +16,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, ColorTokens, CornerRadius};
+use fern_tokens::{BorderRole, Color, ColorTokens, CornerRadius, SurfaceRole, TextRole};
 
 use crate::primitives::{HStack, Padding, RectWidget, TextWidget, VStack, ZStack};
 use crate::primitives::icon_widget::IconWidget;
@@ -256,59 +256,45 @@ impl std::fmt::Debug for Button {
 // border thickness or stroke style. Each variant maps to a distinct surface
 // role; only Default uses the accent family.
 
-fn resolve_bg(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_bg_role(style: ButtonVariant, state: InteractionState) -> SurfaceRole {
     match (style, state) {
-        // Default: accent-filled primary action.
-        (ButtonVariant::Default, InteractionState::Disabled) => colors.accent_disabled,
-        (ButtonVariant::Default, InteractionState::Pressed) => colors.accent_pressed,
-        (ButtonVariant::Default, InteractionState::Hovered) => colors.accent_hover,
-        (ButtonVariant::Default, _) => colors.accent,
+        (ButtonVariant::Default, InteractionState::Disabled) => SurfaceRole::AccentDisabled,
+        (ButtonVariant::Default, InteractionState::Pressed) => SurfaceRole::AccentPressed,
+        (ButtonVariant::Default, InteractionState::Hovered) => SurfaceRole::AccentHover,
+        (ButtonVariant::Default, _) => SurfaceRole::Accent,
 
-        // Regular: visible surface fill. Disabled keeps surface_main so
-        // the button doesn't look primary; only the label dims.
-        (ButtonVariant::Regular, InteractionState::Pressed) => colors.surface_pressed,
-        (ButtonVariant::Regular, InteractionState::Hovered) => colors.surface_hover,
-        (ButtonVariant::Regular, _) => colors.surface_main,
+        (ButtonVariant::Regular, InteractionState::Pressed) => SurfaceRole::Pressed,
+        (ButtonVariant::Regular, InteractionState::Hovered) => SurfaceRole::Hover,
+        (ButtonVariant::Regular, _) => SurfaceRole::Main,
 
-        // Flat: transparent at idle, light wash on hover/press.
-        (ButtonVariant::Flat, InteractionState::Pressed) => colors.surface_pressed,
-        (ButtonVariant::Flat, InteractionState::Hovered) => colors.surface_hover,
-        (ButtonVariant::Flat, _) => Color::TRANSPARENT,
+        (ButtonVariant::Flat, InteractionState::Pressed) => SurfaceRole::Pressed,
+        (ButtonVariant::Flat, InteractionState::Hovered) => SurfaceRole::Hover,
+        (ButtonVariant::Flat, _) => SurfaceRole::Transparent,
     }
 }
 
-fn resolve_text(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
+fn resolve_text_role(style: ButtonVariant, state: InteractionState) -> TextRole {
     match (style, state) {
-        // Default: white label on accent fill.
-        (ButtonVariant::Default, InteractionState::Disabled) => colors.text_disabled,
-        (ButtonVariant::Default, _) => colors.text_on_accent,
-
-        // Regular / Flat: primary text, dim when disabled.
+        (ButtonVariant::Default, InteractionState::Disabled) => TextRole::Disabled,
+        (ButtonVariant::Default, _) => TextRole::OnAccent,
         (ButtonVariant::Regular | ButtonVariant::Flat, InteractionState::Disabled) => {
-            colors.text_disabled
+            TextRole::Disabled
         }
-        (ButtonVariant::Regular | ButtonVariant::Flat, _) => colors.text_primary,
+        (ButtonVariant::Regular | ButtonVariant::Flat, _) => TextRole::Primary,
     }
 }
 
-fn resolve_border(style: ButtonVariant, state: InteractionState, colors: &ColorTokens) -> Color {
-    // Int UI convention, applied uniformly: the button's own
-    // border is the focus indicator. On focus the border thickens
-    // (see `resolve_border_width` below) and recolors to the
-    // accent focus-ring color. There is no external focus ring.
+fn resolve_border_role(style: ButtonVariant, state: InteractionState) -> BorderRole {
+    // Int UI convention: the border IS the focus indicator (accent color,
+    // thicker stroke) — no external ring.
     if state == InteractionState::Focused {
-        return colors.focus_ring;
+        return BorderRole::Focused;
     }
     match style {
-        // Default / Flat at rest: no visible border — the fill
-        // (or absence of one) carries the affordance.
-        ButtonVariant::Default | ButtonVariant::Flat => Color::TRANSPARENT,
-        // Regular: always a visible 1 dp border. Strong variant on
-        // hover/press.
+        ButtonVariant::Default | ButtonVariant::Flat => BorderRole::Transparent,
         ButtonVariant::Regular => match state {
-            InteractionState::Disabled => colors.border,
-            InteractionState::Hovered | InteractionState::Pressed => colors.border_strong,
-            _ => colors.border,
+            InteractionState::Hovered | InteractionState::Pressed => BorderRole::Strong,
+            _ => BorderRole::Default,
         },
     }
 }
@@ -329,8 +315,11 @@ fn resolve_border_width(style: ButtonVariant, state: InteractionState, normal_bw
 
 impl fern_core::widget::Widget for Button {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let button_style = theme_signal.get().components.button;
+        // `button_style` is a one-time snapshot of layout constants
+        // (padding, icon size, corner radius, min width, height). These are
+        // typography/shape tokens that don't vary between light and dark
+        // themes; colors are driven reactively through role signals below.
+        let button_style = ctx.theme_signal().get().components.button;
         let style = self.style;
         let enabled = self.enabled;
 
@@ -358,46 +347,38 @@ impl fern_core::widget::Widget for Button {
             );
         }
 
-        // Derived reactive colors — combine interaction state with the tree
-        // theme signal so both interaction transitions and runtime theme
-        // switches re-derive the rendered colors.
-        let bg_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_bg(style, *s, &t.colors));
-        let text_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_text(style, *s, &t.colors));
-        let border_color = interaction
-            .zip(&theme_signal)
-            .map(move |(s, t)| resolve_border(style, *s, &t.colors));
-        let border_width = interaction.zip(&theme_signal).map(move |(s, t)| {
-            resolve_border_width(
-                style,
-                *s,
-                t.components.button.border_width,
-                t.shape.focus_ring_width,
-            )
+        // Derived reactive roles — map interaction state to semantic roles,
+        // resolved against the current theme at paint time. Signal<Role>
+        // replaces the older `interaction.zip(&theme_signal).map(...)` zip
+        // and drops the explicit theme-signal plumbing.
+        let bg_role = interaction.map(move |s| resolve_bg_role(style, *s));
+        let text_role = interaction.map(move |s| resolve_text_role(style, *s));
+        let border_role = interaction.map(move |s| resolve_border_role(style, *s));
+        let normal_bw = button_style.border_width;
+        let focus_bw = ctx.theme_signal().get().shape.focus_ring_width;
+        let border_width = interaction.map(move |s| {
+            resolve_border_width(style, *s, normal_bw, focus_bw)
         });
 
         // Build the content (icon + label) based on icon_location
         let content_id = match self.icon_location {
             IconLocation::None => {
                 let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_color)
+                    .bind_color(text_role)
                     .single_line()
                     .a11y_hidden();
                 ctx.add(text)
             }
             IconLocation::IconOnly => {
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
-                let icon = icon.icon_size(button_style.icon_size).bind_color(text_color);
+                let icon = icon.icon_size(button_style.icon_size).bind_color(text_role);
                 ctx.add(icon)
             }
             IconLocation::Leading => {
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color.clone()));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role.clone()));
                 let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_color)
+                    .bind_color(text_role)
                     .single_line()
                     .a11y_hidden();
                 let text_id = ctx.add(text);
@@ -410,12 +391,12 @@ impl fern_core::widget::Widget for Button {
             }
             IconLocation::Trailing => {
                 let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_color.clone())
+                    .bind_color(text_role.clone())
                     .single_line()
                     .a11y_hidden();
                 let text_id = ctx.add(text);
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
                 ctx.add(
                     HStack::new()
                         .spacing(button_style.icon_label_gap)
@@ -425,9 +406,9 @@ impl fern_core::widget::Widget for Button {
             }
             IconLocation::Top => {
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color.clone()));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role.clone()));
                 let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_color)
+                    .bind_color(text_role)
                     .single_line()
                     .a11y_hidden();
                 let text_id = ctx.add(text);
@@ -440,12 +421,12 @@ impl fern_core::widget::Widget for Button {
             }
             IconLocation::Bottom => {
                 let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_color.clone())
+                    .bind_color(text_role.clone())
                     .single_line()
                     .a11y_hidden();
                 let text_id = ctx.add(text);
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
-                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_color));
+                let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
                 ctx.add(
                     VStack::new()
                         .spacing(button_style.icon_label_gap)
@@ -467,8 +448,8 @@ impl fern_core::widget::Widget for Button {
         // `resolve_border_width`; color reacts via `resolve_border`.
         // No external ring.
         let rect = RectWidget::new()
-            .bind_background(bg_color)
-            .bind_border_color(border_color)
+            .bind_background(bg_role)
+            .bind_border_color(border_role)
             .bind_border_width(border_width)
             .corner_radius(CornerRadius::uniform(button_style.corner_radius));
         let rect_id = ctx.add(rect);

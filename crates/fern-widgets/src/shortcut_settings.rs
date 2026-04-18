@@ -37,6 +37,7 @@ use fern_core::widget_id::WidgetId;
 use crate::button::Button;
 use crate::keystroke_format::format_keystroke;
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
+use fern_tokens::TextStyleRole;
 
 /// Which keystroke slot a capture/rebind targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -230,7 +231,7 @@ struct ShortcutRowData {
 fn category_header(theme: &fern_tokens::Theme, category: Option<&'static str>) -> impl Widget + 'static {
     let label = category.unwrap_or("General");
     TextWidget::new_literal(label)
-        .style(theme.typography.body_bold.clone())
+        .style(TextStyleRole::BodyBold)
         .color(theme.colors.text_primary)
         .single_line()
 }

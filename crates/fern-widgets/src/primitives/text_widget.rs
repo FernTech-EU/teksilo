@@ -6,7 +6,7 @@ use fern_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOve
 use fern_tokens::{Color, TextStyle};
 
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::color_prop::ColorProp;
+use fern_core::color_prop::{ColorProp, TextStyleProp};
 use fern_core::signal::Prop;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget};
 use fern_core::widget_builder::HandlerSet;
@@ -31,7 +31,11 @@ pub struct TextWidget {
     /// pass resolves against the current theme — so `TextWidget::new("...")`
     /// follows theme switches without any explicit binding.
     color: ColorProp,
-    style: TextStyle,
+    /// Text style. Defaults to [`TextStyleRole::Body`](fern_tokens::TextStyleRole);
+    /// resolved against the current typography tokens every time the widget
+    /// is laid out or painted, so theme switches update font metrics without
+    /// a rebuild.
+    style: TextStyleProp,
     overflow: TextOverflow,
     max_lines: Option<usize>,
     text_backend: Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
@@ -84,7 +88,7 @@ impl TextWidget {
         Self {
             text: Prop::from(ls),
             color: ColorProp::TextRole(TextRole::Primary),
-            style: TextStyle::default(),
+            style: TextStyleProp::default(),
             overflow: TextOverflow::default(),
             max_lines: None,
             text_backend: None,
@@ -123,8 +127,12 @@ impl TextWidget {
         self
     }
 
-    pub fn style(mut self, style: TextStyle) -> Self {
-        self.style = style;
+    /// Set the text style. Accepts a raw [`TextStyle`], a
+    /// [`TextStyleRole`](fern_tokens::TextStyleRole), or any value implementing
+    /// `Into<TextStyleProp>`. Using a role resolves at paint/layout time, so
+    /// theme typography changes take effect without a rebuild.
+    pub fn style(mut self, style: impl Into<TextStyleProp>) -> Self {
+        self.style = style.into();
         self
     }
 
@@ -368,6 +376,7 @@ impl Widget for TextWidget {
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
         let text = self.text.get();
+        let style = self.style.resolve(&ctx.theme.typography);
         let Some(backend) = self.text_backend.as_ref().or(ctx.text_backend) else {
             // Mock fallback when no backend is available (e.g. very early
             // bootstrap). Assume 8px/char for measurement.
@@ -395,8 +404,8 @@ impl Widget for TextWidget {
         // for hit-testing during event dispatch.
         if self.markup {
             let layout = match max_width {
-                Some(w) => backend.layout_paragraph_markup(&text, &self.style, w, self.max_lines),
-                None => backend.layout_single_line_markup(&text, &self.style, None),
+                Some(w) => backend.layout_paragraph_markup(&text, &style, w, self.max_lines),
+                None => backend.layout_single_line_markup(&text, &style, None),
             };
             let size = Size::new(layout.width, layout.height);
             *self.last_layout.borrow_mut() = Some(layout);
@@ -406,37 +415,37 @@ impl Widget for TextWidget {
         match self.overflow {
             TextOverflow::Wrap => match max_width {
                 Some(w) => {
-                    let layout = backend.layout_paragraph(&text, &self.style, w, self.max_lines);
+                    let layout = backend.layout_paragraph(&text, &style, w, self.max_lines);
                     Size::new(layout.width, layout.height)
                 }
                 None => {
                     // Unconstrained width: no basis for wrapping, so measure
                     // as a single line.
-                    let layout = backend.layout_single_line(&text, &self.style, None);
+                    let layout = backend.layout_single_line(&text, &style, None);
                     Size::new(layout.width, layout.height)
                 }
             },
             TextOverflow::Ellipsis(EllipsisMode::Trailing) => {
                 // text-typeset truncates with trailing "…" when a max_width
                 // is supplied — let it do the work.
-                let layout = backend.layout_single_line(&text, &self.style, max_width);
+                let layout = backend.layout_single_line(&text, &style, max_width);
                 Size::new(layout.width, layout.height)
             }
             TextOverflow::Ellipsis(mode) => {
                 // Middle / Leading: compute the truncated display string
                 // first, then measure it unconstrained.
                 let Some(max_w) = max_width else {
-                    let layout = backend.layout_single_line(&text, &self.style, None);
+                    let layout = backend.layout_single_line(&text, &style, None);
                     return Size::new(layout.width, layout.height);
                 };
                 let truncated = fern_canvas::ellipsis::ellipsize(
                     &text,
-                    &self.style,
+                    &style,
                     max_w,
                     mode,
                     &mut *backend,
                 );
-                let layout = backend.layout_single_line(&truncated, &self.style, None);
+                let layout = backend.layout_single_line(&truncated, &style, None);
                 Size::new(layout.width, layout.height)
             }
         }
@@ -450,6 +459,7 @@ impl Widget for TextWidget {
 
         let text = self.text.get();
         let color = self.color.resolve(ctx.theme);
+        let style = self.style.resolve(&ctx.theme.typography);
 
         // Markup path: re-measure through the markup pipeline (the
         // backend's cache makes this a no-op after the size pass) and
@@ -464,13 +474,13 @@ impl Widget for TextWidget {
                 match self.overflow {
                     TextOverflow::Wrap => backend.layout_paragraph_markup(
                         &text,
-                        &self.style,
+                        &style,
                         (bounds.width + 0.5).max(0.0),
                         self.max_lines,
                     ),
                     _ => backend.layout_single_line_markup(
                         &text,
-                        &self.style,
+                        &style,
                         Some(bounds.width + 0.5),
                     ),
                 }
@@ -490,10 +500,10 @@ impl Widget for TextWidget {
 
         match self.overflow {
             TextOverflow::Wrap => {
-                canvas.draw_paragraph(&text, bounds, &self.style, color, self.max_lines);
+                canvas.draw_paragraph(&text, bounds, &style, color, self.max_lines);
             }
             TextOverflow::Ellipsis(EllipsisMode::Trailing) => {
-                canvas.draw_text(&text, bounds, &self.style, color);
+                canvas.draw_text(&text, bounds, &style, color);
             }
             TextOverflow::Ellipsis(mode) => {
                 // Produce the truncated display string via the canvas's
@@ -501,14 +511,14 @@ impl Widget for TextWidget {
                 let truncated = match canvas.text_backend() {
                     Some(backend) => fern_canvas::ellipsis::ellipsize(
                         &text,
-                        &self.style,
+                        &style,
                         bounds.width,
                         mode,
                         &mut *backend.borrow_mut(),
                     ),
                     None => text.clone(),
                 };
-                canvas.draw_text(&truncated, bounds, &self.style, color);
+                canvas.draw_text(&truncated, bounds, &style, color);
             }
         }
     }

@@ -66,28 +66,21 @@ struct KeyboardHighlightWrapper {
 
 impl Widget for KeyboardHighlightWrapper {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
         let index = self.index;
 
         // Keyboard focus highlight uses the dedicated `surface_selected`
         // token (not an alpha wash over `accent`) so it tracks theme
         // changes and stays distinct from mouse hover (`surface_hover`).
-        // When the keyboard focus moves to a row, this wrapper paints a
-        // solid `surface_selected` fill behind the MenuItem. Zipping with
-        // the theme signal keeps the highlight color reactive across
-        // runtime theme switches.
-        let bg_color = self
-            .focused_index
-            .zip(&theme_signal)
-            .map(move |(focused, t)| {
-                if *focused == Some(index) {
-                    t.colors.surface_selected
-                } else {
-                    Color::TRANSPARENT
-                }
-            });
+        // Role-based: no theme_signal zip; paint resolves the role.
+        let bg_role = self.focused_index.map(move |focused| {
+            if *focused == Some(index) {
+                SurfaceRole::Selected
+            } else {
+                SurfaceRole::Transparent
+            }
+        });
 
-        let bg = RectWidget::new().bind_background(bg_color);
+        let bg = RectWidget::new().background(bg_role);
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(self.item_id);

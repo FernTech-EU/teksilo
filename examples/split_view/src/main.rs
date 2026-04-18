@@ -23,8 +23,6 @@ impl SplitViewDemo {
 impl Widget for SplitViewDemo {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let t = &theme.typography;
-        let c = &theme.colors;
 
         let root = ctx.add(
             ScrollArea::new().child(
@@ -32,14 +30,14 @@ impl Widget for SplitViewDemo {
                     .spacing(24.0)
                     .child(
                         TextWidget::new_literal("SplitView")
-                            .style(t.body_bold.clone())
+                            .style(TextStyleRole::BodyBold)
                             .color(TextRole::Primary),
                     )
                     .child(
                         TextWidget::new_literal(
                             "Drag the divider or focus it and use arrow keys to resize the panes.",
                         )
-                        .style(t.body.clone())
+                        .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
                     )
                     .child(Panel::new().padding(16.0).child(

@@ -68,8 +68,6 @@ impl Root {
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let t = &theme.typography;
-        let c = &theme.colors;
 
         // Live readouts so the demo visibly confirms each signal.
         let font_size_text = self.values.font_size.map(|v| format!("{} pt", v));
@@ -97,7 +95,7 @@ impl Widget for Root {
                             // Heading.
                             .child(
                                 TextWidget::new_literal("SpinBox gallery")
-                                    .style(t.body_bold.clone())
+                                    .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
                             .child(
@@ -106,7 +104,7 @@ impl Widget for Root {
                                     Use arrow keys, Page↑/Page↓, mouse wheel, \
                                     or the ± buttons; press Enter or Tab to commit typed input.",
                                 )
-                                .style(t.body.clone())
+                                .style(TextStyleRole::Body)
                                 .color(TextRole::Secondary),
                             )
                             // Row 1 — font size (integer, clamp, narrow width).
@@ -198,7 +196,7 @@ impl Widget for Root {
                             // width policy.
                             .child(
                                 TextWidget::new_literal("Width control")
-                                    .style(t.body_bold.clone())
+                                    .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
                             .child(row(

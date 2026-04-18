@@ -15,7 +15,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::Color;
+use fern_tokens::{Color, TextStyleRole};
 
 use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
@@ -282,7 +282,6 @@ impl Widget for MenuItem {
         let theme_signal = ctx.theme_signal();
         let snapshot = theme_signal.get();
         let menu_style = snapshot.components.menu;
-        let typography_body = snapshot.typography.body.clone();
         let enabled = self.enabled;
 
         let interaction = ctx.signal(if enabled {
@@ -355,7 +354,7 @@ impl Widget for MenuItem {
 
         // Label
         let label = TextWidget::new_literal(&self.label)
-            .style(typography_body.clone())
+            .style(TextStyleRole::Body)
             .bind_color(text_color.clone())
             .single_line()
             .a11y_hidden();
@@ -407,7 +406,7 @@ impl Widget for MenuItem {
                 resolve_shortcut(*s, t.colors.tooltip_shortcut, t.colors.text_disabled)
             });
             let shortcut = TextWidget::new_literal(shortcut_text)
-                .style(typography_body.clone())
+                .style(TextStyleRole::Body)
                 .bind_color(shortcut_color)
                 .single_line()
                 .a11y_hidden();
@@ -447,7 +446,9 @@ impl Widget for MenuItem {
         // (24 dp); left padding uses `item_padding_horizontal`; RIGHT
         // padding is zero because the chevron column occupies that space.
         // Body text is 13 dp so that's ~5.5 dp top + 5.5 dp bottom.
-        let pad_v = ((menu_style.item_height - typography_body.size) * 0.5).max(0.0);
+        // Body size drives the vertical padding of the menu row.
+        let body_size = snapshot.typography.body.size;
+        let pad_v = ((menu_style.item_height - body_size) * 0.5).max(0.0);
         let padding = Padding::new(
             pad_v,                              // top
             0.0,                                // right — chevron column fills this

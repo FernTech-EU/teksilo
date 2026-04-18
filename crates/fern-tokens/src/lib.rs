@@ -26,7 +26,7 @@ pub use layout::LayoutTokens;
 pub use motion::{Easing, MotionTokens, lerp};
 pub use orientation::Orientation;
 pub use os_theme_colors::{ColorSchemePreference, OsThemeColors};
-pub use roles::{BorderRole, SurfaceRole, TextRole};
+pub use roles::{BorderRole, SurfaceRole, TextRole, TextStyleRole};
 pub use shape::{CornerRadius, Shadow, ShapeTokens};
 pub use text_style::{FontWeight, TextStyle};
 pub use theme::{ColorTokens, Theme};

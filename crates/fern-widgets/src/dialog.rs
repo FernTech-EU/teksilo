@@ -8,7 +8,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{CornerRadius, TextRole};
+use fern_tokens::{CornerRadius, TextRole, TextStyleRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::overlay_trigger::OverlayTrigger;
@@ -281,10 +281,6 @@ impl std::fmt::Debug for DialogContent {
 
 impl Widget for DialogContent {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let typography_body_bold = snapshot.typography.body_bold.clone();
-        let typography_body = snapshot.typography.body.clone();
         let mut stack = VStack::new().spacing(16.0);
 
         if self.title.is_some() || self.supporting_text.is_some() {
@@ -292,7 +288,7 @@ impl Widget for DialogContent {
             if let Some(title) = self.title.clone() {
                 header = header.child(
                     TextWidget::new_literal(title)
-                        .style(typography_body_bold)
+                        .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary)
                         .single_line(),
                 );
@@ -300,7 +296,7 @@ impl Widget for DialogContent {
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
                     TextWidget::new_literal(text)
-                        .style(typography_body)
+                        .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
                 );
             }

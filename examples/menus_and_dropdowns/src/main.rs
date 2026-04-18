@@ -37,8 +37,6 @@ impl Root {
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let t = &theme.typography;
-        let c = &theme.colors;
 
         // --- Section 1: ComboBox demos ---
 
@@ -56,7 +54,7 @@ impl Widget for Root {
                 .spacing(12.0)
                 .child(
                     TextWidget::new_literal("ComboBox / Dropdown")
-                        .style(t.body_bold.clone())
+                        .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
@@ -66,7 +64,7 @@ impl Widget for Root {
                          adds a text field at the top of the panel that filters the \
                          list live.",
                     )
-                    .style(t.body.clone())
+                    .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
                 .child(
@@ -77,7 +75,7 @@ impl Widget for Root {
                                 .spacing(4.0)
                                 .child(
                                     TextWidget::new_literal("Fruit")
-                                        .style(t.small.clone())
+                                        .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
                                 .child(
@@ -101,7 +99,7 @@ impl Widget for Root {
                                 .spacing(4.0)
                                 .child(
                                     TextWidget::new_literal("Color")
-                                        .style(t.small.clone())
+                                        .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
                                 .child(ComboBox::new(
@@ -114,7 +112,7 @@ impl Widget for Root {
                                 .spacing(4.0)
                                 .child(
                                     TextWidget::new_literal("Size (disabled)")
-                                        .style(t.small.clone())
+                                        .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
                                 .child(
@@ -131,7 +129,7 @@ impl Widget for Root {
                                 .spacing(4.0)
                                 .child(
                                     TextWidget::new_literal("Country (searchable)")
-                                        .style(t.small.clone())
+                                        .style(TextStyleRole::Small)
                                         .color(TextRole::Primary),
                                 )
                                 .child(
@@ -185,7 +183,7 @@ impl Widget for Root {
                 .spacing(12.0)
                 .child(
                     TextWidget::new_literal("Context Menu")
-                        .style(t.body_bold.clone())
+                        .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
@@ -193,7 +191,7 @@ impl Widget for Root {
                         "Right-click on the panels below to open a context menu. \
                          Each panel has a different menu.",
                     )
-                    .style(t.body.clone())
+                    .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
                 .child(
@@ -209,12 +207,12 @@ impl Widget for Root {
                                         .spacing(6.0)
                                         .child(
                                             TextWidget::new_literal("Edit Menu")
-                                                .style(t.small.clone())
+                                                .style(TextStyleRole::Small)
                                                 .color(TextRole::Primary),
                                         )
                                         .child(
                                             TextWidget::new_literal("Right-click for Cut/Copy/Paste")
-                                                .style(t.body.clone())
+                                                .style(TextStyleRole::Body)
                                                 .color(TextRole::Primary),
                                         ),
                                 )
@@ -288,12 +286,12 @@ impl Widget for Root {
                                         .spacing(6.0)
                                         .child(
                                             TextWidget::new_literal("File Menu")
-                                                .style(t.small.clone())
+                                                .style(TextStyleRole::Small)
                                                 .color(TextRole::Primary),
                                         )
                                         .child(
                                             TextWidget::new_literal("Right-click for file operations")
-                                                .style(t.body.clone())
+                                                .style(TextStyleRole::Body)
                                                 .color(TextRole::Primary),
                                         ),
                                 )
@@ -330,7 +328,7 @@ impl Widget for Root {
                 .spacing(12.0)
                 .child(
                     TextWidget::new_literal("Menu Items (inline)")
-                        .style(t.body_bold.clone())
+                        .style(TextStyleRole::BodyBold)
                         .color(TextRole::Primary),
                 )
                 .child(
@@ -338,7 +336,7 @@ impl Widget for Root {
                         "MenuItems shown directly (not in an overlay) to demonstrate \
                          their visual styles and interaction states.",
                     )
-                    .style(t.body.clone())
+                    .style(TextStyleRole::Body)
                     .color(TextRole::Primary),
                 )
                 .child(
@@ -375,7 +373,7 @@ impl Widget for Root {
                 HStack::new()
                     .child(
                         TextWidget::new_literal("Menus & Dropdowns")
-                            .style(t.body_bold.clone())
+                            .style(TextStyleRole::BodyBold)
                             .color(TextRole::Primary),
                     )
                     .child(Spacer::new())
@@ -498,7 +496,7 @@ impl Widget for Root {
                 .child(
                     StatusBar::new().child(
                         TextWidget::new_literal("Milestone 4 -- Menus & Dropdowns")
-                            .style(t.tiny.clone())
+                            .style(TextStyleRole::Tiny)
                             .color(TextRole::Primary),
                     ),
                 ),

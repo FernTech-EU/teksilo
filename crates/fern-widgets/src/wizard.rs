@@ -14,7 +14,7 @@ use crate::button::{Button, ButtonVariant};
 use crate::dialog::ModalContainer;
 use crate::overlay_trigger::OverlayTrigger;
 use crate::primitives::{Divider, HStack, Spacer, Switcher, TextWidget, VStack};
-use fern_tokens::{TextRole};
+use fern_tokens::{TextRole, TextStyleRole};
 
 const DEFAULT_WIZARD_WIDTH: u32 = 640;
 const DEFAULT_WIZARD_HEIGHT: u32 = 420;
@@ -164,11 +164,6 @@ impl Widget for WizardHeader {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let steps = self.steps.clone();
         let current_step = self.current_step.clone();
-        let theme_signal = ctx.theme_signal();
-        let snapshot = theme_signal.get();
-        let typography_small = snapshot.typography.small.clone();
-        let typography_body_bold = snapshot.typography.body_bold.clone();
-        let typography_body = snapshot.typography.body.clone();
 
         let progress = current_step.map({
             let steps = steps.clone();
@@ -202,14 +197,14 @@ impl Widget for WizardHeader {
         let progress_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(progress)
-                .style(typography_small)
+                .style(TextStyleRole::Small)
                 .color(TextRole::Secondary)
                 .single_line(),
         );
         let title_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(title)
-                .style(typography_body_bold)
+                .style(TextStyleRole::BodyBold)
                 .color(TextRole::Primary)
                 .single_line(),
         );
@@ -218,7 +213,7 @@ impl Widget for WizardHeader {
         let supporting_id = ctx.add(
             TextWidget::new_literal("")
                 .bind_text(supporting_text)
-                .style(typography_body)
+                .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
         );
         ctx.visible_when(supporting_id, show_supporting);

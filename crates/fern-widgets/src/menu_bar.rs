@@ -27,7 +27,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, SurfaceRole};
+use fern_tokens::{Color, SurfaceRole, TextStyleRole};
 
 use crate::menu_context::MenuContext;
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack};
@@ -135,7 +135,6 @@ impl Widget for MenuBarTrigger {
         let snapshot = theme_signal.get();
         let menu_style = snapshot.components.menu;
         let radius_control = snapshot.shape.radius_control;
-        let typography_small = snapshot.typography.small.clone();
         let index = self.index;
         let menu_ctx = self.menu_ctx.clone();
 
@@ -165,7 +164,7 @@ impl Widget for MenuBarTrigger {
             });
 
         let label = TextWidget::new_literal(&self.label)
-            .style(typography_small)
+            .style(TextStyleRole::Small)
             .bind_color(text_color)
             .single_line()
             .a11y_hidden();

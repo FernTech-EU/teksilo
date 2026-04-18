@@ -26,7 +26,7 @@ use fern_core::widget::{
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_core::PlatformTitleBarHost;
-use fern_tokens::Color;
+use fern_tokens::{Color, TextStyleRole};
 
 use crate::primitives::{Center, FixedSize, HStack, RectWidget, TextWidget, ZStack};
 use crate::title_bar::CloseAction;
@@ -98,7 +98,6 @@ impl Widget for ControlButton {
         &mut self,
         ctx: &mut fern_core::build_context::BuildContext,
     ) -> Vec<WidgetId> {
-        let typography_body = ctx.theme_signal().get().typography.body.clone();
 
         // Reactive hover background: starts transparent, flips to
         // `hover_bg` while the pointer is inside, back to transparent on
@@ -109,7 +108,7 @@ impl Widget for ControlButton {
         let bg_rect = ctx.add(RectWidget::new().bind_background(bg_signal.clone()));
 
         let glyph_text = TextWidget::new_literal(self.glyph)
-            .style(typography_body)
+            .style(TextStyleRole::Body)
             .color(self.fg)
             .single_line()
             .a11y_hidden();

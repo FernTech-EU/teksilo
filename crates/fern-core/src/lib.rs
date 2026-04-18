@@ -35,7 +35,7 @@ pub use animation::AnimationScheduler;
 pub use app_event::AppEvent;
 pub use arena::WidgetArena;
 pub use build_context::BuildContext;
-pub use color_prop::ColorProp;
+pub use color_prop::{ColorProp, TextStyleProp};
 pub use drag_payload::{DragData, DragPayload};
 pub use drag_state::DropFeedback;
 pub use environment::{Environment, LayoutDirection};

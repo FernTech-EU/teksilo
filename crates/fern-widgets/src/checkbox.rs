@@ -16,7 +16,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, TextRole, VAlignment};
+use fern_tokens::{Color, CornerRadius, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::primitives::{
@@ -283,8 +283,6 @@ impl Widget for Checkbox {
         let theme_signal = ctx.theme_signal();
         let snapshot = theme_signal.get();
         let cb_style = snapshot.components.checkbox;
-        let typography_body = snapshot.typography.body.clone();
-        let typography_small = snapshot.typography.small.clone();
         let kind = self.kind.clone();
         let enabled = self.enabled;
 
@@ -370,7 +368,7 @@ impl Widget for Checkbox {
         let mut row = HStack::new().spacing(cb_style.label_gap).add_child(check_box);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new_literal(label)
-                .style(typography_body)
+                .style(TextStyleRole::Body)
                 .color(TextRole::Primary)
                 .single_line()
                 .a11y_hidden();
@@ -378,7 +376,7 @@ impl Widget for Checkbox {
 
             let label_column_id = if let Some(ref caption) = self.caption {
                 let caption_widget = TextWidget::new_literal(caption)
-                    .style(typography_small)
+                    .style(TextStyleRole::Small)
                     .color(TextRole::Secondary)
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);

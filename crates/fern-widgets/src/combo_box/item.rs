@@ -11,7 +11,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::Color;
+use fern_tokens::{Color, SurfaceRole, TextStyleRole};
 
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
@@ -30,7 +30,7 @@ pub(super) fn build_default_item(
     theme: &fern_tokens::Theme,
 ) -> WidgetId {
     let text = TextWidget::new_literal(label)
-        .style(theme.typography.body.clone())
+        .style(TextStyleRole::Body)
         .bind_color(ctx.theme_signal().map(|t| t.colors.text_primary))
         .single_line()
         .a11y_hidden();
@@ -95,11 +95,14 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
             });
         }
 
-        let bg_color = highlighted.zip(&theme_signal).map(|(h, t)| {
+        // Highlight uses the accent-subtle background token (designed for
+        // this exact "hinted selection" purpose); falls back to transparent
+        // when not highlighted. Role-based so paint resolves against theme.
+        let bg_role = highlighted.map(|h| {
             if *h {
-                t.colors.accent.with_alpha(0.12)
+                SurfaceRole::AccentSubtle
             } else {
-                Color::TRANSPARENT
+                SurfaceRole::Transparent
             }
         });
 
@@ -115,7 +118,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
             None => build_default_item(ctx, &self.label, &theme),
         };
 
-        let bg = RectWidget::new().bind_background(bg_color);
+        let bg = RectWidget::new().background(bg_role);
         let bg_id = ctx.add(bg);
 
         let zstack = ZStack::new().add_child(bg_id).add_child(inner_id);

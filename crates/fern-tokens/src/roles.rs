@@ -18,7 +18,9 @@
 //! `TextRole`, `SurfaceRole`, `BorderRole`, or a `Signal<Color>` slot in.
 
 use crate::color::Color;
+use crate::text_style::TextStyle;
 use crate::theme::ColorTokens;
+use crate::typography::TypographyTokens;
 
 /// Semantic text-foreground role. Resolved against `ColorTokens` at paint time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -125,6 +127,10 @@ pub enum SurfaceRole {
     EditorSelectionBg,
     /// Modal scrim (overlay dim).
     Scrim,
+    /// Fully transparent — paints nothing. Used as the "no surface"
+    /// variant in interaction-driven `Signal<SurfaceRole>` chains (e.g. a
+    /// Flat button is transparent at rest, hovered at hover).
+    Transparent,
 }
 
 impl SurfaceRole {
@@ -153,6 +159,7 @@ impl SurfaceRole {
             SurfaceRole::EditorCurrentLineBg => colors.editor_current_line_bg,
             SurfaceRole::EditorSelectionBg => colors.editor_selection_bg,
             SurfaceRole::Scrim => colors.scrim,
+            SurfaceRole::Transparent => Color::TRANSPARENT,
         }
     }
 }
@@ -177,6 +184,8 @@ pub enum BorderRole {
     DividerStrong,
     /// Tooltip border.
     TooltipBorder,
+    /// Fully transparent border — paints nothing.
+    Transparent,
 }
 
 impl BorderRole {
@@ -190,6 +199,41 @@ impl BorderRole {
             BorderRole::Divider => colors.divider,
             BorderRole::DividerStrong => colors.divider_strong,
             BorderRole::TooltipBorder => colors.tooltip_border,
+            BorderRole::Transparent => Color::TRANSPARENT,
+        }
+    }
+}
+
+/// Semantic typography role — resolves to a `TextStyle` at paint/layout time.
+/// Use this in `TextWidget::style(...)` and similar surfaces so that a theme
+/// change (which may ship different font sizes or weights) re-lays text
+/// without rebuilding the widget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TextStyleRole {
+    /// Default UI text — button labels, field text, body copy.
+    #[default]
+    Body,
+    /// Bold body — section headers and emphasized labels.
+    BodyBold,
+    /// Secondary info, captions, hints.
+    Small,
+    /// Small emphasized labels.
+    SmallBold,
+    /// Status bar, tag labels, timestamps.
+    Tiny,
+    /// Code, paths, identifiers.
+    Mono,
+}
+
+impl TextStyleRole {
+    pub fn resolve(self, typography: &TypographyTokens) -> TextStyle {
+        match self {
+            TextStyleRole::Body => typography.body.clone(),
+            TextStyleRole::BodyBold => typography.body_bold.clone(),
+            TextStyleRole::Small => typography.small.clone(),
+            TextStyleRole::SmallBold => typography.small_bold.clone(),
+            TextStyleRole::Tiny => typography.tiny.clone(),
+            TextStyleRole::Mono => typography.mono.clone(),
         }
     }
 }

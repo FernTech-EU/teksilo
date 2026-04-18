@@ -23,23 +23,19 @@ impl OverlayDemo {
 impl Widget for OverlayDemo {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let t = &theme.typography;
-        let c = &theme.colors;
-
-        let dialog_theme = theme.clone();
 
         let popover_content = VStack::new()
             .spacing(12.0)
             .child(
                 TextWidget::new_literal("Popover")
-                    .style(t.small.clone())
+                    .style(TextStyleRole::Small)
                     .color(TextRole::Primary),
             )
             .child(
                 TextWidget::new_literal(
                     "Use popovers for compact contextual actions without leaving the current surface.",
                 )
-                .style(t.body.clone())
+                .style(TextStyleRole::Body)
                 .color(TextRole::Secondary),
             )
             .child(
@@ -54,7 +50,7 @@ impl Widget for OverlayDemo {
             .spacing(14.0)
             .child(
                 TextWidget::new_literal("Autosave complete")
-                    .style(t.body.clone())
+                    .style(TextStyleRole::Body)
                     .color(TextRole::TooltipText),
             )
             .child(
@@ -69,7 +65,7 @@ impl Widget for OverlayDemo {
                 .child(Badge::new_literal("Context"))
                 .child(
                     TextWidget::new_literal("Popover actions")
-                        .style(t.small.clone())
+                        .style(TextStyleRole::Small)
                         .color(TextRole::Primary),
                 ),
         );
@@ -80,17 +76,13 @@ impl Widget for OverlayDemo {
                 .child(Badge::new_literal("Modal"))
                 .child(
                     TextWidget::new_literal("Review changes")
-                        .style(t.small.clone())
+                        .style(TextStyleRole::Small)
                         .color(TextRole::Primary),
                 ),
         );
-
-        let auto_modal_theme = theme.clone();
         let modal_trigger_id = ctx.add(
             Dialog::new_literal("Adaptive modal window")
                 .content(move || {
-                    let t = &auto_modal_theme.typography;
-                    let c = &auto_modal_theme.colors;
                     DialogContent::new()
                         .title_literal("Adaptive modal dialog")
                         .supporting_text_literal(
@@ -100,7 +92,7 @@ impl Widget for OverlayDemo {
                             TextWidget::new_literal(
                                 "The app code does not branch on Wayland or window-system support here; it issues one modal request and lets FernUI resolve it.",
                             )
-                            .style(t.body.clone())
+                            .style(TextStyleRole::Body)
                             .color(TextRole::Secondary),
                         )
                         .footer(
@@ -118,14 +110,14 @@ impl Widget for OverlayDemo {
                     .spacing(24.0)
                     .child(
                         TextWidget::new_literal("Dialogs and Popovers")
-                            .style(t.body_bold.clone())
+                            .style(TextStyleRole::BodyBold)
                             .color(TextRole::Primary),
                     )
                     .child(
                         TextWidget::new_literal(
                             "FernUI now resolves dialogs through a shared modal presentation pipeline, alongside anchored popovers and timed snackbars.",
                         )
-                        .style(t.body.clone())
+                        .style(TextStyleRole::Body)
                         .color(TextRole::Secondary),
                     )
                     .child(
@@ -141,8 +133,6 @@ impl Widget for OverlayDemo {
                                 .child(
                                     Dialog::new_literal("Open dialog")
                                         .content(move || {
-                                            let t = &dialog_theme.typography;
-                                            let c = &dialog_theme.colors;
                                             DialogContent::new()
                                                 .title_literal("Review Changes")
                                                 .supporting_text_literal(
@@ -152,7 +142,7 @@ impl Widget for OverlayDemo {
                                                     TextWidget::new_literal(
                                                         "This helper gives dialogs a consistent header, content spacing, and footer separation without forcing a single action-row layout.",
                                                     )
-                                                    .style(t.body.clone())
+                                                    .style(TextStyleRole::Body)
                                                     .color(TextRole::Secondary),
                                                 )
                                                 .footer(
@@ -186,14 +176,14 @@ impl Widget for OverlayDemo {
                                 .spacing(10.0)
                                 .child(
                                     TextWidget::new_literal("Notes")
-                                        .style(t.body_bold.clone())
+                                        .style(TextStyleRole::BodyBold)
                                         .color(TextRole::Primary),
                                 )
                                 .child(
                                     TextWidget::new_literal(
                                         "Dialogs now share one modal request API. Footer actions can dismiss the current modal without knowing whether FernUI resolved it to an in-tree overlay or a native modal child window.",
                                     )
-                                    .style(t.body.clone())
+                                    .style(TextStyleRole::Body)
                                     .color(TextRole::Secondary),
                                 ),
                         ),

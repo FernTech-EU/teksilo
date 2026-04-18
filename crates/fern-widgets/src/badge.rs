@@ -6,7 +6,7 @@ use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::CornerRadius;
+use fern_tokens::{CornerRadius, TextStyleRole};
 
 use crate::primitives::{Padding, RectWidget, TextWidget, ZStack};
 
@@ -63,7 +63,6 @@ impl Widget for Badge {
         let theme_signal = ctx.theme_signal();
         let snapshot = theme_signal.get();
         let badge_style = snapshot.components.badge;
-        let typography_tiny = snapshot.typography.tiny.clone();
 
         // Defaults: soft accent tint + status_info_fg (reactive via theme
         // signal). Callers override with `.color(...)` / `.text_color(...)`;
@@ -80,7 +79,7 @@ impl Widget for Badge {
         });
 
         let text_widget = TextWidget::new_literal(&self.label)
-            .style(typography_tiny)
+            .style(TextStyleRole::Tiny)
             .color(text)
             .single_line()
             .a11y_hidden();

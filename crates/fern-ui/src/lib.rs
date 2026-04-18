@@ -58,10 +58,12 @@ pub mod prelude {
     pub use fern_canvas::{Canvas, EllipsisMode, Paint, Path, RenderFrame, TextOverflow};
 
     // Tokens
-    pub use fern_tokens::{BorderRole, Color, CornerRadius, SurfaceRole, TextRole, Theme};
+    pub use fern_tokens::{
+        BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole, Theme,
+    };
 
-    // Reactive color prop — unified input type for color builders.
-    pub use fern_core::color_prop::ColorProp;
+    // Reactive color / style props — unified input types for widget builders.
+    pub use fern_core::color_prop::{ColorProp, TextStyleProp};
 
     // App
     pub use fern_app::{FernAppBuilder, ThemeMode};

@@ -11,7 +11,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::Color;
+use fern_tokens::{Color, TextStyleRole};
 
 use crate::button::InteractionState;
 use fern_tokens::CornerRadius;
@@ -116,7 +116,6 @@ fn resolve_link_color(state: InteractionState, colors: &fern_tokens::ColorTokens
 impl Widget for Link {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme_signal = ctx.theme_signal();
-        let typography_body = theme_signal.get().typography.body.clone();
         let interaction = ctx.signal(InteractionState::Idle);
         self.interaction = Some(interaction.clone());
 
@@ -128,7 +127,7 @@ impl Widget for Link {
             .map(move |(s, t)| resolve_link_color(*s, &t.colors));
 
         let text = TextWidget::new_literal(&self.text)
-            .style(typography_body)
+            .style(TextStyleRole::Body)
             .bind_color(text_color)
             .single_line()
             .a11y_hidden();

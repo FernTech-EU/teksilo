@@ -15,9 +15,7 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::Easing;
-
-use fern_tokens::{Color, TextStyle};
+use fern_tokens::{Color, Easing, TextStyle, TextStyleRole};
 
 use crate::primitives::{HStack, IconWidget, MaxSize, Spacer, TextWidget, VStack};
 
@@ -112,7 +110,6 @@ impl Widget for Accordion {
         let theme_signal = ctx.theme_signal();
         let snapshot = theme_signal.get();
         let accordion_corner_radius = snapshot.components.accordion.corner_radius;
-        let typography_body = snapshot.typography.body.clone();
         let expanded = self.expanded.clone();
         let is_expanded = expanded.get();
 
@@ -133,12 +130,15 @@ impl Widget for Accordion {
         ctx.visible_when(chevron_down_id, expanded.clone());
         ctx.visible_when(chevron_right_id, expanded.map(|v| !*v));
 
-        let title_style = self.title_style.clone().unwrap_or(typography_body);
-        let title_widget = TextWidget::new_literal(&self.title)
-            .style(title_style)
-            .bind_color(header_fg_signal)
-            .single_line()
-            .a11y_hidden();
+        // Custom override wins; otherwise use the Body role so the title
+        // tracks typography changes across themes.
+        let title_widget = TextWidget::new_literal(&self.title).bind_color(header_fg_signal);
+        let title_widget = if let Some(style) = self.title_style.clone() {
+            title_widget.style(style)
+        } else {
+            title_widget.style(TextStyleRole::Body)
+        };
+        let title_widget = title_widget.single_line().a11y_hidden();
         let title_id = ctx.add(title_widget);
         let spacer_id = ctx.add(Spacer::new());
 

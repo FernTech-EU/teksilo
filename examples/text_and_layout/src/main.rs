@@ -44,7 +44,6 @@ impl Widget for RootContent {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Snapshot typography (static tokens not expressible as a role);
         // colors use roles and resolve reactively at paint time.
-        let t = ctx.theme_signal().get().typography;
 
         let root = ctx.add(
             Padding::uniform(24.0).child(
@@ -55,7 +54,7 @@ impl Widget for RootContent {
                         HStack::new()
                             .child(
                                 TextWidget::new_literal("Text & Layout")
-                                    .style(t.body_bold.clone())
+                                    .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
                             .child(Spacer::new())
@@ -80,35 +79,35 @@ impl Widget for RootContent {
                             .spacing(6.0)
                             .child(
                                 TextWidget::new_literal("Typography Styles")
-                                    .style(t.body_bold.clone())
+                                    .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "Body text (14px) — the default reading style for content.",
                                 )
-                                .style(t.body.clone())
+                                .style(TextStyleRole::Body)
                                 .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "Body small (12px) — secondary information and descriptions.",
                                 )
-                                .style(t.small.clone())
+                                .style(TextStyleRole::Small)
                                 .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "Caption (11px) — timestamps, footnotes, and fine print.",
                                 )
-                                .style(t.tiny.clone())
+                                .style(TextStyleRole::Tiny)
                                 .color(TextRole::Primary),
                             )
                             .child(
                                 TextWidget::new_literal(
                                     "LABEL (12px medium, +0.5 tracking) — form labels and tags.",
                                 )
-                                .style(t.small.clone())
+                                .style(TextStyleRole::Small)
                                 .color(TextRole::Primary),
                             ),
                     )
@@ -118,7 +117,7 @@ impl Widget for RootContent {
                             .spacing(6.0)
                             .child(
                                 TextWidget::new_literal("Layout Primitives")
-                                    .style(t.body_bold.clone())
+                                    .style(TextStyleRole::BodyBold)
                                     .color(TextRole::Primary),
                             )
                             .child(
@@ -130,26 +129,26 @@ impl Widget for RootContent {
                             )
                             .child(
                                 TextWidget::new_literal("HStack with spacing — three colored boxes")
-                                    .style(t.tiny.clone())
+                                    .style(TextStyleRole::Tiny)
                                     .color(TextRole::Primary),
                             )
                             .child(
                                 HStack::new()
                                     .child(
                                         TextWidget::new_literal("Leading")
-                                            .style(t.body.clone())
+                                            .style(TextStyleRole::Body)
                                             .color(TextRole::Primary),
                                     )
                                     .child(Spacer::new())
                                     .child(
                                         TextWidget::new_literal("Trailing")
-                                            .style(t.body.clone())
+                                            .style(TextStyleRole::Body)
                                             .color(TextRole::Primary),
                                     ),
                             )
                             .child(
                                 TextWidget::new_literal("Spacer pushing items to edges")
-                                    .style(t.tiny.clone())
+                                    .style(TextStyleRole::Tiny)
                                     .color(TextRole::Primary),
                             ),
                     ),
