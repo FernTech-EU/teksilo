@@ -93,7 +93,8 @@ impl WidgetTree {
             self.frame_tick_requested.set(true);
         }
         self.advance_frame_tick(now);
-        self.animation_scheduler.tick(now);
+        self.animation_scheduler
+            .tick(now, &self.arena, self.paint_epoch);
 
         self.process_state_changes();
         self.process_tooltips_real();

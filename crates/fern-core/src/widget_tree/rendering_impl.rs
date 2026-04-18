@@ -19,8 +19,22 @@ impl WidgetTree {
         if !self.arena.any_needs_paint()
             && let Some(ref cached) = self.cached_frame
         {
+            // Cache-hit short-circuit: nothing in the tree was marked
+            // needs_paint, so the pixels are identical to the previous
+            // frame. We deliberately do NOT bump `paint_epoch` here —
+            // if we did, every widget's `last_painted_epoch` would
+            // silently age out and the animation scheduler would treat
+            // them as "off-screen" on the next tick. Holding the
+            // epoch steady preserves the `last_painted_epoch + 1 >=
+            // paint_epoch` visibility gate through arbitrarily many
+            // idle cache-hit frames. In practice a running animation
+            // always dirties its widget (RepaintOnly binding) and so
+            // never takes this branch.
             return cached.clone();
         }
+
+        self.paint_epoch = self.paint_epoch.saturating_add(1);
+        let paint_epoch = self.paint_epoch;
 
         let mut frame = RenderFrame::new();
         let base_theme = self.theme.clone();
@@ -40,6 +54,7 @@ impl WidgetTree {
                 &text_backend,
                 None,
                 &a11y_prefs,
+                paint_epoch,
             );
         }
 
@@ -52,6 +67,7 @@ impl WidgetTree {
                 &text_backend,
                 None,
                 &a11y_prefs,
+                paint_epoch,
             );
         }
 
@@ -71,6 +87,7 @@ impl WidgetTree {
 /// Only re-runs `paint()` for widgets with `needs_paint` set; clean widgets
 /// reuse their `cached_paint` output. The tree walk still runs for clip/child
 /// ordering, but skips the expensive `paint()` call for clean widgets.
+#[allow(clippy::too_many_arguments)]
 fn paint_widget_cached(
     arena: &mut WidgetArena,
     id: WidgetId,
@@ -79,6 +96,7 @@ fn paint_widget_cached(
     text_backend: &Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
     clip_bounds: Option<Rect>,
     a11y_prefs: &A11yPaintPrefs,
+    paint_epoch: u64,
 ) {
     if !arena.is_active(id) {
         return;
@@ -92,10 +110,23 @@ fn paint_widget_cached(
         let x1 = bounds.right().min(clip.right());
         let y1 = bounds.bottom().min(clip.bottom());
         if x1 <= x0 || y1 <= y0 {
+            // Clipped to nothing — widget is offscreen. Skip its paint
+            // AND skip stamping `last_painted_epoch`, so the animation
+            // scheduler will notice it is no longer visible and pause
+            // its looping animations.
             return;
         }
     }
 
+    // Mark this widget as "painted in epoch N" regardless of whether
+    // we hit the cache-path or ran `paint()` — both outcomes mean the
+    // widget's bounds landed inside the viewport this frame, which is
+    // all the animation scheduler cares about.
+    if let Some(node_mut) = arena.get_mut(id) {
+        node_mut.last_painted_epoch = paint_epoch;
+    }
+
+    let node = arena.get(id).unwrap();
     let needs_paint = node.dirty.needs_paint;
 
     if needs_paint || node.cached_paint.is_none() {
@@ -178,6 +209,7 @@ fn paint_widget_cached(
             text_backend,
             next_clip,
             a11y_prefs,
+            paint_epoch,
         );
     }
 

@@ -499,7 +499,9 @@ impl WidgetTree {
             .map(|pending| pending.real_requested_at + pending.delay)
             .min();
         let auto_dismiss_deadline = self.overlay_manager.next_auto_dismiss_deadline();
-        let animation_deadline = self.animation_scheduler.next_deadline();
+        let animation_deadline = self
+            .animation_scheduler
+            .next_deadline(&self.arena, self.paint_epoch);
         let gesture_deadline = self.next_gesture_deadline();
         let wake_at_deadline = self.pending_wake_at.get();
 

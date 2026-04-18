@@ -38,6 +38,18 @@ pub(crate) struct ManagedWindow {
     /// The same `Rc` is also stored on the `WidgetTree` so the root-builder
     /// closure can hand it to a `TitleBar` widget.
     pub title_bar_host: Option<Rc<dyn PlatformTitleBarHost>>,
+    /// Tracks `WindowEvent::Focused`. On Linux/X11, Linux/Wayland, and
+    /// Windows this also fires on minimize (no separate minimize event
+    /// exists in winit 0.30). We assume focused on creation — winit
+    /// may not send `Focused(true)` for the initial window on every
+    /// platform, and parking animations before the user has even seen
+    /// the window would be wrong.
+    pub focused: bool,
+    /// Tracks `WindowEvent::Occluded`. macOS-only in winit 0.30 —
+    /// stays `false` on every other platform. Combined with `focused`
+    /// to decide whether the widget tree's animation scheduler should
+    /// run: `active = focused && !occluded`.
+    pub occluded: bool,
 }
 
 /// Manages multiple application windows.
@@ -289,6 +301,8 @@ impl WindowManager {
             modal: config.modal,
             parent: config.parent,
             title_bar_host,
+            focused: true,
+            occluded: false,
         };
 
         self.windows.insert(winit_id, managed);

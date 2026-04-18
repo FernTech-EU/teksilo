@@ -20,7 +20,11 @@ use std::time::Duration;
 
 const DEFAULT_THICKNESS: f32 = 4.0;
 const INDETERMINATE_SWEEP_DURATION: Duration = Duration::from_millis(900);
-const INDETERMINATE_FRAME_INTERVAL: Duration = Duration::from_millis(40);
+/// ~15 Hz cadence. The indeterminate sweep is a continuous smooth
+/// motion; the eye doesn't resolve >15 fps for a 42%-wide bar moving
+/// across the viewport in ~0.9 s, and every doubled frame is a full
+/// wgpu submit even when only the sweep position changed.
+const INDETERMINATE_FRAME_INTERVAL: Duration = Duration::from_millis(66);
 const INDETERMINATE_SWEEP_RATIO: f32 = 0.42;
 
 /// A progress bar — determinate or indeterminate, horizontal or vertical.
@@ -107,7 +111,17 @@ impl std::fmt::Debug for ProgressBar {
 
 impl Widget for ProgressBar {
     fn build(&mut self, ctx: &mut fern_core::build_context::BuildContext) -> Vec<WidgetId> {
-        if self.indeterminate {
+        // Honor the OS-level reduced-motion preference: an
+        // indeterminate sweep is decorative; when reduced-motion is on,
+        // fall through to a static "half-filled" bar rather than
+        // running the looping animation. Also skips scheduling any
+        // animation at all, so the widget stops contributing to
+        // idle-frame wakes for users who explicitly asked for less
+        // motion.
+        let reduced_motion = ctx.prefers_reduced_motion();
+        let animate = self.indeterminate && !reduced_motion;
+
+        if animate {
             // Re-create animated signal registered with the scheduler
             self.indeterminate_pos = ctx.animated_signal(0.0);
         }
@@ -117,7 +131,7 @@ impl Widget for ProgressBar {
         let registry = ctx.binding_registry();
         self.value
             .register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        if self.indeterminate {
+        if animate {
             self.indeterminate_pos
                 .bind_to(id, registry, BindingLevel::RepaintOnly);
             // Looping animation: 0→1 over sweep duration, restarts automatically

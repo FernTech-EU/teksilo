@@ -454,28 +454,34 @@ impl Widget for IconWidget {
         }
 
         // For animated icons: create a looping animation signal that
-        // drives frame cycling. The signal goes from 0 to frame_count
-        // over total_duration, then loops. Capped at 30fps.
+        // drives frame cycling. Capped at 30 fps. Skipped entirely
+        // under the OS reduced-motion preference — animated icons are
+        // decorative, and staying on the first frame respects the
+        // user's stated motion tolerance while drawing zero CPU/GPU.
         if let IconSource::Animated { icon, frame_signal, .. } = &mut self.source {
-            let signal = ctx.animated_signal(0.0);
-            {
-                let self_id = ctx.self_id();
-                let registry = ctx.binding_registry();
-                signal.bind_to(
-                    self_id,
-                    registry,
-                    fern_core::binding::BindingLevel::RepaintOnly,
+            if ctx.prefers_reduced_motion() {
+                *frame_signal = None;
+            } else {
+                let signal = ctx.animated_signal(0.0);
+                {
+                    let self_id = ctx.self_id();
+                    let registry = ctx.binding_registry();
+                    signal.bind_to(
+                        self_id,
+                        registry,
+                        fern_core::binding::BindingLevel::RepaintOnly,
+                    );
+                }
+                let frame_count = icon.frame_count() as f32;
+                let period = icon.total_duration();
+                signal.animate_looping(
+                    frame_count,
+                    period,
+                    Easing::Linear,
+                    Some(std::time::Duration::from_millis(33)), // 30fps cap
                 );
+                *frame_signal = Some(signal);
             }
-            let frame_count = icon.frame_count() as f32;
-            let period = icon.total_duration();
-            signal.animate_looping(
-                frame_count,
-                period,
-                Easing::Linear,
-                Some(std::time::Duration::from_millis(33)), // 30fps cap
-            );
-            *frame_signal = Some(signal);
         }
 
         Vec::new()

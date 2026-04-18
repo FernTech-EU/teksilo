@@ -55,10 +55,13 @@ impl<'a> BuildContext<'a> {
     }
 
     /// Create a new `Signal<f32>` that supports `animate_to()`.
-    /// Registered with the animation scheduler automatically.
+    /// Registered with the animation scheduler automatically. The owning
+    /// widget (`self_id()`) is recorded so that the scheduler can pause
+    /// the animation when the widget is offscreen, dormant, or rebuilt.
     pub fn animated_signal(&mut self, value: f32) -> Signal<f32> {
         let signal = Signal::new_animated(value);
-        self.tree.register_animated_signal(&signal);
+        let owner = self.self_id();
+        self.tree.register_animated_signal(&signal, owner);
         signal
     }
 
@@ -66,7 +69,17 @@ impl<'a> BuildContext<'a> {
     /// Use this when the signal was created outside of `build()` (e.g. in the
     /// widget constructor) and needs to be registered with the animation scheduler.
     pub fn register_animated_signal(&mut self, signal: &Signal<f32>) {
-        self.tree.register_animated_signal(signal);
+        let owner = self.self_id();
+        self.tree.register_animated_signal(signal, owner);
+    }
+
+    /// Read the OS-level `prefers-reduced-motion` preference. Widgets
+    /// that use looping or decorative animations (spinners, sprite
+    /// icons, marquee text, etc.) should skip starting them when this
+    /// returns `true` so the UI respects accessibility settings and —
+    /// as a bonus — draws no CPU/GPU.
+    pub fn prefers_reduced_motion(&self) -> bool {
+        self.tree.prefers_reduced_motion()
     }
 
     /// The per-frame delta-seconds signal. Observe it via

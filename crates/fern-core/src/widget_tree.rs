@@ -20,23 +20,30 @@ mod test_api;
 
 /// The main widget tree orchestrating arena, layout, events, accessibility, and paint.
 /// Provides both the runtime API and the headless test API.
-struct AnimatedRegistration(crate::signal::WeakAnimatedSignal);
+struct AnimatedRegistration {
+    weak: crate::signal::WeakAnimatedSignal,
+    owner: WidgetId,
+}
 
 impl AnimatedRegistration {
     fn same_signal(&self, signal: &crate::signal::Signal<f32>) -> bool {
-        self.0.same_signal(signal)
+        self.weak.same_signal(signal)
     }
 
     fn is_alive(&self) -> bool {
-        self.0.upgrade().is_some()
+        self.weak.upgrade().is_some()
     }
 
     fn take_pending_animation(
         &self,
-    ) -> Option<(crate::signal::Signal<f32>, crate::animation::AnimationRequest)> {
-        let signal = self.0.upgrade()?;
+    ) -> Option<(
+        crate::signal::Signal<f32>,
+        crate::animation::AnimationRequest,
+        WidgetId,
+    )> {
+        let signal = self.weak.upgrade()?;
         let request = signal.take_pending_animation()?;
-        Some((signal, request))
+        Some((signal, request, self.owner))
     }
 }
 
@@ -93,6 +100,14 @@ pub struct WidgetTree {
     animation_scheduler: crate::animation::AnimationScheduler,
     /// Weakly tracked animated values from both state and signal APIs.
     animated_values: Vec<AnimatedRegistration>,
+    /// Monotonic counter bumped at the start of each `render()` call.
+    /// Each widget's `last_painted_epoch` is set to this value whenever
+    /// the paint pass (or the cache-hit early-out) confirms the widget
+    /// intersects the window viewport. The animation scheduler uses it
+    /// to detect and pause animations for widgets that have scrolled
+    /// off-screen. Starts at `0`, which serves as the "never painted"
+    /// sentinel; tests that only call `layout()` see the gate bypass.
+    paint_epoch: u64,
     /// Cached accessibility tree update — only rebuilt when layout changes.
     cached_a11y: Option<accesskit::TreeUpdate>,
     /// Whether the accessibility tree needs rebuilding (set when layout runs).
@@ -244,6 +259,7 @@ impl WidgetTree {
             layout_direction: crate::environment::LayoutDirection::default(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_values: Vec::new(),
+            paint_epoch: 0,
             cached_a11y: None,
             a11y_dirty: true,
             synthetic_parent_map: std::collections::HashMap::new(),
@@ -616,10 +632,16 @@ impl WidgetTree {
     }
 
     /// Whether any widget needs layout or paint (i.e., a redraw would be useful).
+    ///
+    /// Uses `has_running` rather than `has_active` so that animations
+    /// parked by the window-inactive gate stop forcing the event loop
+    /// into `ControlFlow::WaitUntil`. Without this, an unfocused window
+    /// would still wake at the animation frame interval and the
+    /// pause would save nothing.
     pub fn needs_redraw(&self) -> bool {
         self.arena.any_needs_layout()
             || self.arena.any_needs_paint()
-            || self.animation_scheduler.has_active()
+            || self.animation_scheduler.has_running()
             || self.frame_tick_requested.get()
     }
 
@@ -630,18 +652,33 @@ impl WidgetTree {
 
     /// Register a `Signal<f32>` for animation support. The framework
     /// checks registered signals each frame for pending `animate_to`
-    /// requests. Called automatically by `BuildContext::animated_signal()`.
-    pub fn register_animated_signal(&mut self, signal: &crate::signal::Signal<f32>) {
+    /// requests. Called automatically by `BuildContext::animated_signal()`
+    /// — `owner` is `ctx.self_id()` of the widget whose `build()` created
+    /// the signal. Used by the scheduler to pause/cancel animations when
+    /// the owning widget is offscreen, dormant, or destroyed.
+    pub fn register_animated_signal(
+        &mut self,
+        signal: &crate::signal::Signal<f32>,
+        owner: WidgetId,
+    ) {
         self.animated_values
             .retain(|registration| registration.is_alive());
-        if !self
+        if let Some(existing) = self
             .animated_values
-            .iter()
-            .any(|registration| registration.same_signal(signal))
-            && let Some(weak_signal) = signal.weak_handle()
+            .iter_mut()
+            .find(|registration| registration.same_signal(signal))
         {
-            self.animated_values
-                .push(AnimatedRegistration(weak_signal));
+            // Signal may have been registered earlier with a placeholder
+            // owner (e.g. a widget field constructed pre-build and
+            // re-registered during build()) — prefer the latest owner.
+            existing.owner = owner;
+            return;
+        }
+        if let Some(weak_signal) = signal.weak_handle() {
+            self.animated_values.push(AnimatedRegistration {
+                weak: weak_signal,
+                owner,
+            });
         }
     }
 
@@ -669,29 +706,48 @@ impl WidgetTree {
             }
         });
 
-        for (signal, req) in pending {
+        for (signal, req, owner) in pending {
             if req.looping {
                 let start = signal.get();
                 self.animation_scheduler.animate_looping(
                     &signal,
+                    owner,
                     start,
                     req.target,
                     req.duration,
                     req.easing,
                     req.frame_interval,
+                    req.epsilon,
+                    req.max_duration,
                     now,
                 );
             } else {
-                self.animation_scheduler.animate_with_frame_interval(
+                self.animation_scheduler.animate_with_options(
                     &signal,
+                    owner,
                     req.target,
                     req.duration,
                     req.easing,
                     req.frame_interval,
+                    req.epsilon,
+                    req.max_duration,
                     now,
                 );
             }
         }
+    }
+
+    /// Mark the owning window as active (focused AND not occluded) or
+    /// inactive. Propagates to the animation scheduler so looping
+    /// animations pause while the window is hidden — no ticks, no frame
+    /// wakes, no GPU submits. See [`crate::animation::AnimationScheduler::set_window_active`].
+    pub fn set_window_active(&mut self, active: bool) {
+        self.animation_scheduler
+            .set_window_active(active, std::time::Instant::now());
+    }
+
+    pub fn is_window_active(&self) -> bool {
+        self.animation_scheduler.is_window_active()
     }
 
     /// Advance time-driven gesture recognizers (currently only
@@ -752,7 +808,8 @@ impl WidgetTree {
             self.frame_tick.set(delta);
         }
 
-        self.animation_scheduler.tick(self.sim_clock);
+        self.animation_scheduler
+            .tick(self.sim_clock, &self.arena, self.paint_epoch);
 
         self.process_state_changes();
     }
@@ -806,6 +863,15 @@ impl WidgetTree {
         // the two steps (they are silently dropped once the callback is
         // gone), but dropping the source handle first stops the publisher
         // thread's work sooner.
+        // Cancel any looping/one-shot animations owned by this widget
+        // before build() runs. Without this, a widget that creates a
+        // fresh `animated_signal` in build() would leak the previous
+        // instance's scheduler entry: the old Signal<f32> clone lives
+        // in `animations` forever, ticking against an orphaned signal
+        // (silent CPU waste) and, for looping animations, doubling up
+        // when the new one registers.
+        self.animation_scheduler.cancel_by_widget(widget_id);
+
         let drained_subs = if let Some(node) = self.arena.get_mut(widget_id) {
             node.effect_handles.clear();
             node.actions.clear();
@@ -871,6 +937,11 @@ impl WidgetTree {
     /// `arena.destroy()` whenever a widget that may have subscribed to
     /// events is being torn down.
     pub(crate) fn destroy_subtree(&mut self, widget_id: WidgetId) {
+        // See the matching cancel in `rebuild_single_widget` — the
+        // scheduler holds strong Signal<f32> clones, so the animation
+        // would outlive its widget without this explicit cancellation.
+        self.animation_scheduler.cancel_by_widget(widget_id);
+
         let children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         for child in children {
             self.destroy_subtree(child);

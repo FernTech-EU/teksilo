@@ -58,6 +58,15 @@ pub struct WidgetNode {
     /// Cached paint output for this widget (excludes children).
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
+    /// The `WidgetTree::paint_epoch` at which this widget's bounds were
+    /// last observed inside the window viewport by the paint pass.
+    /// The animation scheduler uses this to pause looping animations
+    /// for offscreen widgets: an animation whose
+    /// `last_painted_epoch + 1 < tree.paint_epoch` is considered
+    /// off-screen and skipped. `0` means "not yet painted" — treated
+    /// as "always visible" to keep headless tests (no `render()` call)
+    /// from regressing.
+    pub last_painted_epoch: u64,
 
     // --- V2 fields ---
     /// Attached event handlers (V2). Checked before widget.event() during dispatch.
@@ -151,6 +160,7 @@ impl WidgetArena {
             alignment_override: None,
             clips_children: false,
             cached_paint: None,
+            last_painted_epoch: 0,
             handlers: EventHandlers::new(),
             node_focusable: None,
             node_tab_index: None,
@@ -199,6 +209,7 @@ impl WidgetArena {
             alignment_override: None,
             clips_children: false,
             cached_paint: None,
+            last_painted_epoch: 0,
             handlers: EventHandlers::new(),
             node_focusable: None,
             node_tab_index: None,

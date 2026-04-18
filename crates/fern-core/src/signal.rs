@@ -612,29 +612,15 @@ impl Signal<f32> {
         easing: fern_tokens::Easing,
         frame_interval: Option<std::time::Duration>,
     ) -> Result<(), SignalAccessError> {
-        match &self.kind {
-            SignalKind::Mutable {
-                inner,
-                animation: Some(animation),
-            } => {
-                let mut anim = animation.borrow_mut();
-                anim.pending = Some(crate::animation::AnimationRequest {
-                    target,
-                    duration,
-                    easing,
-                    frame_interval,
-                    looping: false,
-                });
-                anim.target = Some(target);
-                drop(anim);
-                inner.borrow_mut().dirty = true;
-                Ok(())
-            }
-            SignalKind::Mutable {
-                animation: None, ..
-            } => Err(SignalAccessError::AnimationUnsupported),
-            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
-        }
+        self.try_animate_with_options(crate::animation::AnimationRequest {
+            target,
+            duration,
+            easing,
+            frame_interval,
+            looping: false,
+            epsilon: 0.0,
+            max_duration: None,
+        })
     }
 
     /// Start a looping animation from the current value to `target`,
@@ -647,22 +633,41 @@ impl Signal<f32> {
         easing: fern_tokens::Easing,
         frame_interval: Option<std::time::Duration>,
     ) {
-        if let SignalKind::Mutable {
-            inner,
-            animation: Some(animation),
-        } = &self.kind
-        {
-            let mut anim = animation.borrow_mut();
-            anim.pending = Some(crate::animation::AnimationRequest {
-                target,
-                duration: period,
-                easing,
-                frame_interval,
-                looping: true,
-            });
-            anim.target = Some(target);
-            drop(anim);
-            inner.borrow_mut().dirty = true;
+        let _ = self.try_animate_with_options(crate::animation::AnimationRequest {
+            target,
+            duration: period,
+            easing,
+            frame_interval,
+            looping: true,
+            epsilon: 0.0,
+            max_duration: None,
+        });
+    }
+
+    /// Generic entry point that accepts a fully-built `AnimationRequest`.
+    /// Use this to set `epsilon` (pixel-stable quantization) or
+    /// `max_duration` (opt-in wall-clock cap) without having to thread
+    /// through every convenience wrapper.
+    pub fn try_animate_with_options(
+        &self,
+        request: crate::animation::AnimationRequest,
+    ) -> Result<(), SignalAccessError> {
+        match &self.kind {
+            SignalKind::Mutable {
+                inner,
+                animation: Some(animation),
+            } => {
+                let mut anim = animation.borrow_mut();
+                anim.target = Some(request.target);
+                anim.pending = Some(request);
+                drop(anim);
+                inner.borrow_mut().dirty = true;
+                Ok(())
+            }
+            SignalKind::Mutable {
+                animation: None, ..
+            } => Err(SignalAccessError::AnimationUnsupported),
+            SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
         }
     }
 

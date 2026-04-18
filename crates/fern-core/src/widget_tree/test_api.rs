@@ -178,8 +178,9 @@ mod tests {
     #[test]
     fn animate_to_interpolates_over_time() {
         let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
         let signal = Signal::<f32>::new_animated(0.0);
-        tree.register_animated_signal(&signal);
+        tree.register_animated_signal(&signal, owner);
 
         signal.animate_to(
             100.0,
@@ -203,8 +204,9 @@ mod tests {
     #[test]
     fn animate_to_with_easing() {
         let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
         let signal = Signal::<f32>::new_animated(0.0);
-        tree.register_animated_signal(&signal);
+        tree.register_animated_signal(&signal, owner);
 
         signal.animate_to(
             100.0,
@@ -223,8 +225,9 @@ mod tests {
     #[test]
     fn animate_to_replaces_in_flight() {
         let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
         let signal = Signal::<f32>::new_animated(0.0);
-        tree.register_animated_signal(&signal);
+        tree.register_animated_signal(&signal, owner);
 
         signal.animate_to(
             100.0,
@@ -257,10 +260,10 @@ mod tests {
     #[test]
     fn animation_marks_widgets_dirty() {
         let mut tree = WidgetTree::new();
-        let signal = Signal::<f32>::new_animated(100.0);
-        tree.register_animated_signal(&signal);
-
         let widget = tree.add(FillWidget::new());
+        let signal = Signal::<f32>::new_animated(100.0);
+        tree.register_animated_signal(&signal, widget);
+
         signal.bind_to(
             widget,
             tree.binding_registry(),

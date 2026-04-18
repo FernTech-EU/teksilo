@@ -720,6 +720,33 @@ impl FernAppHandler {
                     managed.platform_window.request_redraw();
                 }
             }
+            // Pause all looping animations on the unfocused window so it
+            // stops waking the event loop at the animation frame
+            // interval. The scheduler rebases start_time on resume so
+            // the animation phase is continuous — a half-swept
+            // indeterminate bar picks up at exactly the same position,
+            // not snapped forward by the elapsed unfocused time.
+            //
+            // On Linux/Windows (winit 0.30) minimize fires `Focused(false)`
+            // — no separate minimize event — so this path covers it.
+            WindowEvent::Focused(focused) => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    managed.focused = focused;
+                    let active = managed.focused && !managed.occluded;
+                    managed.tree.set_window_active(active);
+                }
+            }
+            // macOS-only in winit 0.30 (X11/Wayland/Windows never emit
+            // this). Handled for parity with Focused so a macOS app
+            // that is hidden behind another window — still focused —
+            // also parks its animations.
+            WindowEvent::Occluded(occluded) => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    managed.occluded = occluded;
+                    let active = managed.focused && !managed.occluded;
+                    managed.tree.set_window_active(active);
+                }
+            }
             _ => {}
         }
 
