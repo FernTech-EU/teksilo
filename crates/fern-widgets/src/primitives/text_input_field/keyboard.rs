@@ -162,11 +162,13 @@ pub(crate) fn handle_key(
                     false // don't eat unhandled ctrl combos
                 } else if let Some(t) = text.as_deref() {
                     if !read_only {
-                        // Strip newlines (single-line enforcement) and
-                        // control characters.
+                        // Strip newlines (single-line enforcement),
+                        // control characters, and anything the
+                        // optional per-character filter rejects.
                         let clean: String = t
                             .chars()
                             .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+                            .filter(|c| st.char_filter_admits(*c))
                             .collect();
                         if !clean.is_empty() {
                             // Max-length enforcement: compute remaining capacity.
@@ -188,7 +190,11 @@ pub(crate) fn handle_key(
                             }
                             true
                         } else {
-                            false
+                            // Whole input was rejected (filter or
+                            // control-only); swallow the keystroke
+                            // so it doesn't bubble into a shortcut
+                            // match on a single-char rejected key.
+                            return EventResponse::Handled;
                         }
                     } else {
                         false
@@ -219,11 +225,15 @@ fn push_pending_chars(
     if read_only {
         return EventResponse::Handled;
     }
-    // Strip newlines — single-line enforcement.
-    let clean: String = text
-        .chars()
-        .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
-        .collect();
+    // Strip newlines (single-line enforcement), control characters,
+    // and anything the optional filter rejects.
+    let clean: String = {
+        let st = state.borrow();
+        text.chars()
+            .filter(|c| !c.is_control() && *c != '\n' && *c != '\r')
+            .filter(|c| st.char_filter_admits(*c))
+            .collect()
+    };
     if clean.is_empty() {
         return EventResponse::Handled;
     }
@@ -283,10 +293,15 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
     if system.is_empty() {
         return;
     }
-    // Strip newlines — single-line enforcement.
+    // Strip newlines (single-line enforcement) and anything the
+    // optional filter rejects. Control-character strip is omitted
+    // here to match historical behavior — pastes of tabs etc. have
+    // never been stripped and the filter hook is the right place
+    // for callers that want that.
     let clean: String = system
         .chars()
         .filter(|c| *c != '\n' && *c != '\r')
+        .filter(|c| state.char_filter_admits(*c))
         .collect();
     if clean.is_empty() {
         return;

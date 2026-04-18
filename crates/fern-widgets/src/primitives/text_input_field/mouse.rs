@@ -111,11 +111,41 @@ fn to_local(state: &SharedState, position: &Point) -> Point {
 /// wrapping. Our manual horizontal scroll means pointer local.x must
 /// be adjusted by `scroll_x` so the engine resolves the correct
 /// character position.
+///
+/// Suffix handling: when a non-editable suffix is configured, clicks
+/// landing on the suffix strip or past the text end clamp to the end
+/// of the document — the caret cannot enter the suffix. This matches
+/// Qt's `QSpinBox` behavior: tapping the "%", "€", … suffix just
+/// positions the caret after the last editable character.
 fn hit_test(state: &SharedState, local: &Point) -> Option<usize> {
     let st = state.borrow();
+    let text_viewport = (st.viewport_width - st.suffix_width).max(0.0);
+    let doc_end = st
+        .document
+        .to_plain_text()
+        .unwrap_or_default()
+        .chars()
+        .count();
+
+    // Click on the suffix strip (to the right of the editable area):
+    // snap to end of document.
+    if st.suffix_width > 0.0 && local.x >= text_viewport {
+        return Some(doc_end);
+    }
+
     let adjusted_x = local.x + st.scroll_x;
-    let result = st.engine.hit_test(adjusted_x, local.y)?;
-    Some(result.position)
+    if let Some(result) = st.engine.hit_test(adjusted_x, local.y) {
+        return Some(result.position);
+    }
+
+    // Hit-test missed (click past the last glyph but still within
+    // the editable viewport). Snap to end of document — never
+    // return `None` when the click is inside the widget, because
+    // the caller uses `None` to ignore the event entirely.
+    if local.x >= 0.0 && local.x < text_viewport {
+        return Some(doc_end);
+    }
+    None
 }
 
 /// Handle right-click: if the click lands outside the current selection,

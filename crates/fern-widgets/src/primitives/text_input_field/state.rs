@@ -22,6 +22,12 @@ use crate::rich_text::image_cache::ImageCache;
 /// Type-erased action closure, identical to the one in `button.rs`.
 pub(crate) type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
+/// Per-character input-filter predicate. Returning `false` rejects the
+/// character before it enters the document. Applied uniformly to
+/// keyboard input, IME commits, and clipboard paste so a filtered
+/// field cannot receive disallowed characters through any path.
+pub(crate) type CharFilter = Rc<dyn Fn(char) -> bool>;
+
 pub(crate) type SharedState = Rc<RefCell<TextInputState>>;
 
 /// Drag-select session lifecycle.
@@ -90,7 +96,31 @@ pub(crate) struct TextInputState {
     pub max_length: Option<usize>,
     pub read_only: bool,
     pub on_submit: Option<Rc<CommandFactory>>,
+    /// Fired exactly once per focus-loss, AFTER the cursor/selection
+    /// have been cleared and scroll reset. Used by SpinBox-style
+    /// widgets to parse/clamp/reformat on blur.
+    pub on_blur: Option<Rc<CommandFactory>>,
+    /// Per-character input-filter predicate. `None` admits every
+    /// non-control character; `Some(f)` additionally requires `f(c)
+    /// == true`. Applied to keyboard input, IME commits, and paste.
+    pub char_filter: Option<CharFilter>,
     pub placeholder: String,
+
+    // ── Non-editable suffix ─────────────────────────────────────────
+    /// Fixed trailing string rendered flush-right inside the border,
+    /// the cursor can never enter it. Empty string = no suffix.
+    pub suffix: String,
+    /// Independent engine holding the suffix's own single-block flow.
+    /// Shares the app's `SharedTypesetter` with the main engine so
+    /// glyphs land in the same atlas. `None` until the first paint
+    /// that sees a non-empty suffix, which is when we can count on
+    /// `SharedTypesetter` being available via `app_state`.
+    pub suffix_engine: Option<RichTextEngine>,
+    /// Cached logical width of the suffix in pixels, filled when
+    /// `suffix_engine` is laid out. Drives both the reduced text
+    /// viewport (so text scrolls behind a fixed suffix) and the
+    /// suffix paint origin.
+    pub suffix_width: f32,
 
     /// Pre-built context menu widget id, created dormant in field.rs build().
     pub context_menu_id: Option<WidgetId>,
@@ -98,17 +128,37 @@ pub(crate) struct TextInputState {
     pub field_widget_id: Option<WidgetId>,
 }
 
+/// Configuration bundle passed from `TextInput::build()` to
+/// `TextInputState::new()`. Grouped into a struct to keep the public
+/// constructor stable as new hooks are added (SpinBox needs three
+/// extra fields over plain TextInput, and a positional argument
+/// constructor would have grown to eight or nine parameters).
+pub(crate) struct TextInputConfig {
+    pub initial_text: String,
+    pub max_length: Option<usize>,
+    pub read_only: bool,
+    pub on_submit: Option<Rc<CommandFactory>>,
+    pub on_blur: Option<Rc<CommandFactory>>,
+    pub char_filter: Option<CharFilter>,
+    pub placeholder: String,
+    pub suffix: String,
+}
+
 impl TextInputState {
-    pub fn new(
-        initial_text: &str,
-        max_length: Option<usize>,
-        read_only: bool,
-        on_submit: Option<Rc<CommandFactory>>,
-        placeholder: String,
-    ) -> SharedState {
+    pub fn new(config: TextInputConfig) -> SharedState {
+        let TextInputConfig {
+            initial_text,
+            max_length,
+            read_only,
+            on_submit,
+            on_blur,
+            char_filter,
+            placeholder,
+            suffix,
+        } = config;
         let document = TextDocument::new();
         if !initial_text.is_empty() {
-            let _ = document.set_plain_text(initial_text);
+            let _ = document.set_plain_text(&initial_text);
         }
         let cursor = document.cursor();
 
@@ -132,7 +182,7 @@ impl TextInputState {
             document,
             engine,
             cursor,
-            text_signal: Signal::new(initial_text.to_string()),
+            text_signal: Signal::new(initial_text.clone()),
             cursor_position: Signal::new(0),
             cursor_anchor: Signal::new(0),
             has_selection: Signal::new(false),
@@ -160,10 +210,22 @@ impl TextInputState {
             max_length,
             read_only,
             on_submit,
+            on_blur,
+            char_filter,
             placeholder,
+            suffix,
+            suffix_engine: None,
+            suffix_width: 0.0,
             context_menu_id: None,
             field_widget_id: None,
         }))
+    }
+
+    /// Whether the configured `char_filter` (if any) admits this
+    /// character. `None` admits every character; inverted so callers
+    /// can write `if !st.char_filter_admits(c) { skip }`.
+    pub fn char_filter_admits(&self, c: char) -> bool {
+        self.char_filter.as_ref().map_or(true, |f| f(c))
     }
 
     /// Drain the local event queue. Returns `true` if any events

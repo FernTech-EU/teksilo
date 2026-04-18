@@ -1,14 +1,16 @@
-//! Single-line text input widget.
+//! `TextInput` — styled single-line text field composite.
 //!
-//! `TextInput` is a one-line stripped-down `RichTextEditor`: it reuses the
-//! same `TextDocument` + `TextCursor` + `RichTextEngine` stack but
-//! restricts input to a single line of plain text. Newlines are stripped,
-//! Enter fires `on_submit`, and Up/Down/PageUp/PageDown are ignored.
+//! Wraps the [`TextInputField`](crate::primitives::TextInputField)
+//! editing primitive in a bordered, padded frame with placeholder
+//! overlay, validation, optional clear button, and leading/trailing
+//! slots. All actual text editing is delegated to the field: every
+//! configuration method here has a direct counterpart on the
+//! primitive.
 //!
-//! The public `TextInput` is a composite widget that builds a visual
-//! frame (border, focus ring, placeholder, clear button, leading/trailing
-//! slots). The actual text editing is handled by an internal
-//! `TextInputField` leaf widget.
+//! Most applications want `TextInput`. Choose
+//! [`TextInputField`](crate::primitives::TextInputField) directly
+//! when you're building a composite of your own that already
+//! supplies its frame — `SpinBox` is the canonical in-tree example.
 //!
 //! # Example
 //!
@@ -18,18 +20,11 @@
 //!     .placeholder("Search...")
 //!     .show_clear_button(true)
 //!     .leading_slot(IconWidget::from_svg(SEARCH_ICON))
-//!     .on_submit(AppCmd::Search)
+//!     .on_submit_fn(|ctx| ctx.send_intent(AppCmd::Search))
 //! ```
-
-mod field;
-pub(crate) mod keyboard;
-mod mouse;
-pub(crate) mod state;
 
 #[cfg(test)]
 mod tests;
-
-use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
@@ -38,17 +33,14 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
-use fern_text::text_document::SelectionType;
 use fern_tokens::{Color, ColorTokens, CornerRadius};
 
 use crate::button::InteractionState;
+use crate::primitives::text_input_field::TextInputField;
 use crate::primitives::{
     Expand, HStack, MinSize, Padding, RectWidget, TextWidget, ZStack,
 };
 use crate::tooltip::{self, RichTooltipSource};
-
-use self::field::TextInputField;
-use self::state::{CommandFactory, SharedState, TextInputState};
 
 /// Validation state for the text input field.
 #[derive(Debug, Clone, Default)]
@@ -59,27 +51,31 @@ pub enum ValidationState {
     Warning(String),
 }
 
-/// A single-line text input widget.
+/// Styled single-line text input composite.
 ///
 /// See the [module-level documentation](self) for usage examples.
 pub struct TextInput {
-    // ── Configuration (builder methods, consumed in build) ───────────
+    // ── Configuration forwarded to the inner TextInputField ─────────
     text: Signal<String>,
     placeholder: String,
-    label: Option<String>,
     enabled: bool,
     read_only: bool,
     max_length: Option<usize>,
+    on_submit: Option<Box<dyn Fn(&mut EventContext)>>,
+    on_blur: Option<Box<dyn Fn(&mut EventContext)>>,
+    char_filter: Option<std::rc::Rc<dyn Fn(char) -> bool>>,
+    suffix: String,
+
+    // ── Configuration owned by this composite only ──────────────────
+    label: Option<String>,
     show_clear_button: bool,
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
-    on_submit: Option<CommandFactory>,
     validation: Signal<ValidationState>,
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<RichTooltipSource>,
 
     // ── Internal (set during build) ─────────────────────────────────
-    state: Option<SharedState>,
     interaction: Signal<InteractionState>,
     root_child_id: Option<WidgetId>,
 }
@@ -99,30 +95,39 @@ impl TextInput {
         Self {
             text,
             placeholder: String::new(),
-            label: None,
             enabled: true,
             read_only: false,
             max_length: None,
+            on_submit: None,
+            on_blur: None,
+            char_filter: None,
+            suffix: String::new(),
+            label: None,
             show_clear_button: false,
             leading_slot: None,
             trailing_slot: None,
-            on_submit: None,
             validation: Signal::new(ValidationState::None),
             tooltip_text: None,
             rich_tooltip_source: None,
-            state: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
     }
 
     // ── Builder methods ─────────────────────────────────────────────
+    //
+    // Every method below that has a direct analogue on
+    // `TextInputField` forwards to it 1:1 at build time — the
+    // `TextInput` composite just owns the framing around the field.
 
     pub fn placeholder(mut self, text: impl Into<String>) -> Self {
         self.placeholder = text.into();
         self
     }
 
+    /// Accessible name for the composite. Propagated to the outer
+    /// container's a11y node; the inner `TextInputField` still
+    /// carries `Role::TextInput` with the document's value.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
@@ -162,8 +167,29 @@ impl TextInput {
         self
     }
 
+    /// Closure invoked on Enter. Forwarded to `TextInputField`.
     pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_submit = Some(Box::new(f));
+        self
+    }
+
+    /// Closure invoked on focus loss. Forwarded to `TextInputField`.
+    pub fn on_blur_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_blur = Some(Box::new(f));
+        self
+    }
+
+    /// Per-character input-filter predicate. Forwarded to
+    /// `TextInputField`.
+    pub fn char_filter(mut self, f: impl Fn(char) -> bool + 'static) -> Self {
+        self.char_filter = Some(std::rc::Rc::new(f));
+        self
+    }
+
+    /// Non-editable trailing string (Qt's `QSpinBox::suffix`).
+    /// Forwarded to `TextInputField`.
+    pub fn suffix(mut self, text: impl Into<String>) -> Self {
+        self.suffix = text.into();
         self
     }
 
@@ -206,67 +232,46 @@ impl Widget for TextInput {
         let interaction = self.interaction.clone();
         let validation = self.validation.clone();
 
-        let initial_text = self.text.get();
-        let on_submit = self.on_submit.take().map(Rc::new);
-
-        // Create the shared state.
-        let shared_state = TextInputState::new(
-            &initial_text,
-            self.max_length,
-            self.read_only || !self.enabled,
-            on_submit,
-            self.placeholder.clone(),
-        );
-        self.state = Some(shared_state.clone());
-
-        let text_signal = shared_state.borrow().text_signal.clone();
-
-        // Sync external text signal → internal state. If the external
-        // signal changes (e.g. programmatic set), update the document.
-        {
-            let ext = self.text.clone();
-            let state_for_sync = shared_state.clone();
-            ctx.effect(&ext, move |new_text| {
-                let st = state_for_sync.borrow();
-                let current = st.document.to_plain_text().unwrap_or_default();
-                if current != *new_text {
-                    st.cursor.select(SelectionType::Document);
-                    let _ = st.cursor.insert_text(new_text);
-                }
-                drop(st);
-            });
-        }
-
-        // Sync internal text signal → external text signal.
-        {
-            let ext = self.text.clone();
-            ctx.effect(&text_signal, move |new_text| {
-                if ext.get() != *new_text {
-                    ext.set(new_text.clone());
-                }
-            });
-        }
-
-        // ── Build the child subtree ────────────────────────────────
+        // ── Build the inner editing primitive ──────────────────────
         //
-        // Layout structure (inside-out):
-        //   FocusRing > MinSize(65, 28) > ZStack(bg_rect, content_row, placeholder)
-        //
-        // The content row uses horizontal-only padding. The text field
-        // gets its own vertical padding so that slots (BuiltInButton etc.)
-        // sit flush against top/bottom of the inner border area and are
-        // vertically centered by the HStack — keeping the total height
-        // at exactly field_style.height regardless of slot content.
-
+        // The inner field owns the bound text signal, the document,
+        // engine, caret, clipboard, context menu — everything
+        // interactive. The composite just styles it.
         let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
         let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
 
-        // Text editing area, wrapped in vertical padding.
-        let field = TextInputField {
-            state: shared_state.clone(),
-            text_height: text_area_height,
-            interaction: interaction.clone(),
-        };
+        let mut field = TextInputField::new(self.text.clone())
+            .enabled(self.enabled)
+            .read_only(self.read_only)
+            .placeholder(self.placeholder.clone())
+            .text_height(text_area_height)
+            .interaction_signal(interaction.clone());
+        if let Some(max) = self.max_length {
+            field = field.max_length(max);
+        }
+        if let Some(f) = self.char_filter.take() {
+            // Re-wrap the Rc'd closure into a plain closure for the
+            // primitive's builder surface, which owns its own Rc.
+            field = field.char_filter(move |c| (f)(c));
+        }
+        if let Some(cb) = self.on_submit.take() {
+            field = field.on_submit_fn(move |ctx| (cb)(ctx));
+        }
+        if let Some(cb) = self.on_blur.take() {
+            field = field.on_blur_fn(move |ctx| (cb)(ctx));
+        }
+        if !self.suffix.is_empty() {
+            field = field.suffix(std::mem::take(&mut self.suffix));
+        }
+
+        // Expose the field's text signal for downstream reactivity
+        // (placeholder visibility, clear-button visibility) before
+        // the field is consumed by `ctx.add`.
+        let text_signal_for_vis = field.text();
+
+        // Text editing area, wrapped in vertical padding so slots
+        // (BuiltInButton etc.) sit flush against top/bottom of the
+        // inner border area and are vertically centered by the HStack.
         let padded_field = Padding::new(
             field_style.padding_vertical, 0.0, field_style.padding_vertical, 0.0,
         ).child(field);
@@ -287,7 +292,7 @@ impl Widget for TextInput {
                     ).child(ph),
                 ),
             );
-            let visible = text_signal.map(|t| t.is_empty());
+            let visible = text_signal_for_vis.map(|t| t.is_empty());
             ctx.visible_when(ph_id, visible);
 
             ctx.add(
@@ -304,7 +309,6 @@ impl Widget for TextInput {
         // HStack: [leading] [text_column] [clear] [trailing]
         let mut row = HStack::new().spacing(4.0);
 
-        // Leading slot.
         if let Some(leading) = self.leading_slot.take() {
             let leading_id = ctx.add_boxed(leading);
             row = row.add_child(leading_id);
@@ -312,40 +316,24 @@ impl Widget for TextInput {
 
         row = row.add_child(text_column_id);
 
-        // Clear button (opt-in). Uses the framework's built-in clear
-        // icon (SVG) rather than a hand-drawn path: the previous
-        // in-file `clear_icon` produced an `×` with two open line
-        // subpaths and fed them to `Canvas::fill_path`, which fills
-        // the enclosed area only — unclosed lines fill nothing, so
-        // the button sat visible but empty on screen.
-        //
-        // The interactive affordance (`clear_id`) is wrapped in a
-        // fixed-size reservation (`reserve_id`): `visible_when` sets
-        // `clear_id` dormant when the field is empty, and dormant
-        // widgets collapse to zero size. Without the outer wrapper
-        // the text row width would oscillate as the user typed (empty
-        // → narrow; first character → suddenly 16 px wider). The
-        // `FixedSize` always reports 16×16, so row width stays
-        // stable regardless of whether the inner affordance is alive.
+        // Clear button (opt-in). The clear affordance clears the
+        // bound text signal — the field's ext→internal effect
+        // picks this up and wipes the document.
         if self.show_clear_button {
             let icon = (crate::built_in_button::BuiltInIcons::global().clear)()
                 .icon_size(12.0)
                 .color(colors.text_secondary);
-            let state_for_clear = shared_state.clone();
+            let text_for_clear = self.text.clone();
             let clear_id = ctx.add(
                 MinSize::new(16.0, 16.0)
                     .child(crate::primitives::Center::new().child(icon))
                     .on_tap(move |_pos, ctx| {
-                        let st = state_for_clear.borrow();
-                        st.cursor.select(SelectionType::Document);
-                        let _ = st.cursor.remove_selected_text();
-                        drop(st);
-                        state::sync_cursor_signals(&state_for_clear);
+                        text_for_clear.set(String::new());
                         ctx.request_frame();
                     })
                     .cursor(CursorIcon::Pointer),
             );
-            let visible = text_signal.map(|t| !t.is_empty());
+            let visible = text_signal_for_vis.map(|t| !t.is_empty());
             ctx.visible_when(clear_id, visible);
             let reserve_id = ctx.add(
                 crate::primitives::FixedSize::new()
@@ -356,7 +344,6 @@ impl Widget for TextInput {
             row = row.add_child(reserve_id);
         }
 
-        // Trailing slot.
         if let Some(trailing) = self.trailing_slot.take() {
             let trailing_id = ctx.add_boxed(trailing);
             row = row.add_child(trailing_id);
@@ -393,15 +380,9 @@ impl Widget for TextInput {
             .corner_radius(CornerRadius::uniform(field_style.corner_radius));
         let bg_id = ctx.add(bg);
 
-        // ZStack: background + content row.
-        // The placeholder is inside the text column (local ZStack in HStack),
-        // not a sibling here.
         let zstack = ZStack::new().add_child(bg_id).add_child(padded_id);
         let zstack_id = ctx.add(zstack);
 
-        // MinSize — no FocusRing wrapper. The border itself becomes the
-        // focus indicator (thicker + accent colored), matching Int UI
-        // text field convention.
         let root_id = ctx.add(
             MinSize::new(65.0, field_style.height).child_id(zstack_id),
         );
@@ -421,11 +402,8 @@ impl Widget for TextInput {
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 
-        // No handlers on root_id — the inner TextInputField drives the
-        // interaction signal directly from its own on_focus handler.
-
         if !self.enabled {
-            interaction.set(InteractionState::Disabled);
+            self.interaction.set(InteractionState::Disabled);
         }
 
         self.root_child_id = Some(root_id);
@@ -456,7 +434,8 @@ impl Widget for TextInput {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // The inner TextInputField handles Role::TextInput.
-        // The outer composite is transparent to a11y.
+        // The outer composite is transparent to a11y except for a
+        // pass-through label.
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
         if let Some(ref label) = self.label {
             builder.set_name(label);
@@ -481,10 +460,8 @@ fn derive_border_color(
         ValidationState::Error(_) => border_error,
         ValidationState::Warning(_) => border_warning,
         _ => match state {
-            // Focused: accent ring covering the border.
             InteractionState::Focused => focus_ring,
             _ => border,
         },
     })
 }
-
