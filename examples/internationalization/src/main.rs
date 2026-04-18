@@ -117,7 +117,7 @@ impl Widget for Root {
         let ar_btn = ctx.add(
             Button::new(tr!(lang_arabic()))
                 .style(ButtonVariant::Regular)
-                .on_activate_fn(|ctx| ctx.set_locale("ar-EG")),
+                .on_activate_fn(|ctx| ctx.set_locale("ar-SA")),
         );
 
         let language_row = ctx.add(

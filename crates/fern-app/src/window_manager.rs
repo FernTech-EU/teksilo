@@ -527,4 +527,27 @@ impl WindowManager {
         }
         any
     }
+
+    /// Drain per-tree locale-switch requests raised by handlers via
+    /// [`EventContext::set_locale`](fern_core::widget::EventContext::set_locale),
+    /// parse each one to a `LanguageIdentifier`, and route it through
+    /// [`WindowManager::set_locale`] so the `I18nManager` (active locale,
+    /// version signal, RTL direction) and every tree stay in sync.
+    /// Invalid or unsupported locale strings are logged and dropped.
+    pub fn drain_pending_locale_requests(&mut self) {
+        let mut requests: Vec<String> = Vec::new();
+        for managed in self.windows.values_mut() {
+            if let Some(loc) = managed.tree.take_pending_locale_request() {
+                requests.push(loc);
+            }
+        }
+        for loc_str in requests {
+            match loc_str.parse::<fern_i18n::LanguageIdentifier>() {
+                Ok(loc) => self.set_locale(loc),
+                Err(e) => eprintln!(
+                    "fern-app: invalid locale `{loc_str}` requested by handler: {e}"
+                ),
+            }
+        }
+    }
 }

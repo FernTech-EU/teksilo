@@ -164,6 +164,14 @@ pub struct WidgetTree {
     /// by the application event loop after each event via
     /// [`WidgetTree::take_close_window_request`].
     pub(crate) close_window_requested: bool,
+    /// Raised by [`EventContext::set_locale`] during dispatch; drained by
+    /// the application event loop (see
+    /// `WindowManager::drain_pending_locale_requests`) so the switch can be
+    /// routed through the `I18nManager` (active locale + version signal +
+    /// RTL direction). `WidgetTree::set_locale` alone would only update the
+    /// tree's local locale signal — the i18n thread-local would stay put
+    /// and `tr!` lookups would not re-resolve.
+    pub(crate) pending_locale_request: Option<String>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -256,6 +264,7 @@ impl WidgetTree {
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
             last_frame_time: None,
             close_window_requested: false,
+            pending_locale_request: None,
         }
     }
 
@@ -1155,6 +1164,16 @@ impl WidgetTree {
     /// [`EventContext::close_window`] during dispatch.
     pub fn take_close_window_request(&mut self) -> bool {
         std::mem::replace(&mut self.close_window_requested, false)
+    }
+
+    /// Drain the pending locale switch raised by
+    /// [`EventContext::set_locale`] during dispatch. The app layer
+    /// (`WindowManager::drain_pending_locale_requests`) parses the
+    /// result and routes it through `WindowManager::set_locale` so the
+    /// `I18nManager`'s active locale, version signal, and layout
+    /// direction all stay in sync with the tree.
+    pub fn take_pending_locale_request(&mut self) -> Option<String> {
+        self.pending_locale_request.take()
     }
 
     /// Drain all pending modal requests recorded during event handling.

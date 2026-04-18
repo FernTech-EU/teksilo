@@ -985,7 +985,12 @@ impl WidgetTree {
             self.set_theme(theme);
         }
         if let Some(locale) = ctx.locale_request {
-            self.set_locale(locale);
+            // Stored, not applied: the app layer must route this through
+            // `WindowManager::set_locale` so the `I18nManager`'s active
+            // locale and direction stay in sync. Applying via
+            // `WidgetTree::set_locale` alone would leave `tr!` bindings
+            // reading the old translations.
+            self.pending_locale_request = Some(locale);
         }
     }
 

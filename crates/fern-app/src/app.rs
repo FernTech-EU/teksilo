@@ -464,6 +464,7 @@ impl FernAppHandler {
     }
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
+        self.wm.drain_pending_locale_requests();
         let had_commands = self.wm.drain_close_window_requests();
         let had_modal_requests = self.process_modal_requests();
         let had_modal_dismissals = self.process_modal_dismissals();

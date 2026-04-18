@@ -124,6 +124,31 @@ mod tests {
     }
 
     #[test]
+    fn set_locale_from_event_handler_is_parked_not_applied() {
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new().on_tap(|_pos, ctx| {
+            ctx.set_locale("fr-FR");
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(tree.locale().is_none());
+
+        tree.click(widget);
+
+        // The tree's own locale signal must NOT have been flipped — the
+        // app layer is responsible for routing the switch through
+        // `WindowManager::set_locale` so the `I18nManager`'s active
+        // locale, version signal, and RTL direction stay in sync.
+        assert_eq!(tree.locale(), None);
+        // The request is parked for the app layer to drain.
+        assert_eq!(
+            tree.take_pending_locale_request(),
+            Some("fr-FR".to_string())
+        );
+        // Drained exactly once.
+        assert_eq!(tree.take_pending_locale_request(), None);
+    }
+
+    #[test]
     fn idle_deadline_provides_time_budget() {
         let deadline = crate::idle::IdleDeadline::new(std::time::Duration::from_millis(100));
         assert!(!deadline.did_timeout());
