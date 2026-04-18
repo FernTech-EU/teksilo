@@ -80,6 +80,18 @@ impl CheckKind {
         }
     }
 
+    /// A reactive `Signal<CheckState>` that tracks the underlying
+    /// mutable root of either variant. Used to compose multi-source
+    /// derived visuals (e.g. box colors that depend on both interaction
+    /// state and check state) so they dirty-track the check-state
+    /// source in addition to the interaction source.
+    fn check_state_signal(&self) -> Signal<CheckState> {
+        match self {
+            CheckKind::TwoState(s) => s.map(|b| CheckState::from(*b)),
+            CheckKind::TriState(s) => s.clone(),
+        }
+    }
+
     fn toggle(&self) {
         match self {
             CheckKind::TwoState(s) => {
@@ -274,16 +286,22 @@ impl Widget for Checkbox {
         });
         self.interaction = Some(interaction.clone());
 
-        // Derive box colors from interaction state AND check state
+        // Derive box colors from interaction state AND check state.
+        // `zip` registers both upstream roots so the visuals refresh
+        // whether a click moves `interaction` or an external setter
+        // flips the underlying check state directly.
+        let check_state = kind.check_state_signal();
         let bg_color = {
             let colors = theme.colors.clone();
-            let kind = kind.clone();
-            interaction.map(move |s| resolve_box_bg(*s, kind.check_state(), &colors))
+            interaction
+                .zip(&check_state)
+                .map(move |(s, cs)| resolve_box_bg(*s, *cs, &colors))
         };
         let border_color = {
             let colors = theme.colors.clone();
-            let kind = kind.clone();
-            interaction.map(move |s| resolve_box_border(*s, kind.check_state(), &colors))
+            interaction
+                .zip(&check_state)
+                .map(move |(s, cs)| resolve_box_border(*s, *cs, &colors))
         };
 
         let cb_style = theme.components.checkbox;

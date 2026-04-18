@@ -153,10 +153,17 @@ impl Widget for RadioButton {
 
         let radio_style = theme.components.radio;
 
+        // Border color depends on both `interaction` and whether this
+        // button is the group's selected one. `zip` registers both
+        // upstream roots so the border refreshes whenever a sibling
+        // flips `selected`, not only when this button's own
+        // interaction state moves.
+        let is_selected = selected.map(move |s| *s == value);
         let border_color = {
             let colors = theme.colors.clone();
-            let selected = selected.clone();
-            interaction.map(move |s| resolve_circle_border(*s, selected.get() == value, &colors))
+            interaction
+                .zip(&is_selected)
+                .map(move |(s, sel)| resolve_circle_border(*s, *sel, &colors))
         };
         let outer = RectWidget::new()
             .bind_border_color(border_color)

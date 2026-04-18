@@ -370,25 +370,11 @@ impl Widget for TextInput {
                 .child_id(row_id),
         );
 
-        // Combined signal for border color: merges interaction + validation.
-        // We can't use Signal::map2 (doesn't exist), so we use a combined
-        // Signal<(InteractionState, ValidationState)> updated by observers
-        // on both source signals.
-        let combined = Signal::new((interaction.get(), validation.get()));
-        {
-            let combined_for_int = combined.clone();
-            let val_for_int = validation.clone();
-            ctx.effect(&interaction, move |state| {
-                combined_for_int.set((*state, val_for_int.get()));
-            });
-        }
-        {
-            let combined_for_val = combined.clone();
-            let int_for_val = interaction.clone();
-            ctx.effect(&validation, move |val| {
-                combined_for_val.set((int_for_val.get(), val.clone()));
-            });
-        }
+        // Border color + width depend on interaction state AND validation
+        // state. `zip` produces a derived signal that registers both upstream
+        // roots with the binding registry, so the border refreshes whenever
+        // either source changes.
+        let combined = interaction.zip(&validation);
         let border_color = derive_border_color(combined.clone(), &colors);
 
         // Border width: 2px when focused (accent ring covering the border),
