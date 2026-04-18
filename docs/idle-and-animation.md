@@ -1,0 +1,134 @@
+# Idle and animation — the zero-frame rule
+
+## The rule
+
+**An idle app must draw zero frames.** Not "almost zero". Not "a
+cheap 30 Hz". Zero — `rendered_frames == 0` in the
+`FERN_IDLE_TRACE=1` trace, `ControlFlow::Wait` in winit, no GPU submit,
+no CPU wake, no battery drain.
+
+"Idle" means:
+
+- No user input (no cursor move, click, key, scroll, resize).
+- No pending tooltip / delayed overlay / gesture deadline.
+- No accessibility rebuild in flight.
+
+If those conditions hold and the event loop still wakes up, it is a
+bug. Track it down.
+
+## Why so absolute
+
+FernUI is meant for long-running desktop apps (Skribisto writes for
+hours). A 30 Hz idle pump costs CPU, GPU, battery, fan noise, and —
+on laptops — holds the package out of deep C-states. Compounded
+across every running animation, every unfocused window, every
+background process, it is the difference between "I left it open" and
+"my battery is dead".
+
+A framework that draws at idle normalises wasted cycles. We refuse.
+
+## The machinery that enforces it
+
+Four gates, all in the animation subsystem. Any new source of idle
+wakes must be designed to respect them — or add its own gate with
+equivalent rigor.
+
+1. **Widget-drop / rebuild auto-cancel.** The scheduler holds strong
+   `Signal<f32>` clones; without an explicit cancel on widget death,
+   a rebuilt widget leaks its old animation forever and ticks against
+   an orphaned signal. `WidgetTree::rebuild_single_widget` and
+   `destroy_subtree` both call `scheduler.cancel_by_widget(id)` before
+   reconstructing. If you add a new lifecycle path that replaces
+   widget state, it must do the same.
+   ([animation.rs](../crates/fern-core/src/animation.rs),
+   [widget_tree.rs](../crates/fern-core/src/widget_tree.rs))
+
+2. **Per-window active flag.** `WindowEvent::Focused(false)` (and
+   on macOS, `Occluded(true)`) calls `tree.set_window_active(false)`,
+   which makes `AnimationScheduler::tick` a no-op and
+   `next_deadline` return `None`. The event loop falls through to
+   `ControlFlow::Wait`. On resume, each animation's `start_time` is
+   rebased by the paused duration so phase is continuous — a
+   half-swept sweep resumes at 50%, not snapped forward.
+   ([app.rs](../crates/fern-app/src/app.rs),
+   [window_manager.rs](../crates/fern-app/src/window_manager.rs))
+
+3. **Per-widget paint-epoch visibility.** `WidgetTree::paint_epoch`
+   ticks on every non-cache-hit `render()`. `paint_widget_cached`
+   stamps `last_painted_epoch` on each widget whose bounds survive
+   clip intersection. The scheduler skips any animation whose
+   widget's `last_painted_epoch + 1 < paint_epoch` — a scrolled-off
+   spinner pauses itself. When the widget scrolls back in, the
+   resulting paint re-stamps its epoch and
+   `update_control_flow` re-queries `next_deadline` in `post_event`,
+   re-arming the animation. `paint_epoch == 0` is the "never
+   rendered" sentinel: always visible, so headless unit tests that
+   only call `layout()` don't regress.
+   ([rendering_impl.rs](../crates/fern-core/src/widget_tree/rendering_impl.rs),
+   [arena.rs](../crates/fern-core/src/arena.rs))
+
+4. **Pixel-stable ε, mandatory terminal bypass.** Each
+   `AnimationRequest` can carry an `epsilon` (unit: the signal's own
+   units, so usually logical pixels). Intermediate ticks skip
+   `signal.set` when the value hasn't moved by at least ε — no dirt,
+   no frame. Terminal ticks (completion, loop restart) always set
+   unconditionally so one-shots land on exactly `end_value`. Ship ε
+   for any looping animation whose minimum visible delta is known
+   (ProgressBar → 1 px of track width is a safe choice).
+
+## The idle-work audit
+
+`WidgetTree::needs_redraw()` is the predicate the event loop uses to
+decide between `ControlFlow::Wait` and `ControlFlow::WaitUntil`. If
+it returns `true`, the app is not idle — even if nothing visible is
+animating. Any new "is there work pending" signal **must** be
+included in this predicate, and paused/hidden variants **must** be
+excluded. The scheduler's `has_running` (pause-aware) rather than
+`has_active` (pause-oblivious) is the reference pattern; a paused
+scheduler that still said `has_active == true` would defeat every
+gate above.
+
+## Verifying you haven't regressed the rule
+
+Run the catalog with the idle trace. A truly idle app emits no
+trace line at all (the trace is written on each wake — no wake, no
+line):
+
+```bash
+cargo build --profile profiling -p widget-catalog
+FERN_IDLE_TRACE=1 timeout 10 ./target/profiling/widget-catalog 2> /tmp/idle.log
+wc -l /tmp/idle.log   # expect 0
+```
+
+CPU and GPU deltas can be read from the kernel:
+
+```bash
+# Process CPU over 10s (see /tmp/measure_idle.sh in the tree for the
+# full script — samples /proc/<pid>/stat and sysfs gpu_busy_percent)
+/tmp/measure_idle.sh
+# Expect: cpu < 0.5%, gpu delta ≈ baseline.
+```
+
+If the numbers are above baseline, something in the tree is waking
+the loop. Classify it:
+
+- **Looping animation not paused?** Check `tree.is_window_active()`
+  and the widget's `last_painted_epoch` vs. `tree.paint_epoch`.
+- **Timer source you forgot?** Every timer-backed deadline must flow
+  through `next_timer_deadline` in
+  [overlay_impl.rs](../crates/fern-core/src/widget_tree/overlay_impl.rs).
+  If it doesn't, the event loop can't decide whether to sleep.
+- **Poll mode forced?** `ControlFlow::Poll` is used for
+  `frame_tick_requested` (caret blink, drag auto-scroll). It must
+  clear itself the frame it is no longer needed.
+
+When in doubt, bisect: remove widgets from the scene until the idle
+returns to zero. The last removal is the culprit.
+
+## For widget authors
+
+If your widget schedules anything time-driven — animation, timer,
+poll, deferred callback — it must have an explicit answer for each
+of the four gates. `ctx.prefers_reduced_motion()` is a fifth pre-gate
+for decorative motion: honor it, and you get the zero-motion
+accessibility behavior and a free idle win.
