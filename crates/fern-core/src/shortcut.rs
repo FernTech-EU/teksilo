@@ -338,11 +338,18 @@ impl ShortcutBuilder {
     /// Provide a closure that produces the [`Intent`] at activation
     /// time. Use when the intent's parameters depend on the matched
     /// keystroke or runtime state.
-    pub fn on_activate(
+    ///
+    /// The closure may return any `Into<Intent>` — typically an
+    /// [`IntentKind`](crate::intent::IntentKind) enum variant, which
+    /// converts via the blanket `impl<K: IntentKind> From<K> for Intent`.
+    pub fn on_activate<R>(
         mut self,
-        f: impl FnMut(KeyStroke, &mut EventContext) -> Intent + 'static,
-    ) -> Self {
-        self.inner.on_activate = Some(Box::new(f));
+        mut f: impl FnMut(KeyStroke, &mut EventContext) -> R + 'static,
+    ) -> Self
+    where
+        R: Into<Intent>,
+    {
+        self.inner.on_activate = Some(Box::new(move |ks, ctx| f(ks, ctx).into()));
         self
     }
 

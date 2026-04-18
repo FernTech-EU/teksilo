@@ -1,182 +1,154 @@
 //! Runtime intents dispatched by shortcuts and programmatic callers.
 //!
 //! An [`Intent`] is the unit of "something wants to happen" in the
-//! action system. It carries a stable name (the intent string) and an
-//! optional DTO of parameters. Intents are produced by
+//! action system. It pairs a stable name (the intent string) with an
+//! optional type-erased payload that handlers downcast when they
+//! recognize the intent. Intents are produced by
 //! [`Shortcut`](crate::shortcut::Shortcut)s at activation time, by
 //! widgets via `ctx.send_intent`, or by programmatic callers.
 //!
-//! They are dispatched through the widget tree by walking
-//! **source-widget → root**: each ancestor's [`Action`](crate::action::Action)
-//! whose `intent` name matches gets a chance to consume the intent or
-//! propagate it.
+//! They dispatch through the widget tree by walking
+//! **source-widget → root**: each ancestor's
+//! [`Action`](crate::action::Action) whose `intent` name matches
+//! gets a chance to consume the intent or propagate it.
+//!
+//! ## Typed DTOs via [`IntentKind`]
+//!
+//! Apps that want typo-safe construction and handler-side
+//! exhaustiveness define an enum and implement [`IntentKind`] (by
+//! hand or via `#[derive(IntentKind)]` from `fern-ui-macros`). The
+//! whole variant — including any fields it carries — is stored as
+//! the intent's payload; handlers recover it via
+//! [`Intent::payload`] or [`IntentKind::from_intent`].
 
-use std::borrow::Cow;
-
-/// A single parameter slot carried by [`IntentParams`].
-///
-/// Small closed value enum inspired by GTK's `GVariant`. Keeps
-/// parameters stack-allocated and serializable without the type
-/// erasure that a trait-object payload would require.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum ActionArg {
-    #[default]
-    None,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Str(Cow<'static, str>),
-}
-
-impl ActionArg {
-    pub fn as_bool(&self) -> Option<bool> {
-        if let ActionArg::Bool(v) = self { Some(*v) } else { None }
-    }
-
-    pub fn as_int(&self) -> Option<i64> {
-        if let ActionArg::Int(v) = self { Some(*v) } else { None }
-    }
-
-    pub fn as_float(&self) -> Option<f64> {
-        if let ActionArg::Float(v) = self { Some(*v) } else { None }
-    }
-
-    pub fn as_str(&self) -> Option<&str> {
-        if let ActionArg::Str(v) = self { Some(v.as_ref()) } else { None }
-    }
-
-    pub fn is_none(&self) -> bool {
-        matches!(self, ActionArg::None)
-    }
-}
-
-impl From<bool> for ActionArg {
-    fn from(v: bool) -> Self {
-        ActionArg::Bool(v)
-    }
-}
-
-impl From<i64> for ActionArg {
-    fn from(v: i64) -> Self {
-        ActionArg::Int(v)
-    }
-}
-
-impl From<i32> for ActionArg {
-    fn from(v: i32) -> Self {
-        ActionArg::Int(v as i64)
-    }
-}
-
-impl From<f64> for ActionArg {
-    fn from(v: f64) -> Self {
-        ActionArg::Float(v)
-    }
-}
-
-impl From<&'static str> for ActionArg {
-    fn from(v: &'static str) -> Self {
-        ActionArg::Str(Cow::Borrowed(v))
-    }
-}
-
-impl From<String> for ActionArg {
-    fn from(v: String) -> Self {
-        ActionArg::Str(Cow::Owned(v))
-    }
-}
-
-/// Fixed-arity positional parameter DTO for [`Intent`].
-///
-/// Four slots is an arbitrary but pragmatic upper bound: it covers
-/// every parametric shortcut the reference apps (Qt, VSCode) bind in
-/// practice without pushing to the heap. Unused slots default to
-/// [`ActionArg::None`].
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct IntentParams {
-    pub p1: ActionArg,
-    pub p2: ActionArg,
-    pub p3: ActionArg,
-    pub p4: ActionArg,
-}
-
-impl IntentParams {
-    pub fn empty() -> Self {
-        Self::default()
-    }
-
-    pub fn with1(p1: impl Into<ActionArg>) -> Self {
-        Self {
-            p1: p1.into(),
-            ..Self::default()
-        }
-    }
-
-    pub fn with2(p1: impl Into<ActionArg>, p2: impl Into<ActionArg>) -> Self {
-        Self {
-            p1: p1.into(),
-            p2: p2.into(),
-            ..Self::default()
-        }
-    }
-
-    pub fn with3(
-        p1: impl Into<ActionArg>,
-        p2: impl Into<ActionArg>,
-        p3: impl Into<ActionArg>,
-    ) -> Self {
-        Self {
-            p1: p1.into(),
-            p2: p2.into(),
-            p3: p3.into(),
-            ..Self::default()
-        }
-    }
-
-    pub fn with4(
-        p1: impl Into<ActionArg>,
-        p2: impl Into<ActionArg>,
-        p3: impl Into<ActionArg>,
-        p4: impl Into<ActionArg>,
-    ) -> Self {
-        Self {
-            p1: p1.into(),
-            p2: p2.into(),
-            p3: p3.into(),
-            p4: p4.into(),
-        }
-    }
-}
+use std::any::Any;
+use std::rc::Rc;
 
 /// A runtime intent dispatched through the widget tree.
 ///
-/// See the module docs for the dispatch model.
-#[derive(Debug, Clone, PartialEq)]
+/// The `name` is the stable dispatch key (matched against
+/// [`Action::intent`](crate::action::Action)). The optional
+/// `payload` carries any type the sender wants to attach — recover
+/// it with [`Intent::payload::<T>`] when the handler knows the
+/// expected type (typically via `IntentKind::from_intent`).
 pub struct Intent {
     /// Stable intent name. Usually matches the originating
     /// [`Shortcut`](crate::shortcut::Shortcut)'s `intent_name()`.
     pub name: &'static str,
-    /// Parameters. Empty for most intents (save, undo, copy, …).
-    pub params: IntentParams,
+    payload: Option<Rc<dyn Any>>,
 }
 
 impl Intent {
-    /// A parameter-less intent.
+    /// A parameter-less intent (no payload).
     pub fn new(name: &'static str) -> Self {
         Self {
             name,
-            params: IntentParams::empty(),
+            payload: None,
         }
     }
 
-    /// An intent with a pre-built parameter DTO.
-    pub fn with_params(name: &'static str, params: IntentParams) -> Self {
-        Self { name, params }
+    /// An intent carrying a typed payload. The payload is stored
+    /// type-erased in an `Rc<dyn Any>`; recover it with
+    /// [`Intent::payload`].
+    pub fn with_payload<T: 'static>(name: &'static str, payload: T) -> Self {
+        Self {
+            name,
+            payload: Some(Rc::new(payload)),
+        }
     }
 
-    /// Shorthand for `Intent::with_params(name, IntentParams::with1(v))`.
-    pub fn with1(name: &'static str, p1: impl Into<ActionArg>) -> Self {
-        Self::with_params(name, IntentParams::with1(p1))
+    /// Borrow the payload as `&T`, or `None` if the intent has no
+    /// payload or the payload's concrete type doesn't match.
+    pub fn payload<T: 'static>(&self) -> Option<&T> {
+        let any: &dyn Any = &**self.payload.as_ref()?;
+        any.downcast_ref::<T>()
+    }
+
+    /// Whether this intent carries any payload (typed or not).
+    pub fn has_payload(&self) -> bool {
+        self.payload.is_some()
+    }
+}
+
+impl Clone for Intent {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name,
+            // Rc<dyn Any> is cheaply clonable — bumps the refcount.
+            payload: self.payload.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Intent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Intent")
+            .field("name", &self.name)
+            .field("has_payload", &self.payload.is_some())
+            .finish()
+    }
+}
+
+/// Typed DTO bridge between an app's intent enum and the runtime
+/// [`Intent`] dispatch type.
+///
+/// Apps that want compile-time guarantees — typo-safe intent
+/// construction, exhaustive matches on recognized intents, a single
+/// source of truth for intent names — define an enum and implement
+/// this trait (by hand or via `#[derive(IntentKind)]` from
+/// `fern-ui-macros`).
+///
+/// ```ignore
+/// #[derive(Debug, IntentKind)]
+/// enum AppIntent {
+///     #[name = "app.save"]        Save,
+///     #[name = "app.open"]        Open(PathBuf),
+///     #[name = "app.add_item"]    AddItem { id: i64, dto: CreateItemDto },
+/// }
+///
+/// // Send (typo-safe at the enum variant):
+/// ctx.send_intent(AppIntent::Save.into_intent());
+/// ctx.send_intent(AppIntent::Open(path).into_intent());
+///
+/// // Handle (exhaustive match, recovers the full variant):
+/// Action::new("app.open").on_invoke(|intent, ctx| {
+///     if let Some(AppIntent::Open(path)) = AppIntent::from_intent(intent) {
+///         open_file(path, ctx);
+///     }
+/// })
+/// ```
+///
+/// The variant itself — including any fields — is stored as the
+/// intent's payload, so any `Clone + 'static` variant works. Struct
+/// variants (`AddItem { .. }`), tuple variants (`Open(PathBuf)`),
+/// and unit variants (`Save`) are all supported without restriction.
+///
+/// `from_intent` returns a reference (`Option<&Self>`), so recovery
+/// does not require `Self: Clone`. Call `.cloned()` on the result if
+/// an owned variant is needed (the implicit `Clone` bound only
+/// applies to the payload's contents, not the enum type itself).
+pub trait IntentKind: Sized + 'static {
+    /// Consume the variant and build the runtime [`Intent`] it
+    /// corresponds to. The variant — and any data it carries — is
+    /// stored as the intent's type-erased payload.
+    fn into_intent(self) -> Intent;
+
+    /// Recognise a runtime intent as one of this enum's variants and
+    /// borrow its payload. Returns `None` for foreign intents (names
+    /// this enum doesn't cover) and for intents whose payload is
+    /// missing or of a different concrete type.
+    fn from_intent(intent: &Intent) -> Option<&Self>;
+}
+
+/// Blanket conversion from any [`IntentKind`] into a runtime [`Intent`].
+///
+/// Lets call sites drop the explicit `.into_intent()` hop where an
+/// `Into<Intent>` bound is available (for example,
+/// [`EventContext::send_intent`](crate::widget::EventContext::send_intent)
+/// and [`ShortcutBuilder::on_activate`](crate::shortcut::ShortcutBuilder::on_activate)).
+impl<K: IntentKind> From<K> for Intent {
+    fn from(kind: K) -> Self {
+        kind.into_intent()
     }
 }
 
@@ -197,41 +169,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn action_arg_accessors() {
-        assert_eq!(ActionArg::Bool(true).as_bool(), Some(true));
-        assert_eq!(ActionArg::Int(42).as_int(), Some(42));
-        assert_eq!(ActionArg::Float(1.5).as_float(), Some(1.5));
-        assert_eq!(ActionArg::Str("hi".into()).as_str(), Some("hi"));
-        assert!(ActionArg::None.is_none());
-        assert!(ActionArg::Bool(true).as_int().is_none());
+    fn intent_without_payload() {
+        let i = Intent::new("app.save");
+        assert_eq!(i.name, "app.save");
+        assert!(!i.has_payload());
+        assert_eq!(i.payload::<i32>(), None);
     }
 
     #[test]
-    fn action_arg_from_impls() {
-        let a: ActionArg = true.into();
-        assert_eq!(a, ActionArg::Bool(true));
-        let b: ActionArg = 7_i32.into();
-        assert_eq!(b, ActionArg::Int(7));
-        let c: ActionArg = 2.5_f64.into();
-        assert_eq!(c, ActionArg::Float(2.5));
-        let d: ActionArg = "hi".into();
-        assert_eq!(d, ActionArg::Str(Cow::Borrowed("hi")));
+    fn typed_payload_round_trip() {
+        let i = Intent::with_payload("app.scroll_by", 42_i64);
+        assert!(i.has_payload());
+        assert_eq!(i.payload::<i64>(), Some(&42_i64));
+        // Wrong type: None.
+        assert_eq!(i.payload::<String>(), None);
     }
 
     #[test]
-    fn intent_params_builders_fill_slots() {
-        let p = IntentParams::with2(3_i32, "name");
-        assert_eq!(p.p1, ActionArg::Int(3));
-        assert_eq!(p.p2, ActionArg::Str(Cow::Borrowed("name")));
-        assert_eq!(p.p3, ActionArg::None);
-        assert_eq!(p.p4, ActionArg::None);
-    }
-
-    #[test]
-    fn intent_shorthand() {
-        let i = Intent::with1("tab.switch", 3_i32);
-        assert_eq!(i.name, "tab.switch");
-        assert_eq!(i.params.p1, ActionArg::Int(3));
+    fn payload_carries_complex_types() {
+        #[derive(Debug, PartialEq)]
+        struct Dto {
+            id: i64,
+            name: String,
+        }
+        let i = Intent::with_payload(
+            "app.add_item",
+            Dto {
+                id: 7,
+                name: "Foo".into(),
+            },
+        );
+        assert_eq!(
+            i.payload::<Dto>(),
+            Some(&Dto {
+                id: 7,
+                name: "Foo".into(),
+            })
+        );
     }
 
     #[test]

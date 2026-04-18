@@ -511,47 +511,20 @@ impl WindowManager {
         windows_to_close
     }
 
-    /// Drain pending commands from all windows and route through the handler
-    /// with a window-aware `CommandContext`. Returns true if any commands were processed.
-    pub fn flush_commands_through(
-        &mut self,
-        handler: &mut Option<super::app::WindowCommandHandler>,
-    ) -> bool {
-        // Collect (fern_id, commands) pairs to avoid borrow issues
-        let mut all_cmds: Vec<(FernWindowId, Vec<fern_core::app_command::ErasedCommand>)> =
-            Vec::new();
+    /// Drain per-tree close-window requests raised by handlers via
+    /// [`EventContext::close_window`](fern_core::widget::EventContext::close_window).
+    /// Returns `true` when at least one window will be closed.
+    pub fn drain_close_window_requests(&mut self) -> bool {
+        let mut to_close: Vec<FernWindowId> = Vec::new();
         for managed in self.windows.values_mut() {
-            let cmds = managed.tree.drain_pending_commands();
-            if !cmds.is_empty() {
-                all_cmds.push((managed.fern_id, cmds));
+            if managed.tree.take_close_window_request() {
+                to_close.push(managed.fern_id);
             }
         }
-
-        let had_commands = !all_cmds.is_empty();
-
-        for (fern_id, cmds) in all_cmds {
-            if let Some(h) = handler.as_mut() {
-                let mut ctx =
-                    crate::command_context::CommandContext::new(fern_id, self.theme.clone());
-                for cmd in &cmds {
-                    h(cmd, &mut ctx);
-                }
-                // Apply deferred operations
-                if let Some(new_theme) = ctx.take_theme() {
-                    self.set_theme(new_theme);
-                }
-                if let Some(new_locale) = ctx.take_locale() {
-                    self.set_locale(new_locale);
-                }
-                for config in ctx.take_creates() {
-                    self.queue_create(config);
-                }
-                for close_id in ctx.take_closes() {
-                    self.queue_close(close_id);
-                }
-            }
+        let any = !to_close.is_empty();
+        for id in to_close {
+            self.queue_close(id);
         }
-
-        had_commands
+        any
     }
 }

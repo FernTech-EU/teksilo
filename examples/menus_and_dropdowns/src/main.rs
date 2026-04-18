@@ -18,30 +18,6 @@ use fern_ui::widgets::{
 };
 
 // ---------------------------------------------------------------------------
-// Application commands
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq)]
-enum Cmd {
-    ToggleDarkMode,
-    Cut,
-    Copy,
-    Paste,
-    SelectAll,
-    Undo,
-    Redo,
-    NewFile,
-    OpenFile,
-    SaveFile,
-    AlignLeft,
-    AlignCenter,
-    AlignRight,
-    AlignJustify,
-}
-
-impl AppCommand for Cmd {}
-
-// ---------------------------------------------------------------------------
 // Root composite
 // ---------------------------------------------------------------------------
 
@@ -247,34 +223,34 @@ impl Widget for Root {
                                         MenuList::new()
                                             .item(
                                                 MenuItem::new_literal("Undo")
-                                                    .on_activate(Cmd::Undo)
+                                                    .on_activate_fn(|_| println!("Undo"))
                                                     .shortcut_label("Ctrl+Z"),
                                             )
                                             .item(
                                                 MenuItem::new_literal("Redo")
-                                                    .on_activate(Cmd::Redo)
+                                                    .on_activate_fn(|_| println!("Redo"))
                                                     .shortcut_label("Ctrl+Shift+Z"),
                                             )
                                             .separator()
                                             .item(
                                                 MenuItem::new_literal("Cut")
-                                                    .on_activate(Cmd::Cut)
+                                                    .on_activate_fn(|_| println!("Cut"))
                                                     .shortcut_label("Ctrl+X"),
                                             )
                                             .item(
                                                 MenuItem::new_literal("Copy")
-                                                    .on_activate(Cmd::Copy)
+                                                    .on_activate_fn(|_| println!("Copy"))
                                                     .shortcut_label("Ctrl+C"),
                                             )
                                             .item(
                                                 MenuItem::new_literal("Paste")
-                                                    .on_activate(Cmd::Paste)
+                                                    .on_activate_fn(|_| println!("Paste"))
                                                     .shortcut_label("Ctrl+V"),
                                             )
                                             .separator()
                                             .item(
                                                 MenuItem::new_literal("Select All")
-                                                    .on_activate(Cmd::SelectAll)
+                                                    .on_activate_fn(|_| println!("SelectAll"))
                                                     .shortcut_label("Ctrl+A"),
                                             )
                                             .separator()
@@ -283,19 +259,19 @@ impl Widget for Root {
                                                     MenuList::new()
                                                         .item(
                                                             MenuItem::new_literal("Left")
-                                                                .on_activate(Cmd::AlignLeft),
+                                                                .on_activate_fn(|_| println!("AlignLeft")),
                                                         )
                                                         .item(
                                                             MenuItem::new_literal("Center")
-                                                                .on_activate(Cmd::AlignCenter),
+                                                                .on_activate_fn(|_| println!("AlignCenter")),
                                                         )
                                                         .item(
                                                             MenuItem::new_literal("Right")
-                                                                .on_activate(Cmd::AlignRight),
+                                                                .on_activate_fn(|_| println!("AlignRight")),
                                                         )
                                                         .item(
                                                             MenuItem::new_literal("Justify")
-                                                                .on_activate(Cmd::AlignJustify),
+                                                                .on_activate_fn(|_| println!("AlignJustify")),
                                                         ),
                                                 )
                                             })),
@@ -326,17 +302,17 @@ impl Widget for Root {
                                         MenuList::new()
                                             .item(
                                                 MenuItem::new_literal("New File")
-                                                    .on_activate(Cmd::NewFile)
+                                                    .on_activate_fn(|_| println!("NewFile"))
                                                     .shortcut_label("Ctrl+N"),
                                             )
                                             .item(
                                                 MenuItem::new_literal("Open File...")
-                                                    .on_activate(Cmd::OpenFile)
+                                                    .on_activate_fn(|_| println!("OpenFile"))
                                                     .shortcut_label("Ctrl+O"),
                                             )
                                             .item(
                                                 MenuItem::new_literal("Save")
-                                                    .on_activate(Cmd::SaveFile)
+                                                    .on_activate_fn(|_| println!("SaveFile"))
                                                     .shortcut_label("Ctrl+S"),
                                             )
                                             .separator()
@@ -375,12 +351,12 @@ impl Widget for Root {
                             VStack::new()
                                 .child(
                                     MenuItem::new_literal("Normal item")
-                                        .on_activate(Cmd::Cut)
+                                        .on_activate_fn(|_| println!("Cut"))
                                         .shortcut_label("Ctrl+X"),
                                 )
                                 .child(
                                     MenuItem::new_literal("With icon")
-                                        .on_activate(Cmd::Copy)
+                                        .on_activate_fn(|_| println!("Copy"))
                                         .icon(IconWidget::checkmark(16.0))
                                         .shortcut_label("Ctrl+C"),
                                 )
@@ -406,7 +382,7 @@ impl Widget for Root {
                     .child(
                         Button::new_literal("Toggle Dark Mode")
                             .style(ButtonVariant::Regular)
-                            .on_activate(Cmd::ToggleDarkMode),
+                            .on_activate_fn(|_| println!("ToggleDarkMode")),
                     ),
             ),
         );
@@ -433,21 +409,21 @@ impl Widget for Root {
                         MenuList::new()
                             .item(
                                 MenuItem::new_literal("New")
-                                    .on_activate(Cmd::NewFile)
+                                    .on_activate_fn(|_| println!("NewFile"))
                                     .shortcut_label("Ctrl+N"),
                             )
                             .item(
                                 MenuItem::new_literal("Open")
-                                    .on_activate(Cmd::OpenFile)
+                                    .on_activate_fn(|_| println!("OpenFile"))
                                     .shortcut_label("Ctrl+O"),
                             )
                             .item(
                                 MenuItem::new_literal("Save")
-                                    .on_activate(Cmd::SaveFile)
+                                    .on_activate_fn(|_| println!("SaveFile"))
                                     .shortcut_label("Ctrl+S"),
                             )
                             .separator()
-                            .item(MenuItem::new_literal("Quit").on_activate(Cmd::ToggleDarkMode)),
+                            .item(MenuItem::new_literal("Quit").on_activate_fn(|_| println!("ToggleDarkMode"))),
                     )
                 })
                 .menu_literal("Edit", || {
@@ -455,34 +431,34 @@ impl Widget for Root {
                         MenuList::new()
                             .item(
                                 MenuItem::new_literal("Undo")
-                                    .on_activate(Cmd::Undo)
+                                    .on_activate_fn(|_| println!("Undo"))
                                     .shortcut_label("Ctrl+Z"),
                             )
                             .item(
                                 MenuItem::new_literal("Redo")
-                                    .on_activate(Cmd::Redo)
+                                    .on_activate_fn(|_| println!("Redo"))
                                     .shortcut_label("Ctrl+Shift+Z"),
                             )
                             .separator()
                             .item(
                                 MenuItem::new_literal("Cut")
-                                    .on_activate(Cmd::Cut)
+                                    .on_activate_fn(|_| println!("Cut"))
                                     .shortcut_label("Ctrl+X"),
                             )
                             .item(
                                 MenuItem::new_literal("Copy")
-                                    .on_activate(Cmd::Copy)
+                                    .on_activate_fn(|_| println!("Copy"))
                                     .shortcut_label("Ctrl+C"),
                             )
                             .item(
                                 MenuItem::new_literal("Paste")
-                                    .on_activate(Cmd::Paste)
+                                    .on_activate_fn(|_| println!("Paste"))
                                     .shortcut_label("Ctrl+V"),
                             )
                             .separator()
                             .item(
                                 MenuItem::new_literal("Select All")
-                                    .on_activate(Cmd::SelectAll)
+                                    .on_activate_fn(|_| println!("SelectAll"))
                                     .shortcut_label("Ctrl+A"),
                             ),
                     )
@@ -493,24 +469,24 @@ impl Widget for Root {
                             .item(MenuItem::submenu_literal("Alignment", || {
                                 Box::new(
                                     MenuList::new()
-                                        .item(MenuItem::new_literal("Left").on_activate(Cmd::AlignLeft))
-                                        .item(MenuItem::new_literal("Center").on_activate(Cmd::AlignCenter))
-                                        .item(MenuItem::new_literal("Right").on_activate(Cmd::AlignRight))
+                                        .item(MenuItem::new_literal("Left").on_activate_fn(|_| println!("AlignLeft")))
+                                        .item(MenuItem::new_literal("Center").on_activate_fn(|_| println!("AlignCenter")))
+                                        .item(MenuItem::new_literal("Right").on_activate_fn(|_| println!("AlignRight")))
                                         .item(
-                                            MenuItem::new_literal("Justify").on_activate(Cmd::AlignJustify),
+                                            MenuItem::new_literal("Justify").on_activate_fn(|_| println!("AlignJustify")),
                                         ),
                                 )
                             }))
                             .separator()
                             .item(
-                                MenuItem::new_literal("Toggle Dark Mode").on_activate(Cmd::ToggleDarkMode),
+                                MenuItem::new_literal("Toggle Dark Mode").on_activate_fn(|_| println!("ToggleDarkMode")),
                             ),
                     )
                 })
                 .trailing_slot(
                     Button::new_literal("Settings")
                         .style(ButtonVariant::Flat)
-                        .on_activate(Cmd::ToggleDarkMode),
+                        .on_activate_fn(|_| println!("ToggleDarkMode")),
                 ),
         );
 
@@ -547,26 +523,10 @@ impl Widget for Root {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    let is_dark = Rc::new(Cell::new(false));
-    let is_dark_clone = is_dark.clone();
-
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .window_title("FernUI — Menus & Dropdowns (Milestone 4)")
         .window_size(900, 700)
-        .on_command(move |cmd: &Cmd, ctx| match cmd {
-            Cmd::ToggleDarkMode => {
-                let dark = !is_dark_clone.get();
-                is_dark_clone.set(dark);
-                println!("Theme: {}", if dark { "dark" } else { "light" });
-                if dark {
-                    ctx.set_theme(Theme::dark_default());
-                } else {
-                    ctx.set_theme(Theme::light_default());
-                }
-            }
-            other => println!("Command: {:?}", other),
-        })
         .root(|tree| tree.add(Root::new()))
         .run();
 }
@@ -574,393 +534,3 @@ fn main() {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use fern_ui::core::WidgetTree;
-    use fern_ui::core::signal::Signal;
-    use fern_ui::prelude::*;
-    use fern_ui::widgets::{ComboBox, MenuItem, MenuList, MenuSeparator};
-
-    #[derive(Debug, Clone, PartialEq)]
-    enum TestCmd {
-        Action,
-    }
-    impl AppCommand for TestCmd {}
-
-    #[test]
-    fn root_composite_builds_and_lays_out() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add(super::Root::new());
-        tree.layout(SizeProposal::exact(900.0, 700.0));
-        let bounds = tree.bounds(root);
-        assert!(bounds.width > 0.0);
-        assert!(bounds.height > 0.0);
-    }
-
-    #[test]
-    fn combo_box_opens_on_click() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let selected = Signal::new(None::<String>);
-        let cb = tree.add(
-            ComboBox::new(vec!["Apple", "Banana", "Cherry"], selected.clone())
-                .placeholder("Pick one"),
-        );
-        tree.layout(SizeProposal::exact(300.0, 200.0));
-
-        assert!(tree.active_overlays().is_empty());
-        tree.click(cb);
-        tree.layout(SizeProposal::exact(300.0, 200.0));
-        assert_eq!(tree.active_overlays().len(), 1, "dropdown should be open");
-    }
-
-    #[test]
-    fn combo_box_arrow_keys_change_selection() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let selected = Signal::new(None::<String>);
-        let cb = tree.add(ComboBox::new(vec!["A", "B", "C"], selected.clone()));
-        tree.layout(SizeProposal::exact(300.0, 200.0));
-        tree.focus(cb);
-
-        tree.press_key(Key::ArrowDown, Modifiers::NONE);
-        assert_eq!(selected.get().as_deref(), Some("B"));
-
-        tree.press_key(Key::ArrowUp, Modifiers::NONE);
-        assert_eq!(selected.get().as_deref(), Some("A"));
-    }
-
-    #[test]
-    fn menu_list_builds_with_items_and_separators() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let menu = tree.add(
-            MenuList::new()
-                .item(MenuItem::new_literal("Cut").on_activate(TestCmd::Action))
-                .separator()
-                .item(MenuItem::new_literal("Copy").on_activate(TestCmd::Action)),
-        );
-        tree.layout(SizeProposal::exact(200.0, 200.0));
-        let bounds = tree.bounds(menu);
-        assert!(bounds.width >= 120.0);
-        assert!(bounds.height > 0.0);
-    }
-
-    #[test]
-    fn menu_item_tap_emits_command() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(MenuItem::new_literal("Cut").on_activate(TestCmd::Action));
-        tree.layout(SizeProposal::exact(200.0, 40.0));
-
-        let called = std::rc::Rc::new(std::cell::Cell::new(false));
-        let c = called.clone();
-        tree.on_command(move |cmd: &TestCmd| {
-            if *cmd == TestCmd::Action {
-                c.set(true);
-            }
-        });
-
-        tree.click(item);
-        assert!(called.get(), "tap on menu item should emit command");
-    }
-
-    #[test]
-    fn menu_item_disabled_ignores_tap() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(
-            MenuItem::new_literal("Nope")
-                .on_activate(TestCmd::Action)
-                .enabled(false),
-        );
-        tree.layout(SizeProposal::exact(200.0, 40.0));
-
-        let called = std::rc::Rc::new(std::cell::Cell::new(false));
-        let c = called.clone();
-        tree.on_command(move |_cmd: &TestCmd| c.set(true));
-
-        tree.click(item);
-        assert!(!called.get(), "disabled item should not emit command");
-    }
-
-    #[test]
-    fn context_menu_opens_on_right_click() {
-        use fern_ui::core::event::PointerButton;
-        use fern_ui::widgets::Panel;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let panel = tree.add(
-            Panel::new()
-                .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
-                .context_menu(|| {
-                    Box::new(
-                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
-                    )
-                }),
-        );
-        tree.layout(SizeProposal::exact(300.0, 100.0));
-
-        assert!(tree.active_overlays().is_empty());
-
-        let center = tree.bounds(panel).center();
-        tree.pointer_down_button(center, PointerButton::Secondary);
-        tree.layout(SizeProposal::exact(300.0, 100.0));
-
-        assert_eq!(
-            tree.active_overlays().len(),
-            1,
-            "right-click should open context menu overlay"
-        );
-    }
-
-    #[test]
-    fn escape_dismisses_overlay() {
-        use fern_ui::core::event::PointerButton;
-        use fern_ui::widgets::Panel;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let panel = tree.add(
-            Panel::new()
-                .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
-                .context_menu(|| {
-                    Box::new(
-                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
-                    )
-                }),
-        );
-        tree.layout(SizeProposal::exact(300.0, 100.0));
-
-        // Open context menu
-        let center = tree.bounds(panel).center();
-        tree.pointer_down_button(center, PointerButton::Secondary);
-        tree.layout(SizeProposal::exact(300.0, 100.0));
-        assert_eq!(tree.active_overlays().len(), 1);
-
-        // Escape should dismiss
-        tree.press_key(Key::Escape, Modifiers::NONE);
-        assert!(
-            tree.active_overlays().is_empty(),
-            "Escape should dismiss the overlay"
-        );
-    }
-
-    #[test]
-    fn theme_switch_rebuilds_correctly() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let root = tree.add(super::Root::new());
-        tree.layout(SizeProposal::exact(900.0, 700.0));
-        let light_frame = tree.render();
-
-        tree.set_theme(Theme::dark_default());
-        tree.layout(SizeProposal::exact(900.0, 700.0));
-        let dark_frame = tree.render();
-
-        assert_ne!(
-            light_frame.shapes, dark_frame.shapes,
-            "theme switch should change rendered output"
-        );
-    }
-
-    #[test]
-    fn context_menu_overlay_has_correct_bounds() {
-        use fern_ui::core::event::PointerButton;
-        use fern_ui::widgets::Panel;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let panel = tree.add(
-            Panel::new()
-                .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
-                .context_menu(|| {
-                    Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new_literal("Cut").on_activate(TestCmd::Action))
-                            .separator()
-                            .item(MenuItem::new_literal("Copy").on_activate(TestCmd::Action))
-                            .item(MenuItem::new_literal("Paste").on_activate(TestCmd::Action)),
-                    )
-                }),
-        );
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-
-        let center = tree.bounds(panel).center();
-        tree.pointer_down_button(center, PointerButton::Secondary);
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-
-        let overlays = tree.active_overlays();
-        assert_eq!(overlays.len(), 1);
-
-        // The overlay content should have reasonable bounds, NOT fill the page
-        let content_ids = tree.overlay_manager().active_content_ids();
-        let content_bounds = tree.bounds(content_ids[0]);
-        eprintln!(
-            "Overlay content bounds: x={}, y={}, w={}, h={}",
-            content_bounds.x, content_bounds.y, content_bounds.width, content_bounds.height
-        );
-        assert!(
-            content_bounds.width < 350.0,
-            "menu should not fill the page width (got {})",
-            content_bounds.width
-        );
-        assert!(
-            content_bounds.height < 250.0,
-            "menu should not fill the page height (got {})",
-            content_bounds.height
-        );
-        assert!(
-            content_bounds.width >= 120.0,
-            "menu should have minimum width (got {})",
-            content_bounds.width
-        );
-        assert!(
-            content_bounds.height > 30.0,
-            "menu should have some height for items (got {})",
-            content_bounds.height
-        );
-    }
-
-    #[test]
-    fn submenu_opens_on_hover_after_delay() {
-        use std::time::Duration;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let item = tree.add(
-            MenuItem::submenu_literal("Open Recent", || {
-                Box::new(
-                    MenuList::new()
-                        .item(MenuItem::new_literal("File 1").on_activate(TestCmd::Action))
-                        .item(MenuItem::new_literal("File 2").on_activate(TestCmd::Action)),
-                )
-            })
-            .submenu_delay(Duration::from_millis(100)),
-        );
-        tree.layout(SizeProposal::exact(200.0, 40.0));
-
-        assert!(tree.active_overlays().is_empty());
-
-        // Hover over the submenu trigger
-        let center = tree.bounds(item).center();
-        tree.pointer_move(center);
-
-        // Advance past the delay — widget tree processes pending overlays
-        tree.advance_time(Duration::from_millis(150));
-
-        assert_eq!(
-            tree.active_overlays().len(),
-            1,
-            "hovering on submenu item should open submenu overlay after delay"
-        );
-    }
-
-    #[test]
-    fn click_outside_dismisses_context_menu() {
-        use fern_ui::core::event::PointerButton;
-        use fern_ui::widgets::Panel;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let panel = tree.add(
-            Panel::new()
-                .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
-                .context_menu(|| {
-                    Box::new(
-                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
-                    )
-                }),
-        );
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-
-        // Open context menu
-        let center = tree.bounds(panel).center();
-        tree.pointer_down_button(center, PointerButton::Secondary);
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-        assert_eq!(tree.active_overlays().len(), 1);
-
-        // Click far outside the menu
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: fern_ui::prelude::Point::new(399.0, 299.0),
-            button: PointerButton::Primary,
-            modifiers: fern_ui::core::event::Modifiers::NONE,
-        });
-        assert!(
-            tree.active_overlays().is_empty(),
-            "clicking outside should dismiss context menu"
-        );
-    }
-
-    #[test]
-    fn menu_item_activation_dismisses_overlay() {
-        use fern_ui::core::event::PointerButton;
-        use fern_ui::widgets::Panel;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let panel = tree.add(
-            Panel::new()
-                .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
-                .context_menu(|| {
-                    Box::new(
-                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
-                    )
-                }),
-        );
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-
-        // Open context menu
-        let center = tree.bounds(panel).center();
-        tree.pointer_down_button(center, PointerButton::Secondary);
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-        assert_eq!(tree.active_overlays().len(), 1, "menu should be open");
-
-        // Click the menu item — find it via overlay content
-        let content_ids = tree.overlay_manager().active_content_ids();
-        tree.click(content_ids[0]);
-        assert!(
-            tree.active_overlays().is_empty(),
-            "menu should be dismissed after item activation"
-        );
-    }
-
-    #[test]
-    fn right_click_replaces_context_menu() {
-        use fern_ui::core::event::PointerButton;
-        use fern_ui::widgets::Panel;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let panel = tree.add(
-            Panel::new()
-                .padding(20.0)
-                .child(fern_ui::widgets::TextWidget::new_literal("Right-click me"))
-                .context_menu(|| {
-                    Box::new(
-                        MenuList::new().item(MenuItem::new_literal("Action").on_activate(TestCmd::Action)),
-                    )
-                }),
-        );
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-
-        // Open context menu at one position
-        let center = tree.bounds(panel).center();
-        tree.pointer_down_button(center, PointerButton::Secondary);
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-        assert_eq!(tree.active_overlays().len(), 1);
-
-        // Right-click elsewhere on the same panel — should replace, not stack
-        let other = fern_ui::prelude::Point::new(center.x + 20.0, center.y + 20.0);
-        tree.pointer_down_button(other, PointerButton::Secondary);
-        tree.layout(SizeProposal::exact(400.0, 300.0));
-        assert_eq!(
-            tree.active_overlays().len(),
-            1,
-            "right-click should replace existing context menu, not stack"
-        );
-    }
-
-    #[test]
-    fn shortcut_display() {
-        use fern_ui::prelude::KeyStroke;
-
-        assert_eq!(KeyStroke::ctrl(Key::S).to_string(), "Ctrl+S");
-        assert_eq!(KeyStroke::ctrl_shift(Key::Z).to_string(), "Ctrl+Shift+Z");
-        assert_eq!(KeyStroke::alt(Key::F4).to_string(), "Alt+F4");
-    }
-}

@@ -18,8 +18,10 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
+use syn::{parse_macro_input, DeriveInput};
 
 mod diag;
+mod intent_kind;
 mod ir;
 mod lower;
 mod parse;
@@ -55,6 +57,23 @@ pub(crate) fn fern_core_root() -> TokenStream2 {
 pub fn fern(input: TokenStream) -> TokenStream {
     match parse::parse_root(input.into()) {
         Ok(root) => lower::lower_root(&root).into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// `#[derive(IntentKind)]` — generate a typed DTO bridge between an
+/// app's intent enum and the runtime `Intent` dispatch type.
+///
+/// Each variant must carry a `#[name = "..."]` attribute; the string
+/// is used as the runtime intent name. Unit variants are encoded as
+/// parameter-less intents; tuple variants up to 4 fields encode into
+/// `IntentParams::p1..p4` (primitives only — see the docs on the
+/// `IntentKind` trait in `fern-core::intent`).
+#[proc_macro_derive(IntentKind, attributes(name))]
+pub fn derive_intent_kind(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match intent_kind::derive_intent_kind(input) {
+        Ok(ts) => ts.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }

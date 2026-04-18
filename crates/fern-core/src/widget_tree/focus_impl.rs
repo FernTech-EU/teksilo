@@ -27,7 +27,6 @@ impl WidgetTree {
         self.a11y_dirty = true;
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin });
         self.scroll_focused_into_view(id);
-        self.flush_commands();
     }
 
     /// After setting focus, ensure the focused widget is visible inside

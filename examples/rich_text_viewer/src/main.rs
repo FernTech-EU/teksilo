@@ -12,10 +12,6 @@ use fern_ui::prelude::*;
 use fern_ui::text_document::TextDocument;
 use fern_ui::widgets::rich_text::RichTextEditor;
 
-#[derive(Debug, Clone, PartialEq)]
-enum DemoCmd {}
-impl AppCommand for DemoCmd {}
-
 const SAMPLE: &str = r#"# FernUI Rich Text Viewer
 
 This window holds a single `RichTextEditor::read_only` bound to a
@@ -81,7 +77,6 @@ fn main() {
         .theme(Theme::light_default())
         .window_title("FernUI — Rich Text Viewer")
         .window_size(720, 540)
-        .on_command(|_: &DemoCmd, _| {})
         .root(move |tree| tree.add(RichTextEditor::read_only(doc.clone())))
         .run();
 }

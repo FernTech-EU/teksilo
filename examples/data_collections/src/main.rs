@@ -23,17 +23,6 @@ use fern_ui::widgets::{
 };
 
 // ---------------------------------------------------------------------------
-// Commands — used by the "Remove Tag" button (typed command path)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq)]
-enum Cmd {
-    RemoveTag,
-}
-
-impl AppCommand for Cmd {}
-
-// ---------------------------------------------------------------------------
 // Root widget
 // ---------------------------------------------------------------------------
 
@@ -74,6 +63,7 @@ impl Root {
     fn build_repeater_tab(&self, theme: &Theme) -> impl Widget + 'static {
         let tags = self.tags.clone();
         let tags_add = self.tags.clone();
+        let tags_remove = self.tags.clone();
         let counter = self.tag_counter.clone();
 
         VStack::new().spacing(16.0).child(
@@ -105,11 +95,16 @@ impl Root {
                                         tags_add.push(format!("Tag {}", n));
                                     }),
                             )
-                            .child(
+                            .child({
+                                let tags = tags_remove.clone();
                                 Button::new_literal("- Remove Last")
                                     .style(ButtonVariant::Regular)
-                                    .on_activate(Cmd::RemoveTag),
-                            ),
+                                    .on_activate_fn(move |_ctx| {
+                                        if !tags.is_empty() {
+                                            tags.remove(tags.len() - 1);
+                                        }
+                                    })
+                            }),
                     )
                     .child(
                         Repeater::new(tags, move |i, tag| {
@@ -413,20 +408,10 @@ fn main() {
     tree_model.insert_child(pics, 1, "Screenshots".into());
     tree_model.insert_root(2, "Downloads".into());
 
-    // Clone for the typed-command handler (Repeater "Remove" button)
-    let tags_cmd = tags.clone();
-
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .window_title("Data Collections — Milestone 6")
         .window_size(960, 680)
-        .on_command(move |cmd: &Cmd, _ctx| match cmd {
-            Cmd::RemoveTag => {
-                if !tags_cmd.is_empty() {
-                    tags_cmd.remove(tags_cmd.len() - 1);
-                }
-            }
-        })
         .root(move |tree| {
             tree.add(Root::new(
                 tags.clone(),

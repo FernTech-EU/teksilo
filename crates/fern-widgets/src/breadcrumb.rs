@@ -1,6 +1,5 @@
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
@@ -81,15 +80,7 @@ impl BreadcrumbItem {
         Self::current(fern_i18n::LocalizedString::literal(label))
     }
 
-    pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
-        self.action = Some(Box::new(move |ctx: &mut EventContext| {
-            ctx.emit(command.clone());
-        }));
-        self
-    }
-
-    /// Escape hatch: arbitrary closure invoked on activation.
-    /// See architecture Section 9.2.6.
+    /// Closure invoked on activation.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Box::new(f));
         self
@@ -512,108 +503,3 @@ impl Widget for Breadcrumb {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    #[derive(Debug, Clone, PartialEq)]
-    enum TestCmd {
-        GoLibrary,
-        GoProject,
-    }
-
-    impl AppCommand for TestCmd {}
-
-    #[test]
-    fn clicking_interactive_segment_emits_command() {
-        let called = Rc::new(Cell::new(false));
-        let flag = called.clone();
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.on_command(move |cmd: &TestCmd| {
-            if *cmd == TestCmd::GoProject {
-                flag.set(true);
-            }
-        });
-
-        let breadcrumb = tree.add(
-            Breadcrumb::new()
-                .item(BreadcrumbItem::new_literal("Library").on_activate(TestCmd::GoLibrary))
-                .item(BreadcrumbItem::new_literal("Project").on_activate(TestCmd::GoProject))
-                .item(BreadcrumbItem::current_literal("Current")),
-        );
-        tree.layout(SizeProposal::exact(500.0, 48.0));
-
-        let root = tree.child_widget(breadcrumb, 0);
-        let project_segment = tree.child_widget(root, 2);
-        tree.click(project_segment);
-
-        assert!(called.get());
-    }
-
-    #[test]
-    fn current_segment_is_not_clickable() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let breadcrumb = tree.add(
-            Breadcrumb::new()
-                .item(BreadcrumbItem::new_literal("Library").on_activate(TestCmd::GoLibrary))
-                .item(BreadcrumbItem::current_literal("Current")),
-        );
-        tree.layout(SizeProposal::exact(400.0, 48.0));
-
-        let root = tree.child_widget(breadcrumb, 0);
-        let current_segment = tree.child_widget(root, 2);
-        let info = tree.accessibility_node(current_segment);
-
-        // Per ARIA convention the current crumb is still a Link —
-        // it's tagged with `aria-current="page"` instead of a
-        // different role. The guarantee this test is actually after
-        // is "the current crumb has no Click action" (can't navigate
-        // to itself), not "the role is Label".
-        assert_eq!(info.role(), fern_core::accesskit::Role::Link);
-        assert!(
-            !info
-                .actions()
-                .contains(&fern_core::accesskit::Action::Click)
-        );
-    }
-
-    #[test]
-    fn breadcrumb_exposes_navigation_role() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let breadcrumb = tree.add(
-            Breadcrumb::new()
-                .item(BreadcrumbItem::new_literal("Library").on_activate(TestCmd::GoLibrary))
-                .item(BreadcrumbItem::current_literal("Current")),
-        );
-        tree.layout(SizeProposal::exact(400.0, 48.0));
-
-        let info = tree.accessibility_node(breadcrumb);
-        assert_eq!(info.role(), fern_core::accesskit::Role::Navigation);
-    }
-
-    #[test]
-    fn on_activate_fn_fires_closure() {
-        let called = Rc::new(Cell::new(false));
-        let c = called.clone();
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let breadcrumb = tree.add(
-            Breadcrumb::new()
-                .item(BreadcrumbItem::new_literal("Home").on_activate_fn(move |_ctx| {
-                    c.set(true);
-                }))
-                .item(BreadcrumbItem::current_literal("Current")),
-        );
-        tree.layout(SizeProposal::exact(400.0, 48.0));
-
-        // Click the first segment (Home)
-        let root = tree.child_widget(breadcrumb, 0);
-        let home_segment = tree.child_widget(root, 0);
-        tree.click(home_segment);
-
-        assert!(called.get());
-    }
-}

@@ -33,7 +33,6 @@ use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
@@ -160,13 +159,6 @@ impl TextInput {
     /// Typically a `BuiltInButton` or `IconWidget`.
     pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.trailing_slot = Some(Box::new(widget));
-        self
-    }
-
-    pub fn on_submit<C: AppCommand>(mut self, command: C) -> Self {
-        self.on_submit = Some(Box::new(move |ctx: &mut EventContext| {
-            ctx.emit(command.clone());
-        }));
         self
     }
 

@@ -52,24 +52,6 @@ use fern_ui::widgets::tooltip::TooltipContent;
 // Application commands
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq)]
-enum Cmd {
-    ToggleDarkMode,
-    LinkClicked,
-    Cut,
-    Copy,
-    Paste,
-    Save,
-    SaveAs,
-    Cancel,
-    LearnMore,
-    Run,
-    RunTests,
-    RunCoverage,
-    Debug,
-}
-
-impl AppCommand for Cmd {}
 
 // ---------------------------------------------------------------------------
 // Shared signal bundle
@@ -297,7 +279,7 @@ impl Widget for WidgetCatalog {
                     .child(
                         Button::new_literal("Toggle Dark Mode")
                             .style(ButtonVariant::Regular)
-                            .on_activate(Cmd::ToggleDarkMode),
+                            .on_activate_fn(|_| println!("ToggleDarkMode")),
                     ),
             ),
         );
@@ -405,7 +387,7 @@ impl Widget for WidgetCatalog {
                         Spacer { }
                         Button::new_literal("Toggle Dark Mode") {
                             style: ButtonVariant::Regular
-                            on_activate: Cmd::ToggleDarkMode
+                            on_activate_fn: |_| println!("ToggleDarkMode")
                         }
                     }
                 }
@@ -780,17 +762,17 @@ impl WidgetCatalog {
                 .child(
                     Button::new_literal("Save")
                         .style(ButtonVariant::Default)
-                        .on_activate(Cmd::Save),
+                        .on_activate_fn(|_| println!("Save")),
                 )
                 .child(
                     Button::new_literal("Cancel")
                         .style(ButtonVariant::Regular)
-                        .on_activate(Cmd::Cancel),
+                        .on_activate_fn(|_| println!("Cancel")),
                 )
                 .child(
                     Button::new_literal("Learn more")
                         .style(ButtonVariant::Flat)
-                        .on_activate(Cmd::LearnMore),
+                        .on_activate_fn(|_| println!("LearnMore")),
                 ),
         );
         let buttons_row_disabled = ctx.add(
@@ -824,37 +806,37 @@ impl WidgetCatalog {
                     Button::new_literal("Save")
                         .icon(IconWidget::from_svg_icon(save_icon), IconLocation::Leading)
                         .style(ButtonVariant::Default)
-                        .on_activate(Cmd::Save),
+                        .on_activate_fn(|_| println!("Save")),
                 )
                 .child(
                     Button::new_literal("Home")
                         .icon(IconWidget::from_svg_icon(home_icon), IconLocation::Leading)
                         .style(ButtonVariant::Regular)
-                        .on_activate(Cmd::Cancel),
+                        .on_activate_fn(|_| println!("Cancel")),
                 )
                 .child(
                     Button::new_literal("Star")
                         .icon(IconWidget::from_raster(star_icon, 24.0), IconLocation::Leading)
                         .style(ButtonVariant::Regular)
-                        .on_activate(Cmd::Save),
+                        .on_activate_fn(|_| println!("Save")),
                 )
                 .child(
                     Button::new_literal("Clock")
                         .icon(IconWidget::from_raster(clock_icon, 24.0), IconLocation::Leading)
                         .style(ButtonVariant::Regular)
-                        .on_activate(Cmd::Cancel),
+                        .on_activate_fn(|_| println!("Cancel")),
                 )
                 .child(
                     Button::new_literal("Save")
                         .icon(IconWidget::from_svg_icon(save_icon), IconLocation::IconOnly)
                         .style(ButtonVariant::Flat)
-                        .on_activate(Cmd::Save),
+                        .on_activate_fn(|_| println!("Save")),
                 )
                 .child(
                     Button::new_literal("")
                         .icon(IconWidget::chevron_down(16.0), IconLocation::IconOnly)
                         .style(ButtonVariant::Regular)
-                        .on_activate(Cmd::Cancel),
+                        .on_activate_fn(|_| println!("Cancel")),
                 ),
         );
 
@@ -865,23 +847,23 @@ impl WidgetCatalog {
                     SplitButton::new()
                         .item(
                             MenuItem::new_literal("Run")
-                                .on_activate(Cmd::Run)
+                                .on_activate_fn(|_| println!("Run"))
                                 .tooltip_literal("Run the current configuration"),
                         )
                         .item(
                             MenuItem::new_literal("Run Tests")
-                                .on_activate(Cmd::RunTests)
+                                .on_activate_fn(|_| println!("RunTests"))
                                 .tooltip_literal("Run the test suite"),
                         )
                         .item(
                             MenuItem::new_literal("Run with Coverage")
-                                .on_activate(Cmd::RunCoverage)
+                                .on_activate_fn(|_| println!("RunCoverage"))
                                 .tooltip_literal("Run and collect code coverage"),
                         )
                         .separator()
                         .item(
                             MenuItem::new_literal("Debug")
-                                .on_activate(Cmd::Debug)
+                                .on_activate_fn(|_| println!("Debug"))
                                 .tooltip_literal("Launch the debugger"),
                         )
                         .tooltip_literal("Run the selected configuration")
@@ -892,12 +874,12 @@ impl WidgetCatalog {
                     SplitButton::new_static()
                         .item(
                             MenuItem::new_literal("Save")
-                                .on_activate(Cmd::Save)
+                                .on_activate_fn(|_| println!("Save"))
                                 .tooltip_literal("Save the current file"),
                         )
                         .item(
                             MenuItem::new_literal("Save As…")
-                                .on_activate(Cmd::Save)
+                                .on_activate_fn(|_| println!("Save"))
                                 .tooltip_literal("Save the current file under a new name"),
                         )
                         .tooltip_literal("Save (main action stays pinned)")
@@ -905,8 +887,8 @@ impl WidgetCatalog {
                 )
                 .child(
                     SplitButton::new()
-                        .item(MenuItem::new_literal("Run").on_activate(Cmd::Run))
-                        .item(MenuItem::new_literal("Debug").on_activate(Cmd::Debug))
+                        .item(MenuItem::new_literal("Run").on_activate_fn(|_| println!("Run")))
+                        .item(MenuItem::new_literal("Debug").on_activate_fn(|_| println!("Debug")))
                         .enabled(false),
                 ),
         );
@@ -1459,7 +1441,7 @@ impl WidgetCatalog {
                 .trailing_slot(
                     Button::new_literal("More")
                         .style(ButtonVariant::Flat)
-                        .on_activate(Cmd::LinkClicked),
+                        .on_activate_fn(|_| println!("LinkClicked")),
                 ),
         );
         let tabs_block = ctx.add(
@@ -1492,7 +1474,7 @@ impl WidgetCatalog {
                         .spacing(16.0)
                         .child(
                             Link::new_literal("Click me")
-                                .on_activate(Cmd::LinkClicked)
+                                .on_activate_fn(|_| println!("LinkClicked"))
                                 .tooltip_literal("Fires the LinkClicked command"),
                         )
                         .child(
@@ -1588,17 +1570,17 @@ impl WidgetCatalog {
                                 MenuList::new()
                                     .item(
                                         MenuItem::new_literal("Cut")
-                                            .on_activate(Cmd::Cut)
+                                            .on_activate_fn(|_| println!("Cut"))
                                             .shortcut_label("Ctrl+X"),
                                     )
                                     .item(
                                         MenuItem::new_literal("Copy")
-                                            .on_activate(Cmd::Copy)
+                                            .on_activate_fn(|_| println!("Copy"))
                                             .shortcut_label("Ctrl+C"),
                                     )
                                     .item(
                                         MenuItem::new_literal("Paste")
-                                            .on_activate(Cmd::Paste)
+                                            .on_activate_fn(|_| println!("Paste"))
                                             .shortcut_label("Ctrl+V"),
                                     )
                                     .separator()
@@ -1660,12 +1642,12 @@ impl WidgetCatalog {
                 .child(
                     HStack::new()
                         .spacing(4.0)
-                        .child(BuiltInButton::browse().on_activate(Cmd::Save))
-                        .child(BuiltInButton::expand().on_activate(Cmd::Save))
-                        .child(BuiltInButton::search().on_activate(Cmd::Save))
-                        .child(BuiltInButton::copy().on_activate(Cmd::Copy))
-                        .child(BuiltInButton::clear().on_activate(Cmd::Save))
-                        .child(BuiltInButton::add().on_activate(Cmd::Save)),
+                        .child(BuiltInButton::browse().on_activate_fn(|_| println!("Save")))
+                        .child(BuiltInButton::expand().on_activate_fn(|_| println!("Save")))
+                        .child(BuiltInButton::search().on_activate_fn(|_| println!("Save")))
+                        .child(BuiltInButton::copy().on_activate_fn(|_| println!("Copy")))
+                        .child(BuiltInButton::clear().on_activate_fn(|_| println!("Save")))
+                        .child(BuiltInButton::add().on_activate_fn(|_| println!("Save"))),
                 )
                 .child(
                     TextWidget::new_literal("Visibility toggle")
@@ -1694,13 +1676,13 @@ impl WidgetCatalog {
                         .child(
                             BuiltInButton::search()
                                 .size(BuiltInButtonSize::Compact)
-                                .on_activate(Cmd::Save),
+                                .on_activate_fn(|_| println!("Save")),
                         )
-                        .child(BuiltInButton::search().on_activate(Cmd::Save))
+                        .child(BuiltInButton::search().on_activate_fn(|_| println!("Save")))
                         .child(
                             BuiltInButton::search()
                                 .size(BuiltInButtonSize::Large)
-                                .on_activate(Cmd::Save),
+                                .on_activate_fn(|_| println!("Save")),
                         ),
                 )
                 .child(
@@ -1722,7 +1704,7 @@ impl WidgetCatalog {
                 .child(
                     BuiltInButton::new(IconWidget::checkmark(16.0))
                         .tooltip_literal("Custom checkmark")
-                        .on_activate(Cmd::Save),
+                        .on_activate_fn(|_| println!("Save")),
                 ),
         )
     }
@@ -1757,7 +1739,7 @@ impl WidgetCatalog {
                         .placeholder("Username")
                         .label("Username")
                         .trailing_slot(
-                            BuiltInButton::browse().on_activate(Cmd::Save),
+                            BuiltInButton::browse().on_activate_fn(|_| println!("Save")),
                         ),
                 )
                 .child(
@@ -2069,15 +2051,15 @@ impl WidgetCatalog {
                         spacing: 8.0
                         Button::new_literal("Save") {
                             style: ButtonVariant::Default
-                            on_activate: Cmd::Save
+                            on_activate_fn: |_| println!("Save")
                         }
                         Button::new_literal("Cancel") {
                             style: ButtonVariant::Regular
-                            on_activate: Cmd::Cancel
+                            on_activate_fn: |_| println!("Cancel")
                         }
                         Button::new_literal("Learn more") {
                             style: ButtonVariant::Flat
-                            on_activate: Cmd::LearnMore
+                            on_activate_fn: |_| println!("LearnMore")
                         }
                     }
                     HStack {
@@ -2101,32 +2083,32 @@ impl WidgetCatalog {
                         Button::new_literal("Save") {
                             icon: IconWidget::from_svg_icon(save_icon), IconLocation::Leading
                             style: ButtonVariant::Default
-                            on_activate: Cmd::Save
+                            on_activate_fn: |_| println!("Save")
                         }
                         Button::new_literal("Home") {
                             icon: IconWidget::from_svg_icon(home_icon), IconLocation::Leading
                             style: ButtonVariant::Regular
-                            on_activate: Cmd::Cancel
+                            on_activate_fn: |_| println!("Cancel")
                         }
                         Button::new_literal("Star") {
                             icon: IconWidget::from_raster(star_icon, 24.0), IconLocation::Leading
                             style: ButtonVariant::Regular
-                            on_activate: Cmd::Save
+                            on_activate_fn: |_| println!("Save")
                         }
                         Button::new_literal("Clock") {
                             icon: IconWidget::from_raster(clock_icon, 24.0), IconLocation::Leading
                             style: ButtonVariant::Regular
-                            on_activate: Cmd::Cancel
+                            on_activate_fn: |_| println!("Cancel")
                         }
                         Button::new_literal("Save") {
                             icon: IconWidget::from_svg_icon(save_icon), IconLocation::IconOnly
                             style: ButtonVariant::Flat
-                            on_activate: Cmd::Save
+                            on_activate_fn: |_| println!("Save")
                         }
                         Button::new_literal("") {
                             icon: IconWidget::chevron_down(16.0), IconLocation::IconOnly
                             style: ButtonVariant::Regular
-                            on_activate: Cmd::Cancel
+                            on_activate_fn: |_| println!("Cancel")
                         }
                     }
                     GroupHeader::new_literal("Split buttons")
@@ -2134,20 +2116,20 @@ impl WidgetCatalog {
                         spacing: 8.0
                         SplitButton {
                             item: MenuItem::new_literal("Run") {
-                                on_activate: Cmd::Run
+                                on_activate_fn: |_| println!("Run")
                                 tooltip_literal: "Run the current configuration"
                             }
                             item: MenuItem::new_literal("Run Tests") {
-                                on_activate: Cmd::RunTests
+                                on_activate_fn: |_| println!("RunTests")
                                 tooltip_literal: "Run the test suite"
                             }
                             item: MenuItem::new_literal("Run with Coverage") {
-                                on_activate: Cmd::RunCoverage
+                                on_activate_fn: |_| println!("RunCoverage")
                                 tooltip_literal: "Run and collect code coverage"
                             }
                             separator
                             item: MenuItem::new_literal("Debug") {
-                                on_activate: Cmd::Debug
+                                on_activate_fn: |_| println!("Debug")
                                 tooltip_literal: "Launch the debugger"
                             }
                             tooltip_literal: "Run the selected configuration"
@@ -2156,19 +2138,19 @@ impl WidgetCatalog {
                         }
                         SplitButton::new_static() {
                             item: MenuItem::new_literal("Save") {
-                                on_activate: Cmd::Save
+                                on_activate_fn: |_| println!("Save")
                                 tooltip_literal: "Save the current file"
                             }
                             item: MenuItem::new_literal("Save As…") {
-                                on_activate: Cmd::SaveAs
+                                on_activate_fn: |_| println!("SaveAs")
                                 tooltip_literal: "Save the current file under a new name"
                             } 
                             tooltip_literal: "Save (main action stays pinned)"
                             style: ButtonVariant::Regular
                         }
                         SplitButton {
-                            item: MenuItem::new_literal("Run") { on_activate: Cmd::Run }
-                            item: MenuItem::new_literal("Debug") { on_activate: Cmd::Debug }
+                            item: MenuItem::new_literal("Run") { on_activate_fn: |_| println!("Run") }
+                            item: MenuItem::new_literal("Debug") { on_activate_fn: |_| println!("Debug") }
                             enabled: false
                         }
                     }
@@ -2637,7 +2619,7 @@ impl WidgetCatalog {
                         }
                         trailing_slot: Button::new_literal("More") {
                             style: ButtonVariant::Flat
-                            on_activate: Cmd::LinkClicked
+                            on_activate_fn: |_| println!("LinkClicked")
                         }
                     }
                 }
@@ -2648,7 +2630,7 @@ impl WidgetCatalog {
                 HStack {
                     spacing: 16.0
                     Link::new_literal("Click me") {
-                        on_activate: Cmd::LinkClicked
+                        on_activate_fn: |_| println!("LinkClicked")
                         tooltip_literal: "Fires the LinkClicked command"
                     }
                     Link::new_literal("FernUI Documentation") {
@@ -2721,9 +2703,9 @@ impl WidgetCatalog {
                     padding: 16.0
                     context_menu: || Box::new(
                         MenuList::new()
-                            .item(MenuItem::new_literal("Cut").on_activate(Cmd::Cut).shortcut_label("Ctrl+X"))
-                            .item(MenuItem::new_literal("Copy").on_activate(Cmd::Copy).shortcut_label("Ctrl+C"))
-                            .item(MenuItem::new_literal("Paste").on_activate(Cmd::Paste).shortcut_label("Ctrl+V"))
+                            .item(MenuItem::new_literal("Cut").on_activate_fn(|_| println!("Cut")).shortcut_label("Ctrl+X"))
+                            .item(MenuItem::new_literal("Copy").on_activate_fn(|_| println!("Copy")).shortcut_label("Ctrl+C"))
+                            .item(MenuItem::new_literal("Paste").on_activate_fn(|_| println!("Paste")).shortcut_label("Ctrl+V"))
                             .separator()
                             .item(MenuItem::new_literal("Disabled item").enabled(false))
                     )
@@ -2782,12 +2764,12 @@ impl WidgetCatalog {
                 }
                 HStack {
                     spacing: 4.0
-                    BuiltInButton::browse() { on_activate: Cmd::Save }
-                    BuiltInButton::expand() { on_activate: Cmd::Save }
-                    BuiltInButton::search() { on_activate: Cmd::Save }
-                    BuiltInButton::copy()   { on_activate: Cmd::Copy }
-                    BuiltInButton::clear()  { on_activate: Cmd::Save }
-                    BuiltInButton::add()    { on_activate: Cmd::Save }
+                    BuiltInButton::browse() { on_activate_fn: |_| println!("Save") }
+                    BuiltInButton::expand() { on_activate_fn: |_| println!("Save") }
+                    BuiltInButton::search() { on_activate_fn: |_| println!("Save") }
+                    BuiltInButton::copy()   { on_activate_fn: |_| println!("Copy") }
+                    BuiltInButton::clear()  { on_activate_fn: |_| println!("Save") }
+                    BuiltInButton::add()    { on_activate_fn: |_| println!("Save") }
                 }
                 TextWidget::new_literal("Visibility toggle") {
                     style: t.small.clone()
@@ -2810,12 +2792,12 @@ impl WidgetCatalog {
                     spacing: 8.0
                     BuiltInButton::search() {
                         size: BuiltInButtonSize::Compact
-                        on_activate: Cmd::Save
+                        on_activate_fn: |_| println!("Save")
                     }
-                    BuiltInButton::search() { on_activate: Cmd::Save }
+                    BuiltInButton::search() { on_activate_fn: |_| println!("Save") }
                     BuiltInButton::search() {
                         size: BuiltInButtonSize::Large
-                        on_activate: Cmd::Save
+                        on_activate_fn: |_| println!("Save")
                     }
                 }
                 TextWidget::new_literal("Disabled") {
@@ -2833,7 +2815,7 @@ impl WidgetCatalog {
                 }
                 BuiltInButton(IconWidget::checkmark(16.0)) {
                     tooltip_literal: "Custom checkmark"
-                    on_activate: Cmd::Save
+                    on_activate_fn: |_| println!("Save")
                 }
             }
         )
@@ -2862,7 +2844,7 @@ impl WidgetCatalog {
                 TextInput(sigs.username_text.clone()) {
                     placeholder: "Username"
                     label: "Username"
-                    trailing_slot: BuiltInButton::browse() { on_activate: Cmd::Save }
+                    trailing_slot: BuiltInButton::browse() { on_activate_fn: |_| println!("Save") }
                 }
                 TextInput(sigs.readonly_text.clone()) {
                     read_only: true
@@ -2935,31 +2917,6 @@ fn main() {
             ))
             .with_shortcut_label("F9"),
         ])
-        .on_command(move |cmd: &Cmd, ctx| match cmd {
-            Cmd::ToggleDarkMode => {
-                let dark = !is_dark_clone.get();
-                is_dark_clone.set(dark);
-                if dark {
-                    ctx.set_theme(Theme::dark_default());
-                } else {
-                    ctx.set_theme(Theme::light_default());
-                }
-            }
-            Cmd::LinkClicked => {
-                println!("Link clicked!");
-            }
-            Cmd::Cut => println!("Cut"),
-            Cmd::Copy => println!("Copy"),
-            Cmd::Paste => println!("Paste"),
-            Cmd::Save => println!("Save"),
-            Cmd::SaveAs => println!("Save As"),
-            Cmd::Cancel => println!("Cancel"),
-            Cmd::LearnMore => println!("Learn more"),
-            Cmd::Run => println!("Run"),
-            Cmd::RunTests => println!("Run Tests"),
-            Cmd::RunCoverage => println!("Run with Coverage"),
-            Cmd::Debug => println!("Debug"),
-        })
         .root(|tree| tree.add(WidgetCatalog::new()))
         .run();
 }

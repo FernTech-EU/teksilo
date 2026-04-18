@@ -9,24 +9,17 @@ use fern_ui::widgets::{
     TabWidget, TextWidget, VStack,
 };
 
-#[derive(Debug, Clone, PartialEq)]
-enum Cmd {
-    ToggleTheme,
-    OpenLibrary,
-    OpenComponents,
-}
-
-impl AppCommand for Cmd {}
-
 #[derive(Debug)]
 struct Root {
     root_child_id: Option<WidgetId>,
+    is_dark: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 impl Root {
     fn new() -> Self {
         Self {
             root_child_id: None,
+            is_dark: std::rc::Rc::new(std::cell::Cell::new(false)),
         }
     }
 }
@@ -48,11 +41,20 @@ impl Widget for Root {
                     .bind_text(selected_label)
                     .style(theme.typography.small.clone()),
             )
-            .child(
+            .child({
+                let is_dark = self.is_dark.clone();
                 Button::new_literal("Toggle Theme")
                     .style(ButtonVariant::Flat)
-                    .on_activate(Cmd::ToggleTheme),
-            );
+                    .on_activate_fn(move |ctx: &mut EventContext| {
+                        let next_dark = !is_dark.get();
+                        is_dark.set(next_dark);
+                        ctx.set_theme(if next_dark {
+                            Theme::dark_default()
+                        } else {
+                            Theme::light_default()
+                        });
+                    })
+            });
 
         let tabs = ctx.add(
             TabWidget::new(selected)
@@ -137,8 +139,14 @@ impl Widget for Root {
 
         let breadcrumb = ctx.add(
             Breadcrumb::new()
-                .item(BreadcrumbItem::new_literal("Library").on_activate(Cmd::OpenLibrary))
-                .item(BreadcrumbItem::new_literal("Components").on_activate(Cmd::OpenComponents))
+                .item(
+                    BreadcrumbItem::new_literal("Library")
+                        .on_activate_fn(|_| println!("Library")),
+                )
+                .item(
+                    BreadcrumbItem::new_literal("Components")
+                        .on_activate_fn(|_| println!("Components")),
+                )
                 .item(BreadcrumbItem::current_literal("TabWidget")),
         );
 
@@ -196,17 +204,6 @@ fn main() {
         .theme(Theme::light_default())
         .window_title("TabWidget")
         .window_size(960, 640)
-        .on_command(|cmd: &Cmd, ctx| match cmd {
-            Cmd::ToggleTheme => {
-                let next = if ctx.theme().colors.surface_main == Theme::light_default().colors.surface_main {
-                    Theme::dark_default()
-                } else {
-                    Theme::light_default()
-                };
-                ctx.set_theme(next);
-            }
-            Cmd::OpenLibrary | Cmd::OpenComponents => {}
-        })
         .root(|tree| tree.add(Root::new()))
         .run();
 }

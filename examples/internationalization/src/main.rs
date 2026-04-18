@@ -34,15 +34,6 @@ use fern_ui::widgets::{Button, ButtonVariant, HStack, Panel, TextWidget, VStack}
 // Application commands — one per language.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq)]
-enum LangCmd {
-    SetEnglish,
-    SetFrench,
-    SetArabic,
-}
-
-impl AppCommand for LangCmd {}
-
 // ---------------------------------------------------------------------------
 // Root composite widget.
 // ---------------------------------------------------------------------------
@@ -119,17 +110,17 @@ impl Widget for Root {
         let en_btn = ctx.add(
             Button::new(tr!(lang_english()))
                 .style(ButtonVariant::Regular)
-                .on_activate(LangCmd::SetEnglish),
+                .on_activate_fn(|ctx| ctx.set_locale("en-US")),
         );
         let fr_btn = ctx.add(
             Button::new(tr!(lang_french()))
                 .style(ButtonVariant::Regular)
-                .on_activate(LangCmd::SetFrench),
+                .on_activate_fn(|ctx| ctx.set_locale("fr-FR")),
         );
         let ar_btn = ctx.add(
             Button::new(tr!(lang_arabic()))
                 .style(ButtonVariant::Regular)
-                .on_activate(LangCmd::SetArabic),
+                .on_activate_fn(|ctx| ctx.set_locale("ar-EG")),
         );
 
         let language_row = ctx.add(
@@ -313,14 +304,6 @@ fn main() {
         .window_title("FernUI — Internationalization Demo")
         .window_size(720, 520)
         .i18n(config)
-        .on_command(|cmd: &LangCmd, ctx| {
-            let loc: LanguageIdentifier = match cmd {
-                LangCmd::SetEnglish => "en-US".parse().unwrap(),
-                LangCmd::SetFrench => "fr-FR".parse().unwrap(),
-                LangCmd::SetArabic => "ar-SA".parse().unwrap(),
-            };
-            ctx.set_locale(loc);
-        })
         .root(|tree| tree.add(Root::new()))
         .run();
 }

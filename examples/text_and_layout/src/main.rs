@@ -23,13 +23,6 @@ use fern_ui::widgets::{Button, ButtonVariant, HStack, Padding, Panel, Spacer, Te
 // Application commands
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq)]
-enum Cmd {
-    ToggleDarkMode,
-}
-
-impl AppCommand for Cmd {}
-
 // ---------------------------------------------------------------------------
 // Root composite — rebuilds on theme change
 // ---------------------------------------------------------------------------
@@ -66,11 +59,20 @@ impl Widget for RootContent {
                                     .color(c.text_primary),
                             )
                             .child(Spacer::new())
-                            .child(
+                            .child({
+                                let is_dark = std::rc::Rc::new(std::cell::Cell::new(false));
                                 Button::new_literal("Toggle Dark Mode")
                                     .style(ButtonVariant::Regular)
-                                    .on_activate(Cmd::ToggleDarkMode),
-                            ),
+                                    .on_activate_fn(move |ctx: &mut EventContext| {
+                                        let next = !is_dark.get();
+                                        is_dark.set(next);
+                                        ctx.set_theme(if next {
+                                            Theme::dark_default()
+                                        } else {
+                                            Theme::light_default()
+                                        });
+                                    })
+                            }),
                     )
                     // Typography showcase
                     .child(
@@ -192,25 +194,10 @@ fn build_color_box(color: Color, label: &str) -> Panel {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    let is_dark = Rc::new(Cell::new(false));
-    let is_dark_clone = is_dark.clone();
-
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .window_title("FernUI — Text & Layout")
         .window_size(600, 500)
-        .on_command(move |cmd: &Cmd, ctx| match cmd {
-            Cmd::ToggleDarkMode => {
-                let dark = !is_dark_clone.get();
-                is_dark_clone.set(dark);
-                println!("Theme: {}", if dark { "dark" } else { "light" });
-                if dark {
-                    ctx.set_theme(Theme::dark_default());
-                } else {
-                    ctx.set_theme(Theme::light_default());
-                }
-            }
-        })
         .root(|tree| tree.add(RootContent::new()))
         .run();
 }
@@ -288,92 +275,6 @@ mod tests {
 
         assert!((tree.bounds(left).x - 0.0).abs() < 0.01);
         assert!((tree.bounds(right).x - 250.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn button_keyboard_activates_in_composite() {
-        use super::{Cmd, RootContent};
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let clicked = Rc::new(Cell::new(false));
-        let c = clicked.clone();
-        tree.on_command(move |cmd: &Cmd| {
-            if matches!(cmd, Cmd::ToggleDarkMode) {
-                c.set(true);
-            }
-        });
-        let _root = tree.add(RootContent::new());
-        tree.layout(SizeProposal::exact(600.0, 500.0));
-
-        // Tab to the button (first focusable) and activate via Space
-        tree.press_key(Key::Tab, Modifiers::NONE);
-        tree.press_key(Key::Space, Modifiers::NONE);
-
-        assert!(
-            clicked.get(),
-            "ToggleDarkMode command should have been emitted"
-        );
-    }
-
-    #[test]
-    fn button_pointer_click_in_composite() {
-        use super::{Cmd, RootContent};
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let clicked = Rc::new(Cell::new(false));
-        let c = clicked.clone();
-        tree.on_command(move |cmd: &Cmd| {
-            if matches!(cmd, Cmd::ToggleDarkMode) {
-                c.set(true);
-            }
-        });
-        let _root = tree.add(RootContent::new());
-        tree.layout(SizeProposal::exact(600.0, 500.0));
-
-        // Tab to button to discover its ID, then click it
-        tree.press_key(Key::Tab, Modifiers::NONE);
-        let focused = tree.focused();
-        assert!(focused.is_some(), "should have focused the button");
-
-        let btn_id = focused.unwrap();
-        let bounds = tree.bounds(btn_id);
-        eprintln!("Button bounds: {:?}", bounds);
-        tree.click(btn_id);
-
-        assert!(clicked.get(), "pointer click should emit ToggleDarkMode");
-    }
-
-    #[test]
-    fn button_click_produces_pending_command() {
-        // Simulates the windowed app path: commands go to drain_pending_commands,
-        // NOT through tree.on_command (which is the headless test path).
-        use super::{Cmd, RootContent};
-
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let _root = tree.add(RootContent::new());
-        tree.layout(SizeProposal::exact(600.0, 500.0));
-
-        // Tab to button and click
-        tree.press_key(Key::Tab, Modifiers::NONE);
-        let btn_id = tree.focused().expect("button should be focused");
-        tree.click(btn_id);
-
-        // In the windowed app, commands are drained by the event loop
-        let pending = tree.drain_pending_commands();
-        eprintln!("Pending commands after click: {}", pending.len());
-        assert!(
-            !pending.is_empty(),
-            "click should produce a pending command"
-        );
-
-        // Verify it's the right command type
-        let cmd = pending[0].downcast_ref::<Cmd>();
-        assert!(cmd.is_some(), "command should be Cmd type");
-        assert_eq!(cmd.unwrap(), &Cmd::ToggleDarkMode);
     }
 
     #[test]

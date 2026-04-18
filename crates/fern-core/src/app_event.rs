@@ -6,14 +6,10 @@
 use std::any::Any;
 use std::path::PathBuf;
 
-use crate::app_command::ErasedCommand;
 use crate::event_source::SubscriptionId;
 
 /// Events posted to the UI thread from background threads or timers.
 pub enum AppEvent {
-    /// A typed application command (same as widget-emitted commands).
-    Command(ErasedCommand),
-
     /// A background operation completed.
     BackgroundComplete { operation_id: String },
 
@@ -49,7 +45,6 @@ pub enum AppEvent {
 impl std::fmt::Debug for AppEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Command(cmd) => f.debug_tuple("Command").field(cmd).finish(),
             Self::BackgroundComplete { operation_id } => f
                 .debug_struct("BackgroundComplete")
                 .field("operation_id", operation_id)
@@ -82,18 +77,6 @@ impl std::fmt::Debug for AppEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn app_event_command_variant() {
-        use crate::app_command::AppCommand;
-
-        #[derive(Debug, Clone, PartialEq)]
-        struct TestCmd;
-        impl AppCommand for TestCmd {}
-
-        let event = AppEvent::Command(ErasedCommand::new(TestCmd));
-        assert!(matches!(event, AppEvent::Command(_)));
-    }
 
     #[test]
     fn app_event_background_complete() {

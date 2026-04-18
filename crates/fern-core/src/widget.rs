@@ -196,7 +196,6 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 
 /// Context available during event handling.
 pub struct EventContext {
-    pub(crate) commands: Vec<crate::app_command::ErasedCommand>,
     pub(crate) cursor_request: Option<CursorIcon>,
     pub(crate) tree_mutations: Vec<TreeMutation>,
     pub(crate) idle_callbacks: Vec<crate::idle::IdleCallback>,
@@ -266,6 +265,10 @@ pub struct EventContext {
     /// overrides. Applied in `collect_from_ctx` after the handler
     /// returns.
     pub(crate) pending_shortcut_mutations: Vec<ShortcutMutation>,
+    /// Requests that the app-level event loop close the window this
+    /// tree belongs to. Drained after dispatch via
+    /// `WidgetTree::take_close_window_request`.
+    pub(crate) close_window_requested: bool,
 }
 
 /// Deferred edit to the tree's shortcut registry, queued on an
@@ -296,7 +299,6 @@ pub(crate) enum TreeMutation {
 impl EventContext {
     pub(crate) fn new() -> Self {
         Self {
-            commands: Vec::new(),
             cursor_request: None,
             tree_mutations: Vec::new(),
             idle_callbacks: Vec::new(),
@@ -324,6 +326,7 @@ impl EventContext {
             pending_key_capture: None,
             cancel_key_capture: false,
             pending_shortcut_mutations: Vec::new(),
+            close_window_requested: false,
         }
     }
 
@@ -355,19 +358,13 @@ impl EventContext {
         self.frame_requested = true;
     }
 
-    /// Emit a typed application command.
-    pub fn emit<C: crate::app_command::AppCommand>(&mut self, cmd: C) {
-        self.commands
-            .push(crate::app_command::ErasedCommand::new(cmd));
-    }
-
     /// Dispatch an [`Intent`](crate::intent::Intent) as if the source
     /// widget pressed its keyboard shortcut. The framework walks
     /// source-widget → root after the current handler returns,
     /// invoking any matching [`Action`](crate::action::Action) it
     /// finds. Unmatched intents are silently dropped.
-    pub fn send_intent(&mut self, intent: crate::intent::Intent) {
-        self.pending_intents.push(intent);
+    pub fn send_intent(&mut self, intent: impl Into<crate::intent::Intent>) {
+        self.pending_intents.push(intent.into());
     }
 
     /// Arm a one-shot key-capture callback, returning a
@@ -440,6 +437,13 @@ impl EventContext {
     pub fn clear_shortcut_override(&mut self, id: impl Into<String>) {
         self.pending_shortcut_mutations
             .push(ShortcutMutation::ClearOverride { id: id.into() });
+    }
+
+    /// Request that the application close the window this tree
+    /// belongs to. Drained by the app event loop after the handler
+    /// returns. Typical use: title-bar close button handlers.
+    pub fn close_window(&mut self) {
+        self.close_window_requested = true;
     }
 
     /// Request a cursor icon change.

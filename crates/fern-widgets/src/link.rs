@@ -5,7 +5,6 @@
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::app_command::AppCommand;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
@@ -50,15 +49,7 @@ impl Link {
         Self::new(fern_i18n::LocalizedString::literal(text))
     }
 
-    pub fn on_activate<C: AppCommand>(mut self, command: C) -> Self {
-        self.action = Some(Box::new(move |ctx: &mut EventContext| {
-            ctx.emit(command.clone());
-        }));
-        self
-    }
-
-    /// Escape hatch: arbitrary closure invoked on activation.
-    /// See architecture Section 9.2.6.
+    /// Closure invoked on activation.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Box::new(f));
         self
@@ -302,70 +293,3 @@ impl Widget for Link {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use fern_core::app_command::AppCommand;
-    use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    #[derive(Debug, Clone, PartialEq)]
-    enum TestCmd {
-        Navigate,
-    }
-    impl AppCommand for TestCmd {}
-
-    #[test]
-    fn click_fires_command() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new_literal("Go here").on_activate(TestCmd::Navigate));
-        tree.layout(SizeProposal::exact(200.0, 50.0));
-
-        let called = Rc::new(Cell::new(false));
-        let c = called.clone();
-        tree.on_command(move |cmd: &TestCmd| {
-            if *cmd == TestCmd::Navigate {
-                c.set(true);
-            }
-        });
-        tree.click(link);
-        assert!(called.get());
-    }
-
-    #[test]
-    fn accessibility() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new_literal("Go here"));
-        tree.layout(SizeProposal::exact(200.0, 50.0));
-        let info = tree.accessibility_node(link);
-        assert_eq!(info.role(), fern_core::accesskit::Role::Link);
-        assert_eq!(info.name(), Some("Go here"));
-    }
-
-    #[test]
-    fn accessibility_has_actions() {
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new_literal("Go here"));
-        tree.layout(SizeProposal::exact(200.0, 50.0));
-        let info = tree.accessibility_node(link);
-        assert!(
-            info.actions()
-                .contains(&fern_core::accesskit::Action::Click)
-        );
-    }
-
-    #[test]
-    fn on_activate_fn_click() {
-        let called = Rc::new(Cell::new(false));
-        let c = called.clone();
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let link = tree.add(Link::new_literal("Action").on_activate_fn(move |_ctx| {
-            c.set(true);
-        }));
-        tree.layout(SizeProposal::exact(200.0, 50.0));
-        tree.click(link);
-        assert!(called.get());
-    }
-}

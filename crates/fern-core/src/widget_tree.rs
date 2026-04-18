@@ -4,7 +4,6 @@ use std::rc::Rc;
 use fern_canvas::{Canvas, Point, Rect, RenderFrame, SizeProposal};
 use fern_tokens::Theme;
 
-use crate::app_command::{AppCommand, ErasedCommand};
 use crate::arena::WidgetArena;
 use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
 use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
@@ -49,8 +48,6 @@ pub struct WidgetTree {
     focused: Option<WidgetId>,
     hovered: Option<WidgetId>,
     last_proposal: SizeProposal,
-    command_handler: Option<Box<dyn FnMut(&ErasedCommand)>>,
-    pending_commands: Vec<ErasedCommand>,
     pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
     pending_modal_dismissal: bool,
     shortcut_registry: crate::shortcut::ShortcutRegistry,
@@ -150,6 +147,10 @@ pub struct WidgetTree {
     pub(crate) pending_wake_at: std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>,
     /// Wall-clock time of the previous `layout()` call (for delta computation).
     pub(crate) last_frame_time: Option<std::time::Instant>,
+    /// Set by [`EventContext::close_window`] during dispatch; drained
+    /// by the application event loop after each event via
+    /// [`WidgetTree::take_close_window_request`].
+    pub(crate) close_window_requested: bool,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -206,8 +207,6 @@ impl WidgetTree {
             focused: None,
             hovered: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
-            command_handler: None,
-            pending_commands: Vec::new(),
             pending_modal_requests: Vec::new(),
             pending_modal_dismissal: false,
             shortcut_registry: crate::shortcut::ShortcutRegistry::new(),
@@ -240,6 +239,7 @@ impl WidgetTree {
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
             last_frame_time: None,
+            close_window_requested: false,
         }
     }
 
@@ -858,6 +858,16 @@ impl WidgetTree {
         // up so the registry doesn't leak dead entries for the
         // lifetime of the app.
         self.binding_registry.unregister_for_widget(widget_id);
+        // If focus pointed at the widget about to disappear, drop it
+        // so later dispatch doesn't anchor intent walks at a dead id
+        // (which would silently swallow the intent).
+        if self.focused == Some(widget_id) {
+            self.focused = None;
+            self.focus_origin = None;
+        }
+        if self.hovered == Some(widget_id) {
+            self.hovered = None;
+        }
         self.arena.destroy(widget_id);
     }
 
@@ -1111,31 +1121,12 @@ impl WidgetTree {
         }
     }
 
-    // --- Command handling ---
+    // --- Window-close request (drained by the app loop) ---
 
-    /// Register a typed command handler.
-    pub fn on_command<C: AppCommand>(&mut self, mut handler: impl FnMut(&C) + 'static) {
-        self.command_handler = Some(Box::new(move |erased: &ErasedCommand| {
-            if let Some(cmd) = erased.downcast_ref::<C>() {
-                handler(cmd);
-            }
-        }));
-    }
-
-    fn flush_commands(&mut self) {
-        if let Some(handler) = &mut self.command_handler {
-            let commands: Vec<ErasedCommand> = self.pending_commands.drain(..).collect();
-            for cmd in &commands {
-                handler(cmd);
-            }
-        }
-    }
-
-    /// Drain all pending commands without calling the tree-level handler.
-    /// Used by the app-level event loop to route commands through a
-    /// window-aware `CommandContext`.
-    pub fn drain_pending_commands(&mut self) -> Vec<ErasedCommand> {
-        std::mem::take(&mut self.pending_commands)
+    /// Drain the "close this window" flag set by
+    /// [`EventContext::close_window`] during dispatch.
+    pub fn take_close_window_request(&mut self) -> bool {
+        std::mem::replace(&mut self.close_window_requested, false)
     }
 
     /// Drain all pending modal requests recorded during event handling.

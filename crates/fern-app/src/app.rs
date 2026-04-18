@@ -1,5 +1,4 @@
 use fern_canvas::SizeProposal;
-use fern_core::app_command::{AppCommand, ErasedCommand};
 use fern_core::app_event::AppEvent;
 use fern_core::event::WidgetEvent;
 use fern_core::event_source::{
@@ -36,7 +35,6 @@ pub enum ThemeMode {
 #[cfg(feature = "text")]
 use fern_text::SharedTypesetter;
 
-use crate::command_context::CommandContext;
 use crate::window_config::WindowConfig;
 use crate::window_manager::WindowManager;
 
@@ -278,7 +276,6 @@ impl IdleTrace {
 
 struct FernAppHandler {
     wm: WindowManager,
-    command_handler: Option<WindowCommandHandler>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     initial_window: Option<WindowConfig>,
     initial_created: bool,
@@ -298,7 +295,6 @@ impl FernAppHandler {
     fn new(
         theme: Theme,
         theme_mode: ThemeMode,
-        command_handler: Option<WindowCommandHandler>,
         app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
         initial_window: WindowConfig,
         app_context_template: Option<std::rc::Rc<TreeAppContext>>,
@@ -318,7 +314,6 @@ impl FernAppHandler {
 
         Self {
             wm,
-            command_handler,
             app_event_handler,
             initial_window: Some(initial_window),
             initial_created: false,
@@ -333,10 +328,6 @@ impl FernAppHandler {
 
     fn process_pending(&mut self, event_loop: &ActiveEventLoop) {
         self.wm.process_pending(event_loop);
-    }
-
-    fn flush_commands(&mut self) -> bool {
-        self.wm.flush_commands_through(&mut self.command_handler)
     }
 
     fn process_modal_requests(&mut self) -> bool {
@@ -473,7 +464,7 @@ impl FernAppHandler {
     }
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
-        let had_commands = self.flush_commands();
+        let had_commands = self.wm.drain_close_window_requests();
         let had_modal_requests = self.process_modal_requests();
         let had_modal_dismissals = self.process_modal_dismissals();
         self.process_pending(event_loop);
@@ -791,33 +782,6 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
             handler(&event);
         }
         match event {
-            // Route AppEvent::Command through the normal command pipeline so
-            // background-thread commands reach the on_command handler.
-            // Drain the same pending-operation slots as
-            // `WindowManager::flush_commands_through` — theme, locale,
-            // creates, and closes — so a background-thread-initiated
-            // `ctx.set_locale(...)` propagates just like a widget one.
-            AppEvent::Command(erased) => {
-                if let Some(h) = self.command_handler.as_mut() {
-                    let mut ctx = crate::command_context::CommandContext::new(
-                        self.wm.primary_window_id(),
-                        self.wm.theme().clone(),
-                    );
-                    h(&erased, &mut ctx);
-                    if let Some(new_theme) = ctx.take_theme() {
-                        self.wm.set_theme(new_theme);
-                    }
-                    if let Some(new_locale) = ctx.take_locale() {
-                        self.wm.set_locale(new_locale);
-                    }
-                    for config in ctx.take_creates() {
-                        self.wm.queue_create(config);
-                    }
-                    for close_id in ctx.take_closes() {
-                        self.wm.queue_close(close_id);
-                    }
-                }
-            }
             // Backend-event subscription delivery (architecture §9.4): look
             // up the UI-side callback in the shared app context and invoke
             // it with the downcast event payload. The shared template is
@@ -893,13 +857,6 @@ pub struct AppEventProxy {
 }
 
 impl AppEventProxy {
-    /// Post a typed command to the UI thread.
-    pub fn send_command<C: AppCommand>(&self, cmd: C) {
-        let _ = self
-            .inner
-            .send_event(AppEvent::Command(ErasedCommand::new(cmd)));
-    }
-
     /// Post a background completion event.
     pub fn send_background_complete(&self, operation_id: String) {
         let _ = self
@@ -951,16 +908,12 @@ impl AppEventPoster for WinitAppEventPoster {
     }
 }
 
-/// Type for the window-aware command handler.
-pub(crate) type WindowCommandHandler = Box<dyn FnMut(&ErasedCommand, &mut CommandContext)>;
-
 /// Builder for a FernUI application.
 pub struct FernAppBuilder {
     theme: Theme,
     theme_mode: ThemeMode,
     #[cfg(feature = "text")]
     typesetter: Option<SharedTypesetter>,
-    command_handler: Option<WindowCommandHandler>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     on_ready: Option<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
@@ -995,7 +948,6 @@ impl FernAppBuilder {
             theme_mode: ThemeMode::Manual,
             #[cfg(feature = "text")]
             typesetter: None,
-            command_handler: None,
             app_event_handler: None,
             on_ready: None,
             initial_window: None,
@@ -1097,21 +1049,6 @@ impl FernAppBuilder {
     #[cfg(feature = "text")]
     pub fn typesetter(mut self, typesetter: SharedTypesetter) -> Self {
         self.typesetter = Some(typesetter);
-        self
-    }
-
-    /// Register a window-aware command handler.
-    /// The handler receives the command and a `CommandContext` that identifies
-    /// the source window and allows creating/closing windows.
-    pub fn on_command<C: AppCommand>(
-        mut self,
-        mut handler: impl FnMut(&C, &mut CommandContext) + 'static,
-    ) -> Self {
-        self.command_handler = Some(Box::new(move |erased: &ErasedCommand, ctx| {
-            if let Some(cmd) = erased.downcast_ref::<C>() {
-                handler(cmd, ctx);
-            }
-        }));
         self
     }
 
@@ -1372,7 +1309,6 @@ impl FernAppBuilder {
         let mut app = FernAppHandler::new(
             self.theme,
             self.theme_mode,
-            self.command_handler,
             self.app_event_handler,
             initial_config,
             app_context_template,

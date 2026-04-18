@@ -31,10 +31,6 @@ use fern_ui::text_document::TextDocument;
 use fern_ui::widgets::SplitView;
 use fern_ui::widgets::rich_text::{RichTextEditor, ScrollPolicy};
 
-#[derive(Debug, Clone, PartialEq)]
-enum DemoCmd {}
-impl AppCommand for DemoCmd {}
-
 const SAMPLE: &str = r#"# Rich Text Editor — Preview Pane
 
 This window hosts two `RichTextEditor` widgets bound to the **same**
@@ -84,7 +80,6 @@ fn main() {
         .theme(Theme::light_default())
         .window_title("FernUI — Rich Text Editor")
         .window_size(1100, 640)
-        .on_command(|_: &DemoCmd, _| {})
         .root(move |tree| {
             let doc_editor = doc.clone();
             let doc_preview = doc.clone();

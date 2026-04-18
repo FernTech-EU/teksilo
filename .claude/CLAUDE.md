@@ -33,7 +33,7 @@ python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tool
 
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/fern-widgets/src/](crates/fern-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 
-The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`).
+The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`).
 
 Tests are fully headless — no Xvfb, no GPU, no display server needed.
 
@@ -63,7 +63,7 @@ fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by f
 fern-ui-macros       fern! DSL proc macro (re-exported by fern-ui as fern!)
 fern-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
 fern-platform        winit + AccessKit adapter, event translation
-fern-app             FernAppBuilder, WindowManager, event loop, command dispatch
+fern-app             FernAppBuilder, WindowManager, event loop
 fern-ui              Umbrella crate with re-exports and feature flags
 ```
 
@@ -152,7 +152,60 @@ sidebar_width.animate_to(0.0, Duration::from_millis(200), Easing::EaseInOut);
 - Framework auto-wires gesture recognizers from handler types (on_tap → TapRecognizer)
 - `EventHandlers` struct on `WidgetNode` stores closures, dispatched by framework
 - `.focusable(true)`, `.cursor(CursorIcon::Pointer)` — framework-level properties on node
-- Typed commands: `AppCommand` trait, emitted via `ctx.emit(cmd)` inside handlers
+- Cross-widget behavior: `ctx.send_intent(MyIntent::X)` inside handlers; ancestor `Action`s consume it (see "Actions, Intents & Shortcuts")
+
+## Actions, Intents & Shortcuts
+
+Three-layer input-to-behavior pipeline. There is **no** `AppCommand`/`on_command` anymore — widgets fire `Intent`s, ancestor widgets register `Action`s keyed by intent name, and `Shortcut`s bind rebindable keystrokes to intent names.
+
+```rust
+use fern_ui::IntentKind;
+use fern_ui::core::{Action, shortcut::{KeyStroke, Shortcut}};
+use fern_ui::prelude::*;
+
+#[derive(Debug, IntentKind)]
+enum AppIntent {
+    #[name = "app.save"]      Save,
+    #[name = "app.open"]      Open(String),
+    #[name = "app.scroll_by"] ScrollBy(i32),
+}
+
+impl Widget for Root {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.register_shortcut_global(
+            Shortcut::new("app.save").name("Save")
+                .primary(KeyStroke::ctrl(Key::S)).build(),
+        );
+        // Unit handler: name match is enough — no payload to extract.
+        ctx.register_action(
+            Action::new("app.save").on_invoke(|_i, _c| println!("saved")),
+        );
+        // Data-bearing handler: extract typed variant.
+        ctx.register_action(Action::new("app.open").on_invoke(|i, _c| {
+            if let Some(AppIntent::Open(path)) = AppIntent::from_intent(i) {
+                open_file(path);
+            }
+        }));
+        // Fire programmatically:
+        let btn = Button::new_literal("Save")
+            .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save));
+        vec![ctx.add(btn)]
+    }
+}
+```
+
+Key APIs:
+- `Shortcut::new("id").primary(KeyStroke::ctrl(Key::S)).build()` — rebindable keystroke → intent name. `.on_activate(|ks, ctx| AppIntent::X(…))` for parametric payloads (chord-dependent data).
+- `ctx.register_shortcut(shortcut)` (widget-scoped, default) / `ctx.register_shortcut_global(shortcut)` (app-wide).
+- `Action::new("id").on_invoke(|intent, ctx| …)` — handler. Register with `ctx.register_action(action)`.
+- `ctx.send_intent(AppIntent::X)` — fire from any handler. Blanket `impl<K: IntentKind> From<K> for Intent` lets you pass the enum variant directly.
+- `#[derive(IntentKind)]` with `#[name = "..."]` on variants — typed DTO bridge. Works with unit, tuple, and struct variants (whole variant = payload).
+- `ShortcutRegistry::version()` is a `Signal<u64>`; menu labels and tooltips use `MenuItem::for_shortcut("id")` / `TooltipContent::for_shortcut("id")` to re-render on rebinds.
+- `ShortcutSettings::new()` — pre-built rebind UI widget.
+
+Handler rule:  call `AppIntent::from_intent(intent)` **only** when you need typed fields. Unit intents react on name alone — this lets the same handler fire whether the intent came from a shortcut (name-only synthesized) or from `send_intent(AppIntent::X)` (typed payload).
+
+Full reference: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md). Working demo: [examples/shortcuts_demo](examples/shortcuts_demo/src/main.rs).
 
 ## Three-Tier Rendering
 
@@ -210,6 +263,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Animation system (`Signal<f32>::animate_to`, easing, per-frame scheduler)
 - Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal)
 - `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)
+- Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
 - Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`)
 - Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge
 - Containers: Panel, Card, Accordion, ScrollArea, ScrollBar, Tooltip, SplitView, TabWidget, Dialog, Popover, Snackbar, Wizard, Breadcrumb
@@ -251,6 +305,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - i18n macros: [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs)
 - fern! DSL macro: [crates/fern-ui-macros/src/](crates/fern-ui-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/fern-ui/tests/fern_ui/pass/](crates/fern-ui/tests/fern_ui/pass/)
 - fern! reference: [docs/fern-macro-reference.md](docs/fern-macro-reference.md) (user-facing), [docs/fern-language-spec-v3.md](docs/fern-language-spec-v3.md) (design spec)
+- Actions/Intents/Shortcuts: [crates/fern-core/src/action.rs](crates/fern-core/src/action.rs), [intent.rs](crates/fern-core/src/intent.rs), [shortcut.rs](crates/fern-core/src/shortcut.rs). `IntentKind` derive: [crates/fern-ui-macros/src/intent_kind.rs](crates/fern-ui-macros/src/intent_kind.rs). Settings widget: [crates/fern-widgets/src/shortcut_settings.rs](crates/fern-widgets/src/shortcut_settings.rs). Reference doc: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md)
 - Canvas API: `crates/fern-canvas/src/canvas.rs`
 - Renderer: `crates/fern-render/src/renderer.rs`
 - App builder: `crates/fern-app/src/app.rs`
@@ -262,7 +317,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 // Inline children (most common) — .child() accepts impl Widget + 'static
 VStack::new().spacing(10.0)
     .child(TextWidget::new("Hello").style(theme.typography.heading_1.clone()))
-    .child(Button::new("Click").on_click(MyCmd::DoThing))
+    .child(Button::new("Click").on_activate_fn(|ctx| ctx.send_intent(MyIntent::DoThing)))
 
 // Pre-registered children (when you need the ID) — .add_child() takes WidgetId
 let label_id = ctx.add(TextWidget::new("Status").bind_text(status_signal));
@@ -307,7 +362,7 @@ impl Widget for MyWidget {
 // Attached event handlers — via WidgetBuilder on child widgets
 ctx.add(
     MinSize::new(48.0, 48.0).child(content)
-        .on_tap(|ctx| { ctx.emit(Cmd::Clicked); })
+        .on_tap(|ctx| { ctx.send_intent(MyIntent::Clicked); })
         .on_hover(move |entered, _ctx| { interaction.set(if entered { Hovered } else { Idle }); })
         .focusable(true)
         .cursor(CursorIcon::Pointer)
@@ -365,25 +420,17 @@ translate/debug workflows.
 ## App Entry Point Pattern
 
 ```rust
-#[derive(Debug, Clone, PartialEq)]
-enum MyCmd { Save, ToggleTheme }
-impl AppCommand for MyCmd {}
-
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .window_title("My App")
         .window_size(800, 600)
-        .on_command(|cmd: &MyCmd, ctx: &mut CommandContext| match cmd {
-            MyCmd::Save => { /* call Qleany controller */ }
-            MyCmd::ToggleTheme => { ctx.set_theme(Theme::dark_default()); }
-        })
         .root(|tree| tree.add(MyRootWidget::new()))
         .run();
 }
 ```
 
-`CommandContext` provides: `set_theme()`, `create_window()`, `close_window()`, `source_window()`.
+App-wide behavior lives inside the root widget: register `Shortcut`s, declare `Action`s keyed by intent name, and react to them via handlers. See "Actions, Intents & Shortcuts" above and [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md) for the full pattern. Ambient mutations are available on `EventContext` from any handler: `ctx.set_theme(...)`, `ctx.set_locale(...)`, `ctx.close_window()`.
 
 ## Architecture Reference
 

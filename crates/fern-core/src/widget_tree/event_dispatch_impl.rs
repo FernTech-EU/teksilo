@@ -82,7 +82,6 @@ impl WidgetTree {
                     self.collect_from_ctx(cap_ctx, anchor_id);
                     self.drain_pending_intents();
                 }
-                self.flush_commands();
                 return;
             }
         }
@@ -114,7 +113,13 @@ impl WidgetTree {
             );
             if let Some((id, scope, propagate_when_disabled)) = lookup {
                 let anchor = match scope {
-                    crate::shortcut::ShortcutScope::Global => self.focused,
+                    // Global shortcuts fire regardless of focus. If no
+                    // widget is currently focused, anchor the intent
+                    // walk at an arbitrary root so actions registered
+                    // at the top of the tree still see the intent.
+                    crate::shortcut::ShortcutScope::Global => self
+                        .focused
+                        .or_else(|| self.arena.roots().first().copied()),
                     crate::shortcut::ShortcutScope::Scoped(scope_id) => self
                         .focused
                         .filter(|f| self.is_descendant_of(*f, scope_id)),
@@ -130,7 +135,6 @@ impl WidgetTree {
                         self.collect_from_ctx(act_ctx, anchor_id);
                         self.enqueue_intent(anchor_id, intent, propagate_when_disabled);
                         self.drain_pending_intents();
-                        self.flush_commands();
                         return;
                     }
                 }
@@ -263,7 +267,6 @@ impl WidgetTree {
         // before commands are flushed, so commands emitted from
         // action handlers land on the same tick.
         self.drain_pending_intents();
-        self.flush_commands();
     }
 
     fn show_context_menu_for(&mut self, target: WidgetId, position: Point) -> bool {
@@ -777,7 +780,6 @@ impl WidgetTree {
         if let Some(cursor) = ctx.cursor_request {
             self.current_cursor = cursor;
         }
-        self.pending_commands.extend(ctx.commands);
         // Intents queued through `ctx.send_intent` are anchored at
         // the originating widget. Programmatic sends default to
         // `propagate_when_disabled = true` — there is no shortcut to
@@ -813,6 +815,9 @@ impl WidgetTree {
                     self.shortcut_registry.clear_override(&id);
                 }
             }
+        }
+        if ctx.close_window_requested {
+            self.close_window_requested = true;
         }
         self.pending_modal_requests
             .extend(ctx.modal_requests.into_iter().map(|request| {
@@ -1174,12 +1179,6 @@ mod tests {
     use crate::widget::CursorIcon;
     use crate::widget_builder::WidgetBuilder;
 
-    #[derive(Debug, Clone, PartialEq)]
-    enum TestCmd {
-        Save,
-    }
-
-    impl AppCommand for TestCmd {}
 
     #[test]
     fn pointer_enter_leave_synthesized() {
@@ -1329,30 +1328,6 @@ mod tests {
 
         assert!(drag_started.get());
         assert!(drag_ended.get());
-    }
-
-    #[test]
-    fn gesture_handler_can_emit_commands() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let cmd_received = Rc::new(Cell::new(false));
-        let received_flag = cmd_received.clone();
-
-        let mut tree = WidgetTree::new();
-        let widget = tree.add(FillWidget::new().on_tap(|_pos, ctx| {
-            ctx.emit(TestCmd::Save);
-        }));
-        tree.layout(SizeProposal::exact(100.0, 50.0));
-
-        tree.on_command(move |cmd: &TestCmd| {
-            if *cmd == TestCmd::Save {
-                received_flag.set(true);
-            }
-        });
-
-        tree.click(widget);
-        assert!(cmd_received.get());
     }
 
     #[test]
@@ -1660,17 +1635,9 @@ mod tests {
 
     #[test]
     fn escape_cancels_drag() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
         let mut tree = WidgetTree::new();
         let source = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
-
-        // Register a command handler that panics if called
-        let cmd_fired = Rc::new(Cell::new(false));
-        let cf = cmd_fired.clone();
-        tree.on_command(move |_cmd: &TestCmd| cf.set(true));
 
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(99_i32));
@@ -1679,7 +1646,6 @@ mod tests {
 
         tree.press_key(Key::Escape, Modifiers::NONE);
         assert!(tree.active_drag.is_none(), "drag should be cancelled");
-        assert!(!cmd_fired.get(), "Escape should not emit any command");
     }
 
     #[test]
@@ -1928,6 +1894,88 @@ mod tests {
 
         tree.press_key(Key::S, Modifiers::CTRL);
         assert!(fired.get(), "matching action must fire on KeyDown");
+    }
+
+    #[test]
+    fn global_shortcut_fires_without_focused_widget() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // Regression: a global shortcut must fire even when no widget
+        // is focused. A root-registered action should still receive
+        // the intent (anchored at the root as a fallback).
+        let fired = Rc::new(Cell::new(false));
+        let fired_flag = fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(FillWidget::new());
+        tree.push_action(
+            root,
+            Action::new("app.save").on_invoke(move |_intent, _ctx| {
+                fired_flag.set(true);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        // Deliberately no focus() call.
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(
+            fired.get(),
+            "global shortcut must fire without a focused widget"
+        );
+    }
+
+    #[test]
+    fn global_shortcut_fires_after_focused_widget_destroyed() {
+        use crate::action::Action;
+        use crate::shortcut::{KeyStroke, Shortcut};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // Regression: if the focused widget is destroyed (e.g. during a
+        // rebuild after a settings-panel rebind), focus must be cleared
+        // so the next global shortcut falls through to the root-anchor
+        // path instead of dispatching from a stale, destroyed id.
+        let fired = Rc::new(Cell::new(false));
+        let fired_flag = fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(FillWidget::new());
+        let focusable = tree.add_child(root, FillWidget::new().focusable());
+        tree.push_action(
+            root,
+            Action::new("app.save").on_invoke(move |_intent, _ctx| {
+                fired_flag.set(true);
+            }),
+        );
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(focusable);
+        assert_eq!(tree.focused(), Some(focusable));
+
+        // Destroy the focused subtree (simulates a rebuild that drops
+        // the currently-focused Rebind button).
+        tree.destroy_subtree(focusable);
+        assert_eq!(tree.focused(), None, "focus must clear when destroyed");
+
+        tree.press_key(Key::S, Modifiers::CTRL);
+        assert!(
+            fired.get(),
+            "global shortcut must still fire after the focused widget is destroyed"
+        );
     }
 
     #[test]

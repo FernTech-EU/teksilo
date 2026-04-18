@@ -1,7 +1,6 @@
 pub mod accessibility;
 pub mod action;
 pub mod animation;
-pub mod app_command;
 pub mod app_event;
 pub mod arena;
 pub mod build_context;
@@ -32,7 +31,6 @@ pub(crate) mod test_widgets;
 
 pub use accessibility::{AccessNodeBuilder, AccessibilityInfo};
 pub use animation::AnimationScheduler;
-pub use app_command::AppCommand;
 pub use app_event::AppEvent;
 pub use arena::WidgetArena;
 pub use build_context::BuildContext;
@@ -58,7 +56,7 @@ pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
 pub use action::{Action, ActionBuilder, ActionHandler};
-pub use intent::{ActionArg, Intent, IntentParams, IntentResponse};
+pub use intent::{Intent, IntentKind, IntentResponse};
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,
     ShortcutBuilder, ShortcutOnActivate, ShortcutRegistry, ShortcutScope, SlotOverride,

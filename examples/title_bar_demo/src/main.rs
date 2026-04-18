@@ -22,25 +22,12 @@ use fern_ui::widgets::{
     Expand, RectWidget, TextWidget, TitleBar, VStack, WindowFrame, ZStack,
 };
 
-#[derive(Debug, Clone, PartialEq)]
-enum DemoCmd {
-    Close,
-}
-
-impl AppCommand for DemoCmd {}
-
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::dark_default())
         .window_title("FernUI — Title Bar Demo")
         .window_size(900, 600)
         .custom_chrome(true)
-        .on_command(|cmd: &DemoCmd, ctx| match cmd {
-            DemoCmd::Close => {
-                let id = ctx.source_window();
-                ctx.close_window(id);
-            }
-        })
         .root(|tree| {
             let theme = tree.theme().clone();
 
@@ -68,7 +55,7 @@ fn main() {
                             .style(theme.typography.small.clone())
                             .color(theme.colors.text_secondary),
                         )
-                        .close_action(|ctx| ctx.emit(DemoCmd::Close)),
+                        .close_action(|ctx| ctx.close_window()),
                 ),
                 None => Box::new(
                     TextWidget::new_literal(

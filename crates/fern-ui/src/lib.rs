@@ -10,6 +10,11 @@ pub use fern_tokens as tokens;
 /// crates only need `fern-ui` in `[dependencies]`.
 pub use fern_ui_macros::fern;
 
+/// `#[derive(IntentKind)]` — generates the typed DTO bridge between
+/// an app's intent enum and the framework's runtime `Intent`. Each
+/// variant declares its intent name via `#[name = "..."]`.
+pub use fern_ui_macros::IntentKind;
+
 /// Re-export the `res!` macro so consuming crates only need `fern-ui`
 /// in their `[dependencies]` — same pattern as `serde` re-exporting
 /// `serde_derive`.
@@ -39,11 +44,11 @@ pub mod prelude {
 
     // Core widget types
     pub use fern_core::{
-        AccessNodeBuilder, Action, ActionArg, AppCommand, BuildContext, CursorIcon, EventContext,
-        EventResponse, FernBranch, FernBranch3, FernBranch4, FocusPolicy, Intent, IntentParams,
-        IntentResponse, IntoFernChild, IntoFernCondition, Key, KeyStroke, LayoutContext,
-        ModalCloseBehavior, ModalPresentation, Modifiers, PaintContext, Prop, Shortcut,
-        ShortcutRegistry, ShortcutScope, Signal, Widget, WidgetBuilder, WidgetEvent, WidgetId,
+        AccessNodeBuilder, Action, BuildContext, CursorIcon, EventContext, EventResponse,
+        FernBranch, FernBranch3, FernBranch4, FocusPolicy, Intent, IntentKind, IntentResponse,
+        IntoFernChild, IntoFernCondition, Key, KeyStroke, LayoutContext, ModalCloseBehavior,
+        ModalPresentation, Modifiers, PaintContext, Prop, Shortcut, ShortcutRegistry,
+        ShortcutScope, Signal, Widget, WidgetBuilder, WidgetEvent, WidgetId,
     };
 
     // Geometry (lives in fern-canvas)

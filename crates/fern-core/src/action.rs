@@ -121,7 +121,6 @@ impl ActionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intent::{ActionArg, IntentParams};
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -142,17 +141,17 @@ mod tests {
     }
 
     #[test]
-    fn action_handler_receives_params() {
+    fn action_handler_receives_typed_payload() {
         let seen = Rc::new(Cell::new(0_i64));
         let seen_flag = seen.clone();
         let mut action = Action::new("tab.switch").on_invoke(move |intent, _ctx| {
-            if let ActionArg::Int(n) = intent.params.p1 {
+            if let Some(&n) = intent.payload::<i64>() {
                 seen_flag.set(n);
             }
         });
 
         let mut ctx = EventContext::new();
-        let intent = Intent::with_params("tab.switch", IntentParams::with1(5_i64));
+        let intent = Intent::with_payload("tab.switch", 5_i64);
         (action.handler)(&intent, &mut ctx);
         assert_eq!(seen.get(), 5);
     }
