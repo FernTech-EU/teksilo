@@ -310,6 +310,7 @@ impl Canvas {
         let max_width = Some(position.width + 0.5);
         let layout = backend.layout_single_line(text, style, max_width);
         let glyphs = backend.ensure_glyphs(&layout);
+        self.frame.layout_keys.push(layout.layout_key);
 
         // Offset glyphs to the target position
         for glyph in &glyphs {
@@ -342,6 +343,7 @@ impl Canvas {
         if glyphs.is_empty() {
             return false;
         }
+        self.frame.layout_keys.push(layout.layout_key);
 
         for glyph in &glyphs {
             let mut offset_glyph = *glyph;
@@ -375,6 +377,7 @@ impl Canvas {
         if glyphs.is_empty() {
             return false;
         }
+        self.frame.layout_keys.push(layout.layout_key);
 
         let text_rgba = text_color.to_array();
         let link_rgba = link_color.to_array();
@@ -606,6 +609,7 @@ impl Canvas {
         let max_width = (rect.width + 0.5).max(0.0);
         let layout = backend.layout_paragraph(text, style, max_width, max_lines);
         let glyphs = backend.ensure_glyphs(&layout);
+        self.frame.layout_keys.push(layout.layout_key);
 
         for glyph in &glyphs {
             let mut offset_glyph = *glyph;

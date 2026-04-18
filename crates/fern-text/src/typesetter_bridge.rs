@@ -604,6 +604,19 @@ impl TextBackend for TypesetterBridge {
             Vec::new()
         }
     }
+
+    fn touch_layout(&mut self, layout_key: u64) {
+        // Fast path used by the widget-tree renderer when a widget's
+        // `cached_paint` is reused. The cached frame references atlas
+        // positions by baked-in UVs, so if the underlying glyphs age
+        // out and their slots get reused by newer glyphs, the cached
+        // quads render the wrong pixels. Refreshing timestamps here
+        // mirrors what `ensure_glyphs` does on a cache hit, but without
+        // reconstructing or cloning the quad list.
+        if let Some((_, keys)) = self.glyph_cache.get(&layout_key) {
+            self.service.touch_glyphs(keys);
+        }
+    }
 }
 
 

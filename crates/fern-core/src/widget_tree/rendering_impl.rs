@@ -125,6 +125,21 @@ fn paint_widget_cached(
     } else {
         let node = arena.get(id).unwrap();
         if let Some(cached) = &node.cached_paint {
+            // Refresh the text backend's glyph timestamps for every
+            // layout baked into this cached paint. Without this,
+            // widgets that stay clean for ~180 frames (e.g. static
+            // labels next to an animation) can have their atlas slots
+            // evicted and reused, and the cached UVs then sample the
+            // wrong glyph. `TextBackend::touch_layout` is a no-op for
+            // backends without a glyph cache (the mock).
+            if !cached.layout_keys.is_empty()
+                && let Some(tb) = text_backend
+            {
+                let mut tb = tb.borrow_mut();
+                for key in &cached.layout_keys {
+                    tb.touch_layout(*key);
+                }
+            }
             frame.merge(cached);
         }
     }

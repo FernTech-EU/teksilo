@@ -170,6 +170,18 @@ pub trait TextBackend {
     /// Produce GPU-ready glyph quads for a previously laid-out text.
     /// The quads are positioned relative to (0, 0); the caller offsets them.
     fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<GlyphQuad>;
+
+    /// Refresh the backend's last-used timestamp for every glyph produced
+    /// by the layout identified by `layout_key`. Called by the widget-tree
+    /// renderer when a widget's `cached_paint` is reused without invoking
+    /// `widget.paint()` — the normal `ensure_glyphs` touch path is
+    /// bypassed in that case, and without this call still-visible glyphs
+    /// can age out of the backend's atlas cache and have their atlas
+    /// slots re-used by newly rasterized glyphs, producing garbled text.
+    ///
+    /// Implementations that don't maintain a glyph cache (the mock
+    /// backend) can leave the default no-op.
+    fn touch_layout(&mut self, _layout_key: u64) {}
 }
 
 /// Atlas information from the text backend for GPU upload.

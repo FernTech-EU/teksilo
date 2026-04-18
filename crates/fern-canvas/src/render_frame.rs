@@ -17,6 +17,13 @@ pub struct RenderFrame {
     pub draw_order: Vec<DrawCommand>,
     /// Images that need GPU registration before rendering this frame.
     pub pending_images: Vec<PendingImage>,
+    /// Opaque [`TextLayout::layout_key`](crate::text_backend::TextLayout::layout_key)
+    /// values for every `draw_text*` call that produced glyphs in this
+    /// frame. When a widget's `cached_paint` is reused without re-running
+    /// `paint()`, the renderer calls `TextBackend::touch_layout(key)` for
+    /// each stored key so the backend can refresh the underlying glyph
+    /// cache timestamps and avoid evicting still-visible glyphs.
+    pub layout_keys: Vec<u64>,
 }
 
 impl RenderFrame {
@@ -46,6 +53,7 @@ impl RenderFrame {
         self.shadows.extend_from_slice(&other.shadows);
         self.rasterized.extend_from_slice(&other.rasterized);
         self.paths.extend_from_slice(&other.paths);
+        self.layout_keys.extend_from_slice(&other.layout_keys);
         // Merge pending image registrations (deduped by renderer)
         for pending in &other.pending_images {
             if !self.pending_images.iter().any(|p| p.name == pending.name) {
