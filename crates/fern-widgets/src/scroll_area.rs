@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal};
@@ -88,7 +89,16 @@ pub struct ScrollArea {
 
     // --- cached sizes for event handling ---
     content_size: Cell<Size>,
-    viewport_size: Cell<Size>,
+    /// Shared with the on_scroll / on_access_action handler closures.
+    /// Wrapped in `Rc` because cloning a bare `Cell` produces an
+    /// independent cell — the closure would never see updates from
+    /// `place_children`.
+    viewport_size: Rc<Cell<Size>>,
+    /// Absolute top-left of the viewport in tree/screen coordinates.
+    /// Needed to convert `target_bounds` (which `ScrollIntoView` carries
+    /// in absolute tree coords) into content-relative coordinates.
+    /// Shared via `Rc` for the same reason as `viewport_size`.
+    viewport_origin: Rc<Cell<Point>>,
 }
 
 impl Default for ScrollArea {
@@ -134,7 +144,8 @@ impl ScrollArea {
             viewport_ratio_x: Signal::new(1.0),
             child_ids: Vec::new(),
             content_size: Cell::new(Size::ZERO),
-            viewport_size: Cell::new(Size::ZERO),
+            viewport_size: Rc::new(Cell::new(Size::ZERO)),
+            viewport_origin: Rc::new(Cell::new(Point::ZERO)),
         }
     }
 
@@ -303,6 +314,7 @@ impl Widget for ScrollArea {
         let max_scroll_y = self.max_scroll_y.clone();
         let max_scroll_x = self.max_scroll_x.clone();
         let viewport_size = self.viewport_size.clone();
+        let viewport_origin = self.viewport_origin.clone();
         let line_height = self.line_height;
         let smooth_scrolling = self.smooth_scrolling;
         let smooth_scroll_duration = self.smooth_scroll_duration;
@@ -345,6 +357,7 @@ impl Widget for ScrollArea {
             let max_scroll_y = max_scroll_y.clone();
             let max_scroll_x = max_scroll_x.clone();
             let viewport_size = viewport_size.clone();
+            let viewport_origin = viewport_origin.clone();
             let clamp_and_set = clamp_and_set.clone();
             handlers = handlers.on_scroll(move |event, _ctx| match event {
                 WidgetEvent::Scroll { delta, .. } => {
@@ -387,13 +400,20 @@ impl Widget for ScrollArea {
                     target_bounds,
                     margin,
                 } => {
+                    // `target_bounds` is in absolute tree coordinates (the
+                    // arena stores screen-space rects). Convert to the
+                    // content's local frame by subtracting the viewport's
+                    // absolute origin and adding the current scroll offset:
+                    // a child whose absolute top equals the viewport's
+                    // absolute top is at content-space y = scroll_y.
                     let vp = viewport_size.get();
+                    let vo = viewport_origin.get();
                     let sy = scroll_y.get();
                     let sx = scroll_x.get();
 
                     let viewport_top = sy;
                     let viewport_bottom = viewport_top + vp.height;
-                    let target_top = target_bounds.y + sy - margin;
+                    let target_top = target_bounds.y - vo.y + sy - margin;
                     let target_bottom = target_top + target_bounds.height + margin * 2.0;
 
                     let mut new_y = sy;
@@ -405,7 +425,7 @@ impl Widget for ScrollArea {
 
                     let viewport_left = sx;
                     let viewport_right = viewport_left + vp.width;
-                    let target_left = target_bounds.x + sx - margin;
+                    let target_left = target_bounds.x - vo.x + sx - margin;
                     let target_right = target_left + target_bounds.width + margin * 2.0;
 
                     let mut new_x = sx;
@@ -592,6 +612,7 @@ impl Widget for ScrollArea {
         self.content_size.set(placed_content_size);
         self.viewport_size
             .set(Size::new(viewport_width, viewport_height));
+        self.viewport_origin.set(bounds.origin());
 
         let max_y = (placed_content_size.height - viewport_height).max(0.0);
         let max_x = (placed_content_size.width - viewport_width).max(0.0);
@@ -704,6 +725,8 @@ mod tests {
     use fern_canvas::SizeProposal;
     use fern_core::widget::LayoutContext;
     use fern_core::widget_tree::WidgetTree;
+
+    use fern_core::widget_builder::WidgetBuilder;
 
     use crate::primitives::VStack;
 
@@ -1447,6 +1470,76 @@ mod tests {
             "Scroll offset should survive theme switch inside composite: before={}, after={}",
             y_before,
             y_after
+        );
+    }
+
+    // --- ScrollIntoView regression: focused widget above viewport ---
+
+    /// Regression: when the focused widget is above the viewport top and
+    /// the ScrollArea is itself offset from the tree origin, focusing the
+    /// widget should scroll *up* (decreasing scroll_y) to bring it back
+    /// into view — not *down*. The earlier implementation treated
+    /// `target_bounds` as if it were already viewport-relative and added
+    /// `scroll_y` to it, which scrolled past the widget when the
+    /// ScrollArea was not at absolute (0, 0). Cloning a `Cell` also
+    /// produces an independent cell, so the closure was reading a stale
+    /// `viewport_size = Size::ZERO`; both must be fixed for the math to
+    /// produce the right answer.
+    #[test]
+    fn scroll_into_view_brings_widget_above_viewport_into_view() {
+        let mut tree = WidgetTree::new();
+
+        // Layout: VStack { 50px header, ScrollArea(content 500px) }.
+        // Total height 250 → ScrollArea bounds.y = 50 (the offset that
+        // previously triggered the bug).
+        let header = tree.add(TallLeaf::new(200.0, 50.0));
+        // Focusable target near the top of the content.
+        let target = tree.add(TallLeaf::new(200.0, 20.0).focusable(true));
+        let after = tree.add(TallLeaf::new(200.0, 470.0));
+        let content = tree.add(VStack::new().add_child(target).add_child(after));
+        let scroll = tree.add(ScrollArea::from_id(content).smooth_scrolling(false));
+        let _root = tree.add(VStack::new().add_child(header).add_child(scroll));
+
+        tree.layout(SizeProposal::exact(200.0, 250.0));
+
+        let scroll_bounds = tree.bounds(scroll);
+        assert!(
+            (scroll_bounds.y - 50.0).abs() < 0.01,
+            "ScrollArea should sit below the header at y=50, got {}",
+            scroll_bounds.y
+        );
+
+        // Scroll down so the target is well above the viewport top.
+        tree.pointer_move(Point::new(100.0, 100.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+        });
+        tree.layout(SizeProposal::exact(200.0, 250.0));
+
+        let target_before = tree.bounds(target);
+        assert!(
+            target_before.bottom() < scroll_bounds.y,
+            "Target should be above viewport before focus, got y={} (viewport top={})",
+            target_before.y,
+            scroll_bounds.y
+        );
+
+        // Focus the target — fires ScrollIntoView, should bring the
+        // widget back into view rather than push it further away.
+        tree.focus(target);
+        tree.layout(SizeProposal::exact(200.0, 250.0));
+
+        let target_after = tree.bounds(target);
+        let viewport_top = scroll_bounds.y;
+        let viewport_bottom = scroll_bounds.bottom();
+        assert!(
+            target_after.y >= viewport_top - 0.5
+                && target_after.bottom() <= viewport_bottom + 0.5,
+            "Target should be inside viewport after focus, got y={}..{} (viewport={}..{})",
+            target_after.y,
+            target_after.bottom(),
+            viewport_top,
+            viewport_bottom
         );
     }
 }
