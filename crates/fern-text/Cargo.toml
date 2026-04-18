@@ -44,6 +44,17 @@ fonts-all = [
     "fonts-cjk-kr",
 ]
 
+# Runtime-loaded color-emoji fallback. Unlike the embedded `fonts-*`
+# bundles, this does *not* `include_bytes!` any font — color emoji
+# fonts are typically 20-30 MB and bloat the binary. Instead, when
+# enabled, `TypesetterBridge::new_with_default_font()` reads the
+# platform's installed color-emoji font (Noto Color Emoji on Linux,
+# Apple Color Emoji on macOS, Segoe UI Emoji on Windows) from a
+# hard-coded list of well-known paths at startup. No-op on misses;
+# no warning. Apps that need a specific or bundled emoji font still
+# use `register_font(bytes)` directly.
+system-emoji = []
+
 # Enables `RichTextEngine` and the `FontRegistrar` trait. Pulls in
 # `text-document` directly so the engine can consume `FlowSnapshot`,
 # `TextCursor`, and `DocumentFragment`. Required by fern-widgets's

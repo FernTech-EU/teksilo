@@ -211,6 +211,30 @@ impl TypesetterBridge {
             let data = include_bytes!("../fonts/NotoSansKR-VariableFont_wght.ttf");
             let _ = self.service.register_font(data);
         }
+
+        // Optional runtime color-emoji fallback. Reads the platform's
+        // installed emoji font at startup when `system-emoji` is on.
+        // Silent on miss so headless / embedded targets aren't noisy.
+        #[cfg(feature = "system-emoji")]
+        {
+            let _ = self.register_system_emoji_font();
+        }
+    }
+
+    /// Try to register the platform's default color-emoji font as a
+    /// fallback. Returns the registered [`FontFaceId`] on success, or
+    /// `None` if no emoji font was found at a known system path.
+    ///
+    /// Called automatically by [`new_with_default_font`](Self::new_with_default_font).
+    /// Exposed publicly so apps that construct a bare bridge via
+    /// [`new`](Self::new) can still opt in without replicating the
+    /// per-OS path list.
+    ///
+    /// Requires the `system-emoji` feature.
+    #[cfg(feature = "system-emoji")]
+    pub fn register_system_emoji_font(&mut self) -> Option<FontFaceId> {
+        crate::system_emoji::load_system_emoji_data()
+            .map(|data| self.service.register_font(&data))
     }
 
     /// Set the default font and size. Forwards to the shared

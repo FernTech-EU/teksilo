@@ -157,7 +157,7 @@ fn text_sample(
     HStack::new()
         .spacing(12.0)
         .child(
-            TextWidget::new_literal("The quick brown fox jumps over the lazy dog")
+            TextWidget::new_literal("The quick brown 🦊 jumps over the lazy 🐶 🎉")
                 .style(TextStyleRole::Body)
                 .color(color),
         )
@@ -405,7 +405,7 @@ impl Widget for WidgetCatalog {
             VStack {
                 Toolbar {
                     HStack {
-                        TextWidget::new_literal("Widget Catalog -- fern!") {
+                        TextWidget::new_literal("Widget Catalog 🦊 fern!") {
                             style: TextStyleRole::BodyBold
                             color: TextRole::Primary
                         }

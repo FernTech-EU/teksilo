@@ -55,6 +55,14 @@ fonts-cjk-kr = ["fern-text?/fonts-cjk-kr"]
 fonts-all-non-cjk = ["fern-text?/fonts-all-non-cjk"]
 fonts-all = ["fern-text?/fonts-all"]
 
+# Opt-in runtime color-emoji fallback. Forwards to
+# `fern-text/system-emoji`, which loads Noto Color Emoji / Apple
+# Color Emoji / Segoe UI Emoji from a hard-coded list of installed
+# system paths at startup. Off by default — color-emoji fonts are
+# large (20-30 MB) and not always present; apps that ship cross-
+# platform UI with emoji should opt in here.
+system-emoji = ["fern-text?/system-emoji"]
+
 [dependencies]
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }

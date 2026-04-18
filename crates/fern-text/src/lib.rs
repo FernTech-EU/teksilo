@@ -1,6 +1,9 @@
 pub mod shared_typesetter;
 pub mod typesetter_bridge;
 
+#[cfg(feature = "system-emoji")]
+mod system_emoji;
+
 #[cfg(feature = "rich-text")]
 pub mod font_registrar;
 #[cfg(feature = "rich-text")]
