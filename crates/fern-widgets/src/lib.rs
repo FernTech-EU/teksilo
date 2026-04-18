@@ -36,6 +36,8 @@ pub mod segmented_control;
 pub mod shortcut_settings;
 pub mod slider;
 pub mod snackbar;
+#[cfg(feature = "rich-text")]
+pub mod spin_box;
 pub mod split_button;
 pub mod split_view;
 pub mod status_bar;
@@ -72,6 +74,8 @@ pub use primitives::{
     ImageWidget, MasonryLayout, MaxSize, MinSize,
     Padding, RectWidget, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
+#[cfg(feature = "rich-text")]
+pub use primitives::TextInputField;
 pub use progress_bar::ProgressBar;
 pub use radio_button::RadioButton;
 pub use radio_group::RadioGroup;
@@ -82,6 +86,8 @@ pub use segmented_control::SegmentedControl;
 pub use shortcut_settings::ShortcutSettings;
 pub use slider::Slider;
 pub use snackbar::Snackbar;
+#[cfg(feature = "rich-text")]
+pub use spin_box::{ButtonLayout as SpinButtonLayout, SpinBox, SpinValue, StepType, WheelMode, WrapMode};
 pub use split_button::SplitButton;
 pub use split_view::SplitView;
 pub use status_bar::StatusBar;

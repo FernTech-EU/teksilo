@@ -56,7 +56,7 @@ use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::EventResponse;
-use fern_core::signal::Signal;
+use fern_core::signal::{Prop, Signal};
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
@@ -102,7 +102,13 @@ pub struct TextInputField {
     on_submit: Option<CommandFactory>,
     on_blur: Option<CommandFactory>,
     char_filter: Option<CharFilter>,
-    suffix: String,
+    /// Fixed trailing label rendered inside the field's border.
+    /// Accepts both plain strings and `Signal<String>` — when bound,
+    /// the field re-measures the suffix and relayouts each time the
+    /// signal fires, so composites like `SpinBox` can derive the
+    /// suffix from the widget state (e.g. hide it while
+    /// `special_value_text` is active).
+    suffix: Prop<String>,
     text_height: Option<f32>,
     external_interaction: Option<Signal<InteractionState>>,
 
@@ -122,7 +128,6 @@ impl std::fmt::Debug for TextInputField {
             .field("placeholder", &self.placeholder)
             .field("enabled", &self.enabled)
             .field("read_only", &self.read_only)
-            .field("suffix", &self.suffix)
             .finish_non_exhaustive()
     }
 }
@@ -139,7 +144,7 @@ impl TextInputField {
             on_submit: None,
             on_blur: None,
             char_filter: None,
-            suffix: String::new(),
+            suffix: Prop::Static(String::new()),
             text_height: None,
             external_interaction: None,
             state: None,
@@ -207,12 +212,29 @@ impl TextInputField {
         self
     }
 
-    /// Fixed non-editable trailing string rendered flush-right
+    /// Static non-editable trailing string rendered flush-right
     /// inside the field's bounds (Qt's `QSpinBox::suffix`). The
     /// caret cannot enter the suffix; clicks past the text end
     /// position the caret at the last editable character.
+    ///
+    /// For a suffix that changes at runtime (e.g. toggled on/off
+    /// by surrounding widget state), use
+    /// [`bind_suffix`](Self::bind_suffix) with a `Signal<String>`.
     pub fn suffix(mut self, text: impl Into<String>) -> Self {
-        self.suffix = text.into();
+        self.suffix = Prop::Static(text.into());
+        self
+    }
+
+    /// Bind the non-editable trailing string to a reactive
+    /// `Signal<String>`. The field re-measures the suffix glyphs
+    /// and relayouts the editable text viewport each time the
+    /// signal fires, so the transition is seamless.
+    ///
+    /// Typical use: a `SpinBox` with `special_value_text` binds
+    /// an empty string to the suffix whenever the value equals
+    /// `min`, and the configured unit string otherwise.
+    pub fn bind_suffix(mut self, signal: Signal<String>) -> Self {
+        self.suffix = Prop::Bound(signal);
         self
     }
 
@@ -265,6 +287,7 @@ impl Widget for TextInputField {
         let initial_text = self.text.get();
         let read_only_effective = self.read_only || !self.enabled;
 
+        let initial_suffix = self.suffix.get();
         let shared_state = TextInputState::new(TextInputConfig {
             initial_text,
             max_length: self.max_length,
@@ -273,7 +296,7 @@ impl Widget for TextInputField {
             on_blur,
             char_filter: self.char_filter.take(),
             placeholder: self.placeholder.clone(),
-            suffix: std::mem::take(&mut self.suffix),
+            suffix: initial_suffix,
         });
         self.state = Some(shared_state.clone());
 
@@ -339,19 +362,22 @@ impl Widget for TextInputField {
         // `QSpinBox` `suffix`). Shares the app's typesetter when
         // available so glyphs land in the same atlas as the main
         // document; falls back to a private engine under headless
-        // tests. Laid out once here and never again — the suffix
-        // is static.
+        // tests.
         //
         // `suffix_width` is cached on `TextInputState` and drives
         // both the effective text viewport (so the scroll logic
         // keeps the caret visible without sliding text behind the
         // suffix) and the suffix paint origin at the right edge
-        // of the field.
-        let suffix_text = {
-            let st = self.state().borrow();
-            st.suffix.clone()
-        };
-        if !suffix_text.is_empty() {
+        // of the field. When the suffix is bound to a signal, a
+        // reactive effect below re-lays the engine out each time
+        // the signal fires.
+        let text_area_height = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(1.0);
+        let needs_suffix_engine =
+            matches!(self.suffix, Prop::Bound(_)) || {
+                let st = self.state().borrow();
+                !st.suffix.is_empty()
+            };
+        if needs_suffix_engine {
             let mut suffix_engine = if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
                 RichTextEngine::from_shared(shared.clone())
             } else {
@@ -365,18 +391,32 @@ impl Widget for TextInputField {
                 suffix_engine.set_cursor_color(secondary);
                 suffix_engine.set_selection_color([0.0, 0.0, 0.0, 0.0]);
             }
-            let height_for_viewport = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(1.0);
-            suffix_engine.set_viewport(10_000.0, height_for_viewport);
+            suffix_engine.set_viewport(10_000.0, text_area_height);
 
-            let suffix_doc = TextDocument::new();
-            let _ = suffix_doc.set_plain_text(&suffix_text);
-            let flow = suffix_doc.snapshot_flow();
-            suffix_engine.layout_full(&flow);
-            let measured_width = suffix_engine.max_content_width();
+            {
+                let mut st = self.state().borrow_mut();
+                st.suffix_engine = Some(suffix_engine);
+            }
+            // Initial layout from the current suffix value.
+            let initial = self.state().borrow().suffix.clone();
+            relayout_suffix(self.state(), &initial);
+        }
 
-            let mut st = self.state().borrow_mut();
-            st.suffix_engine = Some(suffix_engine);
-            st.suffix_width = measured_width;
+        // Reactive suffix: observe the signal and re-lay out on
+        // every change. `Relayout` dirty-tracking ensures the
+        // surrounding layout sees the new `suffix_width` and the
+        // text viewport narrows/widens accordingly.
+        if let Prop::Bound(signal) = &self.suffix {
+            let self_id = ctx.self_id();
+            signal.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                fern_core::binding::BindingLevel::Relayout,
+            );
+            let state_for_effect = self.state().clone();
+            ctx.effect(signal, move |new_text| {
+                relayout_suffix(&state_for_effect, new_text);
+            });
         }
 
         // Bind caret_visible for repaint.
@@ -727,6 +767,31 @@ fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32) {
     } else if caret_x + caret_w - st.scroll_x > vw - SCROLL_MARGIN {
         st.scroll_x = caret_x + caret_w - vw + SCROLL_MARGIN;
     }
+}
+
+/// Update the cached suffix text and re-run layout on the suffix
+/// engine. Called from `build()` for the initial value and from
+/// the reactive effect when the bound suffix signal fires.
+fn relayout_suffix(state: &SharedState, new_text: &str) {
+    let mut st = state.borrow_mut();
+    st.suffix = new_text.to_string();
+    if new_text.is_empty() {
+        st.suffix_width = 0.0;
+        // Leave the engine in place (cheap to reuse) but don't
+        // lay out — paint skips the suffix when width is zero.
+        return;
+    }
+    let Some(engine) = st.suffix_engine.as_mut() else {
+        // No engine allocated (pure-static path that started
+        // empty and never became non-empty). Allocate lazily so
+        // late signal flips still render.
+        return;
+    };
+    let doc = TextDocument::new();
+    let _ = doc.set_plain_text(new_text);
+    let flow = doc.snapshot_flow();
+    engine.layout_full(&flow);
+    st.suffix_width = engine.max_content_width();
 }
 
 /// Paint glyphs from a pre-laid-out suffix `RenderFrame` at a fixed

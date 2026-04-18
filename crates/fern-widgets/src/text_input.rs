@@ -361,11 +361,14 @@ impl Widget for TextInput {
         // state. `zip` produces a derived signal that registers both upstream
         // roots with the binding registry, so the border refreshes whenever
         // either source changes.
+        //
+        // This is the Int UI text-field convention (Section 7 of the v2
+        // reference): emphasis lives in the field's own border — thicker
+        // and accent-colored when focused — rather than in a separate ring
+        // wrapping the control. A validation `Error` / `Warning` state
+        // overrides the focus color so a user can't miss a broken field.
         let combined = interaction.zip(&validation);
         let border_color = derive_border_color(combined.clone(), &colors);
-
-        // Border width: 2px when focused (accent ring covering the border),
-        // 1px otherwise. Same combined signal drives both color and width.
         let normal_bw = field_style.border_width;
         let focus_ring_width = theme.shape.focus_ring_width;
         let border_width = combined.map(move |(state, _val)| match state {
