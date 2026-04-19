@@ -23,6 +23,56 @@ use crate::primitives::{HStack, IconWidget, MaxSize, Spacer, TextWidget, VStack}
 /// Large enough to never clip content when fully expanded.
 const EXPANDED_MAX_HEIGHT: f32 = 10000.0;
 
+// ---------------------------------------------------------------------------
+// AccordionRegion — thin wrapper that exposes Role::Region for aria-controls.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct AccordionRegion {
+    name: String,
+    child: Option<WidgetId>,
+}
+
+impl AccordionRegion {
+    fn new(name: String, child: WidgetId) -> Self {
+        Self { name, child: Some(child) }
+    }
+}
+
+impl Widget for AccordionRegion {
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        self.child
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::Region);
+        builder.set_name(&self.name);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Accordion widget
+// ---------------------------------------------------------------------------
+
 /// A collapsible section with a clickable header that toggles content visibility.
 ///
 /// Content must be pre-registered via `content_id(id)`.
@@ -33,6 +83,8 @@ pub struct Accordion {
     pending_content: Option<Box<dyn Widget>>,
     content_height: Option<Signal<f32>>,
     root_child_id: Option<WidgetId>,
+    /// Region wrapper ID — used for `aria-controls` on the header button.
+    region_id: Option<WidgetId>,
     /// Optional override for the header foreground color (title text +
     /// chevron icon). When `None`, the accordion uses
     /// `theme.colors.text_primary`. Set this when the accordion is
@@ -54,6 +106,7 @@ impl Accordion {
             pending_content: None,
             content_height: None,
             root_child_id: None,
+            region_id: None,
             title_color: None,
             title_style: None,
         }
@@ -184,7 +237,12 @@ impl Widget for Accordion {
             .spacing(2.0)
             .add_child(header_with_ring);
         if let Some(content_id) = self.content_id {
-            // Wrap content in MaxSize with animated height for smooth expand/collapse.
+            // Wrap content in AccordionRegion (Role::Region) so AT can navigate
+            // to the content via the header's aria-controls relationship.
+            let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
+            self.region_id = Some(region_id);
+
+            // Wrap region in MaxSize with animated height for smooth expand/collapse.
             // Width is also constrained to a derived signal so the
             // collapsed wrapper claims **zero** width — without this,
             // `size_that_fits` pass-through would let the content's
@@ -211,7 +269,7 @@ impl Widget for Accordion {
                 MaxSize::new(f32::MAX, EXPANDED_MAX_HEIGHT)
                     .bind_max_width(width_state)
                     .bind_max_height(height_state)
-                    .child_id(content_id),
+                    .child_id(region_id),
             );
             vstack = vstack.add_child(wrapper);
         }
@@ -315,6 +373,9 @@ impl Widget for Accordion {
         builder.set_expanded(self.expanded.get());
         builder.add_action(fern_core::accesskit::Action::Click);
         builder.add_action(fern_core::accesskit::Action::Focus);
+        if let Some(region_id) = self.region_id {
+            builder.push_controlled(fern_core::accessibility::widget_id_to_node_id(region_id));
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

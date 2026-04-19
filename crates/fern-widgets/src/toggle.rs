@@ -301,6 +301,12 @@ impl Widget for Toggle {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        debug_assert!(
+            self.label.is_some(),
+            "Toggle is missing an accessible label — \
+             screen readers will announce \"switch\" with no context. \
+             Call .label(...) when constructing the widget."
+        );
         builder.set_role(fern_core::accesskit::Role::Switch);
         if let Some(ref label) = self.label {
             builder.set_name(label);
@@ -370,7 +376,7 @@ mod tests {
     fn accessibility() {
         let on = Signal::new(true);
         let mut tree = WidgetTree::new();
-        let t = tree.add(Toggle::new(on));
+        let t = tree.add(Toggle::new(on).label_literal("Dark mode"));
         tree.layout(SizeProposal::exact(100.0, 60.0));
         let info = tree.accessibility_node(t);
         assert_eq!(info.role(), fern_core::accesskit::Role::Switch);
@@ -381,7 +387,7 @@ mod tests {
     fn accessibility_has_actions() {
         let on = Signal::new(false);
         let mut tree = WidgetTree::new();
-        let t = tree.add(Toggle::new(on));
+        let t = tree.add(Toggle::new(on).label_literal("Dark mode"));
         tree.layout(SizeProposal::exact(100.0, 60.0));
         let info = tree.accessibility_node(t);
         assert!(

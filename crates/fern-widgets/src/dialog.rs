@@ -3,6 +3,8 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
+use fern_core::overlay::OverlayDismissCallback;
+use fern_core::signal::Signal;
 use fern_core::widget::{
     EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
@@ -184,18 +186,21 @@ fn queue_dialog_request(
     presentation: ModalPresentation,
     close_behavior: ModalCloseBehavior,
     title: &str,
+    on_dismiss: Option<OverlayDismissCallback>,
 ) {
     let factory = factory.clone();
-    ctx.present_modal(
-        ModalRequest::deferred(move |tree| {
-            let content = (factory.as_ref())();
-            tree.add(ModalContainer::boxed(content))
-        })
-        .presentation(presentation)
-        .close_behavior(close_behavior)
-        .title(title)
-        .size(460, 260),
-    );
+    let mut request = ModalRequest::deferred(move |tree| {
+        let content = (factory.as_ref())();
+        tree.add(ModalContainer::boxed(content))
+    })
+    .presentation(presentation)
+    .close_behavior(close_behavior)
+    .title(title)
+    .size(460, 260);
+    if let Some(cb) = on_dismiss {
+        request = request.on_dismiss(cb);
+    }
+    ctx.present_modal(request);
 }
 
 pub struct DialogContent {
@@ -458,7 +463,25 @@ impl Widget for Dialog {
             .clone()
             .expect("Dialog requires .content(...) — no content factory was set");
 
+        // Track whether the modal is currently open so the trigger can set
+        // aria-expanded correctly. The dismiss callback resets it to false
+        // regardless of which close path fires (Escape, click-outside, explicit
+        // ctx.dismiss_modal()). Only in-tree presentations fire this callback.
+        let is_open: Signal<bool> = ctx.signal(false);
+        let dismiss_callback: OverlayDismissCallback = {
+            let is_open = is_open.clone();
+            std::rc::Rc::new(move || {
+                is_open.set(false);
+            })
+        };
+
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
+            let tap_open = is_open.clone();
+            let tap_dismiss = dismiss_callback.clone();
+            let key_open = is_open.clone();
+            let key_dismiss = dismiss_callback.clone();
+            let action_open = is_open.clone();
+            let action_dismiss = dismiss_callback.clone();
             let handlers = fern_core::widget_builder::HandlerSet::new()
                 .focusable(true)
                 .cursor(fern_core::widget::CursorIcon::Pointer)
@@ -469,12 +492,14 @@ impl Widget for Dialog {
                         if !enabled {
                             return;
                         }
+                        tap_open.set(true);
                         queue_dialog_request(
                             ctx,
                             &content_factory,
                             presentation,
                             close_behavior,
                             &label,
+                            Some(tap_dismiss.clone()),
                         );
                     }
                 })
@@ -486,12 +511,14 @@ impl Widget for Dialog {
                             key: Key::Enter | Key::Space,
                             ..
                         } if enabled => {
+                            key_open.set(true);
                             queue_dialog_request(
                                 ctx,
                                 &content_factory,
                                 presentation,
                                 close_behavior,
                                 &label,
+                                Some(key_dismiss.clone()),
                             );
                             EventResponse::Handled
                         }
@@ -503,12 +530,14 @@ impl Widget for Dialog {
                     let content_factory = content_factory.clone();
                     move |action, ctx| {
                         if action == fern_core::accesskit::Action::Click && enabled {
+                            action_open.set(true);
                             queue_dialog_request(
                                 ctx,
                                 &content_factory,
                                 presentation,
                                 close_behavior,
                                 &label,
+                                Some(action_dismiss.clone()),
                             );
                             EventResponse::Handled
                         } else {
@@ -520,13 +549,23 @@ impl Widget for Dialog {
                 PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
                 PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
             }
-            .name(label);
+            .name(label)
+            .has_popup(fern_core::accesskit::HasPopup::Dialog)
+            .expanded_when(is_open.clone());
             ctx.add(overlay_trigger)
         } else {
+            let tap_open = is_open.clone();
+            let tap_dismiss = dismiss_callback.clone();
+            let key_open = is_open.clone();
+            let key_dismiss = dismiss_callback.clone();
+            let action_open = is_open.clone();
+            let action_dismiss = dismiss_callback.clone();
             ctx.add(
                 Button::new_literal(label)
                     .style(style)
                     .enabled(enabled)
+                    .has_popup(fern_core::accesskit::HasPopup::Dialog)
+                    .expanded_when(is_open.clone())
                     .on_tap({
                         let label = self.label.clone();
                         let content_factory = content_factory.clone();
@@ -534,12 +573,14 @@ impl Widget for Dialog {
                             if !enabled {
                                 return;
                             }
+                            tap_open.set(true);
                             queue_dialog_request(
                                 ctx,
                                 &content_factory,
                                 presentation,
                                 close_behavior,
                                 &label,
+                                Some(tap_dismiss.clone()),
                             );
                         }
                     })
@@ -551,12 +592,14 @@ impl Widget for Dialog {
                                 key: Key::Enter | Key::Space,
                                 ..
                             } if enabled => {
+                                key_open.set(true);
                                 queue_dialog_request(
                                     ctx,
                                     &content_factory,
                                     presentation,
                                     close_behavior,
                                     &label,
+                                    Some(key_dismiss.clone()),
                                 );
                                 EventResponse::Handled
                             }
@@ -568,12 +611,14 @@ impl Widget for Dialog {
                         let content_factory = content_factory.clone();
                         move |action, ctx| {
                             if action == fern_core::accesskit::Action::Click && enabled {
+                                action_open.set(true);
                                 queue_dialog_request(
                                     ctx,
                                     &content_factory,
                                     presentation,
                                     close_behavior,
                                     &label,
+                                    Some(action_dismiss.clone()),
                                 );
                                 EventResponse::Handled
                             } else {

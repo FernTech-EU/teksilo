@@ -24,6 +24,8 @@ struct PopoverSurface {
     placement: OverlayPlacement,
     show_caret: bool,
     caret_size: f32,
+    /// Accessible name for the dialog node — propagated from the trigger label.
+    name: String,
 }
 
 impl PopoverSurface {
@@ -32,6 +34,7 @@ impl PopoverSurface {
         placement: OverlayPlacement,
         show_caret: bool,
         caret_size: f32,
+        name: String,
     ) -> Self {
         Self {
             content_id: None,
@@ -39,6 +42,7 @@ impl PopoverSurface {
             placement,
             show_caret,
             caret_size,
+            name,
         }
     }
 
@@ -178,8 +182,10 @@ impl Widget for PopoverSurface {
         // Popover surface is modeled as a non-modal Dialog: ARIA has
         // no dedicated popover role, and Role::Dialog without
         // `set_modal` is the standard fallback for panels that float
-        // over other content without blocking it.
+        // over other content without blocking it. Every dialog node
+        // must have an accessible name; use the trigger's label.
         builder.set_role(fern_core::accesskit::Role::Dialog);
+        builder.set_name(&self.name);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -301,6 +307,7 @@ impl Widget for Popover {
             placement.clone(),
             show_caret,
             caret_size,
+            label.clone(),
         ));
         ctx.set_dormant(content_id);
 

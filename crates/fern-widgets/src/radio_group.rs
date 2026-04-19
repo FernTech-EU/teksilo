@@ -262,8 +262,8 @@ mod tests {
         let info_a = tree.accessibility_node(a);
         let info_b = tree.accessibility_node(b);
         let info_c = tree.accessibility_node(c);
-        assert!(!info_a.is_selected());
-        assert!(info_b.is_selected());
-        assert!(!info_c.is_selected());
+        assert!(!info_a.is_toggled());
+        assert!(info_b.is_toggled());
+        assert!(!info_c.is_toggled());
     }
 }

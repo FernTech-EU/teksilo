@@ -597,20 +597,36 @@ impl<T: 'static> Widget for TreeView<T> {
                 .with_entry(i, |item, entry| (self.delegate)(item, entry, selected))
             {
                 let inner_id = ctx.add_boxed(widget);
-                let (level, expanded_opt) = entry_meta
-                    .map(|e| {
-                        let exp = if e.has_children {
-                            Some(e.is_expanded)
-                        } else {
-                            None
-                        };
-                        (e.depth + 1, exp)
-                    })
-                    .unwrap_or((1, None));
+                let (level, position_1based, total_siblings, expanded_opt) =
+                    if let Some(ref e) = entry_meta {
+                        let exp = if e.has_children { Some(e.is_expanded) } else { None };
+                        let tree_model = self.tree_slice.tree();
+                        let (pos, total) =
+                            if let Some(parent_id) = tree_model.parent(e.node_id) {
+                                let siblings = tree_model.children(parent_id);
+                                let idx = siblings
+                                    .iter()
+                                    .position(|&s| s == e.node_id)
+                                    .unwrap_or(0);
+                                (idx + 1, siblings.len())
+                            } else {
+                                let root_count = tree_model.root_count();
+                                let idx = (0..root_count)
+                                    .find(|&k| tree_model.root(k) == e.node_id)
+                                    .unwrap_or(0);
+                                (idx + 1, root_count)
+                            };
+                        (e.depth + 1, pos, total, exp)
+                    } else {
+                        (1, 1, 1, None)
+                    };
                 let child_id = ctx.add(crate::list_item_a11y::TreeItemWrapper::new(
                     inner_id,
                     level,
+                    position_1based,
+                    total_siblings,
                     expanded_opt,
+                    selected,
                 ));
 
                 // Click handling: selection + expand/collapse for items with children

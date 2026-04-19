@@ -92,7 +92,9 @@ impl Widget for GroupBox {
             .a11y_hidden();
 
         let title_row_id = if let Some(ref checked) = self.checked {
-            let checkbox = Checkbox::new(checked.clone());
+            // The adjacent title text is `a11y_hidden`, so the checkbox must
+            // carry the accessible name for the group's on/off state.
+            let checkbox = Checkbox::new(checked.clone()).label_literal(&self.title);
             ctx.add(
                 HStack::new()
                     .spacing(style.checkbox_gap)

@@ -515,6 +515,12 @@ impl Widget for Checkbox {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        debug_assert!(
+            self.label.is_some(),
+            "Checkbox is missing an accessible label — \
+             screen readers will announce \"checkbox\" with no context. \
+             Call .label(...) when constructing the widget."
+        );
         builder.set_role(fern_core::accesskit::Role::CheckBox);
         if let Some(ref label) = self.label {
             builder.set_name(label);

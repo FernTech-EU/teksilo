@@ -89,3 +89,90 @@ Same pattern as TabWidget — prioritised by relationship complexity:
 | Checkbox / Toggle / RadioButton | `toggled` matches signal value |
 | Slider | `value`, `min`, `max` set and correct |
 | ListView / TreeView | items have correct roles; only visible items in tree |
+
+---
+
+## Full Widget A11y Audit — Batch Tracking
+
+Widgets reviewed in batches of 10. Layout primitives (no interactive semantics) are listed separately at the bottom.
+
+### Batch 1 ✅ — Audited and fixed
+
+| Widget | Role | Issues found | Status |
+|---|---|---|---|
+| Popover | `Dialog` (surface), trigger correct | Surface unnamed — needed `set_name` from trigger label | ✅ Fixed |
+| Dialog | `Dialog` (modal), surface correct | Trigger missing `has_popup(Dialog)` + `expanded_when` | ✅ Fixed |
+| Accordion | `Button` | Missing `aria-controls` → content; content needed `Region` wrapper | ✅ Fixed |
+| ToolBox | `Button` + `Region` | Collapsed panels remained in a11y tree — needed `set_hidden()` | ✅ Fixed |
+| Checkbox | `CheckBox` | Unlabeled = unnamed (footgun) — now `debug_assert!` | ✅ Fixed |
+| Toggle | `Switch` | Same as Checkbox — unlabeled footgun — now `debug_assert!` | ✅ Fixed |
+| RadioButton | `RadioButton` | `set_selected()` → `set_toggled()` (correct ARIA `aria-checked`) | ✅ Fixed |
+| Slider | `Slider` | Added `.label()` / `.label_literal()` builder methods | ✅ Fixed |
+| ListView | `List` → `ListBox` | Role changed; `ListItemWrapper` now `ListBoxOption` + selection | ✅ Fixed |
+| TreeView | `Tree` | `TreeItemWrapper` now sets `position_in_set`, `size_of_set`, selection | ✅ Fixed |
+
+### Batch 2 — Pending
+
+| Widget | Role | Issues | Status |
+|---|---|---|---|
+| Button | — | — | Pending |
+| ComboBox | — | — | Pending (partial: `push_controlled` dangling-ref fix done) |
+| ProgressBar | — | — | Pending |
+| Snackbar | — | — | Pending |
+| TabWidget | — | — | Done ✅ (see Point 3b above) |
+| SegmentedControl | — | — | Pending |
+| Link | — | — | Pending |
+| Badge | — | — | Pending |
+| Breadcrumb / BreadcrumbItem | — | — | Pending |
+| MenuItem / MenuList / MenuBar | — | — | Pending |
+
+### Batch 3 — Pending
+
+| Widget | Role | Issues | Status |
+|---|---|---|---|
+| ScrollArea | — | — | Pending |
+| ScrollBar | — | — | Pending |
+| SplitView | — | — | Pending |
+| Wizard / WizardStep | — | — | Pending |
+| MessageBox | — | — | Pending |
+| Toolbar | — | — | Pending |
+| StatusBar | — | — | Pending |
+| TitleBar | — | — | Pending |
+| Tooltip / TooltipWidget | — | — | Pending |
+| Card | — | — | Pending |
+
+### Batch 4 — Pending
+
+| Widget | Role | Issues | Status |
+|---|---|---|---|
+| Panel | — | — | Pending |
+| GroupBox | — | — | Pending |
+| GroupHeader | — | — | Pending |
+| BuiltInButton | — | — | Pending |
+| SplitButton | — | — | Pending |
+| SpinBox | — | — | Pending |
+| TextInput / TextInputField | — | — | Pending |
+| RadioGroup | — | — | Pending |
+| Repeater | — | — | Pending |
+| ShortcutSettings | — | — | Pending |
+
+### Batch 5 — Pending
+
+| Widget | Role | Issues | Status |
+|---|---|---|---|
+| RichTextEditor | — | — | Pending (feature-gated) |
+| MenuContext | — | — | Pending |
+| ImageWidget | — | — | Pending |
+| MasonryLayout | — | — | Pending |
+| FormLayout | — | — | Pending |
+| Switcher | — | — | Pending |
+| AspectRatio | — | — | Pending |
+| MaxSize | — | — | Pending |
+| GroupBox | — | — | Pending |
+| SplitButton | — | — | Pending |
+
+### Layout / Decorative Primitives (no interactive a11y requirements)
+
+These set `Role::GenericContainer` or have no `accessibility()` impl — correct behavior, no audit needed unless they gain interactive semantics:
+
+`HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `Divider`, `IconWidget`, `RectWidget`, `TextWidget`, `ImageWidget` (decorative), `MasonryLayout`, `FormLayout`

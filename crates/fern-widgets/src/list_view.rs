@@ -533,11 +533,9 @@ impl<T: 'static> Widget for ListView<T> {
                 (self.source.with_item_fn)(i, &|item| (self.delegate)(i, item, selected))
             {
                 let inner_id = ctx.add_boxed(widget);
-                let total = self.source.len();
                 let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
                     inner_id,
-                    i + 1,
-                    total,
+                    selected,
                 ));
 
                 // Selection click handling: plain click selects,
@@ -697,7 +695,7 @@ impl<T: 'static> Widget for ListView<T> {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::List);
+        builder.set_role(fern_core::accesskit::Role::ListBox);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1073,8 +1071,8 @@ mod tests {
         let info = tree.accessibility_node(children[0]);
         assert_eq!(
             info.role(),
-            fern_core::accesskit::Role::ListItem,
-            "Item wrapper should have ListItem role"
+            fern_core::accesskit::Role::ListBoxOption,
+            "Item wrapper should have ListBoxOption role"
         );
     }
 
