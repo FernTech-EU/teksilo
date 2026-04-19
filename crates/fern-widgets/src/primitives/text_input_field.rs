@@ -753,6 +753,7 @@ impl Widget for TextInputField {
         builder.add_action(Action::Focus);
         if !st.read_only {
             builder.add_action(Action::SetValue);
+            builder.add_action(Action::ReplaceSelectedText);
         }
         builder.add_action(Action::SetTextSelection);
     }

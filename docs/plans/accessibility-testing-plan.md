@@ -159,20 +159,29 @@ Fix details:
 - Tooltip focus-promotion — new `tooltip_focus_enter` / `tooltip_focus_leave_outside` wired into `focus_with_origin`. When a keyboard user focuses an anchor with a rich tooltip attached, the tooltip appears immediately and is pre-promoted to sticky (bypassing the 2 s pointer dwell). The tooltip dismisses automatically when focus moves outside both the anchor's subtree and the tooltip's content subtree, preventing sticky-tooltip accumulation as the user Tabs through a form. Plain tooltips are unaffected — their text still reaches AT via the existing `described_by` wiring, which is the W3C-recommended pattern for supplementary hints.
 - New FTL keys in fern-widgets: `a11y_toolbar_name`, `a11y_title_bar_name`, `a11y_window_controls_name`, `a11y_window_minimize_name`, `a11y_window_maximize_name`, `a11y_window_restore_name`, `a11y_window_close_name`, `a11y_wizard_progress_name`, `a11y_wizard_content_name` (en-US + fr-FR).
 
-### Batch 4 — Pending
+### Batch 4 ✅ — Audited and fixed
 
-| Widget | Role | Issues | Status |
+| Widget | Role | Issues found | Status |
 |---|---|---|---|
-| Panel | — | — | Pending |
-| GroupBox | — | — | Pending |
-| GroupHeader | — | — | Pending |
-| BuiltInButton | — | — | Pending |
-| SplitButton | — | — | Pending |
-| SpinBox | — | — | Pending |
-| TextInput / TextInputField | — | — | Pending |
-| RadioGroup | — | — | Pending |
-| Repeater | — | — | Pending |
-| ShortcutSettings | — | — | Pending |
+| Panel | `Group` (or hidden via `a11y_presentational`) | Already conventional (presentational mode already exists from Batch 3) | ✅ No changes |
+| GroupBox | `Group` | Checkable-but-unchecked state wasn't reflected as `set_disabled()` — AT announced the group as interactive while dispatcher blocked its content | ✅ Fixed |
+| GroupHeader | `Label` | Already conventional (`set_name` from label, adjacent `TextWidget` marked `a11y_hidden`, has dedicated a11y tests) | ✅ No changes |
+| BuiltInButton | `Button` (+ `set_toggled` for toggle mode) | No tooltip ⇒ unnamed button (silent footgun); `toggled` signal was only bound `RepaintOnly`, so AT never observed toggle flips | ✅ Fixed |
+| SplitButton | `Button` with dropdown | Missing `set_has_popup(Menu)` + `set_expanded` — screen readers announced a plain button with no hint that a menu was attached or currently open | ✅ Fixed |
+| SpinBox | `SpinButton` | Already conventional (full numeric API, `Increment`/`Decrement`/`SetValue`/`Focus`, value signal bound `AccessibilityOnly`) | ✅ No changes |
+| TextInput / TextInputField | `TextInput` on the field + `GenericContainer` on the composite | Field was missing `Action::ReplaceSelectedText` — password managers / voice-control "replace 'foo' with 'bar'" commands had nothing to target | ✅ Fixed |
+| RadioGroup | `RadioGroup` | Already conventional (container name, radio children push each sibling via `push_to_radio_group`) | ✅ No changes |
+| Repeater | (hidden by default; `Role` on opt-in) | Unconditionally emitted `Role::List`, wrong for the widget's documented uses (toolbar buttons, tag chips, chapter lists) — AT announced a dead "list" wrapper around non-list content | ✅ Fixed |
+| ShortcutSettings | `Group` + `Role::Status` live region on capture | No `accessibility()` impl at all — top-level role defaulted to `Unknown`; "Press any key…" capture hint was silent to AT | ✅ Fixed |
+
+Fix details:
+- `GroupBox` — `accessibility()` now calls `builder.set_disabled()` when `checked == Some(false)`, matching the dispatcher-level enabled-propagation that already blocks descendant events. The `checked` signal is bound to the group's own a11y node at `BindingLevel::AccessibilityOnly` so the state flips without a relayout.
+- `BuiltInButton` — added `debug_assert!(self.tooltip_text.is_some(), …)` mirroring the Checkbox/Toggle footgun from Batch 1; release builds fall back to the string "Button" so AT is never completely silent. When `toggle(...)` mode is active, the `toggled` signal is now bound `AccessibilityOnly` in addition to `RepaintOnly`, so `set_toggled()` refreshes every flip.
+- `SplitButton` — added a private `menu_open: Signal<bool>` bound `AccessibilityOnly`. Both overlay-open paths (chevron click, ArrowDown key) set it `true` and register an `on_dismiss` callback that flips it back to `false`. `accessibility()` now emits `set_has_popup(HasPopup::Menu)` + `set_expanded(menu_open.get())`. `selected` is also bound `AccessibilityOnly` so the main-region name (driven by the promoted item) refreshes in AT.
+- `TextInputField` — added `builder.add_action(Action::ReplaceSelectedText)` alongside the existing `SetValue`/`SetTextSelection`, guarded by `!read_only`.
+- `Repeater` — default `accessibility()` now emits `set_hidden()`; items therefore attach semantically to the Repeater's parent instead of a generic wrapper. Two opt-in builders — `.a11y_role(Role)` and `.a11y_label(impl Into<LocalizedString>)` (+ `a11y_label_literal` shim) — let callers surface a genuine `List`/`Menu`/`Toolbar` when the children really do form one.
+- `ShortcutSettings` — added a top-level `accessibility()` impl emitting `Role::Group` with the localised name "Shortcut settings"/"Paramètres des raccourcis". During capture, the row's keystroke cell is promoted to a new private `LiveStatusText` widget that emits `Role::Status` + `set_live(Live::Polite)`, so screen readers announce the "Press any key…" hint the instant Rebind is clicked. Static keystroke cells stay plain labels. Moved the hint text to an FTL key so it translates alongside the widget name.
+- New FTL keys in fern-widgets: `a11y-shortcut-settings-name`, `a11y-shortcut-settings-capture-hint` (en-US + fr-FR).
 
 ### Batch 5 — Pending
 

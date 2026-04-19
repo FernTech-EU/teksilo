@@ -30,10 +30,21 @@ use crate::primitives::VStack;
 /// })
 /// .spacing(8.0)
 /// ```
+///
+/// # Accessibility
+///
+/// By default the Repeater itself is hidden from assistive technology
+/// (`set_hidden()`); its materialized children connect to the parent's
+/// a11y subtree directly. This avoids announcing a semantically-empty
+/// "list" wrapper around content that may be buttons, tags, or any
+/// other shape. Use [`Repeater::a11y_role`] and [`Repeater::a11y_label`]
+/// when the children genuinely form a named list / menu / toolbar.
 pub struct Repeater<T: 'static> {
     model: ListModel<T>,
     factory: Rc<dyn Fn(usize, &T) -> Box<dyn Widget>>,
     spacing: f32,
+    a11y_role: Option<fern_core::accesskit::Role>,
+    a11y_label: Option<String>,
     // Internal state (set during build)
     container_id: Option<WidgetId>,
 }
@@ -51,6 +62,8 @@ impl<T: 'static> Repeater<T> {
             model,
             factory: Rc::new(factory),
             spacing: 0.0,
+            a11y_role: None,
+            a11y_label: None,
             container_id: None,
         }
     }
@@ -58,6 +71,31 @@ impl<T: 'static> Repeater<T> {
     /// Set the spacing between items (default 0.0).
     pub fn spacing(mut self, spacing: f32) -> Self {
         self.spacing = spacing;
+        self
+    }
+
+    /// Expose the Repeater to assistive tech with a specific role
+    /// (e.g. `Role::List`, `Role::Menu`, `Role::Toolbar`). Without
+    /// this, the Repeater is hidden from AT and its children connect
+    /// directly to the parent.
+    pub fn a11y_role(mut self, role: fern_core::accesskit::Role) -> Self {
+        self.a11y_role = Some(role);
+        self
+    }
+
+    /// Set an accessible name for the Repeater. Only takes effect
+    /// alongside [`a11y_role`](Self::a11y_role); a hidden Repeater
+    /// has no node to attach the name to.
+    pub fn a11y_label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.a11y_label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `a11y_label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn a11y_label_literal(mut self, label: impl Into<String>) -> Self {
+        self.a11y_label = Some(label.into());
         self
     }
 }
@@ -124,7 +162,17 @@ impl<T: 'static> Widget for Repeater<T> {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::List);
+        match self.a11y_role {
+            Some(role) => {
+                builder.set_role(role);
+                if let Some(ref label) = self.a11y_label {
+                    builder.set_name(label.as_str());
+                }
+            }
+            None => {
+                builder.set_hidden();
+            }
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

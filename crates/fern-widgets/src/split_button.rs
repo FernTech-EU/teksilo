@@ -27,6 +27,7 @@ use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
@@ -72,6 +73,10 @@ pub struct SplitButton {
     interaction: Signal<InteractionState>,
     selected: Signal<usize>,
     labels: Rc<Vec<String>>,
+    /// Tracks whether the dropdown overlay is currently visible.
+    /// Drives the accessibility `set_expanded()` state so AT announces
+    /// "collapsed" / "expanded" as the menu opens and closes.
+    menu_open: Signal<bool>,
     menu_content_id: Option<WidgetId>,
     root_child_id: Option<WidgetId>,
 }
@@ -93,6 +98,7 @@ impl SplitButton {
             interaction: Signal::new(InteractionState::Idle),
             selected: Signal::new(0),
             labels: Rc::new(Vec::new()),
+            menu_open: Signal::new(false),
             menu_content_id: None,
             root_child_id: None,
         }
@@ -324,6 +330,22 @@ impl Widget for SplitButton {
         self.labels = labels_rc.clone();
         self.selected = selected.clone();
 
+        // ---- Menu-open tracker (drives accessibility set_expanded). ----
+        // `selected` also feeds the a11y name, so bind it AccessibilityOnly
+        // so AT updates when the promoted item changes without relayout.
+        let menu_open = self.menu_open.clone();
+        let self_id_for_bindings = ctx.self_id();
+        menu_open.bind_to(
+            self_id_for_bindings,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
+        selected.bind_to(
+            self_id_for_bindings,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
+
         // ---- Interaction state signal ----
         let interaction = ctx.signal(if enabled {
             InteractionState::Idle
@@ -442,27 +464,32 @@ impl Widget for SplitButton {
                 .bind_width(sb_style.chevron_width)
                 .bind_height(sb_style.height)
                 .child_id(chevron_centered_id)
-                .on_tap(move |_pos, ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
+                .on_tap({
+                    let menu_open = self.menu_open.clone();
+                    move |_pos, ctx: &mut EventContext| {
+                        if !enabled {
+                            return;
+                        }
+                        int_for_tap.set(InteractionState::Pressed);
+                        ctx.activate(menu_id);
+                        menu_open.set(true);
+                        let on_dismiss_open = menu_open.clone();
+                        ctx.show_overlay(OverlayRequest {
+                            content_id: menu_id,
+                            anchor: self_id,
+                            placement: OverlayPlacement::BelowPreferred,
+                            dismiss: DismissBehavior::EscapeOrClickOutside,
+                            layer: OverlayLayer::InTree,
+                            parent_overlay: None,
+                            on_dismiss: Some(Rc::new(move || on_dismiss_open.set(false))),
+                        });
+                        // The MenuList owns the keyboard-navigation handler
+                        // (ArrowUp/ArrowDown/Enter/Escape) and that handler
+                        // only fires when the MenuList is focused. Hand focus
+                        // over so the user can immediately keyboard-walk the
+                        // items they just opened.
+                        ctx.request_focus(menu_id);
                     }
-                    int_for_tap.set(InteractionState::Pressed);
-                    ctx.activate(menu_id);
-                    ctx.show_overlay(OverlayRequest {
-                        content_id: menu_id,
-                        anchor: self_id,
-                        placement: OverlayPlacement::BelowPreferred,
-                        dismiss: DismissBehavior::EscapeOrClickOutside,
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: None,
-                    });
-                    // The MenuList owns the keyboard-navigation handler
-                    // (ArrowUp/ArrowDown/Enter/Escape) and that handler
-                    // only fires when the MenuList is focused. Hand focus
-                    // over so the user can immediately keyboard-walk the
-                    // items they just opened.
-                    ctx.request_focus(menu_id);
                 })
                 .on_hover(move |entered: bool, _ctx: &mut EventContext| {
                     if !enabled {
@@ -533,6 +560,7 @@ impl Widget for SplitButton {
         let selected_for_key = selected.clone();
         let int_for_key = interaction.clone();
         let int_for_focus = interaction.clone();
+        let menu_open_for_key = self.menu_open.clone();
 
         let handler_set = HandlerSet::new()
             .on_key(
@@ -566,6 +594,8 @@ impl Widget for SplitButton {
                             ..
                         } => {
                             ctx.activate(menu_id);
+                            menu_open_for_key.set(true);
+                            let on_dismiss_key = menu_open_for_key.clone();
                             ctx.show_overlay(OverlayRequest {
                                 content_id: menu_id,
                                 anchor: self_id,
@@ -573,7 +603,7 @@ impl Widget for SplitButton {
                                 dismiss: DismissBehavior::EscapeOrClickOutside,
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
-                                on_dismiss: None,
+                                on_dismiss: Some(Rc::new(move || on_dismiss_key.set(false))),
                             });
                             ctx.request_focus(menu_id);
                             EventResponse::Handled
@@ -629,6 +659,8 @@ impl Widget for SplitButton {
         if !self.enabled {
             builder.set_disabled();
         }
+        builder.set_has_popup(fern_core::accesskit::HasPopup::Menu);
+        builder.set_expanded(self.menu_open.get());
         builder.add_action(fern_core::accesskit::Action::Click);
         builder.add_action(fern_core::accesskit::Action::Focus);
     }

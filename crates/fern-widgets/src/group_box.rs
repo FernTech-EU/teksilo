@@ -10,6 +10,7 @@
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, Widget, WidgetPlacement};
@@ -79,6 +80,13 @@ impl Widget for GroupBox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         if let Some(pending) = self.pending_content.take() {
             self.content_id = Some(ctx.add_boxed(pending));
+        }
+
+        // When checkable, refresh the group's own a11y node (set_disabled
+        // tracks the unchecked state) without triggering a relayout.
+        if let Some(ref checked) = self.checked {
+            let self_id = ctx.self_id();
+            checked.bind_to(self_id, ctx.binding_registry(), BindingLevel::AccessibilityOnly);
         }
 
         let theme_signal = ctx.theme_signal();
@@ -165,6 +173,11 @@ impl Widget for GroupBox {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Group);
         builder.set_name(&self.title);
+        if let Some(ref checked) = self.checked
+            && !checked.get()
+        {
+            builder.set_disabled();
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
