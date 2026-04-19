@@ -146,7 +146,22 @@ pub struct AnimatedQuadRegistry {
     /// inactive→active transition to rebase every entry's
     /// `started_at` by the paused duration (phase continuity).
     paused_at: Option<Instant>,
+    /// Wall-clock of the last successful `tick` (when `window_active`
+    /// was true). `None` before the first tick. Drives
+    /// [`Self::next_deadline`] so the event loop wakes at the
+    /// animation frame interval even when no widget is dirty —
+    /// without this, the `ControlFlow::WaitUntil` path never fires
+    /// and the animation only advances on unrelated events.
+    last_tick_at: Option<Instant>,
+    /// Frame interval for shader-driven animations. 33 ms (~30 Hz)
+    /// by default — same cadence as the signal-based animation
+    /// scheduler's `DEFAULT_FRAME_INTERVAL`. Per-frame cost on the
+    /// shader path is just `queue.write_buffer(64 B) + draw_indexed`,
+    /// so driving at 30 Hz is cheap even with many animated quads.
+    frame_interval: Duration,
 }
+
+const DEFAULT_SHADER_FRAME_INTERVAL: Duration = Duration::from_millis(33);
 
 impl AnimatedQuadRegistry {
     pub fn new() -> Self {
@@ -158,6 +173,8 @@ impl AnimatedQuadRegistry {
             scratch: Vec::new(),
             window_active: true,
             paused_at: None,
+            last_tick_at: None,
+            frame_interval: DEFAULT_SHADER_FRAME_INTERVAL,
         }
     }
 
@@ -277,7 +294,46 @@ impl AnimatedQuadRegistry {
             let params = compute_params(entry, now, theme);
             self.scratch[slot as usize] = params;
         }
+        self.last_tick_at = Some(now);
         &self.scratch
+    }
+
+    /// Whether any animation is *eligible to advance* on the next tick.
+    /// Mirrors `AnimationScheduler::has_running`: pause-aware so the
+    /// idle-work predicate stays off while the window is inactive.
+    pub fn has_running(&self) -> bool {
+        self.window_active && !self.entries.is_empty()
+    }
+
+    /// Earliest deadline at which a visible, not-paused animation
+    /// wants the event loop to wake and call `render()`. Returns
+    /// `None` when the scheduler is window-paused, has no entries, or
+    /// all entries are hidden.
+    ///
+    /// Without this contribution to the tree's `next_timer_deadline`,
+    /// the event loop would sleep on `ControlFlow::Wait` between
+    /// unrelated events and the animation would only advance when the
+    /// user moves the mouse or scrolls — exactly the staircase
+    /// behaviour a missing deadline produces.
+    pub fn next_deadline(&self, arena: &WidgetArena, paint_epoch: u64) -> Option<Instant> {
+        if !self.window_active {
+            return None;
+        }
+        let any_visible = self
+            .entries
+            .values()
+            .any(|entry| widget_visible(arena, entry.owner, paint_epoch));
+        if !any_visible {
+            return None;
+        }
+        // First tick ever: wake immediately. Otherwise: last tick +
+        // frame interval. The event loop clamps against `Instant::now()`
+        // when setting `ControlFlow::WaitUntil`, so a past deadline
+        // just means "wake on the next poll" — which is fine.
+        Some(match self.last_tick_at {
+            Some(t) => t + self.frame_interval,
+            None => Instant::now(),
+        })
     }
 }
 
@@ -305,8 +361,22 @@ fn widget_visible(arena: &WidgetArena, id: WidgetId, paint_epoch: u64) -> bool {
     if paint_epoch == 0 {
         return true;
     }
+    // Strict equality (NOT `last_painted_epoch + 1 >= paint_epoch` like
+    // the signal scheduler). The signal path dirties its widget on
+    // every tick, which causes a non-cache-hit paint and bumps
+    // paint_epoch — so its `+1` tolerance is self-correcting. The
+    // shader path, by design, never dirties widgets (the fragment
+    // shader reads per-frame state from a uniform); paint_epoch stays
+    // frozen on cache-hit frames, so a `+1` tolerance would treat a
+    // widget that has NEVER been painted (last_painted_epoch = 0,
+    // paint_epoch = 1) as visible forever, driving the event loop at
+    // the animation frame rate for quads that are actually off-screen.
+    //
+    // With `==`, freshly-visible widgets miss exactly one tick (the
+    // one before their first post-scroll paint stamps them); that's
+    // ~33 ms, imperceptible.
     match arena.get(id) {
-        Some(node) => arena.is_active(id) && node.last_painted_epoch + 1 >= paint_epoch,
+        Some(node) => arena.is_active(id) && node.last_painted_epoch == paint_epoch,
         None => false,
     }
 }
@@ -510,6 +580,71 @@ mod tests {
         assert!(
             (p - 0.5).abs() < 0.02,
             "phase-continuous resume expected ~0.5, got {p}"
+        );
+    }
+
+    #[test]
+    fn next_deadline_advances_on_each_tick() {
+        // Regression test for a real bug: without this deadline
+        // contribution the event loop parks on ControlFlow::Wait
+        // between frame intervals and the animation only advances on
+        // unrelated wakes (mouse move, scroll) — visible as a 1-2
+        // step staircase.
+        let mut reg = AnimatedQuadRegistry::new();
+        let (arena, ids) = arena_with(1);
+        let theme = Theme::light_default();
+        let start = Instant::now();
+
+        reg.register(ids[0], sweep_kind(), start);
+
+        // Before any tick: deadline is "wake immediately" — ensures
+        // the first animation frame runs on the next event-loop turn.
+        let d0 = reg.next_deadline(&arena, 0).expect("must be scheduled");
+        assert!(
+            d0 <= Instant::now() + Duration::from_millis(1),
+            "first deadline should be ~now, got {:?} from now",
+            d0.saturating_duration_since(Instant::now())
+        );
+
+        // After a tick at time t, deadline moves to t + frame_interval.
+        reg.tick(start, &arena, 0, &theme);
+        let d1 = reg.next_deadline(&arena, 0).expect("must stay scheduled");
+        assert_eq!(
+            d1,
+            start + Duration::from_millis(33),
+            "deadline must advance by frame_interval after each tick"
+        );
+
+        // Another tick 33ms later → deadline pushes another 33ms.
+        reg.tick(start + Duration::from_millis(33), &arena, 0, &theme);
+        let d2 = reg.next_deadline(&arena, 0).expect("still scheduled");
+        assert_eq!(d2, start + Duration::from_millis(66));
+    }
+
+    #[test]
+    fn next_deadline_none_when_window_inactive() {
+        let mut reg = AnimatedQuadRegistry::new();
+        let (arena, ids) = arena_with(1);
+        let start = Instant::now();
+        reg.register(ids[0], sweep_kind(), start);
+        reg.set_window_active(false, start);
+        assert!(
+            reg.next_deadline(&arena, 0).is_none(),
+            "paused registry must not contribute to next_timer_deadline"
+        );
+    }
+
+    #[test]
+    fn next_deadline_none_when_all_entries_offscreen() {
+        let mut reg = AnimatedQuadRegistry::new();
+        let (arena, ids) = arena_with(1);
+        let start = Instant::now();
+        reg.register(ids[0], sweep_kind(), start);
+        // paint_epoch > 0 but widget's last_painted_epoch stays 0 →
+        // gate closes. Deadline should drop so the loop can park.
+        assert!(
+            reg.next_deadline(&arena, 5).is_none(),
+            "offscreen-only registry must not keep the event loop awake"
         );
     }
 

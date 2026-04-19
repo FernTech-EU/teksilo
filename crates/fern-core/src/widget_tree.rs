@@ -645,11 +645,16 @@ impl WidgetTree {
     /// parked by the window-inactive gate stop forcing the event loop
     /// into `ControlFlow::WaitUntil`. Without this, an unfocused window
     /// would still wake at the animation frame interval and the
-    /// pause would save nothing.
+    /// pause would save nothing. Both the signal scheduler AND the
+    /// shader-driven animated-quad registry are consulted — a
+    /// ProgressBar::indeterminate whose widget has no pending paint
+    /// dirt still needs the loop to keep waking at the animation
+    /// frame interval so its phase advances.
     pub fn needs_redraw(&self) -> bool {
         self.arena.any_needs_layout()
             || self.arena.any_needs_paint()
             || self.animation_scheduler.has_running()
+            || self.animated_quads.has_running()
             || self.frame_tick_requested.get()
     }
 

@@ -502,6 +502,13 @@ impl WidgetTree {
         let animation_deadline = self
             .animation_scheduler
             .next_deadline(&self.arena, self.paint_epoch);
+        // Same pattern for the shader-driven animated-quad registry —
+        // without this the event loop sleeps between frame intervals
+        // and shader-driven animations only advance on unrelated
+        // wakes (mouse move, scroll), producing a visible staircase.
+        let animated_quad_deadline = self
+            .animated_quads
+            .next_deadline(&self.arena, self.paint_epoch);
         let gesture_deadline = self.next_gesture_deadline();
         let wake_at_deadline = self.pending_wake_at.get();
 
@@ -511,6 +518,7 @@ impl WidgetTree {
             delayed_overlay_deadline,
             auto_dismiss_deadline,
             animation_deadline,
+            animated_quad_deadline,
             gesture_deadline,
             wake_at_deadline,
         ]
