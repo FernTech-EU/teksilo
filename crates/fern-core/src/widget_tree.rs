@@ -100,6 +100,17 @@ pub struct WidgetTree {
     animation_scheduler: crate::animation::AnimationScheduler,
     /// Weakly tracked animated values from both state and signal APIs.
     animated_values: Vec<AnimatedRegistration>,
+    /// Registry of shader-driven animated quads (opt-in alternative to
+    /// `Signal<f32>::animate_looping` for decorative motion — progress
+    /// sweeps, sprite-atlas frame cycling, future pulse/shimmer). The
+    /// scheduler-style signal path stays for everything else.
+    animated_quads: crate::animated_quad::AnimatedQuadRegistry,
+    /// Proxy for pushing per-frame `AnimParams` to the renderer's
+    /// uniform buffer. `None` in headless tests and anywhere the
+    /// tree is used without a live renderer — the registry still
+    /// runs `tick` (callers can read the `&[AnimParams]` slice), it
+    /// just isn't uploaded.
+    renderer_proxy: Option<std::rc::Rc<dyn crate::animated_quad::RendererProxy>>,
     /// Monotonic counter bumped at the start of each `render()` call.
     /// Each widget's `last_painted_epoch` is set to this value whenever
     /// the paint pass (or the cache-hit early-out) confirms the widget
@@ -259,6 +270,8 @@ impl WidgetTree {
             layout_direction: crate::environment::LayoutDirection::default(),
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_values: Vec::new(),
+            animated_quads: crate::animated_quad::AnimatedQuadRegistry::new(),
+            renderer_proxy: None,
             paint_epoch: 0,
             cached_a11y: None,
             a11y_dirty: true,
@@ -738,16 +751,62 @@ impl WidgetTree {
     }
 
     /// Mark the owning window as active (focused AND not occluded) or
-    /// inactive. Propagates to the animation scheduler so looping
-    /// animations pause while the window is hidden — no ticks, no frame
-    /// wakes, no GPU submits. See [`crate::animation::AnimationScheduler::set_window_active`].
+    /// inactive. Propagates to the animation scheduler AND the
+    /// animated-quad registry so both pause-resume in lockstep — no
+    /// ticks, no frame wakes, no GPU submits.
     pub fn set_window_active(&mut self, active: bool) {
-        self.animation_scheduler
-            .set_window_active(active, std::time::Instant::now());
+        let now = std::time::Instant::now();
+        self.animation_scheduler.set_window_active(active, now);
+        self.animated_quads.set_window_active(active, now);
     }
 
     pub fn is_window_active(&self) -> bool {
         self.animation_scheduler.is_window_active()
+    }
+
+    /// Install the renderer-side proxy used to upload animated-quad
+    /// uniforms each frame. Called by `fern-app` at window creation
+    /// after the renderer is ready; left `None` in headless tests.
+    pub fn set_renderer_proxy(
+        &mut self,
+        proxy: std::rc::Rc<dyn crate::animated_quad::RendererProxy>,
+    ) {
+        self.renderer_proxy = Some(proxy);
+    }
+
+    /// Register a new animated quad for the currently-building widget.
+    /// Called by [`crate::build_context::BuildContext::animated_quad`];
+    /// returns an opaque handle the widget stashes for its `paint()`
+    /// call.
+    pub fn register_animated_quad(
+        &mut self,
+        owner: WidgetId,
+        kind: crate::animated_quad::AnimatedQuadKind,
+    ) -> crate::animated_quad::AnimatedQuadHandle {
+        self.animated_quads
+            .register(owner, kind, std::time::Instant::now())
+    }
+
+    /// Compute fresh `AnimParams` for every live animated-quad slot and
+    /// forward them to the renderer. Called once per frame, just before
+    /// the renderer encodes the command buffer — the uniform buffer
+    /// must reflect the current phase by the time the shader runs.
+    ///
+    /// No-op when the widget tree has no `RendererProxy` (headless
+    /// tests, unit tests) — the registry's own `tick` is still useful
+    /// for diagnostics but nothing needs to be uploaded.
+    pub fn tick_animated_quads(&mut self, now: std::time::Instant) {
+        let params = self
+            .animated_quads
+            .tick(now, &self.arena, self.paint_epoch, &self.theme);
+        if let Some(proxy) = &self.renderer_proxy {
+            proxy.write_anim_uniforms(params);
+        }
+    }
+
+    /// Active animated-quad slot count. Test / debug helper.
+    pub fn animated_quad_count(&self) -> usize {
+        self.animated_quads.active_count()
     }
 
     /// Advance time-driven gesture recognizers (currently only
@@ -871,11 +930,19 @@ impl WidgetTree {
         // (silent CPU waste) and, for looping animations, doubling up
         // when the new one registers.
         self.animation_scheduler.cancel_by_widget(widget_id);
+        // Same pattern for shader-driven animated quads: free the
+        // widget's slot(s) so `build()` can allocate fresh handles.
+        // The old cached_paint (if any) carries stale slot indices —
+        // clear it so paint() re-runs and re-emits DrawCommands with
+        // the newly-allocated slot.
+        self.animated_quads.cancel_by_widget(widget_id);
 
         let drained_subs = if let Some(node) = self.arena.get_mut(widget_id) {
             node.effect_handles.clear();
             node.actions.clear();
             node.dirty.needs_rebuild = false;
+            node.cached_paint = None;
+            node.dirty.needs_paint = true;
             std::mem::take(&mut node.subscription_handles)
         } else {
             Vec::new()
@@ -941,6 +1008,8 @@ impl WidgetTree {
         // scheduler holds strong Signal<f32> clones, so the animation
         // would outlive its widget without this explicit cancellation.
         self.animation_scheduler.cancel_by_widget(widget_id);
+        // Release the animated-quad slot(s) too.
+        self.animated_quads.cancel_by_widget(widget_id);
 
         let children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         for child in children {

@@ -7,8 +7,8 @@ use crate::geometry::{Point, Rect, Transform2D};
 use crate::paint::{Paint, StrokeStyle};
 use crate::path::Path;
 use crate::render_frame::{
-    BlendMode, DecorationKind, DecorationRect, DrawCommand, GlyphQuad, ImageQuad, PaintData,
-    PathEntry, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
+    AnimatedQuadClass, AnimatedQuadDraw, BlendMode, DecorationKind, DecorationRect, DrawCommand,
+    GlyphQuad, ImageQuad, PaintData, PathEntry, RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 use crate::text_backend::TextBackend;
 
@@ -42,6 +42,23 @@ impl Canvas {
     /// draw_text / draw_paragraph helpers.
     pub fn text_backend(&self) -> Option<&Rc<RefCell<dyn TextBackend>>> {
         self.text_backend.as_ref()
+    }
+
+    /// Emit a shader-driven animated quad. The `slot` comes from an
+    /// `AnimatedQuadHandle` the widget obtained in `build()` via
+    /// `ctx.animated_quad(kind)`; the fragment shader reads the
+    /// per-frame state (phase, frame index, resolved colors, …) from
+    /// the renderer's uniform buffer indexed by `slot`. This means
+    /// `paint()` only runs when the widget's layout changes, not every
+    /// frame — the animation keeps moving while `paint()` sits idle.
+    pub fn draw_animated_quad(&mut self, bounds: Rect, slot: u32, class: AnimatedQuadClass) {
+        let idx = self.frame.animated_quads.len();
+        self.frame.animated_quads.push(AnimatedQuadDraw {
+            screen: bounds.to_array(),
+            slot,
+            class,
+        });
+        self.frame.draw_order.push(DrawCommand::AnimatedQuad(idx));
     }
 
     // --- Tier 1: Axis-aligned rectangles (DecorationRect) ---

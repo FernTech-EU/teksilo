@@ -14,6 +14,13 @@ pub struct RenderFrame {
     pub shadows: Vec<ShadowQuad>,
     pub rasterized: Vec<RasterizedQuad>,
     pub paths: Vec<PathEntry>,
+    /// Animated quads (procedural or sprite-atlas kinds). Emitted by
+    /// widgets that opt into the shader-driven animation pipeline via
+    /// `ctx.animated_quad()`. The fragment shader samples per-slot
+    /// state from a renderer-side uniform buffer updated each frame by
+    /// the widget tree — the widget's own `paint()` runs only when
+    /// layout changes, not once per animation frame.
+    pub animated_quads: Vec<AnimatedQuadDraw>,
     pub draw_order: Vec<DrawCommand>,
     /// Images that need GPU registration before rendering this frame.
     pub pending_images: Vec<PendingImage>,
@@ -45,6 +52,7 @@ impl RenderFrame {
         let shadow_offset = self.shadows.len();
         let rasterized_offset = self.rasterized.len();
         let path_offset = self.paths.len();
+        let animated_offset = self.animated_quads.len();
 
         self.glyphs.extend_from_slice(&other.glyphs);
         self.images.extend_from_slice(&other.images);
@@ -53,6 +61,7 @@ impl RenderFrame {
         self.shadows.extend_from_slice(&other.shadows);
         self.rasterized.extend_from_slice(&other.rasterized);
         self.paths.extend_from_slice(&other.paths);
+        self.animated_quads.extend_from_slice(&other.animated_quads);
         self.layout_keys.extend_from_slice(&other.layout_keys);
         // Merge pending image registrations (deduped by renderer)
         for pending in &other.pending_images {
@@ -70,6 +79,7 @@ impl RenderFrame {
                 DrawCommand::Shadow(i) => DrawCommand::Shadow(i + shadow_offset),
                 DrawCommand::Rasterized(i) => DrawCommand::Rasterized(i + rasterized_offset),
                 DrawCommand::Path(i) => DrawCommand::Path(i + path_offset),
+                DrawCommand::AnimatedQuad(i) => DrawCommand::AnimatedQuad(i + animated_offset),
                 other => other.clone(),
             };
             self.draw_order.push(shifted);
@@ -322,6 +332,11 @@ pub enum DrawCommand {
     Shadow(usize),
     Rasterized(usize),
     Path(usize),
+    /// Shader-driven animated quad — index into `RenderFrame::animated_quads`.
+    /// The per-frame state (phase, frame_index, colors) is NOT in the
+    /// vertex data; the renderer looks it up from its uniform buffer
+    /// via the `slot` stored in `AnimatedQuadDraw`.
+    AnimatedQuad(usize),
     SetClip(Rect),
     ClearClip,
     SetOpacity(f32),
@@ -329,6 +344,36 @@ pub enum DrawCommand {
     SetBlendMode(BlendMode),
     RestoreBlendMode,
     SetTransform(Transform2D),
+}
+
+/// An animated quad to render with one of the shader-animation pipelines.
+/// The fragment shader samples per-slot state from the renderer's uniform
+/// buffer (updated each frame by the widget tree's animated-quad
+/// registry) — the `slot` field selects which entry to read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimatedQuadDraw {
+    /// Screen-space bounds: [x, y, width, height] in logical pixels.
+    pub screen: [f32; 4],
+    /// Dense index into the renderer's `AnimParams` uniform array. Owned
+    /// and allocated by the widget tree's `AnimatedQuadRegistry`; stable
+    /// for the lifetime of one widget mount (freed on rebuild/destroy).
+    pub slot: u32,
+    /// Which pipeline draws this quad — procedural (sweep, pulse…) or
+    /// sprite (texture-atlas frame cycling). Picked once at emit time.
+    pub class: AnimatedQuadClass,
+}
+
+/// Which shader pipeline a [`DrawCommand::AnimatedQuad`] is routed to.
+/// Chosen by the widget at `Canvas::draw_animated_quad` time based on
+/// its `AnimatedQuadKind`; the renderer binds the matching pipeline.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnimatedQuadClass {
+    /// Fully procedural — no texture binding. IndeterminateSweep,
+    /// Pulse, Shimmer, etc.
+    Procedural,
+    /// Samples a texture atlas. Carries the image name so the renderer
+    /// can resolve the bind group (same path registered images use).
+    Sprite { image_name: String },
 }
 
 #[cfg(test)]

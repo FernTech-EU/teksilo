@@ -1,5 +1,6 @@
 pub mod accessibility;
 pub mod action;
+pub mod animated_quad;
 pub mod animation;
 pub mod app_event;
 pub mod arena;
@@ -31,6 +32,9 @@ pub mod window_chrome;
 pub(crate) mod test_widgets;
 
 pub use accessibility::{AccessNodeBuilder, AccessibilityInfo};
+pub use animated_quad::{
+    AnimParams, AnimatedQuadHandle, AnimatedQuadKind, AnimatedQuadRegistry, RendererProxy,
+};
 pub use animation::AnimationScheduler;
 pub use app_event::AppEvent;
 pub use arena::WidgetArena;

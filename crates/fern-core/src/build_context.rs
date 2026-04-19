@@ -82,6 +82,25 @@ impl<'a> BuildContext<'a> {
         self.tree.prefers_reduced_motion()
     }
 
+    /// Opt into the shader-driven animated-quad pipeline. The widget
+    /// paint() emits ONE `canvas.draw_animated_quad(bounds, handle.slot(),
+    /// class)` call; the renderer samples per-slot state from its
+    /// uniform buffer each frame and the widget's paint() does not
+    /// re-run for animation ticks — only on layout changes. The
+    /// returned handle is stable for the widget-mount lifetime and
+    /// should be stashed on `self` to thread to `paint()`.
+    ///
+    /// For decorative motion that isn't a quad (scroll-offset tweens,
+    /// sidebar slide, toggle knob), keep using `ctx.animated_signal` +
+    /// `signal.animate_looping` — both paths coexist.
+    pub fn animated_quad(
+        &mut self,
+        kind: crate::animated_quad::AnimatedQuadKind,
+    ) -> crate::animated_quad::AnimatedQuadHandle {
+        let owner = self.self_id();
+        self.tree.register_animated_quad(owner, kind)
+    }
+
     /// The per-frame delta-seconds signal. Observe it via
     /// `ctx.effect(&ctx.frame_tick(), |delta| ...)` to run code once per
     /// frame **the tree was explicitly asked to pump**. Merely observing

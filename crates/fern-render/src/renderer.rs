@@ -724,6 +724,13 @@ impl Renderer {
                         current_opacity = opacity_stack.pop().unwrap_or(1.0);
                     }
                     fern_canvas::DrawCommand::Rasterized(_) => {}
+                    // Phase A stub. The animated-quad pipeline lands
+                    // in Phase B; until ProgressBar / IconWidget are
+                    // ported, no widget emits this command. The arm
+                    // is here so the plumbing (DrawCommand variant,
+                    // RenderFrame::animated_quads, Canvas API) can
+                    // land without a dangling non-exhaustive match.
+                    fern_canvas::DrawCommand::AnimatedQuad(_) => {}
                     fern_canvas::DrawCommand::SetBlendMode(mode) => {
                         blend_stack.push(current_blend);
                         current_blend = *mode;
