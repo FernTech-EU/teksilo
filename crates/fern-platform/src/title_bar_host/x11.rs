@@ -10,17 +10,24 @@
 use std::sync::Arc;
 
 use fern_canvas::{Point, Size};
-use fern_core::{HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge};
+use fern_core::{
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, Signal, TitleBarHostCallbacks,
+};
 use winit::window::Window;
 
 #[allow(dead_code)]
 pub struct X11Host {
     window: Arc<Window>,
+    is_max: Signal<bool>,
+    callbacks: TitleBarHostCallbacks,
 }
 
 impl X11Host {
     #[allow(dead_code)]
-    pub fn new(_window: Arc<Window>) -> Result<Self, PlatformError> {
+    pub fn new(
+        _window: Arc<Window>,
+        _callbacks: TitleBarHostCallbacks,
+    ) -> Result<Self, PlatformError> {
         Err(PlatformError::Unsupported)
     }
 }
@@ -33,6 +40,9 @@ impl PlatformTitleBarHost for X11Host {
         Size::ZERO
     }
     fn renders_custom_controls(&self) -> bool {
+        false
+    }
+    fn needs_custom_resize_handles(&self) -> bool {
         false
     }
     fn begin_drag(&self) -> Result<(), PlatformError> {
@@ -49,6 +59,9 @@ impl PlatformTitleBarHost for X11Host {
     fn close(&self) {}
     fn is_maximized(&self) -> bool {
         false
+    }
+    fn is_maximized_signal(&self) -> Signal<bool> {
+        self.is_max.clone()
     }
     fn update_hit_regions(&self, _regions: &HitRegions) {}
 }

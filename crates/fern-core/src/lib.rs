@@ -79,6 +79,7 @@ pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 pub use window_chrome::{
     HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,
+    TitleBarHostCallbacks,
 };
 
 pub use accesskit;

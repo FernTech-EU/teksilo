@@ -104,7 +104,12 @@ impl std::fmt::Debug for TitleBar {
 impl TitleBar {
     /// Construct a `TitleBar` bound to the given platform host.
     pub fn new(host: Rc<dyn PlatformTitleBarHost>) -> Self {
-        let initial_maximized = host.is_maximized();
+        // Share the host's own `is_maximized` signal rather than minting a
+        // new one: the host updates this signal from `notify_window_resized`
+        // when the OS initiates a maximize (drag-to-top snap, green-light
+        // zoom), so the Switcher glyph and any app-level subscribers stay
+        // in sync without extra plumbing.
+        let is_maximized = host.is_maximized_signal();
         Self {
             host,
             leading: None,
@@ -114,7 +119,7 @@ impl TitleBar {
             background: Color::TRANSPARENT,
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
-            is_maximized: Signal::new(initial_maximized),
+            is_maximized,
             close_action: None,
             root_child_id: None,
         }
@@ -192,9 +197,11 @@ impl TitleBar {
         self
     }
 
-    /// The reactive `is_maximized` signal. Exposed so applications can
-    /// update it from `WindowEvent::Resized` until the per-platform host
-    /// learns to do that itself.
+    /// Read-only view of the platform host's maximize state. The host
+    /// drives this itself: `toggle_maximize` flips the OS state, and the
+    /// subsequent `WindowEvent::Resized` runs `host.notify_window_resized()`
+    /// which pushes the new value. Applications can observe it (e.g. to
+    /// swap their own iconography), but shouldn't write to it.
     pub fn is_maximized_signal(&self) -> Signal<bool> {
         self.is_maximized.clone()
     }
@@ -334,12 +341,24 @@ mod tests {
     /// A test host that records calls. Pretends the platform supports
     /// custom controls (`renders_custom_controls = true`) and reports
     /// zero macOS traffic-light insets.
-    #[derive(Default)]
     struct TestHost {
         minimized: Cell<u32>,
         maximize_toggled: Cell<u32>,
         closed: Cell<u32>,
         drags_started: Cell<u32>,
+        is_max: Signal<bool>,
+    }
+
+    impl Default for TestHost {
+        fn default() -> Self {
+            Self {
+                minimized: Cell::new(0),
+                maximize_toggled: Cell::new(0),
+                closed: Cell::new(0),
+                drags_started: Cell::new(0),
+                is_max: Signal::new(false),
+            }
+        }
     }
 
     impl PlatformTitleBarHost for TestHost {
@@ -350,6 +369,9 @@ mod tests {
             Size::ZERO
         }
         fn renders_custom_controls(&self) -> bool {
+            true
+        }
+        fn needs_custom_resize_handles(&self) -> bool {
             true
         }
         fn begin_drag(&self) -> Result<(), PlatformError> {
@@ -372,7 +394,10 @@ mod tests {
             self.closed.set(self.closed.get() + 1);
         }
         fn is_maximized(&self) -> bool {
-            false
+            self.is_max.get()
+        }
+        fn is_maximized_signal(&self) -> Signal<bool> {
+            self.is_max.clone()
         }
         fn update_hit_regions(&self, _regions: &HitRegions) {}
     }
@@ -403,6 +428,11 @@ mod tests {
     /// order: minimize, maximize, close. Layout-shape-aware — if the build
     /// changes shape this test will tell us by panicking with a helpful
     /// debug print of the children at each level.
+    ///
+    /// The maximize slot is a `Switcher` wrapping a `ControlButton` for the
+    /// `□` (normal) and `❐` (zoomed) glyphs; this helper drills in and
+    /// returns the currently-visible ControlButton so accessibility /
+    /// geometry assertions work unchanged.
     fn locate_control_buttons(tree: &WidgetTree, bar: WidgetId) -> [WidgetId; 3] {
         // bar -> [HStack root]
         let bar_kids = tree.children(bar);
@@ -423,14 +453,26 @@ mod tests {
         assert_eq!(controls_kids.len(), 1, "controls should wrap one HStack");
         let inner_row = controls_kids[0];
 
-        // inner_row -> [minimize, maximize, close]
+        // inner_row -> [minimize, max_switcher, close]
         let inner_kids = tree.children(inner_row);
         assert_eq!(
             inner_kids.len(),
             3,
-            "inner controls row should contain 3 buttons, got {inner_kids:?}"
+            "inner controls row should contain 3 items, got {inner_kids:?}"
         );
-        [inner_kids[0], inner_kids[1], inner_kids[2]]
+        // Descend into the Switcher → ZStack → [normal, zoomed]; return the
+        // first (normal-state) ControlButton since `TestHost::default()`
+        // reports `is_maximized = false` at build time.
+        let switcher_kids = tree.children(inner_kids[1]);
+        assert_eq!(switcher_kids.len(), 1, "Switcher wraps one ZStack");
+        let zstack = switcher_kids[0];
+        let max_buttons = tree.children(zstack);
+        assert_eq!(
+            max_buttons.len(),
+            2,
+            "maximize Switcher should wrap 2 ControlButtons (□ + ❐), got {max_buttons:?}"
+        );
+        [inner_kids[0], max_buttons[0], inner_kids[2]]
     }
 
     #[test]

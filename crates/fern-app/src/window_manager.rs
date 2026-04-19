@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use fern_core::event_source::TreeAppContext;
-use fern_core::{PlatformTitleBarHost, WidgetTree};
+use fern_core::{PlatformTitleBarHost, TitleBarHostCallbacks, WidgetTree};
 use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
 use fern_platform::create_title_bar_host;
@@ -20,7 +20,7 @@ use winit::raw_window_handle::HasWindowHandle;
 use winit::window::UserAttentionType;
 use winit::window::WindowLevel;
 
-use crate::app::ThemeMode;
+use crate::app::{AppEventProxy, CloseWindowRequest, ThemeMode};
 
 use crate::window_config::{FernWindowId, WindowConfig};
 
@@ -80,6 +80,12 @@ pub struct WindowManager {
     /// receives a clone of this Rc so subscriptions land in a single
     /// shared `subscription_callbacks` map.
     app_context_template: Option<Rc<TreeAppContext>>,
+    /// Event-loop proxy used to construct `TitleBarHostCallbacks` when a
+    /// window opts into custom chrome. Installed by `FernAppHandler::new`
+    /// after the proxy is minted in `FernAppBuilder::run`. `None` during
+    /// tests or the headless path, in which case the host's `close()`
+    /// callback is a no-op (`TitleBarHostCallbacks::noop`).
+    event_proxy: Option<AppEventProxy>,
 }
 
 impl WindowManager {
@@ -98,12 +104,20 @@ impl WindowManager {
             a11y_prefs,
             theme_mode: ThemeMode::Manual,
             app_context_template: None,
+            event_proxy: None,
         }
     }
 
     /// Set the theme mode (called by FernAppHandler during initialization).
     pub fn set_theme_mode(&mut self, mode: ThemeMode) {
         self.theme_mode = mode;
+    }
+
+    /// Install the event-loop proxy (called by FernAppHandler once the
+    /// proxy is available). Enables `TitleBarHostCallbacks::request_close`
+    /// to post `CloseWindowRequest` back through the event loop.
+    pub fn set_event_proxy(&mut self, proxy: AppEventProxy) {
+        self.event_proxy = Some(proxy);
     }
 
     /// Install the per-tree app context template that every newly created
@@ -161,6 +175,19 @@ impl WindowManager {
             && fern_platform::active_window_system() == fern_platform::WindowSystem::Wayland
         {
             window_attrs = window_attrs.with_decorations(false);
+        }
+
+        // macOS custom chrome: let the widget tree paint under the titlebar
+        // region while keeping the native traffic-light cluster on top. See
+        // `title_bar_host/macos.rs` for how the traffic-light inset is
+        // measured and exposed through `reserved_leading_inset`.
+        #[cfg(target_os = "macos")]
+        if config.custom_chrome {
+            use winit::platform::macos::WindowAttributesExtMacOS;
+            window_attrs = window_attrs
+                .with_titlebar_transparent(true)
+                .with_fullsize_content_view(true)
+                .with_title_hidden(true);
         }
 
         if config.modal {
@@ -256,7 +283,18 @@ impl WindowManager {
         // factory logs a warning and returns `Unsupported`; we silently
         // continue with native decorations and leave the host slot empty.
         let title_bar_host: Option<Rc<dyn PlatformTitleBarHost>> = if config.custom_chrome {
-            match create_title_bar_host(pw.window_arc()) {
+            let callbacks = match self.event_proxy.clone() {
+                Some(proxy) => TitleBarHostCallbacks {
+                    request_close: Rc::new(move || {
+                        proxy.send_external(CloseWindowRequest { fern_id });
+                    }),
+                },
+                // Headless / test path: no event loop proxy is installed, so
+                // the host's close() becomes a silent no-op. Real windowed
+                // runs always install a proxy via `set_event_proxy`.
+                None => TitleBarHostCallbacks::noop(),
+            };
+            match create_title_bar_host(pw.window_arc(), callbacks) {
                 Ok(host) => Some(host),
                 Err(_) => None,
             }

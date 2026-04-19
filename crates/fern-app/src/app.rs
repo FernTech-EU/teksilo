@@ -35,7 +35,7 @@ pub enum ThemeMode {
 #[cfg(feature = "text")]
 use fern_text::SharedTypesetter;
 
-use crate::window_config::WindowConfig;
+use crate::window_config::{FernWindowId, WindowConfig};
 use crate::window_manager::WindowManager;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,9 +306,11 @@ impl FernAppHandler {
         app_context_template: Option<std::rc::Rc<TreeAppContext>>,
         #[cfg(feature = "text")] typesetter: SharedTypesetter,
         i18n_watcher: Option<fern_i18n::FtlFileWatcher>,
+        event_proxy: AppEventProxy,
     ) -> Self {
         let mut wm = WindowManager::new(theme);
         wm.set_theme_mode(theme_mode);
+        wm.set_event_proxy(event_proxy);
         if let Some(template) = app_context_template {
             wm.set_app_context_template(template);
         }
@@ -643,6 +645,14 @@ impl FernAppHandler {
             WindowEvent::Resized(new_size) => {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.platform_window.resize(new_size);
+                    // Sync the host's `is_maximized_signal` from the OS's
+                    // current state (macOS `isZoomed`, Wayland `is_maximized`,
+                    // …). Covers OS-initiated maximize — drag-to-top-snap on
+                    // Wayland/Windows, green-light zoom on macOS — which
+                    // never hits `toggle_maximize()` on our side.
+                    if let Some(host) = &managed.title_bar_host {
+                        host.notify_window_resized();
+                    }
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("resize");
                     }
@@ -889,6 +899,16 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
                     ),
                 }
             }
+            // Title-bar hosts route their `close()` through this variant so
+            // the operation hops back onto the main thread before touching
+            // `WindowManager` (see `title_bar_host.rs`). Unrecognized payloads
+            // are ignored — application-authored `send_external` payloads can
+            // coexist with framework-internal ones.
+            AppEvent::External(payload) => {
+                if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
+                    self.wm.queue_close(req.fern_id);
+                }
+            }
             _ => {}
         }
         if let Some(trace) = &mut self.idle_trace {
@@ -912,6 +932,17 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
         self.maybe_exit(event_loop);
         self.update_control_flow(event_loop);
     }
+}
+
+/// Payload used by `TitleBarHostCallbacks::request_close` to route a
+/// host-initiated close back to the main event loop. The host's
+/// close callback boxes one of these through `AppEventProxy::send_external`;
+/// `FernAppHandler::user_event` downcasts the payload and calls
+/// `WindowManager::queue_close` so the window tears down on the next tick
+/// (matching the `WindowEvent::CloseRequested` path).
+#[derive(Debug, Clone, Copy)]
+pub struct CloseWindowRequest {
+    pub fern_id: FernWindowId,
 }
 
 /// A thread-safe handle for posting `AppEvent`s to the UI thread.
@@ -1382,6 +1413,7 @@ impl FernAppBuilder {
             #[cfg(feature = "text")]
             typesetter,
             i18n_watcher,
+            proxy.clone(),
         );
 
         event_loop.run_app(&mut app).unwrap();

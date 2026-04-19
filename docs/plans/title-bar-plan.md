@@ -1,22 +1,24 @@
 # Custom `TitleBar` Widget — M3+ Plan
 
 **Companion to:** fern-ui-architecture.md, fern-ui-milestones.md
-**Status:** Living document — reflects M2 as shipped and the remaining
-platform + polish work.
+**Status:** Living document — M1 + M2 + M3 shipped; M4 / M5 (Windows)
+and M6 (polish) remain. Reference docs at
+[docs/title-bar.md](../title-bar.md).
 
 This document picks up where the original title-bar plan (in the private
 `~/.claude/plans/` scratch area) left off. It records:
 
-1. What M1 and M2 actually landed.
+1. What M1, M2, and M3 actually landed.
 2. Framework changes that were needed along the way but weren't in the
    original plan.
-3. Known follow-ups carried out of M2 that still need addressing.
-4. The full scope of M3 (macOS), M4 and M5 (Windows), and M6 (polish).
-5. Risks and the reading list.
+3. Known follow-ups — resolved and still-open.
+4. Deferred work and caveats from M3.
+5. The scope of M4 and M5 (Windows) and M6 (polish).
+6. Risks and the reading list.
 
 ---
 
-## 1. What's done (M1 + M2)
+## 1. What's done (M1 + M2 + M3)
 
 ### M1 — Platform trait + Wayland + X11 stubs
 
@@ -126,58 +128,72 @@ Test count before M2: 562. After M2: 838. +276 net, of which the
 new title-bar / window-frame tests account for 12. The rest come from
 other work in parallel.
 
+### M3 — macOS backend + §2.1–§2.3 follow-ups
+
+All landed on `feat/macos-titlebar`:
+
+- [`MacOsHost`](../../crates/fern-platform/src/title_bar_host/macos.rs)
+  replaces the M1 stub. Retains the underlying
+  `Retained<NSWindow>` (obtained from winit's `RawWindowHandle::AppKit`
+  → `ns_view.window()`), measures the traffic-light cluster once at
+  construction via `standardWindowButton(…).frame()`, and drives zoom
+  via `-[NSWindow performZoom:]` so the OS animates the transition.
+  `begin_drag` still delegates to winit's `drag_window`; edge resize is
+  unsupported because the native `NSWindow` frame services it. No
+  widget-layer drag or resize handles run on macOS.
+- **Trait additions** (see [`fern_core::window_chrome`](../../crates/fern-core/src/window_chrome.rs)):
+  `needs_custom_resize_handles() -> bool`, `is_maximized_signal() -> Signal<bool>`,
+  and `notify_window_resized(&self)` with a default impl that refreshes
+  the signal from `is_maximized()`. `TitleBar` now uses the host's
+  signal rather than an internally-created one; OS-initiated maximize
+  (green-light, drag-to-top) flows through the same path.
+- **`TitleBarHostCallbacks`** — a new `Clone` struct carrying an
+  `Rc<dyn Fn()>` close callback, plus a `::noop()` helper. Breaks the
+  fern-platform ↔ fern-app cycle: the app constructs a closure that
+  boxes a `CloseWindowRequest { fern_id }` onto `AppEvent::External`;
+  the host calls it opaquely. Replaces §2.3's no-op `close()` on every
+  backend simultaneously.
+- **`needs_custom_resize_handles` gating in the demo** — the
+  `WindowFrame` overlay is now conditional on `host.needs_custom_resize_handles()`,
+  so macOS gets the native `NSWindow` edge-resize and Wayland/Windows
+  keep the invisible strips.
+- **Switcher glyph swap** restored in `WindowControls`. Each Switcher
+  child (`□` U+25A1 / `❐` U+2750) has its own static a11y name
+  ("Maximize" / "Restore"); the hidden child's a11y node doesn't reach
+  AT, so no reactive name is needed.
+- **macOS window attributes** — `WindowManager::create_window` applies
+  `with_titlebar_transparent(true) + with_fullsize_content_view(true) +
+  with_title_hidden(true)` under `#[cfg(target_os = "macos")]` when
+  `custom_chrome` is set.
+- **`WindowEvent::Resized` hook** — the app's resize handler now calls
+  `host.notify_window_resized()` after `platform_window.resize`, which
+  is what keeps the Switcher glyph in sync with OS-initiated zoom.
+- Reference doc landed at [docs/title-bar.md](../title-bar.md).
+
+Visual QA walked the §3.5 checklist on Apple Silicon — see the
+"Acceptance" block below for the surviving caveats.
+
+Commit: `feat(title-bar): macOS backend + OS-sync maximize signal`.
+
 ---
 
 ## 2. Known follow-ups carried out of M2
 
-These are live issues to address in M3+ (or earlier if they get in the
-way). None of them block the M2 demo from working; they're all rough
-edges.
+### Resolved in M3
 
-### 2.1 `is_maximized` signal doesn't track OS-driven changes
+- **2.1 `is_maximized` signal OS-sync** — DONE. Host owns the
+  `Signal<bool>`, `notify_window_resized()` refreshes it from
+  `WindowEvent::Resized`.
+- **2.2 Maximize / restore glyph swap** — DONE. `Switcher` restored in
+  `WindowControls` (U+25A1 / U+2750). Both glyphs confirmed present in
+  the fonts shipped with Wayland/macOS/Windows defaults.
+- **2.3 `host.close()` no-op on Wayland** — DONE. `TitleBarHostCallbacks`
+  + `AppEvent::External(CloseWindowRequest)` routing; every backend now
+  closes correctly. The demo's `close_action(|ctx| ctx.close_window())`
+  override is kept as a redundancy illustrating the app-level hook, but
+  is no longer required.
 
-`TitleBar` exposes `is_maximized_signal() -> Signal<bool>` and the
-maximize button optimistically flips it on click. But drag-to-edge-snap
-or compositor-initiated maximize doesn't update the signal, so the
-button glyph (when the Switcher re-lands) would go stale.
-
-**Fix in M3**: in `WindowManager`'s `WindowEvent::Resized` arm, check
-`host.is_maximized()` and drive the signal via an accessor on
-`ManagedWindow`. We need a `Rc<Signal<bool>>` stored on the host or on
-`ManagedWindow` so the window-manager side and the widget side share
-the same signal. Simplest: add a method
-`PlatformTitleBarHost::subscribe_maximized(f: Box<dyn Fn(bool)>)` that
-the host calls whenever `WindowEvent::Resized` is processed. Then the
-widget registers a callback that flips the signal.
-
-### 2.2 Maximize / restore glyph swap
-
-The M2 `WindowControls` drops the `Switcher` and always shows `□`.
-M3+ should restore it: a `Switcher` driven by `is_maximized.map(|b| if *b { 1 } else { 0 })`
-swapping between `□` (maximize) and `❐` (U+2750 — verify font support,
-or draw a custom icon path via `IconWidget` once a window-control set
-lands).
-
-### 2.3 `WaylandHost::close()` is a no-op
-
-winit 0.30 has no `Window::request_close` and we hold an
-`Arc<winit::Window>` we can't drop from inside the host. The workaround
-in the demo is `TitleBar::close_action(|ctx| ctx.close_window())` —
-the closure calls `EventContext::close_window` directly. Applications
-that want a central close-window hook can instead send an `Intent` and
-handle it with a root-level `Action` that calls `ctx.close_window()`
-(see [shortcut-intent-action.md](shortcut-intent-action.md)).
-M3 should make this work out of the box:
-
-1. Add an `Rc<EventLoopProxy<AppEvent>>` (or similar) to `WaylandHost`
-   at construction time. `create_title_bar_host` takes it as a
-   parameter; `WindowManager::create_window` passes it in.
-2. `WaylandHost::close()` posts `AppEvent::External(Box<CloseWindow { fern_id }>)`.
-3. `FernAppHandler::user_event` recognises the payload and calls
-   `wm.queue_close(fern_id)`.
-
-This also solves the same problem for M5's Windows synthetic button
-events — see §4.5.
+### Still open
 
 ### 2.4 Title bar hit-region publishing isn't wired yet
 
@@ -197,163 +213,114 @@ need a dedicated `after_layout` hook in `fern-core`.
 
 ---
 
-## 3. M3 — macOS backend
+## 3. M3 — macOS backend (shipped)
 
-**Target**: traffic lights render natively, custom content renders
-alongside them, drag and double-click-to-zoom work, OS edge-resize
-still works, the widget renders no min / max / close buttons.
+Retrospective of what actually landed, what was deferred, and the
+caveats discovered during implementation. The as-built reference is
+[docs/title-bar.md](../title-bar.md); detailed API docs are inline on
+[`MacOsHost`](../../crates/fern-platform/src/title_bar_host/macos.rs)
+and [`PlatformTitleBarHost`](../../crates/fern-core/src/window_chrome.rs).
 
-### 3.1 NSWindow attributes (done at window creation)
+### 3.1 Shipped
 
-In [`WindowManager::create_window`](../crates/fern-app/src/window_manager.rs),
-inside the existing attribute builder (right around where we added the
-Wayland `with_decorations(false)`), add a `#[cfg(target_os = "macos")]`
-block:
+- NSWindow attributes (transparent titlebar + full-size content view +
+  hidden title) applied in `WindowManager::create_window` under
+  `#[cfg(target_os = "macos")]`.
+- `MacOsHost` with:
+  - `Retained<NSWindow>` extracted from
+    `RawWindowHandle::AppKit` → `NSView::window()`, held for the
+    lifetime of the host so `isZoomed` / `performZoom` avoid
+    re-traversing the view chain.
+  - `measure_traffic_light_inset` — reads `standardWindowButton(Close)`
+    and `standardWindowButton(Zoom)` frames once at construction,
+    returns `leading_edge + cluster_width + 12pt trailing_padding` as
+    a plain `Size` (no interior mutability — the cluster doesn't move
+    at runtime while the title-bar height is the OS default).
+  - `toggle_maximize` → `-[NSWindow performZoom:]` (matches green-light
+    click, honours `NSWindowDelegate.windowWillUseStandardFrame:`,
+    animates).
+  - `begin_drag` → winit `drag_window`; `begin_resize` returns
+    `Unsupported`; `show_window_menu` returns `Ok(())` (no AppKit
+    equivalent of xdg-shell's client-requested menu).
+  - `renders_custom_controls = false` and
+    `needs_custom_resize_handles = false` — the widget yields the
+    leading band to the OS and skips its own control/resize overlays.
+- Close routing via `TitleBarHostCallbacks::request_close` →
+  `AppEvent::External(CloseWindowRequest)` → `WindowManager::queue_close`.
+  Wayland shares the mechanism; Windows M5 will reuse it for synthetic
+  button events.
+- `is_maximized_signal` + `notify_window_resized` added to the trait
+  (default impl syncs from `is_maximized()`). `WindowEvent::Resized`
+  calls it in `FernAppHandler`; the widget's Switcher swaps □/❐ in
+  sync with OS-initiated zoom.
+- Demo gates `WindowFrame` on `host.needs_custom_resize_handles()`.
+- Reference doc at [docs/title-bar.md](../title-bar.md).
 
-```rust
-#[cfg(target_os = "macos")]
-if config.custom_chrome {
-    use winit::platform::macos::WindowAttributesExtMacOS;
-    window_attrs = window_attrs
-        .with_titlebar_transparent(true)
-        .with_fullsize_content_view(true)
-        .with_title_hidden(true);
-}
-```
+### 3.2 Deferred — custom title-bar height ≠ OS default
 
-These are the three attributes that let us draw underneath the native
-title bar while keeping the traffic lights visible. Unlike the Wayland
-case we keep decorations on — the traffic lights are part of the OS
-decoration.
+The plan called for a `position_traffic_lights(x, y)` helper (old §3.3)
+for apps that set a title bar taller or shorter than the OS's 22-pt
+default. **Not implemented.** The current design assumes callers use
+the default-compatible height (`TitleBar::height(40.0)` is fine
+because the traffic-light cluster sits in the top ~22 pt of the band
+and the extra height below it is app-drawable). When an app chooses
+a non-standard height in the future:
 
-### 3.2 `MacOsHost` implementation
+1. Add `MacOsHost::position_traffic_lights(x: f32, y: f32)` that calls
+   `setFrameOrigin` on each `standardWindowButton`.
+2. Call it from `notify_window_resized` — a `TODO` marker at
+   [macos.rs:185](../../crates/fern-platform/src/title_bar_host/macos.rs#L185)
+   points back here.
+3. Mind the timing risk (see §7, risk #2): defer by one frame or run
+   inside NSWindow's own layout callback, otherwise rapid resize drags
+   flicker.
 
-Replace the M1 stub in
-[`fern-platform/src/title_bar_host/macos.rs`](../crates/fern-platform/src/title_bar_host/macos.rs)
-with a real implementation. Dependencies already present in
-[`Cargo.toml`](../crates/fern-platform/Cargo.toml): `objc2 = 0.6`,
-`objc2-app-kit = 0.3`, `objc2-foundation = 0.3`.
+### 3.3 Caveats
 
-```rust
-pub struct MacOsHost {
-    window: Arc<winit::window::Window>,
-    // Cached natural traffic-light inset measured once from the NSWindow
-    // at construction time. Updated on WindowEvent::ScaleFactorChanged.
-    leading_inset: Cell<Size>,
-}
+- **`NSWindow.isZoomed` does not track native macOS fullscreen.**
+  Green-light zoom and `-[NSWindow performZoom:]` flip `isZoomed`;
+  green-light + Option (or `-[NSWindow toggleFullScreen:]`) puts the
+  window on its own Space and `isZoomed` stays `false`. The title bar
+  is hidden during fullscreen anyway, so this is benign; documented
+  inline on `MacOsHost::is_maximized`.
+- **`reserved_leading_inset` is measured once at construction.** Cocoa
+  guarantees the cluster stays in place across window resizes and DPI
+  changes, so no refresh is wired in. If that assumption ever breaks
+  (e.g. a future macOS changes cluster metrics mid-session), move the
+  remeasure into `notify_window_resized`.
+- **`is_maximized_signal` is read-only for callers.** The host drives
+  it from `notify_window_resized`; speculative widget-side writes on
+  button click de-sync it from the OS (especially when the user
+  cancels a zoom by clicking off the button during animation).
+  Documented on `TitleBar::is_maximized_signal`.
+- **`PlatformError::Os(String)` on AppKit handle mismatch** (rather
+  than `Unsupported`): `Unsupported` is reserved for "this platform
+  cannot do X" (e.g. X11 has no custom-chrome backend at all);
+  `Os(String)` covers runtime call failures including an unexpected
+  `RawWindowHandle` variant from winit.
 
-impl PlatformTitleBarHost for MacOsHost {
-    fn reserved_leading_inset(&self) -> Size { self.leading_inset.get() }
-    fn reserved_trailing_inset(&self) -> Size { Size::ZERO }
-    fn renders_custom_controls(&self) -> bool { false }
-    fn begin_drag(&self) -> Result<(), PlatformError> {
-        self.window.drag_window().map_err(|e| PlatformError::Os(e.to_string()))
-    }
-    fn begin_resize(&self, _edge: ResizeEdge) -> Result<(), PlatformError> {
-        // winit's drag_resize_window is Windows/Linux-only.
-        Err(PlatformError::Unsupported)
-    }
-    fn show_window_menu(&self, _at: Point) -> Result<(), PlatformError> { Ok(()) }
-    fn minimize(&self) { self.window.set_minimized(true); }
-    fn toggle_maximize(&self) { self.window.set_maximized(!self.window.is_maximized()); }
-    fn close(&self) { /* see §2.3 — post event-loop event */ }
-    fn is_maximized(&self) -> bool { self.window.is_maximized() }
-    fn update_hit_regions(&self, _regions: &HitRegions) { /* no-op on macOS */ }
-}
-```
+### 3.4 Acceptance — as-built
 
-#### Traffic-light inset measurement
+Walked on Apple Silicon on `feat/macos-titlebar`:
 
-Compute `leading_inset` by reading the standard window buttons from
-the `NSWindow` via `objc2-app-kit`:
+- [x] Traffic lights visible at launch, stable under rapid resize drag.
+- [x] Leading app label doesn't overlap the traffic lights (spacer
+      reserves `reserved_leading_inset.width`).
+- [x] No custom min/max/close cluster at the trailing edge.
+- [x] Middle-band drag moves the window (winit `drag_window`).
+- [x] Double-click the band → `performZoom:` animates the zoom toggle.
+- [x] Right-click the band → no-op, no crash.
+- [x] Edge resize works via the native NSWindow frame; no
+      `WindowFrame` overlay installed.
+- [x] Close button closes the window via `host.close()` alone (the
+      demo's `close_action` override is redundant now).
+- [x] Title-bar height is exactly the value passed to `.height()`.
+- [x] OS-initiated maximize (drag to screen top) flips the Switcher
+      glyph to ❐ within one frame of `WindowEvent::Resized`.
 
-```rust
-use objc2_app_kit::{NSWindow, NSWindowButton};
-
-fn measure_traffic_light_inset(hwnd_raw: *mut NSWindow) -> Size {
-    unsafe {
-        let close = hwnd_raw.standardWindowButton_(NSWindowButton::CloseButton);
-        let min   = hwnd_raw.standardWindowButton_(NSWindowButton::MiniaturizeButton);
-        let zoom  = hwnd_raw.standardWindowButton_(NSWindowButton::ZoomButton);
-        if let (Some(close), Some(zoom)) = (close, zoom) {
-            let cf = close.frame();
-            let zf = zoom.frame();
-            // Leading inset = (zoom_right_edge - close_left_edge) + trailing padding.
-            // Standard macOS layout gives about 78 points at 1x scale.
-            let width = (zf.origin.x + zf.size.width - cf.origin.x) as f32 + 12.0;
-            let height = cf.size.height as f32;
-            return Size::new(width, height);
-        }
-    }
-    Size::new(78.0, 22.0) // fallback
-}
-```
-
-Run this once from `MacOsHost::new`. If the result is different from
-the default 78 × 22, persist it in the `Cell` and read via
-`reserved_leading_inset`.
-
-### 3.3 Traffic-light reposition helper
-
-Also from `objc2-app-kit`, expose `MacOsHost::position_traffic_lights(x, y)`.
-The default position is usually fine (~8, 12), but if the title bar is
-taller or shorter than the OS default (22 points), the traffic lights
-look misaligned. The helper moves each `standardWindowButton` via
-`setFrameOrigin` on its superview.
-
-**Timing is critical** (original plan §6, risk #3): repositioning must
-run **after** the NSWindow content-view layout has settled for the
-current frame. Running too early snaps the buttons to the wrong place
-for one frame and users see a flicker. Hook it into
-`WindowEvent::Resized`'s handler in
-[`FernAppHandler`](../crates/fern-app/src/app.rs) but defer by one
-frame via `window.request_redraw()` + a "did we reposition this frame"
-flag, or call it from inside `NSWindow`'s own layout callback. Test
-specifically with rapid resize (`kill -WINCH` in a loop, or resize-
-dragging at 60 fps).
-
-### 3.4 Demo changes
-
-The M2 demo assumes `host.renders_custom_controls() == true` and
-shows three buttons at the trailing edge. On macOS the `TitleBar`
-widget handles this automatically: `WindowControls` is only built if
-the host reports `renders_custom_controls()`. But the leading content
-in the demo (`"  FernUI — Title Bar Demo"`) should not overlap the
-traffic lights. The `TitleBar::build()` already inserts a leading-inset
-`FixedSize` spacer when `reserved_leading_inset().width > 0.0`, so on
-macOS the leading content is pushed right by ~78 points automatically.
-No demo changes needed — just verify visually.
-
-On macOS the `WindowFrame` resize overlay can be **omitted**: the
-native NSWindow frame still handles edge resize. The M2 demo's
-`match tree.title_bar_host()` branch should be `#[cfg(not(target_os = "macos"))]`,
-or the demo can check `host.renders_custom_controls()` as a proxy for
-"this platform wants our custom resize handles". Simpler: add a new
-`PlatformTitleBarHost::needs_custom_resize_handles() -> bool` trait
-method, `true` on Windows + Wayland, `false` on macOS.
-
-### 3.5 M3 acceptance checklist
-
-- [ ] Traffic lights visible in the leading area at the expected
-      position after launch.
-- [ ] Traffic lights stay in the expected position after a resize,
-      including rapid resize drags.
-- [ ] Leading content (the app title label) does not overlap the
-      traffic lights.
-- [ ] No `WindowControls` cluster at the trailing edge.
-- [ ] Drag the title bar's middle band → window moves (via
-      `host.begin_drag()` → `NSWindow.performWindowDrag` via winit).
-- [ ] Double-click the title bar → zoom toggles (host.toggle_maximize).
-- [ ] Right-click the title bar → system window menu (no-op on macOS,
-      but must not crash).
-- [ ] OS-edge resize still works (we don't install a `WindowFrame`
-      overlay, so the native resize cursors should appear when
-      hovering the window edge).
-- [ ] `host.close()` actually closes the window (implement §2.3 first).
-- [ ] Title bar height is exactly the value passed to `.height()`.
-- [ ] `cargo test -p fern-platform --features macos-live` (if we add
-      a feature-gated sanity test that builds a fake `NSWindow` in
-      headless mode — optional, most of M3 is visual QA).
+No feature-gated live-NSWindow test (`macos-live`) was added — the
+backend is pure visual QA territory, and the rest of the workspace's
+838 tests exercise the widget layer in isolation.
 
 ---
 
@@ -725,33 +692,36 @@ the two.
 
 ## 6. M6 — Polish
 
-Small quality-of-life items, doable in any order:
+Small quality-of-life items, doable in any order. Items 1–3 shipped in
+M3; 4–8 remain.
 
-1. **OS-initiated maximize tracking**: §2.1. Wire
-   `WindowEvent::Resized` into a signal the widget observes.
-2. **Maximize / restore glyph swap**: §2.2. Re-introduce the
-   `Switcher` in `WindowControls`, driven by the signal from §2.1.
-3. **Close action default**: §2.3. Make `host.close()` actually work
-   on Wayland (and use the same mechanism for the Windows synthetic
-   button forwarding in §5.2).
+1. ~~**OS-initiated maximize tracking**~~ — DONE in M3 via
+   `notify_window_resized`.
+2. ~~**Maximize / restore glyph swap**~~ — DONE in M3 (Switcher with
+   static a11y names per child).
+3. ~~**Close action default**~~ — DONE in M3 via
+   `TitleBarHostCallbacks` + `AppEvent::External(CloseWindowRequest)`.
 4. **Inactive window dim**: subscribe to `WindowEvent::Focused` and
    bind a `Signal<bool>` that `TitleBar` reads to dim its content
-   when the window is unfocused.
-5. **Theme change**: verify the title bar repaints correctly when
-   `tree.set_theme(…)` flips light/dark. The widget's paint reads
-   `self.background` at build time, so a theme change requires
-   rebuilding the composite. Should work out of the box via the V2
-   rebuild-on-environment-change flow; add a regression test.
+   when the window is unfocused. Not started.
+5. **Theme change regression test**: the title bar already repaints
+   correctly when `tree.set_theme(…)` flips light/dark (the V2
+   reactive-theme flow dirty-marks every node), but there's no
+   dedicated regression test pinning the behaviour. Add one.
 6. **Architecture doc update**: add a "Custom window chrome" section
-   to [`docs/fern-ui-architecture.md`](fern-ui-architecture.md)
-   pointing at this plan and the `PlatformTitleBarHost` trait.
+   to [`docs/fern-ui-architecture.md`](../fern-ui-architecture.md)
+   pointing at [docs/title-bar.md](../title-bar.md), this plan, and
+   the `PlatformTitleBarHost` trait.
 7. **Milestones doc update**: add an entry to
-   [`docs/fern-ui-milestones.md`](fern-ui-milestones.md) marking
-   the title bar work as M-TB (Title Bar) complete through whichever
-   stage is done.
+   [`docs/fern-ui-milestones.md`](../fern-ui-milestones.md) marking
+   the title bar work as M-TB (Title Bar) complete through M3.
 8. **Drop the dead-code warning** on `list_view.rs:69` (unrelated but
    noisy during every demo build) — remove the unused `is_empty`
    method from `ListSource<T>`.
+9. **Custom title-bar height reposition**: the deferred §3.2 work —
+   `position_traffic_lights(x, y)` + a public hook so apps can pick a
+   non-default title-bar height without the traffic lights drifting
+   out of the band.
 
 ---
 
@@ -765,9 +735,15 @@ the implementer. Re-read before starting each milestone.
    `platform_impl/windows/window.rs` how winit installs its proc. If
    it uses the raw `SetWindowLongPtrW` path, we may need to also use
    `SetWindowLongPtrW` and chain through the stored previous proc.
-2. **macOS traffic-light reposition timing** (M3.3). Must run *after*
-   the content-view layout has settled, otherwise there's a one-frame
-   visual snap during rapid resize.
+2. **macOS traffic-light reposition timing** (M3.2, §6.9). Dormant —
+   M3 shipped without the reposition helper because the default OS
+   cluster geometry is correct for our default title-bar height. The
+   moment a custom height is introduced this risk goes live: the
+   reposition call must run *after* the content-view layout has
+   settled, otherwise there's a one-frame visual snap during rapid
+   resize. See `notify_window_resized` in
+   [macos.rs](../../crates/fern-platform/src/title_bar_host/macos.rs)
+   for the anchor point.
 3. **HiDPI hit-region conversion** (M4.7). `WM_NCHITTEST` is in
    physical pixels; the widget works in logical. Centralise the
    conversion in exactly one place (`WindowsHost::update_hit_regions`).
