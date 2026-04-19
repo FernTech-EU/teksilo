@@ -10,6 +10,7 @@
 use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
 use fern_core::gesture::DragPhase;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
@@ -148,6 +149,14 @@ impl Widget for DragRegion {
         // horizontal space. Critical: without this override the drag
         // region collapses to zero width and there is nothing to drag.
         true
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Pointer-only affordance — no keyboard or AT analogue for
+        // "drag the window by its title". Hide the node so it doesn't
+        // show up as an unnamed Unknown stop between the title bar
+        // landmark and its real content.
+        builder.set_hidden();
     }
 
     fn children(&self) -> Vec<WidgetId> {

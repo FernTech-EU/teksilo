@@ -28,6 +28,8 @@ pub struct Slider {
     step: Option<f32>,
     orientation: Orientation,
     enabled: bool,
+    /// Accessible name, announced by screen readers as the control's label.
+    label: Option<String>,
     hovered: Rc<Cell<bool>>,
     dragging: Rc<Cell<bool>>,
     focus_origin: Rc<Cell<Option<FocusOrigin>>>,
@@ -43,6 +45,7 @@ impl Slider {
             step: None,
             orientation: Orientation::Horizontal,
             enabled: true,
+            label: None,
             hovered: Rc::new(Cell::new(false)),
             dragging: Rc::new(Cell::new(false)),
             focus_origin: Rc::new(Cell::new(None)),
@@ -62,6 +65,22 @@ impl Slider {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Set an accessible name for the slider, announced by screen readers.
+    /// ARIA requires sliders to have a label; when none is set here the
+    /// caller is responsible for labelling via a wrapping element.
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
         self
     }
 
@@ -438,6 +457,9 @@ impl Widget for Slider {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Slider);
+        if let Some(ref label) = self.label {
+            builder.set_name(label);
+        }
         builder.set_numeric_value(self.value.get() as f64);
         builder.set_min_numeric_value(self.min as f64);
         builder.set_max_numeric_value(self.max as f64);

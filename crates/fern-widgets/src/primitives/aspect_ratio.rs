@@ -95,7 +95,9 @@ impl Widget for AspectRatio {
 
     fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {}
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
+    }
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()

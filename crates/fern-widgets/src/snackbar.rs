@@ -419,7 +419,12 @@ impl Widget for Snackbar {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The outer Snackbar widget is just a layout shell around the
+        // focusable trigger (Button or OverlayTrigger). Hiding it from
+        // the platform a11y tree prevents a dead GenericContainer node
+        // from sitting between the trigger and its ancestors.
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
+        builder.set_hidden();
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -26,6 +26,14 @@ impl WidgetTree {
         self.focus_origin = Some(origin);
         self.a11y_dirty = true;
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin });
+        // Focus-driven tooltip machinery: close any previously-shown
+        // focus-promoted rich tooltip whose scope no longer contains
+        // the focus target, then immediately surface+sticky the rich
+        // tooltip (if any) attached to the new focus target. See
+        // `tooltip_focus_enter` / `tooltip_focus_leave_outside` for
+        // the full rationale.
+        self.tooltip_focus_leave_outside(Some(id));
+        self.tooltip_focus_enter(id);
         self.scroll_focused_into_view(id);
     }
 

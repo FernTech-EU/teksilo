@@ -50,6 +50,9 @@ pub struct ControlButton {
     hover_bg: Color,
     action: Option<ControlAction>,
     bg_signal: Signal<Color>,
+    /// Accessible name exposed to AT. Reactive so `WindowControls` can
+    /// flip it between "Maximize" and "Restore" without rebuilding.
+    a11y_name: Signal<String>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -73,6 +76,7 @@ impl ControlButton {
             hover_bg: Color::TRANSPARENT,
             action: None,
             bg_signal: Signal::new(Color::TRANSPARENT),
+            a11y_name: Signal::new(String::new()),
             root_child_id: None,
         }
     }
@@ -89,6 +93,14 @@ impl ControlButton {
 
     fn with_action(mut self, action: ControlAction) -> Self {
         self.action = Some(action);
+        self
+    }
+
+    /// Bind the accessible name read by AT when this button's a11y node
+    /// is queried. The glyph text drawn in the cell is purely visual and
+    /// is hidden from AT — assistive users get this name instead.
+    pub(crate) fn bind_a11y_name(mut self, name: Signal<String>) -> Self {
+        self.a11y_name = name;
         self
     }
 }
@@ -142,6 +154,15 @@ impl Widget for ControlButton {
 
         ctx.apply_self_handlers(handlers);
 
+        // Refresh the a11y node whenever the name signal changes
+        // (maximize ⇄ restore toggle).
+        let self_id = ctx.self_id();
+        self.a11y_name.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            fern_core::binding::BindingLevel::AccessibilityOnly,
+        );
+
         self.root_child_id = Some(sized);
         vec![sized]
     }
@@ -169,7 +190,10 @@ impl Widget for ControlButton {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Button);
-        builder.set_name(self.glyph);
+        let name = self.a11y_name.get();
+        if !name.is_empty() {
+            builder.set_name(name);
+        }
         builder.add_action(fern_core::accesskit::Action::Click);
     }
 
@@ -247,19 +271,40 @@ impl Widget for WindowControls {
             None => Rc::new(move |_ctx| host_close.close()),
         };
 
+        // `to_signal()` observes the i18n manager so the name updates
+        // when `tree.set_locale(...)` is called; `resolve_now()` would
+        // freeze the English string at build time.
+        let minimize_name = fern_i18n::tr_widget!(a11y_window_minimize_name()).to_signal();
+        let close_name = fern_i18n::tr_widget!(a11y_window_close_name()).to_signal();
+        let maximize_sig = fern_i18n::tr_widget!(a11y_window_maximize_name()).to_signal();
+        let restore_sig = fern_i18n::tr_widget!(a11y_window_restore_name()).to_signal();
+        let maximize_name = self
+            .is_maximized
+            .zip3(&maximize_sig, &restore_sig)
+            .map(|(maxed, max_s, restore_s)| {
+                if *maxed {
+                    restore_s.clone()
+                } else {
+                    max_s.clone()
+                }
+            });
+
         let minimize = ControlButton::new("\u{2014}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
-            .with_action(minimize_action);
+            .with_action(minimize_action)
+            .bind_a11y_name(minimize_name);
         let maximize = ControlButton::new("\u{25A1}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
-            .with_action(maximize_action);
+            .with_action(maximize_action)
+            .bind_a11y_name(maximize_name);
         // U+00D7 (Latin-1 ×) instead of U+2715 (Dingbats ✕): the latter
         // is missing from many default Linux sans-serif fonts, leaving the
         // close cell unlabelled. The Latin-1 multiplication sign is in
         // basically every font.
         let close = ControlButton::new("\u{00D7}", cell_w, cell_h, fg)
             .hover_background(close_hover)
-            .with_action(close_action);
+            .with_action(close_action)
+            .bind_a11y_name(close_name);
 
         let row = HStack::new()
             .spacing(0.0)
@@ -270,6 +315,13 @@ impl Widget for WindowControls {
         let root = ctx.add(row);
         self.root_child_id = Some(root);
         vec![root]
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::Group);
+        builder.set_name(
+            fern_i18n::tr_widget!(a11y_window_controls_name()).resolve_now(),
+        );
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {

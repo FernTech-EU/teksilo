@@ -226,6 +226,14 @@ impl Widget for WizardHeader {
                 .add_child(supporting_id),
         );
         self.root_child_id = Some(root);
+
+        let self_id = ctx.self_id();
+        self.current_step.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            fern_core::binding::BindingLevel::AccessibilityOnly,
+        );
+
         vec![root]
     }
 
@@ -250,6 +258,13 @@ impl Widget for WizardHeader {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
+        builder.set_name(fern_i18n::tr_widget!(a11y_wizard_progress_name()).resolve_now());
+        let total = self.steps.len();
+        if total > 0 {
+            let current = self.current_step.get().min(total.saturating_sub(1));
+            builder.inner_mut().set_position_in_set(current + 1);
+            builder.inner_mut().set_size_of_set(total);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -543,7 +558,8 @@ impl Widget for WizardFlow {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+        builder.set_role(fern_core::accesskit::Role::Region);
+        builder.set_name(fern_i18n::tr_widget!(a11y_wizard_content_name()).resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -823,6 +823,10 @@ impl Widget for ClipPane {
         true
     }
 
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         vec![self.child_id]
     }

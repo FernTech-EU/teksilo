@@ -51,6 +51,7 @@ pub struct ProgressBar {
     thickness: f32,
     track_color: Option<ColorProp>,
     fill_color: Option<ColorProp>,
+    label: Option<String>,
 }
 
 impl ProgressBar {
@@ -65,6 +66,7 @@ impl ProgressBar {
             thickness: DEFAULT_THICKNESS,
             track_color: None,
             fill_color: None,
+            label: None,
         }
     }
 
@@ -83,6 +85,7 @@ impl ProgressBar {
             thickness: DEFAULT_THICKNESS,
             track_color: None,
             fill_color: None,
+            label: None,
         }
     }
 
@@ -113,6 +116,22 @@ impl ProgressBar {
     /// Accepts `Color`, roles, or `Signal<Color>`.
     pub fn fill_color(mut self, color: impl Into<ColorProp>) -> Self {
         self.fill_color = Some(color.into());
+        self
+    }
+
+    /// Accessible name for the progress bar (e.g. "Uploading files",
+    /// "Loading"). Without this, screen readers announce a bare
+    /// "progress indicator" with no context.
+    pub fn label(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(mut self, text: impl Into<String>) -> Self {
+        self.label = Some(text.into());
         self
     }
 }
@@ -274,6 +293,9 @@ impl Widget for ProgressBar {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::ProgressIndicator);
+        if let Some(ref label) = self.label {
+            builder.set_name(label.clone());
+        }
         if self.indeterminate {
             // Indeterminate bars have no meaningful numeric value —
             // don't announce a stale 0.0. Live::Polite lets screen

@@ -986,9 +986,13 @@ impl WidgetCatalog {
         let toggle_group = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .child(Toggle::new(sigs.toggle_on.clone()))
+                .child(Toggle::new(sigs.toggle_on.clone()).label_literal("Enabled"))
                 .child(Toggle::new(sigs.toggle_label_on.clone()).label_literal("Notifications"))
-                .child(Toggle::new(sigs.toggle_disabled_state.clone()).enabled(false)),
+                .child(
+                    Toggle::new(sigs.toggle_disabled_state.clone())
+                        .label_literal("Unavailable")
+                        .enabled(false),
+                ),
         );
 
         let slider_vert = ctx.add(
@@ -2350,11 +2354,14 @@ impl WidgetCatalog {
                         }
                         VStack {
                             spacing: 8.0
-                            Toggle(sigs.toggle_on.clone())
+                            Toggle(sigs.toggle_on.clone()) {
+                                label_literal: "Enabled"
+                            }
                             Toggle(sigs.toggle_label_on.clone()) {
                                 label_literal: "Notifications"
                             }
                             Toggle(sigs.toggle_disabled_state.clone()) {
+                                label_literal: "Unavailable"
                                 enabled: false
                             }
                         }

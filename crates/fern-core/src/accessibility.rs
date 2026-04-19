@@ -12,6 +12,7 @@ pub struct AccessNodeBuilder {
     toggled: Option<bool>,
     expanded: Option<bool>,
     selected: Option<bool>,
+    hidden: bool,
     /// The owning widget's id. Set at construction time by the
     /// tree walker (via `AccessNodeBuilder::for_widget`). Used by
     /// the sub-tree API (`push_paragraph_child` / `push_text_run_child`)
@@ -111,6 +112,7 @@ impl AccessNodeBuilder {
             toggled: None,
             expanded: None,
             selected: None,
+            hidden: false,
             owner: None,
             pending_self_selection: None,
             pending_explicit_selection: None,
@@ -192,6 +194,22 @@ impl AccessNodeBuilder {
         self.inner.set_placeholder(placeholder.into());
     }
 
+    /// Target URL for link-like widgets. Maps to `aria-url` / platform
+    /// link metadata so screen readers can announce the destination
+    /// (e.g. "link, https://example.com"). Informational only — does
+    /// not navigate when activated.
+    pub fn set_url(&mut self, url: impl Into<String>) {
+        self.inner.set_url(url.into());
+    }
+
+    /// Keyboard shortcut announcement (e.g. `"Ctrl+S"`). Maps to
+    /// `aria-keyshortcuts`. Used by menu items and buttons whose
+    /// chord is shown visually but must also be exposed to assistive
+    /// tech so shortcut users discover it.
+    pub fn set_keyboard_shortcut(&mut self, shortcut: impl Into<String>) {
+        self.inner.set_keyboard_shortcut(shortcut.into());
+    }
+
     /// Autocomplete behavior for combobox / text input widgets. Maps to
     /// ARIA `aria-autocomplete`: `Inline` completes within the field,
     /// `List` shows a popup of matching values, `Both` does both.
@@ -263,6 +281,20 @@ impl AccessNodeBuilder {
 
     pub fn set_max_numeric_value(&mut self, value: f64) {
         self.inner.set_max_numeric_value(value);
+    }
+
+    /// Hide this node from all assistive technologies (equivalent to
+    /// `aria-hidden="true"`). The node is still in the widget tree but
+    /// is invisible to screen readers and other ATs. Use for purely
+    /// decorative elements — e.g. scrollbars (AT scrolls via the
+    /// parent `ScrollView`'s scroll actions instead).
+    pub fn set_hidden(&mut self) {
+        self.hidden = true;
+        self.inner.set_hidden();
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
     }
 
     pub fn role(&self) -> Role {
@@ -620,6 +652,7 @@ pub struct AccessibilityInfo {
     expanded: Option<bool>,
     selected: Option<bool>,
     disabled: bool,
+    hidden: bool,
 }
 
 impl AccessibilityInfo {
@@ -632,6 +665,7 @@ impl AccessibilityInfo {
             expanded: None,
             selected: None,
             disabled: false,
+            hidden: false,
         }
     }
 
@@ -652,6 +686,11 @@ impl AccessibilityInfo {
 
     pub fn with_disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    pub fn with_hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
         self
     }
 
@@ -681,6 +720,10 @@ impl AccessibilityInfo {
 
     pub fn is_disabled(&self) -> bool {
         self.disabled
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
     }
 }
 

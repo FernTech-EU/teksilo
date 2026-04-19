@@ -131,7 +131,7 @@ impl Widget for Switcher {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+        builder.set_hidden();
     }
 
     fn children(&self) -> Vec<WidgetId> {

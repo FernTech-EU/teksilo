@@ -825,10 +825,13 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         builder.set_expanded(self.interaction.get() == ComboBoxState::Open);
 
-        // A11y gap #2: trigger points at the popup listbox via aria-controls
-        // so AT can jump from the combobox into its options.
-        if let Some(popup_id) = self.dropdown_content_id {
-            builder.push_controlled(widget_id_to_node_id(popup_id));
+        // Only set aria-controls when the popup is open — the listbox node is
+        // absent from the tree when closed, and pointing at a missing node
+        // causes AT crashes (VoiceOver unwrap in linked_ui_elements).
+        if self.interaction.get() == ComboBoxState::Open {
+            if let Some(popup_id) = self.dropdown_content_id {
+                builder.push_controlled(widget_id_to_node_id(popup_id));
+            }
         }
 
         // ARIA combobox pattern: when the popup is a filtered list, mark
@@ -839,7 +842,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             builder.set_auto_complete(fern_core::accesskit::AutoComplete::List);
         }
 
-        if !self.enabled {
+        if self.enabled {
+            // Expose the standard combobox activation surface to AT —
+            // without these, screen-reader "press" and "focus" commands
+            // probing `actions()` on the node see an empty list even
+            // though the attached `on_access_action` handler can route
+            // Click internally.
+            builder.add_action(fern_core::accesskit::Action::Click);
+            builder.add_action(fern_core::accesskit::Action::Focus);
+        } else {
             builder.set_disabled();
         }
     }

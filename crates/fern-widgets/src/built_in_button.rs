@@ -38,6 +38,7 @@ use std::sync::OnceLock;
 
 use fern_canvas::{Path, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
@@ -263,15 +264,14 @@ impl fern_core::widget::Widget for BuiltInButton {
             ctx.enabled_when(self_id, false);
         }
 
-        // Register toggled signal for repaint if present
+        // Register toggled signal for repaint + a11y refresh if present.
+        // AccessibilityOnly pushes a fresh set_toggled() into the a11y
+        // tree on every flip without forcing a relayout.
         if let Some(ref toggled) = self.toggled {
             let self_id = ctx.self_id();
             let registry = ctx.binding_registry();
-            toggled.bind_to(
-                self_id,
-                registry,
-                fern_core::binding::BindingLevel::RepaintOnly,
-            );
+            toggled.bind_to(self_id, registry, BindingLevel::RepaintOnly);
+            toggled.bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         }
 
         // Derived reactive roles — the interaction signal is the only
@@ -492,8 +492,15 @@ impl fern_core::widget::Widget for BuiltInButton {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Button);
+        debug_assert!(
+            self.tooltip_text.is_some(),
+            "BuiltInButton: expected a tooltip (used as the accessible name). \
+             Use .tooltip(tr!(…)) or a predefined constructor like BuiltInButton::clear()."
+        );
         if let Some(ref text) = self.tooltip_text {
             builder.set_name(text.as_str());
+        } else {
+            builder.set_name("Button");
         }
         if !self.enabled {
             builder.set_disabled();

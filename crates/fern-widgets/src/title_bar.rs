@@ -27,6 +27,7 @@
 use std::rc::Rc;
 
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::widget::{
     EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
@@ -310,6 +311,13 @@ impl Widget for TitleBar {
         }
     }
 
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::Banner);
+        builder.set_name(
+            fern_i18n::tr_widget!(a11y_title_bar_name()).resolve_now(),
+        );
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
@@ -543,6 +551,53 @@ mod tests {
             host.drags_started.get() >= 1,
             "host.begin_drag() should be called on drag-start, got {}",
             host.drags_started.get()
+        );
+    }
+
+    #[test]
+    fn title_bar_exposes_banner_landmark() {
+        let host = Rc::new(TestHost::default());
+        let (tree, bar) = build_realistic_tree(host, |b| b);
+        let info = tree.accessibility_node(bar);
+        assert_eq!(info.role(), fern_core::accesskit::Role::Banner);
+        assert!(
+            info.name().is_some(),
+            "TitleBar Banner landmark should have a localised name"
+        );
+    }
+
+    #[test]
+    fn window_controls_have_semantic_names_not_glyphs() {
+        let host = Rc::new(TestHost::default());
+        let (tree, bar) = build_realistic_tree(host, |b| b);
+        let [minimize, maximize, close] = locate_control_buttons(&tree, bar);
+
+        let min_info = tree.accessibility_node(minimize);
+        let max_info = tree.accessibility_node(maximize);
+        let close_info = tree.accessibility_node(close);
+
+        // Screen readers must get a semantic verb, not the raw glyph
+        // character (`—`, `□`, `×`) which Unicode-aware AT pronounces
+        // as "em dash" / "white square" / "multiplication sign".
+        for info in [&min_info, &max_info, &close_info] {
+            let name = info.name().expect("control button must have a name");
+            assert!(!name.is_empty(), "name empty");
+            assert_ne!(name, "\u{2014}", "minimize reads glyph literal");
+            assert_ne!(name, "\u{25A1}", "maximize reads glyph literal");
+            assert_ne!(name, "\u{00D7}", "close reads glyph literal");
+            assert_eq!(info.role(), fern_core::accesskit::Role::Button);
+        }
+    }
+
+    #[test]
+    fn drag_region_is_hidden_from_a11y() {
+        let host = Rc::new(TestHost::default());
+        let (tree, bar) = build_realistic_tree(host, |b| b);
+        let drag = locate_drag_region(&tree, bar);
+        let info = tree.accessibility_node(drag);
+        assert!(
+            info.is_hidden(),
+            "DragRegion is pointer-only; should be hidden from AT"
         );
     }
 

@@ -298,7 +298,10 @@ impl Widget for ScrollBar {
             }
         };
 
-        let mut handlers = HandlerSet::new().focusable(true);
+        // Scrollbars are pointer affordances. AT scrolls through the parent
+        // ScrollView node's ScrollUp/Down/Left/Right actions, not by focusing
+        // the scrollbar widget itself.
+        let mut handlers = HandlerSet::new().focusable(false);
 
         // Thumb drag — routed through the typed gesture API. The
         // framework auto-captures the pointer on `DragPhase::Started`
@@ -537,22 +540,10 @@ impl Widget for ScrollBar {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::ScrollBar);
-
-        let pos = self.scroll_position.get();
-        let max = self.max_scroll.get();
-
-        builder.set_numeric_value(pos as f64);
-        builder.set_min_numeric_value(0.0);
-        builder.set_max_numeric_value(max as f64);
-
-        let orientation = match self.orientation {
-            ScrollBarOrientation::Vertical => fern_core::accesskit::Orientation::Vertical,
-            ScrollBarOrientation::Horizontal => fern_core::accesskit::Orientation::Horizontal,
-        };
-        builder.set_orientation(orientation);
-
-        builder.add_action(fern_core::accesskit::Action::SetValue);
+        // Scrollbars are pointer UI. AT uses ScrollUp/Down/Left/Right on the
+        // parent ScrollView node — exposing the bar itself adds noise without
+        // benefit and creates spurious Tab stops in screen readers.
+        builder.set_hidden();
     }
 }
 
@@ -717,7 +708,9 @@ mod tests {
     }
 
     #[test]
-    fn scrollbar_accessibility() {
+    fn scrollbar_is_hidden_from_at() {
+        // ScrollBar is a pointer affordance. AT scrolls through the parent
+        // ScrollView's actions, not by navigating the bar directly.
         let (bar, position, _max_scroll, _ratio) = make_scrollbar();
         position.set(100.0);
 
@@ -726,7 +719,7 @@ mod tests {
         tree.layout(SizeProposal::exact(12.0, 400.0));
 
         let info = tree.accessibility_node(id);
-        assert_eq!(info.role(), fern_core::accesskit::Role::ScrollBar);
+        assert!(info.is_hidden(), "ScrollBar must be hidden from AT");
     }
 
     #[test]

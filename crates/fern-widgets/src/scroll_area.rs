@@ -712,10 +712,25 @@ impl Widget for ScrollArea {
         builder.inner_mut().set_scroll_x(scroll_x as f64);
         builder.inner_mut().set_scroll_x_min(0.0);
         builder.inner_mut().set_scroll_x_max(max_x as f64);
-        builder.add_action(fern_core::accesskit::Action::ScrollDown);
-        builder.add_action(fern_core::accesskit::Action::ScrollUp);
-        builder.add_action(fern_core::accesskit::Action::ScrollLeft);
-        builder.add_action(fern_core::accesskit::Action::ScrollRight);
+
+        // Only advertise scroll actions for axes that actually overflow —
+        // AT uses these to know which directions are available.
+        if max_y > 0.0 {
+            if scroll_y < max_y {
+                builder.add_action(fern_core::accesskit::Action::ScrollDown);
+            }
+            if scroll_y > 0.0 {
+                builder.add_action(fern_core::accesskit::Action::ScrollUp);
+            }
+        }
+        if max_x > 0.0 {
+            if scroll_x < max_x {
+                builder.add_action(fern_core::accesskit::Action::ScrollRight);
+            }
+            if scroll_x > 0.0 {
+                builder.add_action(fern_core::accesskit::Action::ScrollLeft);
+            }
+        }
     }
 }
 

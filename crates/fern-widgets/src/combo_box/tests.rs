@@ -613,11 +613,24 @@ fn accessibility_trigger_controls_popup() {
     let selected = Signal::new(None::<String>);
     let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 200.0));
+    tree.focus(cb);
+
+    // controls() is only populated while the popup is open — the listbox node
+    // is absent from the tree when closed, so pointing at it would be a
+    // dangling reference that crashes VoiceOver.
+    let node = build_raw_a11y_node(&mut tree, cb);
+    assert!(
+        node.controls().is_empty(),
+        "closed combo box must not have dangling controls() reference"
+    );
+
+    tree.press_key(Key::Enter, fern_core::event::Modifiers::NONE);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
 
     let node = build_raw_a11y_node(&mut tree, cb);
     assert!(
         !node.controls().is_empty(),
-        "combo box trigger should point at its listbox via aria-controls"
+        "open combo box trigger should point at its listbox via aria-controls"
     );
 }
 

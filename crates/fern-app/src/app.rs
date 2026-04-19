@@ -86,6 +86,7 @@ fn present_in_tree_modal_request(
 ) {
     let dismiss = modal_close_behavior_to_overlay_dismiss(request.close_behavior);
     let requested_focus = request.focus_target;
+    let on_dismiss = request.on_dismiss;
     let content_id = match request.content {
         ModalContent::ExistingWidget(id) => id,
         ModalContent::Deferred(builder) => {
@@ -105,7 +106,7 @@ fn present_in_tree_modal_request(
             dismiss,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
-            on_dismiss: None,
+            on_dismiss,
         },
     );
 

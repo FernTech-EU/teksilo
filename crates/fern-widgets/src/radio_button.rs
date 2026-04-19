@@ -379,9 +379,9 @@ impl Widget for RadioButton {
         if let Some(ref caption) = self.caption {
             builder.set_description(caption);
         }
-        // AccessKit / ARIA models radio selection via `selected`,
-        // not `toggled` — `toggled` is for checkbox/switch on-off.
-        builder.set_selected(self.is_selected());
+        // ARIA role="radio" uses aria-checked (→ AccessKit `toggled`),
+        // not aria-selected. `selected` is for options, tabs, and grid cells.
+        builder.set_toggled(self.is_selected());
         // Publish radio-group membership if this button was wrapped
         // in a `RadioGroup`. Each button declares every sibling
         // (including itself) so AT can announce "2 of 3".
@@ -454,10 +454,10 @@ mod tests {
 
         let info0 = tree.accessibility_node(r0);
         assert_eq!(info0.role(), fern_core::accesskit::Role::RadioButton);
-        assert!(!info0.is_selected());
+        assert!(!info0.is_toggled());
 
         let info1 = tree.accessibility_node(r1);
-        assert!(info1.is_selected());
+        assert!(info1.is_toggled());
     }
 
     #[test]

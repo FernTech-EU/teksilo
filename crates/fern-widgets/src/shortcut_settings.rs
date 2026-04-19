@@ -26,6 +26,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use fern_canvas::{Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{Key, Modifiers};
@@ -216,6 +217,79 @@ impl Widget for ShortcutSettings {
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::Group);
+        builder.set_name(
+            fern_i18n::tr_widget!(a11y_shortcut_settings_name())
+                .resolve_now()
+                .as_str(),
+        );
+    }
+}
+
+/// A thin wrapper used only by the row currently in key-capture mode.
+/// Emits `Role::Status` + `Live::Polite` so assistive tech announces
+/// the "Press any key…" hint the moment the capture row appears, and
+/// re-announces when the hint text changes (e.g. capture cancels).
+/// This sits in place of a plain `TextWidget` inside `slot_widget`.
+#[derive(Debug)]
+struct LiveStatusText {
+    text: String,
+    color: fern_tokens::Color,
+    child_id: Option<WidgetId>,
+}
+
+impl LiveStatusText {
+    fn new(text: impl Into<String>, color: fern_tokens::Color) -> Self {
+        Self {
+            text: text.into(),
+            color,
+            child_id: None,
+        }
+    }
+}
+
+impl Widget for LiveStatusText {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let id = ctx.add(
+            TextWidget::new_literal(&self.text)
+                .color(self.color)
+                .single_line()
+                .a11y_hidden(),
+        );
+        self.child_id = Some(id);
+        vec![id]
+    }
+
+    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        self.child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::Status);
+        builder.set_name(self.text.as_str());
+        builder.set_live(fern_core::accesskit::Live::Polite);
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
 }
 
 struct ShortcutRowData {
@@ -298,15 +372,12 @@ impl ShortcutSettings {
     ) -> impl Widget + 'static {
         let is_capturing_here = capturing == Some(CaptureTarget { id, slot });
         let keystroke_text = if is_capturing_here {
-            "Press any key…  (Del = clear, Esc = cancel)".to_string()
+            fern_i18n::tr_widget!(a11y_shortcut_settings_capture_hint()).resolve_now()
         } else {
             keystroke
                 .map(format_keystroke)
                 .unwrap_or_else(|| "—".to_string())
         };
-        let keystroke_widget = TextWidget::new_literal(&keystroke_text)
-            .color(if is_capturing_here { accent } else { label_color })
-            .single_line();
 
         let slot_label = match slot {
             SlotKind::Primary => "Rebind",
@@ -331,10 +402,22 @@ impl ShortcutSettings {
             })
         };
 
-        HStack::new()
-            .spacing(4.0)
-            .child(keystroke_widget)
-            .child(rebind_button)
+        // While capturing, the hint cell is a `Role::Status` +
+        // `Live::Polite` wrapper so screen readers announce
+        // "Press any key…" the moment the user hits Rebind. Static
+        // bindings stay as plain labels — their content is announced
+        // on focus, not as a live change.
+        let row = HStack::new().spacing(4.0);
+        let row = if is_capturing_here {
+            row.child(LiveStatusText::new(keystroke_text, accent))
+        } else {
+            row.child(
+                TextWidget::new_literal(&keystroke_text)
+                    .color(label_color)
+                    .single_line(),
+            )
+        };
+        row.child(rebind_button)
     }
 }
 

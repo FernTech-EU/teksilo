@@ -124,6 +124,14 @@ impl Widget for KeyboardHighlightWrapper {
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Presentational wrapper — the real semantics live on the
+        // wrapped MenuItem. Without this, the default node would
+        // insert an unannotated container between `Role::Menu` and
+        // `Role::MenuItem` in the a11y tree.
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+    }
 }
 
 /// A themed vertical menu container.

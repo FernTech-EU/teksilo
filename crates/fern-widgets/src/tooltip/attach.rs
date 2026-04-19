@@ -205,6 +205,64 @@ mod tests {
     }
 
     #[test]
+    fn rich_tooltip_auto_promotes_on_keyboard_focus() {
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![TooltipContent::new(
+            "focus-key",
+            LocalizedString::literal("Focus-shown body"),
+        )]);
+
+        let mut tree = tree_with_backend();
+        let btn = tree.add(
+            Button::new_literal("Focus me").rich_tooltip("focus-key"),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        assert!(tree.active_overlays().is_empty());
+
+        // Simulate keyboard focus of the button — no hover, no delay.
+        tree.focus(btn);
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "rich tooltip should appear immediately when its anchor is keyboard-focused"
+        );
+
+        _reset_tooltip_registry();
+    }
+
+    #[test]
+    fn focus_promoted_tooltip_dismisses_when_focus_leaves_scope() {
+        _reset_tooltip_registry();
+        install_tooltip_registry(vec![TooltipContent::new(
+            "leave-key",
+            LocalizedString::literal("Goes away"),
+        )]);
+
+        let mut tree = tree_with_backend();
+        let btn = tree.add(
+            Button::new_literal("Anchor").rich_tooltip("leave-key"),
+        );
+        let other = tree.add(Button::new_literal("Elsewhere"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+
+        tree.focus(btn);
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // Moving focus to an unrelated widget dismisses the
+        // focus-promoted tooltip (prevents sticky accumulation as the
+        // user Tabs through a form).
+        tree.focus(other);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "focus-promoted sticky tooltip should dismiss when focus moves outside its scope"
+        );
+
+        _reset_tooltip_registry();
+    }
+
+    #[test]
     fn inline_content_tooltip_attaches_without_registry_key() {
         _reset_tooltip_registry();
         // No install_tooltip_registry — we rely on inline content.

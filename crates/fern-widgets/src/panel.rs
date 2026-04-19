@@ -27,6 +27,7 @@ pub struct Panel {
     border_width: Option<Prop<f32>>,
     corner_radius: Option<Prop<f32>>,
     padding: Option<Prop<f32>>,
+    a11y_presentational: bool,
 }
 
 impl Panel {
@@ -39,7 +40,18 @@ impl Panel {
             border_width: None,
             corner_radius: None,
             padding: None,
+            a11y_presentational: false,
         }
+    }
+
+    /// Mark the panel as presentational for assistive tech: the panel's
+    /// own a11y node is hidden so its wrapping chrome (background,
+    /// border, padding) doesn't introduce a spurious `Group` node
+    /// between an outer widget (Toolbar, StatusBar, etc.) and the
+    /// real content. Children remain visible in the a11y tree.
+    pub fn a11y_presentational(mut self) -> Self {
+        self.a11y_presentational = true;
+        self
     }
 
     /// Set child by pre-registered ID.
@@ -193,6 +205,10 @@ impl Widget for Panel {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.a11y_presentational {
+            builder.set_hidden();
+            return;
+        }
         builder.set_role(fern_core::accesskit::Role::Group);
     }
 

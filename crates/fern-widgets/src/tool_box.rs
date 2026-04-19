@@ -818,6 +818,12 @@ impl Widget for ToolBoxPanel {
         // by screen readers to announce the panel as "Region: <label>".
         builder.set_role(Role::Region);
         builder.set_name(&self.label);
+        // Collapsed panels must be hidden from AT — they're kept in the
+        // widget tree for animation purposes, but their content is at
+        // height=0 and should not be navigable by screen readers.
+        if self.selected.get() != self.index {
+            builder.set_hidden();
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -38,6 +38,7 @@ use fern_core::build_context::BuildContext;
 use fern_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::LocalizedString;
 use fern_tokens::{CornerRadius, TextRole, TextStyleRole};
@@ -351,6 +352,25 @@ impl Widget for RichTooltipWidget {
         );
 
         self.root_child_id = Some(padded);
+
+        // Sticky tooltip becomes a focusable Dialog. Keyboard users
+        // press Tab to enter the promoted surface (e.g. to click
+        // inline links). Ephemeral tooltips dismiss on pointer-leave
+        // so they can't realistically be tab targets; leaving
+        // `focusable(true)` unconditionally avoids a rebuild on every
+        // sticky flip.
+        let handlers = HandlerSet::new().focusable(true);
+        ctx.apply_self_handlers(handlers);
+
+        // Rebind the sticky signal at AccessibilityOnly so the role
+        // flip (Tooltip → Dialog) and the `Action::Focus` addition in
+        // `accessibility()` reach AT without a relayout or repaint.
+        self.sticky.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            fern_core::binding::BindingLevel::AccessibilityOnly,
+        );
+
         vec![padded]
     }
 
@@ -385,7 +405,8 @@ impl Widget for RichTooltipWidget {
         // Role flips from Tooltip to Dialog (non-modal) once the
         // tooltip is sticky, since a sticky tooltip behaves like a
         // persistent panel rather than an ephemeral hover hint.
-        let role = if self.sticky.get() {
+        let is_sticky = self.sticky.get();
+        let role = if is_sticky {
             fern_core::accesskit::Role::Dialog
         } else {
             fern_core::accesskit::Role::Tooltip
@@ -393,6 +414,9 @@ impl Widget for RichTooltipWidget {
         builder.set_role(role);
         if let Some(content) = self.content.as_ref() {
             builder.set_name(&content.text.resolve_now());
+        }
+        if is_sticky {
+            builder.add_action(fern_core::accesskit::Action::Focus);
         }
     }
 

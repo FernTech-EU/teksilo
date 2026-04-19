@@ -1,3 +1,4 @@
+use crate::overlay::OverlayDismissCallback;
 use crate::widget_id::WidgetId;
 
 /// How the framework should present a modal surface.
@@ -52,7 +53,6 @@ impl std::fmt::Debug for ModalContent {
 }
 
 /// A framework-level request to present a modal.
-#[derive(Debug)]
 pub struct ModalRequest {
     pub content: ModalContent,
     pub presentation: ModalPresentation,
@@ -68,6 +68,11 @@ pub struct ModalRequest {
     /// `MessageBox`-style alerts where the default button may not be
     /// the first focusable descendant in tree-walk order.
     pub focus_target: Option<WidgetId>,
+    /// Invoked when the modal is dismissed by any path (Escape, close
+    /// button, click-outside, explicit `ctx.dismiss_modal()`). Only
+    /// fired for in-tree presentations — native-window modals do not
+    /// have a reliable dismiss callback yet.
+    pub on_dismiss: Option<OverlayDismissCallback>,
 }
 
 impl ModalRequest {
@@ -80,6 +85,7 @@ impl ModalRequest {
             title: None,
             size: None,
             focus_target: None,
+            on_dismiss: None,
         }
     }
 
@@ -94,6 +100,7 @@ impl ModalRequest {
             title: None,
             size: None,
             focus_target: None,
+            on_dismiss: None,
         }
     }
 
@@ -117,6 +124,14 @@ impl ModalRequest {
         self
     }
 
+    /// Register a callback invoked when the modal is dismissed by any
+    /// path (Escape, close button, click-outside, explicit
+    /// `ctx.dismiss_modal()`). Only fired for in-tree presentations.
+    pub fn on_dismiss(mut self, callback: OverlayDismissCallback) -> Self {
+        self.on_dismiss = Some(callback);
+        self
+    }
+
     /// Direct initial focus to a specific widget inside the modal
     /// content subtree. The id must resolve to a widget that exists
     /// and is active at the time the modal is presented; if it does
@@ -125,6 +140,20 @@ impl ModalRequest {
     pub fn focus_target(mut self, id: WidgetId) -> Self {
         self.focus_target = Some(id);
         self
+    }
+}
+
+impl std::fmt::Debug for ModalRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModalRequest")
+            .field("content", &self.content)
+            .field("presentation", &self.presentation)
+            .field("close_behavior", &self.close_behavior)
+            .field("title", &self.title)
+            .field("size", &self.size)
+            .field("focus_target", &self.focus_target)
+            .field("on_dismiss", &self.on_dismiss.as_ref().map(|_| "<callback>"))
+            .finish()
     }
 }
 
