@@ -2354,11 +2354,14 @@ impl WidgetCatalog {
                         }
                         VStack {
                             spacing: 8.0
-                            Toggle(sigs.toggle_on.clone())
+                            Toggle(sigs.toggle_on.clone()) {
+                                label_literal: "Enabled"
+                            }
                             Toggle(sigs.toggle_label_on.clone()) {
                                 label_literal: "Notifications"
                             }
                             Toggle(sigs.toggle_disabled_state.clone()) {
+                                label_literal: "Unavailable"
                                 enabled: false
                             }
                         }
