@@ -108,6 +108,10 @@ pub struct StreamBuffers {
     pub sdf: StreamBuffer,
     pub quad: StreamBuffer,
     pub shadow: StreamBuffer,
+    /// Shader-driven animated-quad vertices (procedural pipeline —
+    /// IndeterminateSweep, future Pulse / Shimmer). Per-frame uniform
+    /// state lives in a separate `wgpu::Buffer` owned by `Renderer`.
+    pub anim_proc: StreamBuffer,
     /// Shared index buffer — quad indices are deterministic so one buffer
     /// serves every pipeline that renders quads.
     pub index: StreamBuffer,
@@ -120,6 +124,7 @@ impl StreamBuffers {
             sdf: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "sdf_stream"),
             quad: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "quad_stream"),
             shadow: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "shadow_stream"),
+            anim_proc: StreamBuffer::new(wgpu::BufferUsages::VERTEX, "anim_proc_stream"),
             index: StreamBuffer::new(wgpu::BufferUsages::INDEX, "index_stream"),
         }
     }
@@ -129,6 +134,7 @@ impl StreamBuffers {
         self.sdf.reset();
         self.quad.reset();
         self.shadow.reset();
+        self.anim_proc.reset();
         self.index.reset();
     }
 }

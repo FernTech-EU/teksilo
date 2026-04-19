@@ -1,13 +1,21 @@
 //! ProgressBar — a bar showing progress from 0.0 to 1.0.
 //!
-//! Supports determinate mode (bound to a `Prop<f32>`) and indeterminate mode
-//! (animated sweep via `Signal<f32>`). Horizontal or vertical.
+//! Supports determinate mode (bound to a `Prop<f32>`) and indeterminate mode.
 //!
-//! The indeterminate animation uses a looping `Signal<f32>` driven by the
-//! animation scheduler. It loops automatically and is capped at 30fps.
+//! - **Horizontal indeterminate** uses the shader-driven animated-quad
+//!   pipeline: the widget's `paint()` emits one `AnimatedQuad` draw
+//!   command, and the fragment shader computes the sweep position
+//!   from a uniform updated each frame by the widget tree. Paint()
+//!   only re-runs when layout changes — per-frame animation cost is
+//!   one uniform write + one `draw_indexed` call.
+//! - **Vertical indeterminate** keeps the signal-based animate_looping
+//!   path — the procedural shader currently only handles horizontal
+//!   sweeps.
+//! - **Determinate** uses a static rounded-rect fill (unchanged).
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{AnimatedQuadClass, Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::animated_quad::{AnimatedQuadHandle, AnimatedQuadKind};
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::{Prop, Signal};
 use fern_core::binding::BindingLevel;
@@ -15,7 +23,7 @@ use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 #[cfg(test)]
 use fern_tokens::Color;
-use fern_tokens::{CornerRadius, Easing, Orientation};
+use fern_tokens::{CornerRadius, Easing, Orientation, SurfaceRole};
 use std::time::Duration;
 
 const DEFAULT_THICKNESS: f32 = 4.0;
@@ -31,8 +39,14 @@ const INDETERMINATE_SWEEP_RATIO: f32 = 0.42;
 pub struct ProgressBar {
     value: Prop<f32>,
     indeterminate: bool,
-    /// Animated position for indeterminate sweep (0.0–1.0, loops).
+    /// Legacy signal-based sweep position (0.0–1.0). Only used by the
+    /// vertical indeterminate path; the horizontal path uses the
+    /// shader pipeline via `anim_handle` instead.
     indeterminate_pos: Signal<f32>,
+    /// Shader-driven animated-quad handle for horizontal indeterminate
+    /// bars. `Some` only when `indeterminate && orientation ==
+    /// Horizontal && !prefers_reduced_motion` at the last `build()`.
+    anim_handle: Option<AnimatedQuadHandle>,
     orientation: Orientation,
     thickness: f32,
     track_color: Option<ColorProp>,
@@ -46,6 +60,7 @@ impl ProgressBar {
             value: Prop::Static(value.clamp(0.0, 1.0)),
             indeterminate: false,
             indeterminate_pos: Signal::new_animated(0.0),
+            anim_handle: None,
             orientation: Orientation::Horizontal,
             thickness: DEFAULT_THICKNESS,
             track_color: None,
@@ -63,6 +78,7 @@ impl ProgressBar {
             value: Prop::Static(0.0),
             indeterminate: true,
             indeterminate_pos: Signal::new_animated(0.0),
+            anim_handle: None,
             orientation: Orientation::Horizontal,
             thickness: DEFAULT_THICKNESS,
             track_color: None,
@@ -114,15 +130,37 @@ impl Widget for ProgressBar {
         // Honor the OS-level reduced-motion preference: an
         // indeterminate sweep is decorative; when reduced-motion is on,
         // fall through to a static "half-filled" bar rather than
-        // running the looping animation. Also skips scheduling any
-        // animation at all, so the widget stops contributing to
-        // idle-frame wakes for users who explicitly asked for less
-        // motion.
+        // running the animation.
         let reduced_motion = ctx.prefers_reduced_motion();
         let animate = self.indeterminate && !reduced_motion;
+        let use_shader_path = animate && matches!(self.orientation, Orientation::Horizontal);
 
-        if animate {
-            // Re-create animated signal registered with the scheduler
+        // Horizontal indeterminate: register a shader-driven animated
+        // quad. paint() below emits ONE DrawCommand::AnimatedQuad; the
+        // fragment shader computes the sweep from a uniform updated
+        // each frame without re-running paint().
+        if use_shader_path {
+            let track_color = self
+                .track_color
+                .clone()
+                .unwrap_or_else(|| SurfaceRole::Sunken.into());
+            let fill_color = self
+                .fill_color
+                .clone()
+                .unwrap_or_else(|| SurfaceRole::Accent.into());
+            self.anim_handle = Some(ctx.animated_quad(AnimatedQuadKind::IndeterminateSweep {
+                period: INDETERMINATE_SWEEP_DURATION,
+                sweep_ratio: INDETERMINATE_SWEEP_RATIO,
+                track_color,
+                fill_color,
+            }));
+        } else {
+            self.anim_handle = None;
+        }
+
+        // Vertical indeterminate still uses the signal path — the
+        // procedural shader only draws horizontal sweeps today.
+        if animate && !use_shader_path {
             self.indeterminate_pos = ctx.animated_signal(0.0);
         }
 
@@ -131,10 +169,9 @@ impl Widget for ProgressBar {
         let registry = ctx.binding_registry();
         self.value
             .register_if_bound(id, registry, BindingLevel::RepaintOnly);
-        if animate {
+        if animate && !use_shader_path {
             self.indeterminate_pos
                 .bind_to(id, registry, BindingLevel::RepaintOnly);
-            // Looping animation: 0→1 over sweep duration, restarts automatically
             self.indeterminate_pos.animate_looping(
                 1.0,
                 INDETERMINATE_SWEEP_DURATION,
@@ -183,12 +220,20 @@ impl Widget for ProgressBar {
         // Track
         canvas.fill_rounded_rect(bounds, radius, track_color);
 
-        if self.indeterminate {
-            // Indeterminate: a one-way sweep that travels slightly beyond the
-            // track edges so the motion is clearer at a glance.
-            //
-            // The loop is re-armed from paint(), so invisible/clipped progress
-            // bars do not continue consuming animation frames offscreen.
+        if let Some(handle) = self.anim_handle {
+            // Horizontal indeterminate via shader pipeline. The sweep
+            // is drawn as a rectangular band inside the track's
+            // rounded corners — the shader does not honor the corner
+            // radius, so on rounded tracks with large radii the sweep
+            // slightly overlaps the corner. In practice progress-bar
+            // radii are 1–3 px and the artifact is imperceptible; the
+            // trade is that paint() emits one draw command instead of
+            // recomputing the sweep rect each frame.
+            canvas.draw_animated_quad(bounds, handle.slot(), AnimatedQuadClass::Procedural);
+        } else if self.indeterminate {
+            // Vertical indeterminate (or reduced-motion fallback):
+            // signal-driven path. The scheduler's own visibility gate
+            // stops the sweep when the bar scrolls offscreen.
             let pos = self.indeterminate_pos.get().clamp(0.0, 1.0);
             let sweep_ratio = INDETERMINATE_SWEEP_RATIO;
             let fill_rect = match self.orientation {
@@ -321,22 +366,35 @@ mod tests {
     }
 
     #[test]
-    fn indeterminate_progress_bar_changes_frame_over_time() {
+    fn indeterminate_progress_bar_emits_animated_quad() {
+        // Horizontal indeterminate uses the shader pipeline: one
+        // rounded-rect track + one AnimatedQuad whose per-frame phase
+        // lives in `frame.anim_params`. The widget's own `paint()`
+        // does not re-run between frames — the shader samples live
+        // params from the uniform buffer.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         tree.add(ProgressBar::indeterminate());
 
         tree.layout(SizeProposal::exact(200.0, 40.0));
         let frame1 = tree.render();
-        let fill1 = frame1.shapes[1].screen;
+        assert_eq!(
+            frame1.animated_quads.len(),
+            1,
+            "horizontal indeterminate should emit exactly one AnimatedQuad"
+        );
+        assert_eq!(frame1.anim_params.len(), 1);
+        let phase1 = frame1.anim_params[frame1.animated_quads[0].slot as usize].phase;
 
-        tree.tick_animations(Duration::from_millis(750));
-        tree.layout(SizeProposal::exact(200.0, 40.0));
+        // Advance time and re-render. The arena is not dirtied (paint()
+        // doesn't need to re-run for phase advancement), but the tree
+        // ticks the animated-quad registry every render() and writes
+        // fresh anim_params into the frame.
+        std::thread::sleep(Duration::from_millis(250));
         let frame2 = tree.render();
-        let fill2 = frame2.shapes[1].screen;
-
+        let phase2 = frame2.anim_params[frame2.animated_quads[0].slot as usize].phase;
         assert_ne!(
-            fill1, fill2,
-            "indeterminate fill should move between frames"
+            phase1, phase2,
+            "animated-quad phase must advance between frames"
         );
     }
 }

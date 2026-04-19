@@ -103,14 +103,10 @@ pub struct WidgetTree {
     /// Registry of shader-driven animated quads (opt-in alternative to
     /// `Signal<f32>::animate_looping` for decorative motion — progress
     /// sweeps, sprite-atlas frame cycling, future pulse/shimmer). The
-    /// scheduler-style signal path stays for everything else.
+    /// scheduler-style signal path stays for everything else. Per-slot
+    /// `AnimParams` are ticked and attached to every `RenderFrame`
+    /// produced by `render()` — the renderer reads them from there.
     animated_quads: crate::animated_quad::AnimatedQuadRegistry,
-    /// Proxy for pushing per-frame `AnimParams` to the renderer's
-    /// uniform buffer. `None` in headless tests and anywhere the
-    /// tree is used without a live renderer — the registry still
-    /// runs `tick` (callers can read the `&[AnimParams]` slice), it
-    /// just isn't uploaded.
-    renderer_proxy: Option<std::rc::Rc<dyn crate::animated_quad::RendererProxy>>,
     /// Monotonic counter bumped at the start of each `render()` call.
     /// Each widget's `last_painted_epoch` is set to this value whenever
     /// the paint pass (or the cache-hit early-out) confirms the widget
@@ -271,7 +267,6 @@ impl WidgetTree {
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_values: Vec::new(),
             animated_quads: crate::animated_quad::AnimatedQuadRegistry::new(),
-            renderer_proxy: None,
             paint_epoch: 0,
             cached_a11y: None,
             a11y_dirty: true,
@@ -764,16 +759,6 @@ impl WidgetTree {
         self.animation_scheduler.is_window_active()
     }
 
-    /// Install the renderer-side proxy used to upload animated-quad
-    /// uniforms each frame. Called by `fern-app` at window creation
-    /// after the renderer is ready; left `None` in headless tests.
-    pub fn set_renderer_proxy(
-        &mut self,
-        proxy: std::rc::Rc<dyn crate::animated_quad::RendererProxy>,
-    ) {
-        self.renderer_proxy = Some(proxy);
-    }
-
     /// Register a new animated quad for the currently-building widget.
     /// Called by [`crate::build_context::BuildContext::animated_quad`];
     /// returns an opaque handle the widget stashes for its `paint()`
@@ -785,23 +770,6 @@ impl WidgetTree {
     ) -> crate::animated_quad::AnimatedQuadHandle {
         self.animated_quads
             .register(owner, kind, std::time::Instant::now())
-    }
-
-    /// Compute fresh `AnimParams` for every live animated-quad slot and
-    /// forward them to the renderer. Called once per frame, just before
-    /// the renderer encodes the command buffer — the uniform buffer
-    /// must reflect the current phase by the time the shader runs.
-    ///
-    /// No-op when the widget tree has no `RendererProxy` (headless
-    /// tests, unit tests) — the registry's own `tick` is still useful
-    /// for diagnostics but nothing needs to be uploaded.
-    pub fn tick_animated_quads(&mut self, now: std::time::Instant) {
-        let params = self
-            .animated_quads
-            .tick(now, &self.arena, self.paint_epoch, &self.theme);
-        if let Some(proxy) = &self.renderer_proxy {
-            proxy.write_anim_uniforms(params);
-        }
     }
 
     /// Active animated-quad slot count. Test / debug helper.

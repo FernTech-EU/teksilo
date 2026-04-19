@@ -21,6 +21,15 @@ pub struct RenderFrame {
     /// the widget tree — the widget's own `paint()` runs only when
     /// layout changes, not once per animation frame.
     pub animated_quads: Vec<AnimatedQuadDraw>,
+    /// Per-slot `AnimParams`, indexed by the `slot` field of each
+    /// `AnimatedQuadDraw`. Recomputed by the widget tree every frame
+    /// (phase advanced, colors resolved against the current theme)
+    /// and uploaded to the renderer's uniform buffer at the top of
+    /// `Renderer::render`. Slots whose widget is dormant / offscreen /
+    /// in an inactive window keep their last-written values — the
+    /// fragment shader still renders, just with stale phase for one
+    /// frame until the next tick resumes.
+    pub anim_params: Vec<AnimParams>,
     pub draw_order: Vec<DrawCommand>,
     /// Images that need GPU registration before rendering this frame.
     pub pending_images: Vec<PendingImage>,
@@ -62,6 +71,11 @@ impl RenderFrame {
         self.rasterized.extend_from_slice(&other.rasterized);
         self.paths.extend_from_slice(&other.paths);
         self.animated_quads.extend_from_slice(&other.animated_quads);
+        // `anim_params` is NOT merged index-wise — the widget tree
+        // writes one authoritative slice per frame (indexed by
+        // registry slot, which is global across the tree). Cached
+        // sub-frames carry empty `anim_params`; the outer tree
+        // replaces it wholesale after `render()` is called.
         self.layout_keys.extend_from_slice(&other.layout_keys);
         // Merge pending image registrations (deduped by renderer)
         for pending in &other.pending_images {
@@ -374,6 +388,39 @@ pub enum AnimatedQuadClass {
     /// Samples a texture atlas. Carries the image name so the renderer
     /// can resolve the bind group (same path registered images use).
     Sprite { image_name: String },
+}
+
+/// GPU-visible per-slot state for a shader-driven animated quad.
+/// Layout must match the WGSL `AnimParams` struct in
+/// `fern-render/src/shaders/anim_procedural.wgsl` (and the sprite
+/// variant). `repr(C)` with explicit `_pad` fields for `std140`
+/// compatibility.
+///
+/// Lives in `fern-canvas` (not `fern-core`) because it is the
+/// serialized-over-the-wire data type between the tree's animated-quad
+/// registry and the renderer, and `RenderFrame` is already the
+/// tree→renderer data channel.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct AnimParams {
+    /// Discriminator — 0 = IndeterminateSweep, 1 = SpriteCycle, ...
+    /// Matches the `kind: u32` constant in the fragment shader switch.
+    pub kind: u32,
+    /// Continuous phase for procedural kinds (0..1) OR integer frame
+    /// index (as f32) for sprite kinds.
+    pub phase: f32,
+    /// IndeterminateSweep: sweep band width (0..1). Other kinds unused.
+    pub sweep_ratio: f32,
+    pub _pad0: f32,
+    /// IndeterminateSweep: track color. Unused for sprite.
+    pub color0: [f32; 4],
+    /// IndeterminateSweep: fill color. Sprite: tint (alpha 0 = no tint).
+    pub color1: [f32; 4],
+    /// Sprite atlas grid width (cols). Unused for procedural.
+    pub atlas_cols: f32,
+    /// Sprite atlas grid height (rows). Unused for procedural.
+    pub atlas_rows: f32,
+    pub _pad1: [f32; 2],
 }
 
 #[cfg(test)]

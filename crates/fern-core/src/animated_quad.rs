@@ -48,6 +48,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use fern_canvas::AnimParams;
 use fern_tokens::{Color, Easing, Theme};
 
 use crate::arena::WidgetArena;
@@ -106,55 +107,6 @@ pub enum AnimatedQuadKind {
         tint: Option<ColorProp>,
     },
     // Future kinds: Pulse, Shimmer, Skeleton, Spinner (circular rotation).
-}
-
-/// GPU-visible per-slot state. Layout MUST match the WGSL struct in
-/// `anim_procedural.wgsl` / `anim_sprite.wgsl`. Kept `repr(C)` and
-/// padded to 16-byte boundaries for `std140` compatibility.
-///
-/// Kept in fern-core so the widget tree can compute and stage new
-/// values each frame without a round-trip through fern-render (the
-/// renderer `Proxy` takes a `&[AnimParams]` slice and uploads it).
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct AnimParams {
-    /// Discriminator — 0 = IndeterminateSweep, 1 = SpriteCycle, ...
-    /// Matches the `kind: u32` constant in the fragment shader's `switch`.
-    pub kind: u32,
-    /// Continuous phase for procedural kinds (0..1) OR integer
-    /// frame index encoded as f32 for sprite kinds. The shader reads
-    /// whichever it needs based on `kind`.
-    pub phase: f32,
-    /// IndeterminateSweep: sweep band width (0..1). Other kinds:
-    /// unused.
-    pub sweep_ratio: f32,
-    pub _pad0: f32,
-    /// IndeterminateSweep: track color. SpriteCycle: unused.
-    pub color0: [f32; 4],
-    /// IndeterminateSweep: fill color. SpriteCycle: tint (premultiplied
-    /// with sampled atlas color; alpha 0 = no tint).
-    pub color1: [f32; 4],
-    /// Sprite: atlas grid dimensions. Procedural: unused.
-    pub atlas_cols: f32,
-    pub atlas_rows: f32,
-    pub _pad1: [f32; 2],
-}
-
-/// Thin trait the widget tree uses to push the fresh
-/// [`AnimParams`] slice to the GPU each frame. Implemented by
-/// `fern-render`'s `Renderer` (stored on `WidgetTree` as
-/// `Option<Rc<dyn RendererProxy>>`; `None` in headless / unit tests).
-pub trait RendererProxy {
-    /// Upload the full params slice, indexed by slot, into the
-    /// renderer's uniform buffer. Called once per frame just before
-    /// command encoding.
-    fn write_anim_uniforms(&self, params: &[AnimParams]);
-}
-
-impl std::fmt::Debug for dyn RendererProxy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RendererProxy").finish_non_exhaustive()
-    }
 }
 
 // ---------------------------------------------------------------------------

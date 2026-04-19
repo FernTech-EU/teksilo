@@ -16,21 +16,41 @@ impl WidgetTree {
     pub fn render(&mut self) -> RenderFrame {
         self.process_state_changes();
 
+        // Always tick the animated-quad registry — even on the cache-hit
+        // early-out we still need fresh phase in the frame's
+        // anim_params, because every looping slot advances. Widgets
+        // whose paint() wasn't re-run (all of them on cache hit) keep
+        // their last DrawCommand::AnimatedQuad in the cached frame;
+        // the renderer reads the live params from `frame.anim_params`
+        // at the slot index stored in the draw command.
+        let anim_params: Vec<fern_canvas::AnimParams> = self
+            .animated_quads
+            .tick(
+                std::time::Instant::now(),
+                &self.arena,
+                self.paint_epoch,
+                &self.theme,
+            )
+            .to_vec();
+
+        // Cache-hit short-circuit: nothing in the tree was marked
+        // needs_paint, so the pixels are identical to the previous
+        // frame apart from the animated-quad uniforms. We deliberately
+        // do NOT bump `paint_epoch` here — if we did, every widget's
+        // `last_painted_epoch` would silently age out and the animation
+        // scheduler would treat them as "off-screen" on the next tick.
+        // Holding the epoch steady preserves the
+        // `last_painted_epoch + 1 >= paint_epoch` visibility gate
+        // through arbitrarily many idle cache-hit frames. The fresh
+        // `anim_params` we just computed are attached so shader-driven
+        // animations keep advancing even when paint() doesn't run.
         if !self.arena.any_needs_paint()
             && let Some(ref cached) = self.cached_frame
         {
-            // Cache-hit short-circuit: nothing in the tree was marked
-            // needs_paint, so the pixels are identical to the previous
-            // frame. We deliberately do NOT bump `paint_epoch` here —
-            // if we did, every widget's `last_painted_epoch` would
-            // silently age out and the animation scheduler would treat
-            // them as "off-screen" on the next tick. Holding the
-            // epoch steady preserves the `last_painted_epoch + 1 >=
-            // paint_epoch` visibility gate through arbitrarily many
-            // idle cache-hit frames. In practice a running animation
-            // always dirties its widget (RepaintOnly binding) and so
-            // never takes this branch.
-            return cached.clone();
+            let mut frame = cached.clone();
+            frame.anim_params = anim_params.clone();
+            self.cached_frame = Some(frame.clone());
+            return frame;
         }
 
         self.paint_epoch = self.paint_epoch.saturating_add(1);
@@ -77,6 +97,7 @@ impl WidgetTree {
             }
         }
 
+        frame.anim_params = anim_params;
         frame.debug_validate_stacks();
         self.cached_frame = Some(frame.clone());
         frame

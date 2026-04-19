@@ -419,6 +419,71 @@ impl ShadowVertex {
     }
 }
 
+/// Vertex for the shader-driven animated-quad pipeline (procedural
+/// and sprite kinds). All four vertices of a quad carry the same
+/// `slot`, which the fragment shader uses to look up per-frame state
+/// (phase, resolved colors, atlas dims) in the `anim_uniforms` buffer.
+/// No color or timing is baked in the vertex — that's the whole point:
+/// rebuilding the vertex batch is unnecessary when only the phase
+/// changes, so the widget's `paint()` doesn't re-run per frame.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct AnimQuadVertex {
+    /// Pixel position; converted to NDC in the render loop.
+    pub position: [f32; 2],
+    /// Local UV within the quad (0..1 across each axis). The fragment
+    /// shader uses `uv.x` to decide sweep inclusion; the sprite shader
+    /// combines it with `AnimParams::atlas_cols`/`atlas_rows` to sample
+    /// the atlas cell.
+    pub uv: [f32; 2],
+    /// Index into the renderer's `AnimParams` uniform array. Same for
+    /// all four vertices of a quad; declared `@interpolate(flat)` in
+    /// WGSL to preserve the integer across rasterization.
+    pub slot: u32,
+    /// Struct padding to keep stride a multiple of 8 bytes (matches
+    /// `QuadVertex` convention for wgpu vertex-buffer layouts).
+    pub _pad: u32,
+}
+
+impl AnimQuadVertex {
+    pub fn from_animated_quad(
+        draw: &fern_canvas::AnimatedQuadDraw,
+        scale_factor: f32,
+    ) -> [AnimQuadVertex; 4] {
+        let [x, y, w, h] = draw.screen;
+        let sx = x * scale_factor;
+        let sy = y * scale_factor;
+        let sw = w * scale_factor;
+        let sh = h * scale_factor;
+        [
+            AnimQuadVertex {
+                position: [sx, sy],
+                uv: [0.0, 0.0],
+                slot: draw.slot,
+                _pad: 0,
+            },
+            AnimQuadVertex {
+                position: [sx + sw, sy],
+                uv: [1.0, 0.0],
+                slot: draw.slot,
+                _pad: 0,
+            },
+            AnimQuadVertex {
+                position: [sx + sw, sy + sh],
+                uv: [1.0, 1.0],
+                slot: draw.slot,
+                _pad: 0,
+            },
+            AnimQuadVertex {
+                position: [sx, sy + sh],
+                uv: [0.0, 1.0],
+                slot: draw.slot,
+                _pad: 0,
+            },
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

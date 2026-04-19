@@ -14,9 +14,9 @@ pub use geometry::{Point, Rect, Size, SizeProposal, Transform2D, Vec2};
 pub use paint::{GradientStop, ImageHandle, LineCap, Paint, StrokeStyle};
 pub use path::{Path, PathCommand};
 pub use render_frame::{
-    AnimatedQuadClass, AnimatedQuadDraw, BlendMode, DecorationKind, DecorationRect, DrawCommand,
-    GlyphQuad, ImageQuad, PaintData, PathEntry, PendingImage, RasterizedQuad, RenderFrame,
-    ShadowQuad, ShapeKind, ShapeQuad,
+    AnimParams, AnimatedQuadClass, AnimatedQuadDraw, BlendMode, DecorationKind, DecorationRect,
+    DrawCommand, GlyphQuad, ImageQuad, PaintData, PathEntry, PendingImage, RasterizedQuad,
+    RenderFrame, ShadowQuad, ShapeKind, ShapeQuad,
 };
 pub use animated::AnimatedIcon;
 pub use raster::{ImageDecodeError, RasterIcon};

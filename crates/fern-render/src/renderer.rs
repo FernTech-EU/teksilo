@@ -6,9 +6,15 @@ use fern_canvas::geometry::Transform2D;
 use crate::image_manager::ImageManager;
 use crate::path_atlas::PathAtlas;
 use crate::stream_buffer::StreamBuffers;
-use crate::vertex::{QuadVertex, RectVertex, SdfVertex, ShadowVertex};
+use crate::vertex::{AnimQuadVertex, QuadVertex, RectVertex, SdfVertex, ShadowVertex};
 
-/// GPU renderer that draws a RenderFrame using four shader pipelines.
+/// How many animated-quad slots the uniform buffer holds. Must match
+/// the array size in `shaders/anim_procedural.wgsl`. Bumping this
+/// requires updating the WGSL constant too (WGSL array sizes are
+/// static). 128 × 64 B = 8 KiB — well within UBO caps.
+const MAX_ANIM_SLOTS: usize = 128;
+
+/// GPU renderer that draws a RenderFrame using five shader pipelines.
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -16,6 +22,17 @@ pub struct Renderer {
     sdf_pipeline: wgpu::RenderPipeline,
     quad_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
+    /// Procedural animated-quad pipeline — IndeterminateSweep and
+    /// future Pulse / Shimmer kinds. Binds group 0 to a uniform buffer
+    /// holding an array of `AnimParams` (one per slot).
+    anim_proc_pipeline: wgpu::RenderPipeline,
+    /// Uniform buffer backing the procedural pipeline's per-slot state.
+    /// Rewritten wholesale at the top of each `render()` from
+    /// `frame.anim_params`. Fixed size (`MAX_ANIM_SLOTS * 64 B`); the
+    /// tree's registry truncates if it ever exceeds.
+    anim_uniform_buffer: wgpu::Buffer,
+    /// Bind group for the procedural pipeline (buffer above, binding 0).
+    anim_uniform_bind_group: wgpu::BindGroup,
     atlas_texture: Option<AtlasTexture>,
     path_atlas: PathAtlas,
     path_atlas_texture: Option<AtlasTexture>,
@@ -45,6 +62,8 @@ impl Renderer {
         let sdf_pipeline = create_sdf_pipeline(&device, surface_format);
         let quad_pipeline = create_quad_pipeline(&device, surface_format);
         let shadow_pipeline = create_shadow_pipeline(&device, surface_format);
+        let (anim_proc_pipeline, anim_uniform_buffer, anim_uniform_bind_group) =
+            create_anim_proc_pipeline(&device, surface_format);
 
         Self {
             device,
@@ -53,6 +72,9 @@ impl Renderer {
             sdf_pipeline,
             quad_pipeline,
             shadow_pipeline,
+            anim_proc_pipeline,
+            anim_uniform_buffer,
+            anim_uniform_bind_group,
             atlas_texture: None,
             path_atlas: PathAtlas::new(512, 512),
             path_atlas_texture: None,
@@ -201,10 +223,16 @@ impl Renderer {
         let sdf_quads = frame.shapes.len();
         let quad_quads = frame.glyphs.len() + frame.paths.len() + frame.images.len();
         let shadow_quads = frame.shadows.len();
+        let anim_proc_quads = frame
+            .animated_quads
+            .iter()
+            .filter(|a| matches!(a.class, fern_canvas::AnimatedQuadClass::Procedural))
+            .count();
         let max_quads = rect_quads
             .max(sdf_quads)
             .max(quad_quads)
-            .max(shadow_quads);
+            .max(shadow_quads)
+            .max(anim_proc_quads);
 
         self.streams.rect.ensure_capacity(
             &self.device,
@@ -222,11 +250,39 @@ impl Renderer {
             &self.device,
             (shadow_quads * 4 * std::mem::size_of::<ShadowVertex>()) as u64,
         );
+        self.streams.anim_proc.ensure_capacity(
+            &self.device,
+            (anim_proc_quads * 4 * std::mem::size_of::<AnimQuadVertex>()) as u64,
+        );
         self.streams.index.ensure_capacity(
             &self.device,
             (max_quads * 6 * std::mem::size_of::<u16>()) as u64,
         );
         self.streams.reset();
+
+        // Upload animated-quad per-slot state for this frame. Truncate
+        // past MAX_ANIM_SLOTS — the registry currently caps at
+        // 128 slots and growing the buffer would require recreating
+        // the bind group, so we just drop excess slots and warn in
+        // debug builds. In practice, 128 is well beyond typical UIs.
+        if !frame.anim_params.is_empty() {
+            let n = frame.anim_params.len().min(MAX_ANIM_SLOTS);
+            debug_assert!(
+                frame.anim_params.len() <= MAX_ANIM_SLOTS,
+                "AnimParams exceeds MAX_ANIM_SLOTS ({}); tail will be dropped",
+                MAX_ANIM_SLOTS
+            );
+            // Safety: `fern_canvas::AnimParams` is `#[repr(C)]` with
+            // explicit padding and only contains `u32`/`f32`/fixed
+            // arrays thereof — layout-compatible with raw bytes.
+            let bytes = unsafe {
+                std::slice::from_raw_parts(
+                    frame.anim_params.as_ptr() as *const u8,
+                    n * std::mem::size_of::<fern_canvas::AnimParams>(),
+                )
+            };
+            self.queue.write_buffer(&self.anim_uniform_buffer, 0, bytes);
+        }
 
         // Upload the full quad index pattern once — 6 u16s per quad, shared
         // across every quad-based pipeline this frame.
@@ -290,6 +346,7 @@ impl Renderer {
             let mut sdf_batch: Vec<SdfVertex> = Vec::new();
             let mut quad_batch: Vec<QuadVertex> = Vec::new();
             let mut shadow_batch: Vec<ShadowVertex> = Vec::new();
+            let mut anim_proc_batch: Vec<AnimQuadVertex> = Vec::new();
 
             // Which pipeline the current quad batch uses (glyph atlas, path atlas, or image).
             // Flushed when the bind group source changes.
@@ -366,6 +423,35 @@ impl Renderer {
                         $qb.clear();
                     }
                     flush_stream!($pass, $queue, &$streams.shadow, $shp, $shb, $index_binding);
+                    // Animated-quad procedural batch. Unlike the shared
+                    // atlas quad pipeline above, this always binds the
+                    // same uniform bind group (per-slot state read by
+                    // shader) so there's no source-switching. Accesses
+                    // `self.anim_proc_pipeline` / `.anim_uniform_bind_group`
+                    // and the local `anim_proc_batch` via macro hygiene —
+                    // all three are in scope inside `render()` at every
+                    // flush_all! call site.
+                    if !anim_proc_batch.is_empty()
+                        && let Some((ib, _, _)) = $index_binding
+                    {
+                        let bytes: &[u8] = bytemuck::cast_slice(&anim_proc_batch);
+                        if let Some((vb, v_off, v_len)) =
+                            $streams.anim_proc.write($queue, bytes)
+                        {
+                            let quads = (anim_proc_batch.len() / 4) as u32;
+                            let index_count = quads * 6;
+                            let index_bytes = (index_count as u64) * 2;
+                            $pass.set_pipeline(&self.anim_proc_pipeline);
+                            $pass.set_bind_group(0, &self.anim_uniform_bind_group, &[]);
+                            $pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
+                            $pass.set_index_buffer(
+                                ib.slice(0..index_bytes),
+                                wgpu::IndexFormat::Uint16,
+                            );
+                            $pass.draw_indexed(0..index_count, 0, 0..1);
+                        }
+                        anim_proc_batch.clear();
+                    }
                 };
             }
 
@@ -724,13 +810,46 @@ impl Renderer {
                         current_opacity = opacity_stack.pop().unwrap_or(1.0);
                     }
                     fern_canvas::DrawCommand::Rasterized(_) => {}
-                    // Phase A stub. The animated-quad pipeline lands
-                    // in Phase B; until ProgressBar / IconWidget are
-                    // ported, no widget emits this command. The arm
-                    // is here so the plumbing (DrawCommand variant,
-                    // RenderFrame::animated_quads, Canvas API) can
-                    // land without a dangling non-exhaustive match.
-                    fern_canvas::DrawCommand::AnimatedQuad(_) => {}
+                    fern_canvas::DrawCommand::AnimatedQuad(idx) => {
+                        let Some(draw) = frame.animated_quads.get(*idx) else {
+                            continue;
+                        };
+                        // Sprite pipeline lands in Phase C; until then
+                        // only procedural variants draw.
+                        if !matches!(draw.class, fern_canvas::AnimatedQuadClass::Procedural) {
+                            continue;
+                        }
+                        // Flush every other pipeline first so painter's
+                        // order is preserved across pipeline boundaries.
+                        flush_all!(
+                            pass,
+                            &self.queue,
+                            self.streams,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source,
+                            index_binding
+                        );
+                        quad_source = None;
+                        let verts = AnimQuadVertex::from_animated_quad(draw, scale_factor);
+                        for v in &verts {
+                            let tp = apply_transform_pixel(v.position, &current_transform);
+                            anim_proc_batch.push(AnimQuadVertex {
+                                position: pixel_to_ndc(tp, viewport_width, viewport_height),
+                                uv: v.uv,
+                                slot: v.slot,
+                                _pad: v._pad,
+                            });
+                        }
+                    }
                     fern_canvas::DrawCommand::SetBlendMode(mode) => {
                         blend_stack.push(current_blend);
                         current_blend = *mode;
@@ -1411,6 +1530,108 @@ fn create_shadow_pipeline(
         multiview_mask: None,
         cache: None,
     })
+}
+
+/// Build the procedural-animation pipeline plus its per-slot uniform
+/// buffer and bind group. The buffer is sized for
+/// [`MAX_ANIM_SLOTS`] × `size_of::<fern_canvas::AnimParams>()`; the
+/// tree's registry truncates writes past that cap (logged in debug).
+fn create_anim_proc_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> (wgpu::RenderPipeline, wgpu::Buffer, wgpu::BindGroup) {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("anim_procedural_shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/anim_procedural.wgsl").into()),
+    });
+
+    let buffer_size = (MAX_ANIM_SLOTS * std::mem::size_of::<fern_canvas::AnimParams>()) as u64;
+    let anim_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("anim_uniform_buffer"),
+        size: buffer_size,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("anim_uniform_bind_group_layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+
+    let anim_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("anim_uniform_bind_group"),
+        layout: &bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: anim_uniform_buffer.as_entire_binding(),
+        }],
+    });
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("anim_proc_pipeline_layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("anim_proc_pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<AnimQuadVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2, // position
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 8,
+                        shader_location: 1,
+                        format: wgpu::VertexFormat::Float32x2, // uv
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 16,
+                        shader_location: 2,
+                        format: wgpu::VertexFormat::Uint32, // slot
+                    },
+                ],
+            }],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+
+    (pipeline, anim_uniform_buffer, anim_uniform_bind_group)
 }
 
 #[cfg(test)]
