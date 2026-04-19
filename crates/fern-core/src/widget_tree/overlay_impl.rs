@@ -354,7 +354,7 @@ impl WidgetTree {
         true
     }
 
-    pub(super) fn is_descendant_of(&self, widget_id: WidgetId, ancestor: WidgetId) -> bool {
+    pub fn is_descendant_of(&self, widget_id: WidgetId, ancestor: WidgetId) -> bool {
         if widget_id == ancestor {
             return true;
         }

@@ -41,3 +41,26 @@ keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
 keystroke-modifier-super = Super
 keystroke-separator = +
+
+# MessageBox standard button labels. These are the canonical English
+# labels used when a caller doesn't override with
+# `MessageBoxButton::label`. See `crates/fern-widgets/src/message_box.rs`.
+messagebox-btn-ok = OK
+messagebox-btn-cancel = Cancel
+messagebox-btn-close = Close
+messagebox-btn-yes = Yes
+messagebox-btn-no = No
+messagebox-btn-yes-to-all = Yes to All
+messagebox-btn-no-to-all = No to All
+messagebox-btn-save = Save
+messagebox-btn-save-all = Save All
+messagebox-btn-discard = Discard
+messagebox-btn-apply = Apply
+messagebox-btn-reset = Reset
+messagebox-btn-restore-defaults = Restore Defaults
+messagebox-btn-abort = Abort
+messagebox-btn-retry = Retry
+messagebox-btn-ignore = Ignore
+messagebox-btn-open = Open
+messagebox-btn-help = Help
+messagebox-show-details = Show details

@@ -33,6 +33,12 @@ pub struct WindowConfig {
     pub(crate) parent: Option<FernWindowId>,
     pub(crate) root_builder: Option<Box<dyn FnOnce(&mut WidgetTree) -> WidgetId>>,
     pub(crate) custom_chrome: bool,
+    /// Explicit initial-focus target inside the root widget's subtree.
+    /// Only honored when the window is `modal`. Mirrors
+    /// `ModalRequest::focus_target` — used when a modal is promoted to a
+    /// native child window and the caller already knows which descendant
+    /// should hold initial focus.
+    pub(crate) focus_target: Option<WidgetId>,
 }
 
 impl WindowConfig {
@@ -46,6 +52,7 @@ impl WindowConfig {
             parent: None,
             root_builder: None,
             custom_chrome: false,
+            focus_target: None,
         }
     }
 
@@ -84,6 +91,18 @@ impl WindowConfig {
     /// Set the root widget builder for this window.
     pub fn root(mut self, builder: impl FnOnce(&mut WidgetTree) -> WidgetId + 'static) -> Self {
         self.root_builder = Some(Box::new(builder));
+        self
+    }
+
+    /// Direct initial focus, on modal-window creation, to a specific
+    /// descendant of the root built by this config's `root_builder`.
+    /// Only honored when `modal(true)`. Non-modal windows ignore it.
+    ///
+    /// If the id is not active in the resulting tree, the framework
+    /// falls back to the root widget's `initial_focus_hint`, then to
+    /// `first_focusable_descendant`.
+    pub fn focus_target(mut self, id: WidgetId) -> Self {
+        self.focus_target = Some(id);
         self
     }
 

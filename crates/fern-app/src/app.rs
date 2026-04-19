@@ -85,6 +85,7 @@ fn present_in_tree_modal_request(
     request: ModalRequest,
 ) {
     let dismiss = modal_close_behavior_to_overlay_dismiss(request.close_behavior);
+    let requested_focus = request.focus_target;
     let content_id = match request.content {
         ModalContent::ExistingWidget(id) => id,
         ModalContent::Deferred(builder) => {
@@ -108,8 +109,12 @@ fn present_in_tree_modal_request(
         },
     );
 
-    if let Some(focus_target) = tree.first_focusable_descendant(content_id) {
-        tree.focus(focus_target);
+    let focus_target = requested_focus
+        .filter(|id| tree.is_active(*id) && tree.is_descendant_of(*id, content_id))
+        .or_else(|| tree.widget_initial_focus_hint(content_id))
+        .or_else(|| tree.first_focusable_descendant(content_id));
+    if let Some(id) = focus_target {
+        tree.focus(id);
     }
 }
 
@@ -358,6 +363,7 @@ impl FernAppHandler {
                             content,
                             title,
                             size,
+                            focus_target,
                             ..
                         } = queued.request;
 
@@ -371,6 +377,9 @@ impl FernAppHandler {
                         }
                         if let Some((width, height)) = size {
                             config = config.size(width, height);
+                        }
+                        if let Some(id) = focus_target {
+                            config = config.focus_target(id);
                         }
                         self.wm.queue_create(config.root(builder));
                     }
@@ -1571,5 +1580,143 @@ mod tests {
 
         let continue_button = tree.find_by_label("Continue").unwrap();
         assert_eq!(tree.focused(), Some(continue_button));
+    }
+
+    /// Test content widget: a focusable container with two focusable
+    /// button descendants. `hint` controls which (if any) the widget
+    /// reports as its `initial_focus_hint`.
+    #[derive(Debug)]
+    struct TwoButtonContent {
+        root: Option<WidgetId>,
+        second: Option<WidgetId>,
+        hint_to_second: bool,
+    }
+
+    impl fern_core::Widget for TwoButtonContent {
+        fn build(&mut self, ctx: &mut fern_core::BuildContext) -> Vec<WidgetId> {
+            let first = ctx.add(Button::new_literal("First"));
+            let second = ctx.add(Button::new_literal("Second"));
+            let row = ctx.add(fern_widgets::HStack::new().add_child(first).add_child(second));
+            self.root = Some(row);
+            self.second = Some(second);
+            vec![row]
+        }
+
+        fn size_that_fits(
+            &self,
+            proposal: fern_canvas::SizeProposal,
+            ctx: &fern_core::LayoutContext,
+        ) -> fern_canvas::Size {
+            self.root
+                .and_then(|id| ctx.child_size(id, proposal))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+        }
+
+        fn initial_focus_hint(&self) -> Option<WidgetId> {
+            if self.hint_to_second {
+                self.second
+            } else {
+                None
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.root.into_iter().collect()
+        }
+    }
+
+    #[test]
+    fn present_in_tree_modal_consults_initial_focus_hint() {
+        // When `focus_target` is None, the framework must consult the
+        // content widget's `initial_focus_hint` before falling back to
+        // `first_focusable_descendant`.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let source = tree.add(Button::new_literal("Trigger"));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(TwoButtonContent {
+                    root: None,
+                    second: None,
+                    hint_to_second: true,
+                })
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // Two "Second" labels may exist globally (source isn't one), so
+        // find_by_label is unambiguous here.
+        let second = tree.find_by_label("Second").unwrap();
+        assert_eq!(
+            tree.focused(),
+            Some(second),
+            "initial_focus_hint must redirect focus away from first focusable",
+        );
+    }
+
+    #[test]
+    fn present_in_tree_modal_falls_back_to_first_focusable_without_hint() {
+        // Baseline: content without an initial_focus_hint gets the first
+        // focusable descendant, matching prior behavior.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let source = tree.add(Button::new_literal("Trigger"));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(TwoButtonContent {
+                    root: None,
+                    second: None,
+                    hint_to_second: false,
+                })
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let first = tree.find_by_label("First").unwrap();
+        assert_eq!(
+            tree.focused(),
+            Some(first),
+            "without focus_target or initial_focus_hint, first focusable wins",
+        );
+    }
+
+    #[test]
+    fn present_in_tree_modal_rejects_focus_target_outside_content_subtree() {
+        // A focus_target pointing at a widget that exists but is NOT a
+        // descendant of content_id must be rejected. The framework falls
+        // back to initial_focus_hint → first_focusable_descendant.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let source = tree.add(Button::new_literal("Trigger"));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(TwoButtonContent {
+                    root: None,
+                    second: None,
+                    hint_to_second: false,
+                })
+            })
+            .presentation(ModalPresentation::InTree)
+            .focus_target(source), // active but outside modal subtree
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let first = tree.find_by_label("First").unwrap();
+        assert_eq!(
+            tree.focused(),
+            Some(first),
+            "focus_target outside content subtree must be rejected",
+        );
     }
 }

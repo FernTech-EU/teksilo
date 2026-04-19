@@ -28,3 +28,24 @@ keystroke-modifier-shift = Maj
 keystroke-modifier-alt = Alt
 keystroke-modifier-super = Super
 keystroke-separator = +
+
+# MessageBox — boutons standards et divulgation des détails.
+messagebox-btn-ok = OK
+messagebox-btn-cancel = Annuler
+messagebox-btn-close = Fermer
+messagebox-btn-yes = Oui
+messagebox-btn-no = Non
+messagebox-btn-yes-to-all = Oui à tout
+messagebox-btn-no-to-all = Non à tout
+messagebox-btn-save = Enregistrer
+messagebox-btn-save-all = Tout enregistrer
+messagebox-btn-discard = Ignorer les modifications
+messagebox-btn-apply = Appliquer
+messagebox-btn-reset = Réinitialiser
+messagebox-btn-restore-defaults = Valeurs par défaut
+messagebox-btn-abort = Abandonner
+messagebox-btn-retry = Réessayer
+messagebox-btn-ignore = Ignorer
+messagebox-btn-open = Ouvrir
+messagebox-btn-help = Aide
+messagebox-show-details = Afficher les détails

@@ -277,10 +277,15 @@ impl WindowManager {
 
         if let Some(root_builder) = config.root_builder {
             let root_id = root_builder(&mut tree);
-            if config.modal
-                && let Some(focus_target) = tree.first_focusable_descendant(root_id)
-            {
-                tree.focus(focus_target);
+            if config.modal {
+                let focus_target = config
+                    .focus_target
+                    .filter(|id| tree.is_active(*id))
+                    .or_else(|| tree.widget_initial_focus_hint(root_id))
+                    .or_else(|| tree.first_focusable_descendant(root_id));
+                if let Some(id) = focus_target {
+                    tree.focus(id);
+                }
             }
         }
 

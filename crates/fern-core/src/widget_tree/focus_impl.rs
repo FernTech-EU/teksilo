@@ -80,6 +80,49 @@ impl WidgetTree {
         focusable.into_iter().next()
     }
 
+    /// Whether the given widget id currently exists and is active in the
+    /// tree (not dormant, not destroyed). Callers that need to validate a
+    /// user-supplied `WidgetId` before acting on it — e.g. the modal
+    /// presentation path validating `ModalRequest::focus_target` — use
+    /// this.
+    pub fn is_active(&self, id: WidgetId) -> bool {
+        self.arena.is_active(id)
+    }
+
+    /// Walk the subtree rooted at `id` in depth-first order, returning
+    /// the first widget-reported `initial_focus_hint` that resolves to
+    /// an active descendant of `id`.
+    ///
+    /// Used by the modal presentation pipeline to let a deferred-built
+    /// content widget (e.g. `MessageBox`) direct focus to a specific
+    /// descendant after build — even when wrapped in a surface widget
+    /// like `ModalContainer` that doesn't itself know the default
+    /// button's id. The framework walks in to find the first hint
+    /// under the content root, which is tighter than falling all the
+    /// way back to `first_focusable_descendant`.
+    ///
+    /// Hints pointing at inactive or out-of-subtree ids are ignored;
+    /// the walk continues so a shallow wrapper's stale hint doesn't
+    /// hide a deeper child's valid one.
+    pub fn widget_initial_focus_hint(&self, id: WidgetId) -> Option<WidgetId> {
+        if !self.arena.is_active(id) {
+            return None;
+        }
+        if let Some(node) = self.arena.get(id) {
+            if let Some(target) = node.widget.initial_focus_hint() {
+                if self.arena.is_active(target) && self.is_descendant_of(target, id) {
+                    return Some(target);
+                }
+            }
+            for &child in &node.children {
+                if let Some(found) = self.widget_initial_focus_hint(child) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
     /// How the currently focused widget gained focus.
     pub fn focus_origin(&self) -> Option<crate::focus::FocusOrigin> {
         self.focus_origin

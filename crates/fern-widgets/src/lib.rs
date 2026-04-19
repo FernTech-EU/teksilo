@@ -17,6 +17,7 @@ pub mod menu_bar;
 pub(crate) mod menu_context;
 pub mod menu_item;
 pub mod menu_list;
+pub mod message_box;
 pub(crate) mod overlay_trigger;
 pub mod panel;
 pub mod popover;
@@ -67,6 +68,10 @@ pub use list_view::ListView;
 pub use menu_bar::MenuBar;
 pub use menu_item::MenuItem;
 pub use menu_list::{MenuList, MenuSeparator};
+pub use message_box::{
+    ButtonRole, EventContextMessageBoxExt, MessageBox, MessageBoxButton, MessageBoxButtons,
+    MessageBoxResult, MessageBoxSeverity, StandardButton,
+};
 pub use panel::Panel;
 pub use popover::Popover;
 pub use primitives::{

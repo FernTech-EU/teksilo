@@ -39,9 +39,10 @@ use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
 use fern_ui::widgets::{
     Accordion, Badge, BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Card, CheckState,
-    Checkbox, ComboBox, Divider, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
-    IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, Padding, Panel, ProgressBar,
-    RadioButton, ScrollArea, SegmentedControl, Slider, Spacer, SplitButton, SplitView, StatusBar, TabItem,
+    Checkbox, ComboBox, Divider, EventContextMessageBoxExt, Expand, FixedSize, Grid, GroupBox,
+    GroupHeader, HStack, IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem,
+    MenuList, MessageBox, MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea,
+    SegmentedControl, Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabItem,
     TabWidget, TextInput, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
 };
 use fern_ui::widgets::tooltip::TooltipContent;
@@ -285,6 +286,7 @@ impl Widget for WidgetCatalog {
         let containers_section = self.containers_builder(ctx, &theme, &sigs);
         let nav_section = self.nav_builder(ctx, &theme, &sigs);
         let rich_tooltips_section = self.rich_tooltips_builder(ctx, &theme, &sigs);
+        let message_box_section = self.message_box_builder(ctx, &theme, &sigs);
         let menus_section = self.menus_builder(ctx, &theme, &sigs);
         let image_section = self.image_builder(ctx, &theme, &sigs);
         let builtin_section = self.builtin_builder(ctx, &theme, &sigs);
@@ -330,6 +332,8 @@ impl Widget for WidgetCatalog {
                 .child(Divider::new())
                 .add_child(rich_tooltips_section)
                 .child(Divider::new())
+                .add_child(message_box_section)
+                .child(Divider::new())
                 .add_child(menus_section)
                 .child(Divider::new())
                 .add_child(image_section)
@@ -364,6 +368,7 @@ impl Widget for WidgetCatalog {
         let r_containers = self.containers_fern(ctx, &theme, &sigs);
         let r_nav = self.nav_fern(ctx, &theme, &sigs);
         let r_rich_tooltips = self.rich_tooltips_fern(ctx, &theme, &sigs);
+        let r_message_box = self.message_box_fern(ctx, &theme, &sigs);
         let r_menus = self.menus_fern(ctx, &theme, &sigs);
         let r_image = self.image_fern(ctx, &theme, &sigs);
         let r_builtin = self.builtin_fern(ctx, &theme, &sigs);
@@ -389,6 +394,8 @@ impl Widget for WidgetCatalog {
                 add_child: r_nav
                 Divider { }
                 add_child: r_rich_tooltips
+                Divider { }
+                add_child: r_message_box
                 Divider { }
                 add_child: r_menus
                 Divider { }
@@ -1532,6 +1539,92 @@ impl WidgetCatalog {
         )
     }
 
+    fn message_box_builder(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
+        // Each trigger presents a MessageBox exercising one severity +
+        // preset combination. The primary comprehensive demo lives in
+        // examples/dialogs_and_popovers; this section exists so the
+        // catalog's readers can see MessageBox alongside Dialog,
+        // Popover, and Snackbar.
+        let info_btn = Button::new_literal("Information")
+            .style(ButtonVariant::Regular)
+            .on_activate_fn(|ctx| {
+                ctx.present_message_box(
+                    MessageBox::information_literal("Build complete")
+                        .text_literal("13 files compiled in 2.4 s.")
+                        .buttons(MessageBoxButtons::Ok),
+                );
+            });
+        let question_btn = Button::new_literal("Question")
+            .style(ButtonVariant::Regular)
+            .on_activate_fn(|ctx| {
+                ctx.present_message_box(
+                    MessageBox::question_literal("Enable analytics?")
+                        .text_literal("Send anonymous usage data to help improve FernUI.")
+                        .buttons(MessageBoxButtons::YesNo)
+                        .default_button(StandardButton::No),
+                );
+            });
+        let warning_btn = Button::new_literal("Warning")
+            .style(ButtonVariant::Regular)
+            .on_activate_fn(|ctx| {
+                ctx.present_message_box(
+                    MessageBox::warning_literal("Unsaved changes")
+                        .text_literal("report.skrib has unsaved changes.")
+                        .informative_text_literal("Save before closing?")
+                        .buttons(MessageBoxButtons::SaveDiscardCancel)
+                        .default_button(StandardButton::Save)
+                        .escape_button(StandardButton::Cancel),
+                );
+            });
+        let critical_btn = Button::new_literal("Critical")
+            .style(ButtonVariant::Regular)
+            .on_activate_fn(|ctx| {
+                ctx.present_message_box(
+                    MessageBox::critical_literal("Could not open file")
+                        .text_literal("Insufficient permissions.")
+                        .detailed_text_literal("open() returned EACCES (errno 13).")
+                        .buttons(MessageBoxButtons::RetryIgnoreAbort)
+                        .default_button(StandardButton::Retry),
+                );
+            });
+        let dsa_btn = Button::new_literal("With 'Don't show again'")
+            .style(ButtonVariant::Regular)
+            .on_activate_fn(|ctx| {
+                ctx.present_message_box(
+                    MessageBox::information_literal("Welcome")
+                        .text_literal("First-time message.")
+                        .show_again_checkbox_literal("Don't show this again")
+                        .buttons(MessageBoxButtons::Ok),
+                );
+            });
+
+        ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    TextWidget::new_literal("MessageBox")
+                        .style(TextStyleRole::BodyBold)
+                        .color(TextRole::Primary),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "QMessageBox-style alert dialog: severity icon + title + 3-level text + standard button row, with Enter → default, Escape → escape button. Critical severity disables click-outside dismiss.",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(10.0)
+                        .child(info_btn)
+                        .child(question_btn)
+                        .child(warning_btn)
+                        .child(critical_btn)
+                        .child(dsa_btn),
+                ),
+        )
+    }
+
     fn menus_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
 
         ctx.add(
@@ -2645,6 +2738,84 @@ impl WidgetCatalog {
                     Button::new_literal("Save As…") { rich_tooltip: "save-as" }
                     Button::new_literal("Autosave info") { rich_tooltip: "autosave" }
                     Button::new_literal("Compile") { rich_tooltip: "compile" }
+                }
+            }
+        )
+    }
+
+    fn message_box_fern(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
+        fern!(ctx =>
+            VStack {
+                spacing: 8.0
+                TextWidget::new_literal("MessageBox") {
+                    style: TextStyleRole::BodyBold
+                    color: TextRole::Primary
+                }
+                TextWidget::new_literal(
+                    "QMessageBox-style alert dialog: severity icon + title + 3-level text + standard button row, with Enter → default, Escape → escape button. Critical severity disables click-outside dismiss."
+                ) {
+                    style: TextStyleRole::Small
+                    color: TextRole::Secondary
+                }
+                HStack {
+                    spacing: 10.0
+                    Button::new_literal("Information") {
+                        style: ButtonVariant::Regular
+                        on_activate_fn: |ctx| {
+                            ctx.present_message_box(
+                                MessageBox::information_literal("Build complete")
+                                    .text_literal("13 files compiled in 2.4 s.")
+                                    .buttons(MessageBoxButtons::Ok),
+                            );
+                        }
+                    }
+                    Button::new_literal("Question") {
+                        style: ButtonVariant::Regular
+                        on_activate_fn: |ctx| {
+                            ctx.present_message_box(
+                                MessageBox::question_literal("Enable analytics?")
+                                    .text_literal("Send anonymous usage data to help improve FernUI.")
+                                    .buttons(MessageBoxButtons::YesNo)
+                                    .default_button(StandardButton::No),
+                            );
+                        }
+                    }
+                    Button::new_literal("Warning") {
+                        style: ButtonVariant::Regular
+                        on_activate_fn: |ctx| {
+                            ctx.present_message_box(
+                                MessageBox::warning_literal("Unsaved changes")
+                                    .text_literal("report.skrib has unsaved changes.")
+                                    .informative_text_literal("Save before closing?")
+                                    .buttons(MessageBoxButtons::SaveDiscardCancel)
+                                    .default_button(StandardButton::Save)
+                                    .escape_button(StandardButton::Cancel),
+                            );
+                        }
+                    }
+                    Button::new_literal("Critical") {
+                        style: ButtonVariant::Regular
+                        on_activate_fn: |ctx| {
+                            ctx.present_message_box(
+                                MessageBox::critical_literal("Could not open file")
+                                    .text_literal("Insufficient permissions.")
+                                    .detailed_text_literal("open() returned EACCES (errno 13).")
+                                    .buttons(MessageBoxButtons::RetryIgnoreAbort)
+                                    .default_button(StandardButton::Retry),
+                            );
+                        }
+                    }
+                    Button::new_literal("With 'Don't show again'") {
+                        style: ButtonVariant::Regular
+                        on_activate_fn: |ctx| {
+                            ctx.present_message_box(
+                                MessageBox::information_literal("Welcome")
+                                    .text_literal("First-time message.")
+                                    .show_again_checkbox_literal("Don't show this again")
+                                    .buttons(MessageBoxButtons::Ok),
+                            );
+                        }
+                    }
                 }
             }
         )

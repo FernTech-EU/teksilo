@@ -171,6 +171,26 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         None
     }
 
+    /// Optional hint that directs initial focus to a specific
+    /// descendant when this widget is the root of a deferred-built
+    /// modal surface.
+    ///
+    /// The modal presentation pipeline consults this after building
+    /// the content subtree, in priority order: the caller's
+    /// `ModalRequest::focus_target` → the content widget's
+    /// `initial_focus_hint` → `first_focusable_descendant`.
+    /// `MessageBox` overrides this to return the widget id of its
+    /// configured default button, so platform-native button orderings
+    /// (Cancel-left + Default-right-but-focused) work without
+    /// forcing the default button to be the first focusable
+    /// descendant in tree-walk order.
+    ///
+    /// Default: `None` — widgets that don't need to direct initial
+    /// focus to a non-first-focusable descendant don't override.
+    fn initial_focus_hint(&self) -> Option<WidgetId> {
+        None
+    }
+
     /// Return the child widget IDs that this widget manages.
     fn children(&self) -> Vec<WidgetId> {
         Vec::new()

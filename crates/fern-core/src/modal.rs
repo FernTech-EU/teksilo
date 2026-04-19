@@ -59,6 +59,15 @@ pub struct ModalRequest {
     pub close_behavior: ModalCloseBehavior,
     pub title: Option<String>,
     pub size: Option<(u32, u32)>,
+    /// Optional explicit initial-focus target inside the modal content
+    /// subtree. When `None`, the framework falls back to
+    /// `first_focusable_descendant(content_id)`. When `Some`, the id
+    /// is consulted first and the framework focuses it if the widget
+    /// exists and is still active in the target tree; otherwise it
+    /// falls back to `first_focusable_descendant`. Required for
+    /// `MessageBox`-style alerts where the default button may not be
+    /// the first focusable descendant in tree-walk order.
+    pub focus_target: Option<WidgetId>,
 }
 
 impl ModalRequest {
@@ -70,6 +79,7 @@ impl ModalRequest {
             close_behavior: ModalCloseBehavior::default(),
             title: None,
             size: None,
+            focus_target: None,
         }
     }
 
@@ -83,6 +93,7 @@ impl ModalRequest {
             close_behavior: ModalCloseBehavior::default(),
             title: None,
             size: None,
+            focus_target: None,
         }
     }
 
@@ -103,6 +114,16 @@ impl ModalRequest {
 
     pub fn size(mut self, width: u32, height: u32) -> Self {
         self.size = Some((width, height));
+        self
+    }
+
+    /// Direct initial focus to a specific widget inside the modal
+    /// content subtree. The id must resolve to a widget that exists
+    /// and is active at the time the modal is presented; if it does
+    /// not, the framework falls back to
+    /// `first_focusable_descendant(content_id)`.
+    pub fn focus_target(mut self, id: WidgetId) -> Self {
+        self.focus_target = Some(id);
         self
     }
 }
@@ -149,5 +170,26 @@ mod tests {
         assert_eq!(request.title.as_deref(), Some("Preferences"));
         assert_eq!(request.size, Some((640, 480)));
         assert!(matches!(request.content, ModalContent::Deferred(_)));
+    }
+
+    #[test]
+    fn focus_target_defaults_to_none() {
+        let mut tree = crate::WidgetTree::new();
+        let content_id = tree.add(FillWidget::new());
+        let in_tree = ModalRequest::in_tree(content_id);
+        assert!(in_tree.focus_target.is_none());
+
+        let deferred =
+            ModalRequest::deferred(|tree| tree.add(crate::test_widgets::FillWidget::new()));
+        assert!(deferred.focus_target.is_none());
+    }
+
+    #[test]
+    fn focus_target_builder_sets_field() {
+        let mut tree = crate::WidgetTree::new();
+        let content_id = tree.add(FillWidget::new());
+        let target_id = tree.add(FillWidget::new());
+        let request = ModalRequest::in_tree(content_id).focus_target(target_id);
+        assert_eq!(request.focus_target, Some(target_id));
     }
 }

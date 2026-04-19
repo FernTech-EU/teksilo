@@ -79,6 +79,13 @@ impl<L: Widget, R: Widget> Widget for FernBranch<L, R> {
         }
     }
 
+    fn initial_focus_hint(&self) -> Option<WidgetId> {
+        match self {
+            FernBranch::L(w) => w.initial_focus_hint(),
+            FernBranch::R(w) => w.initial_focus_hint(),
+        }
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         match self {
             FernBranch::L(w) => w.children(),
@@ -171,6 +178,14 @@ impl<A: Widget, B: Widget, C: Widget> Widget for FernBranch3<A, B, C> {
             FernBranch3::A(w) => w.accessible_title_hint(),
             FernBranch3::B(w) => w.accessible_title_hint(),
             FernBranch3::C(w) => w.accessible_title_hint(),
+        }
+    }
+
+    fn initial_focus_hint(&self) -> Option<WidgetId> {
+        match self {
+            FernBranch3::A(w) => w.initial_focus_hint(),
+            FernBranch3::B(w) => w.initial_focus_hint(),
+            FernBranch3::C(w) => w.initial_focus_hint(),
         }
     }
 
@@ -277,6 +292,15 @@ impl<A: Widget, B: Widget, C: Widget, D: Widget> Widget for FernBranch4<A, B, C,
             FernBranch4::B(w) => w.accessible_title_hint(),
             FernBranch4::C(w) => w.accessible_title_hint(),
             FernBranch4::D(w) => w.accessible_title_hint(),
+        }
+    }
+
+    fn initial_focus_hint(&self) -> Option<WidgetId> {
+        match self {
+            FernBranch4::A(w) => w.initial_focus_hint(),
+            FernBranch4::B(w) => w.initial_focus_hint(),
+            FernBranch4::C(w) => w.initial_focus_hint(),
+            FernBranch4::D(w) => w.initial_focus_hint(),
         }
     }
 
