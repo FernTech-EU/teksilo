@@ -287,7 +287,7 @@ impl<'a> BuildContext<'a> {
     /// to the widget's arena node, replacing `event()` and `is_focusable()` overrides.
     pub fn apply_self_handlers(&mut self, handler_set: crate::widget_builder::HandlerSet) {
         let id = self.self_id();
-        self.tree.apply_handler_set(id, handler_set);
+        self.tree.apply_self_handler_set(id, handler_set);
     }
 
     // --- Actions & shortcuts (step 3) ---
@@ -382,7 +382,10 @@ impl<'a> BuildContext<'a> {
         id: crate::widget_id::WidgetId,
         handler_set: crate::widget_builder::HandlerSet,
     ) {
-        self.tree.apply_handler_set(id, handler_set);
+        // A composing parent attaches handlers to a child — from the
+        // child's perspective these are external and must survive the
+        // child's own rebuilds.
+        self.tree.apply_external_handler_set(id, handler_set);
     }
 
     /// Subscribe to events from the registered application event source

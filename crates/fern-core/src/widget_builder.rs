@@ -210,6 +210,29 @@ impl HandlerSet {
         self
     }
 
+    /// Set the drag-leave handler. Fires when a drag that was over this
+    /// widget moves to another target, completes (drop on any target), or
+    /// is cancelled. Widgets that stash transient feedback state in
+    /// `on_drag_hover` must clear it here.
+    pub fn on_drag_leave(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+        self.handlers.on_drag_leave = Some(Box::new(f));
+        self
+    }
+
+    /// Set the per-frame drag-tick handler. Fires once per frame while a
+    /// drag is active and this widget is the current drop target. The
+    /// closure receives the current pointer position in widget-local
+    /// coordinates. Use for behaviours that must keep running even when
+    /// the pointer is stationary — viewport-edge auto-scroll and
+    /// spring-loaded folders.
+    pub fn on_drag_tick(
+        mut self,
+        f: impl FnMut(fern_canvas::Point, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handlers.on_drag_tick = Some(Box::new(f));
+        self
+    }
+
     /// Set the drop handler. Called when a payload is dropped on this widget.
     /// Return `true` if the drop was accepted.
     pub fn on_drop(
@@ -409,6 +432,21 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
+    /// Set the drag-leave handler. See [`HandlerSet::on_drag_leave`].
+    pub fn on_drag_leave(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
+        self.handler_set.handlers.on_drag_leave = Some(Box::new(f));
+        self
+    }
+
+    /// Set the per-frame drag-tick handler. See [`HandlerSet::on_drag_tick`].
+    pub fn on_drag_tick(
+        mut self,
+        f: impl FnMut(fern_canvas::Point, &mut EventContext) + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_drag_tick = Some(Box::new(f));
+        self
+    }
+
     /// Set the drop handler. Called when a payload is dropped on this widget.
     pub fn on_drop(
         mut self,
@@ -471,6 +509,10 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
 
     fn children(&self) -> Vec<crate::widget_id::WidgetId> {
         self.widget.children()
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        self.widget.as_any()
     }
 
     fn is_spacer(&self) -> bool {
@@ -537,6 +579,44 @@ mod tests {
         fn children(&self) -> Vec<WidgetId> {
             self.child_id.into_iter().collect()
         }
+    }
+
+    #[test]
+    fn external_handlers_survive_rebuild() {
+        // Regression check: handlers attached externally via the
+        // `WidgetBuilder` builder (e.g. `MyCompositeWidget::new().on_tap(...)`)
+        // must continue to fire after the widget rebuilds in place.
+        // My handler-clearing fix in `rebuild_single_widget` wiped
+        // `node.handlers` to stop accumulation of `apply_self_handlers`
+        // calls across rebuilds — but the extracted-once-at-insertion
+        // HandlerSet is gone by rebuild time and would be lost.
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let tap_count = Rc::new(Cell::new(0_u32));
+        let tc = tap_count.clone();
+
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            CompositeLeaf::new().on_tap(move |_pos, _ctx| {
+                tc.set(tc.get() + 1);
+            }),
+        );
+        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
+
+        // Trip a rebuild of the composite — its child gets torn down &
+        // rebuilt; node.handlers gets cleared and reset.
+        tree.arena_mark_needs_rebuild_for_testing(id);
+        tree.layout(fern_canvas::SizeProposal::exact(200.0, 100.0));
+
+        // Click through the composite; the externally-attached on_tap
+        // must still be wired up.
+        tree.click(id);
+        assert_eq!(
+            tap_count.get(),
+            1,
+            "externally-attached on_tap must survive a rebuild"
+        );
     }
 
     #[test]
@@ -680,6 +760,20 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drag_hover(f)
+    }
+
+    fn on_drag_leave(
+        self,
+        f: impl FnMut(&mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_drag_leave(f)
+    }
+
+    fn on_drag_tick(
+        self,
+        f: impl FnMut(fern_canvas::Point, &mut EventContext) + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_drag_tick(f)
     }
 
     fn on_drop(

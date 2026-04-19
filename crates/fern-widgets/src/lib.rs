@@ -10,6 +10,7 @@ pub mod dialog;
 pub mod group_box;
 pub mod group_header;
 pub mod link;
+pub(crate) mod drag_preview;
 pub(crate) mod list_item_a11y;
 pub(crate) mod list_source;
 pub mod list_view;

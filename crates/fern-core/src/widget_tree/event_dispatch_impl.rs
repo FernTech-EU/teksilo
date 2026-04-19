@@ -2,6 +2,30 @@ use super::*;
 
 use crate::gesture::{GestureArena, GestureEvent, RawPointerEvent};
 
+/// Fire an `EventResponse`-returning handler from BOTH the external
+/// and own slots (in that order). Returns `Handled` if either did,
+/// `Ignored` otherwise. `None` slots are skipped.
+fn fire_event_handler_both(
+    external: &mut Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+    own: &mut Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+    event: &WidgetEvent,
+    ctx: &mut EventContext,
+) -> EventResponse {
+    let r1 = external
+        .as_mut()
+        .map(|h| h(event, ctx))
+        .unwrap_or(EventResponse::Ignored);
+    let r2 = own
+        .as_mut()
+        .map(|h| h(event, ctx))
+        .unwrap_or(EventResponse::Ignored);
+    if r1 == EventResponse::Handled || r2 == EventResponse::Handled {
+        EventResponse::Handled
+    } else {
+        EventResponse::Ignored
+    }
+}
+
 impl WidgetTree {
     /// Dispatch an event into the widget tree.
     ///
@@ -158,9 +182,26 @@ impl WidgetTree {
                 WidgetEvent::KeyDown {
                     key: Key::Escape, ..
                 } => {
-                    self.cleanup_drag_preview();
-                    self.active_drag = None;
-                    self.pointer_captured_by = None;
+                    self.cancel_active_drag();
+                    return;
+                }
+                WidgetEvent::Scroll { .. } => {
+                    // Route the wheel to the current drop target so users
+                    // can scroll the list/tree beneath the drag. Then
+                    // synthesise a hover at the stationary pointer so
+                    // feedback, drop-index math and the preview overlay
+                    // all reflect the new scroll offset.
+                    let target_and_pos = self.active_drag.as_ref().and_then(|d| {
+                        d.current_target.map(|t| (t, d.current_position))
+                    });
+                    if let Some((target, _pos)) = target_and_pos {
+                        self.dispatch_to_widget(target, &event);
+                    }
+                    if let Some((_, pos)) = target_and_pos {
+                        if self.active_drag.is_some() {
+                            self.handle_drag_move(pos);
+                        }
+                    }
                     return;
                 }
                 _ => {}
@@ -383,10 +424,12 @@ impl WidgetTree {
             WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. }
         );
         let mut current = Some(target);
+        let mut is_target = true;
         while let Some(id) = current {
             let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
             let response = if let Some(node) = self.arena.get_mut(id) {
-                Self::try_handler_bubble(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
+                Self::try_handler_bubble(node, event, &mut ctx, is_target)
+                    .unwrap_or(EventResponse::Ignored)
             } else {
                 EventResponse::Ignored
             };
@@ -399,6 +442,7 @@ impl WidgetTree {
                 }
                 return true;
             }
+            is_target = false;
             current = self.arena.parent(id);
         }
         false
@@ -411,7 +455,8 @@ impl WidgetTree {
 
         let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
         let response = if let Some(node) = self.arena.get_mut(target) {
-            Self::try_handler_bubble(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
+            Self::try_handler_bubble(node, event, &mut ctx, true)
+                .unwrap_or(EventResponse::Ignored)
         } else {
             EventResponse::Ignored
         };
@@ -429,84 +474,181 @@ impl WidgetTree {
     ) -> Option<EventResponse> {
         match event {
             WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => None,
-            _ => node
-                .handlers
-                .on_pointer_event
-                .as_mut()
-                .map(|handler| handler(event, ctx)),
+            _ => {
+                let has = node.external_handlers.on_pointer_event.is_some()
+                    || node.handlers.on_pointer_event.is_some();
+                if !has {
+                    return None;
+                }
+                Some(fire_event_handler_both(
+                    &mut node.external_handlers.on_pointer_event,
+                    &mut node.handlers.on_pointer_event,
+                    event,
+                    ctx,
+                ))
+            }
         }
     }
 
+    /// `fire_on_pointer_event` gates the pre-gesture `on_pointer_event`
+    /// intercept. Set it to `true` for the bubble target (the widget the
+    /// event was dispatched at) and `false` for every ancestor, because
+    /// ancestors already fired their `on_pointer_event` during the
+    /// preview pass — firing it again in bubble was the source of
+    /// double-toggle / double-select bugs when a wrapper widget (e.g.
+    /// `ListItemWrapper`) held the handler and a child leaf was the hit
+    /// target.
     fn try_handler_bubble(
         node: &mut crate::arena::WidgetNode,
         event: &WidgetEvent,
         ctx: &mut EventContext,
+        fire_on_pointer_event: bool,
     ) -> Option<EventResponse> {
         match event {
             WidgetEvent::PointerEnter => {
                 if let Some(cursor) = node.node_cursor {
                     ctx.set_cursor(cursor);
                 }
-                node.handlers
-                    .on_hover
-                    .as_mut()
-                    .map(|handler| {
-                        handler(true, ctx);
-                        EventResponse::Handled
-                    })
-                    .or_else(|| node.node_cursor.map(|_| EventResponse::Handled))
+                let mut fired = false;
+                if let Some(h) = node.external_handlers.on_hover.as_mut() {
+                    h(true, ctx);
+                    fired = true;
+                }
+                if let Some(h) = node.handlers.on_hover.as_mut() {
+                    h(true, ctx);
+                    fired = true;
+                }
+                if fired {
+                    Some(EventResponse::Handled)
+                } else {
+                    node.node_cursor.map(|_| EventResponse::Handled)
+                }
             }
             WidgetEvent::PointerLeave => {
                 if node.node_cursor.is_some() {
                     ctx.set_cursor(crate::widget::CursorIcon::Default);
                 }
-                node.handlers
-                    .on_hover
-                    .as_mut()
-                    .map(|handler| {
-                        handler(false, ctx);
-                        EventResponse::Handled
-                    })
-                    .or_else(|| node.node_cursor.map(|_| EventResponse::Handled))
+                let mut fired = false;
+                if let Some(h) = node.external_handlers.on_hover.as_mut() {
+                    h(false, ctx);
+                    fired = true;
+                }
+                if let Some(h) = node.handlers.on_hover.as_mut() {
+                    h(false, ctx);
+                    fired = true;
+                }
+                if fired {
+                    Some(EventResponse::Handled)
+                } else {
+                    node.node_cursor.map(|_| EventResponse::Handled)
+                }
             }
-            WidgetEvent::FocusGained { .. } => node.handlers.on_focus.as_mut().map(|handler| {
-                handler(true, ctx);
-                EventResponse::Handled
-            }),
-            WidgetEvent::FocusLost => node.handlers.on_focus.as_mut().map(|handler| {
-                handler(false, ctx);
-                EventResponse::Handled
-            }),
-            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => node
-                .handlers
-                .on_key
-                .as_mut()
-                .map(|handler| handler(event, ctx)),
-            WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. } => node
-                .handlers
-                .on_scroll
-                .as_mut()
-                .map(|handler| handler(event, ctx)),
+            WidgetEvent::FocusGained { .. } => {
+                let mut fired = false;
+                if let Some(h) = node.external_handlers.on_focus.as_mut() {
+                    h(true, ctx);
+                    fired = true;
+                }
+                if let Some(h) = node.handlers.on_focus.as_mut() {
+                    h(true, ctx);
+                    fired = true;
+                }
+                fired.then_some(EventResponse::Handled)
+            }
+            WidgetEvent::FocusLost => {
+                let mut fired = false;
+                if let Some(h) = node.external_handlers.on_focus.as_mut() {
+                    h(false, ctx);
+                    fired = true;
+                }
+                if let Some(h) = node.handlers.on_focus.as_mut() {
+                    h(false, ctx);
+                    fired = true;
+                }
+                fired.then_some(EventResponse::Handled)
+            }
+            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
+                if node.external_handlers.on_key.is_some() || node.handlers.on_key.is_some() {
+                    Some(fire_event_handler_both(
+                        &mut node.external_handlers.on_key,
+                        &mut node.handlers.on_key,
+                        event,
+                        ctx,
+                    ))
+                } else {
+                    None
+                }
+            }
+            WidgetEvent::Scroll { .. } | WidgetEvent::ScrollIntoView { .. } => {
+                if node.external_handlers.on_scroll.is_some() || node.handlers.on_scroll.is_some() {
+                    Some(fire_event_handler_both(
+                        &mut node.external_handlers.on_scroll,
+                        &mut node.handlers.on_scroll,
+                        event,
+                        ctx,
+                    ))
+                } else {
+                    None
+                }
+            }
             WidgetEvent::AccessAction {
                 action,
                 target_node,
                 data,
                 ..
             } => {
-                // Prefer the full-payload handler when the widget
-                // has opted in; it's the one that receives
-                // `target_node` and `data` so it can honour
-                // `SetTextSelection` / `SetValue` / `SetScrollOffset`
-                // correctly. Fall back to the bare handler
-                // otherwise — most widgets only care about the
-                // action type.
-                if let Some(handler) = node.handlers.on_access_action_request.as_mut() {
-                    Some(handler(*action, *target_node, data.clone(), ctx))
-                } else {
-                    node.handlers
+                // Prefer the full-payload handler when the widget has
+                // opted in; it's the one that receives `target_node` and
+                // `data`. Within each payload variant, fire BOTH external
+                // and own handlers — Button (own) and Dialog (external)
+                // layered together rely on both firing for a single
+                // accesskit click.
+                let request_is_set = node.handlers.on_access_action_request.is_some()
+                    || node.external_handlers.on_access_action_request.is_some();
+                if request_is_set {
+                    let r1 = node
+                        .external_handlers
+                        .on_access_action_request
+                        .as_mut()
+                        .map(|h| h(*action, *target_node, data.clone(), ctx))
+                        .unwrap_or(EventResponse::Ignored);
+                    let r2 = node
+                        .handlers
+                        .on_access_action_request
+                        .as_mut()
+                        .map(|h| h(*action, *target_node, data.clone(), ctx))
+                        .unwrap_or(EventResponse::Ignored);
+                    Some(
+                        if r1 == EventResponse::Handled || r2 == EventResponse::Handled {
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        },
+                    )
+                } else if node.handlers.on_access_action.is_some()
+                    || node.external_handlers.on_access_action.is_some()
+                {
+                    let r1 = node
+                        .external_handlers
                         .on_access_action
                         .as_mut()
-                        .map(|handler| handler(*action, ctx))
+                        .map(|h| h(*action, ctx))
+                        .unwrap_or(EventResponse::Ignored);
+                    let r2 = node
+                        .handlers
+                        .on_access_action
+                        .as_mut()
+                        .map(|h| h(*action, ctx))
+                        .unwrap_or(EventResponse::Ignored);
+                    Some(
+                        if r1 == EventResponse::Handled || r2 == EventResponse::Handled {
+                            EventResponse::Handled
+                        } else {
+                            EventResponse::Ignored
+                        },
+                    )
+                } else {
+                    None
                 }
             }
             WidgetEvent::Gesture { gesture } => {
@@ -525,10 +667,18 @@ impl WidgetTree {
                     let has_handler = match gesture {
                         GestureEvent::PinchStarted { .. }
                         | GestureEvent::PinchChanged { .. }
-                        | GestureEvent::PinchEnded => node.handlers.on_pinch.is_some(),
-                        GestureEvent::Swipe { .. } => node.handlers.on_swipe.is_some(),
-                        GestureEvent::DoubleTap { .. } => node.handlers.on_double_tap.is_some(),
-                        GestureEvent::TripleTap { .. } => node.handlers.on_triple_tap.is_some(),
+                        | GestureEvent::PinchEnded => {
+                            node.any_handler(|h| h.on_pinch.is_some())
+                        }
+                        GestureEvent::Swipe { .. } => {
+                            node.any_handler(|h| h.on_swipe.is_some())
+                        }
+                        GestureEvent::DoubleTap { .. } => {
+                            node.any_handler(|h| h.on_double_tap.is_some())
+                        }
+                        GestureEvent::TripleTap { .. } => {
+                            node.any_handler(|h| h.on_triple_tap.is_some())
+                        }
                         _ => false,
                     };
                     if has_handler {
@@ -549,10 +699,18 @@ impl WidgetTree {
                 // events that the gesture recognizers won't catch (e.g.
                 // right-click → context menu). If it returns Handled the
                 // gesture arena is skipped; otherwise we fall through.
-                if let Some(handler) = node.handlers.on_pointer_event.as_mut()
-                    && handler(event, ctx) == EventResponse::Handled
-                {
-                    return Some(EventResponse::Handled);
+                // Only fire for the target — ancestors already fired
+                // on_pointer_event during the preview pass.
+                if fire_on_pointer_event {
+                    let r = fire_event_handler_both(
+                        &mut node.external_handlers.on_pointer_event,
+                        &mut node.handlers.on_pointer_event,
+                        event,
+                        ctx,
+                    );
+                    if r == EventResponse::Handled {
+                        return Some(EventResponse::Handled);
+                    }
                 }
                 Self::ensure_gesture_arena(node);
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
@@ -579,10 +737,16 @@ impl WidgetTree {
             WidgetEvent::PointerUp {
                 position, button, ..
             } => {
-                if let Some(handler) = node.handlers.on_pointer_event.as_mut()
-                    && handler(event, ctx) == EventResponse::Handled
-                {
-                    return Some(EventResponse::Handled);
+                if fire_on_pointer_event {
+                    let r = fire_event_handler_both(
+                        &mut node.external_handlers.on_pointer_event,
+                        &mut node.handlers.on_pointer_event,
+                        event,
+                        ctx,
+                    );
+                    if r == EventResponse::Handled {
+                        return Some(EventResponse::Handled);
+                    }
                 }
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
                     let result = arena.process(&RawPointerEvent::Up {
@@ -597,10 +761,16 @@ impl WidgetTree {
                 None
             }
             WidgetEvent::PointerMove { position } => {
-                if let Some(handler) = node.handlers.on_pointer_event.as_mut()
-                    && handler(event, ctx) == EventResponse::Handled
-                {
-                    return Some(EventResponse::Handled);
+                if fire_on_pointer_event {
+                    let r = fire_event_handler_both(
+                        &mut node.external_handlers.on_pointer_event,
+                        &mut node.handlers.on_pointer_event,
+                        event,
+                        ctx,
+                    );
+                    if r == EventResponse::Handled {
+                        return Some(EventResponse::Handled);
+                    }
                 }
                 if let Some(arena) = node.handlers.gesture_arena.as_mut() {
                     let result = arena.process(&RawPointerEvent::Move {
@@ -633,16 +803,20 @@ impl WidgetTree {
     /// the widget's handler set actually needs. Without this, a widget
     /// that wires `on_drag` or `on_double_tap` (but not `on_tap`) would
     /// never get a gesture arena and the handlers would never fire.
+    ///
+    /// Checks BOTH handler buckets (own + external) so a recognizer gets
+    /// installed whether the handler was attached via
+    /// `apply_self_handlers` or via the `WidgetBuilder` chain.
     pub(crate) fn ensure_gesture_arena(node: &mut crate::arena::WidgetNode) {
         if node.handlers.gesture_arena.is_some() {
             return;
         }
-        let has_tap = node.handlers.on_tap.is_some();
-        let has_double_tap = node.handlers.on_double_tap.is_some();
-        let has_triple_tap = node.handlers.on_triple_tap.is_some();
-        let has_drag = node.handlers.on_drag.is_some();
-        let has_long_press = node.handlers.on_long_press.is_some();
-        let has_swipe = node.handlers.on_swipe.is_some();
+        let has_tap = node.any_handler(|h| h.on_tap.is_some());
+        let has_double_tap = node.any_handler(|h| h.on_double_tap.is_some());
+        let has_triple_tap = node.any_handler(|h| h.on_triple_tap.is_some());
+        let has_drag = node.any_handler(|h| h.on_drag.is_some());
+        let has_long_press = node.any_handler(|h| h.on_long_press.is_some());
+        let has_swipe = node.any_handler(|h| h.on_swipe.is_some());
 
         if !(has_tap
             || has_double_tap
@@ -695,25 +869,42 @@ impl WidgetTree {
         ctx: &mut EventContext,
     ) {
         use crate::gesture::{DragPhase, PinchPhase};
+        // For every gesture handler, fire BOTH the external and own slot
+        // in that order so a widget that wired an on_tap via the
+        // WidgetBuilder AND via apply_self_handlers sees both callbacks —
+        // and more importantly, so widgets that rely on one bucket don't
+        // miss the gesture when the other is empty.
         match gesture {
             GestureEvent::Tap { position } => {
-                if let Some(handler) = node.handlers.on_tap.as_mut() {
-                    handler(position, ctx);
+                if let Some(h) = node.external_handlers.on_tap.as_mut() {
+                    h(position, ctx);
+                }
+                if let Some(h) = node.handlers.on_tap.as_mut() {
+                    h(position, ctx);
                 }
             }
             GestureEvent::DoubleTap { position } => {
-                if let Some(handler) = node.handlers.on_double_tap.as_mut() {
-                    handler(position, ctx);
+                if let Some(h) = node.external_handlers.on_double_tap.as_mut() {
+                    h(position, ctx);
+                }
+                if let Some(h) = node.handlers.on_double_tap.as_mut() {
+                    h(position, ctx);
                 }
             }
             GestureEvent::TripleTap { position } => {
-                if let Some(handler) = node.handlers.on_triple_tap.as_mut() {
-                    handler(position, ctx);
+                if let Some(h) = node.external_handlers.on_triple_tap.as_mut() {
+                    h(position, ctx);
+                }
+                if let Some(h) = node.handlers.on_triple_tap.as_mut() {
+                    h(position, ctx);
                 }
             }
             GestureEvent::LongPress { position } => {
-                if let Some(handler) = node.handlers.on_long_press.as_mut() {
-                    handler(position, ctx);
+                if let Some(h) = node.external_handlers.on_long_press.as_mut() {
+                    h(position, ctx);
+                }
+                if let Some(h) = node.handlers.on_long_press.as_mut() {
+                    h(position, ctx);
                 }
             }
             GestureEvent::DragStarted { position, button } => {
@@ -721,18 +912,30 @@ impl WidgetTree {
                 // the widget keeps receiving `Moved` / `Ended` even when
                 // the cursor leaves its bounds. Released on `DragEnded`.
                 ctx.capture_pointer();
-                if let Some(handler) = node.handlers.on_drag.as_mut() {
-                    handler(DragPhase::Started { position, button }, ctx);
+                let phase = DragPhase::Started { position, button };
+                if let Some(h) = node.external_handlers.on_drag.as_mut() {
+                    h(phase, ctx);
+                }
+                if let Some(h) = node.handlers.on_drag.as_mut() {
+                    h(phase, ctx);
                 }
             }
             GestureEvent::DragMoved { position, delta } => {
-                if let Some(handler) = node.handlers.on_drag.as_mut() {
-                    handler(DragPhase::Moved { position, delta }, ctx);
+                let phase = DragPhase::Moved { position, delta };
+                if let Some(h) = node.external_handlers.on_drag.as_mut() {
+                    h(phase, ctx);
+                }
+                if let Some(h) = node.handlers.on_drag.as_mut() {
+                    h(phase, ctx);
                 }
             }
             GestureEvent::DragEnded { position } => {
-                if let Some(handler) = node.handlers.on_drag.as_mut() {
-                    handler(DragPhase::Ended { position }, ctx);
+                let phase = DragPhase::Ended { position };
+                if let Some(h) = node.external_handlers.on_drag.as_mut() {
+                    h(phase, ctx);
+                }
+                if let Some(h) = node.handlers.on_drag.as_mut() {
+                    h(phase, ctx);
                 }
                 ctx.release_pointer();
             }
@@ -740,13 +943,19 @@ impl WidgetTree {
                 direction,
                 velocity,
             } => {
-                if let Some(handler) = node.handlers.on_swipe.as_mut() {
-                    handler(direction, velocity, ctx);
+                if let Some(h) = node.external_handlers.on_swipe.as_mut() {
+                    h(direction, velocity, ctx);
+                }
+                if let Some(h) = node.handlers.on_swipe.as_mut() {
+                    h(direction, velocity, ctx);
                 }
             }
             GestureEvent::PinchStarted { center } => {
-                if let Some(handler) = node.handlers.on_pinch.as_mut() {
-                    handler(PinchPhase::Started { center }, ctx);
+                if let Some(h) = node.external_handlers.on_pinch.as_mut() {
+                    h(PinchPhase::Started { center }, ctx);
+                }
+                if let Some(h) = node.handlers.on_pinch.as_mut() {
+                    h(PinchPhase::Started { center }, ctx);
                 }
             }
             GestureEvent::PinchChanged {
@@ -754,20 +963,24 @@ impl WidgetTree {
                 scale,
                 rotation,
             } => {
-                if let Some(handler) = node.handlers.on_pinch.as_mut() {
-                    handler(
-                        PinchPhase::Changed {
-                            center,
-                            scale,
-                            rotation,
-                        },
-                        ctx,
-                    );
+                let phase = PinchPhase::Changed {
+                    center,
+                    scale,
+                    rotation,
+                };
+                if let Some(h) = node.external_handlers.on_pinch.as_mut() {
+                    h(phase, ctx);
+                }
+                if let Some(h) = node.handlers.on_pinch.as_mut() {
+                    h(phase, ctx);
                 }
             }
             GestureEvent::PinchEnded => {
-                if let Some(handler) = node.handlers.on_pinch.as_mut() {
-                    handler(PinchPhase::Ended, ctx);
+                if let Some(h) = node.external_handlers.on_pinch.as_mut() {
+                    h(PinchPhase::Ended, ctx);
+                }
+                if let Some(h) = node.handlers.on_pinch.as_mut() {
+                    h(PinchPhase::Ended, ctx);
                 }
             }
         }
@@ -947,7 +1160,13 @@ impl WidgetTree {
         // --- Drag and drop ---
         if let Some((source_widget, payload, preview_widget)) = ctx.drag_start_request {
             let (preview_content_id, preview_overlay_id) = if let Some(preview) = preview_widget {
-                let content_id = self.arena.insert(preview);
+                // `add_boxed` — NOT `arena.insert` — runs the widget's
+                // `build()` so composite previews (our `DragPreview`
+                // wrapper in fern-widgets, or anything a user supplies)
+                // actually instantiate their child subtree. Plain
+                // `arena.insert` stops at the root node, leaves build
+                // un-fired, and the overlay renders an empty widget.
+                let content_id = self.add_boxed(preview);
                 let overlay_id = self.overlay_manager.show(crate::overlay::OverlayRequest {
                     content_id,
                     anchor: source_widget,
@@ -959,6 +1178,10 @@ impl WidgetTree {
                     parent_overlay: None,
                     on_dismiss: None,
                 });
+                // Force the next layout pass to run `position_overlays`
+                // and `set_content_bounds` — otherwise the preview sits
+                // at its initial (0, 0) placement forever.
+                self.arena.mark_needs_layout(content_id);
                 (Some(content_id), Some(overlay_id))
             } else {
                 (None, None)
@@ -973,11 +1196,12 @@ impl WidgetTree {
                 preview_overlay_id,
             });
             self.pointer_captured_by = Some(source_widget);
+            // Grabbing-hand cursor while the drag is in flight. Reset on
+            // drop / cancel / source-destroyed below.
+            self.current_cursor = crate::widget::CursorIcon::Grabbing;
         }
         if ctx.cancel_drag {
-            self.cleanup_drag_preview();
-            self.active_drag = None;
-            self.pointer_captured_by = None;
+            self.cancel_active_drag();
         }
 
         // --- Environment changes (architecture §9.5) ---
@@ -997,7 +1221,7 @@ impl WidgetTree {
     // --- Drag and drop helpers ---
 
     /// Clean up drag preview overlay (if any).
-    fn cleanup_drag_preview(&mut self) {
+    pub(super) fn cleanup_drag_preview(&mut self) {
         if let Some(ref drag) = self.active_drag {
             if let Some(overlay_id) = drag.preview_overlay_id {
                 self.overlay_manager.dismiss(overlay_id);
@@ -1008,6 +1232,110 @@ impl WidgetTree {
         }
     }
 
+    /// Cancel the active drag session: fire `on_drag_leave` on the current
+    /// target (if any), dismiss the preview overlay, clear the session and
+    /// release pointer capture. Used by Escape, explicit cancel requests,
+    /// and the source-destroyed salvage in `revalidate_interaction_state`.
+    pub(super) fn cancel_active_drag(&mut self) {
+        let prev_target = self
+            .active_drag
+            .as_ref()
+            .and_then(|d| d.current_target);
+        self.cleanup_drag_preview();
+        self.active_drag = None;
+        self.pointer_captured_by = None;
+        self.current_cursor = crate::widget::CursorIcon::Default;
+        if let Some(prev) = prev_target {
+            self.fire_on_drag_leave(prev);
+        }
+    }
+
+    /// Fire `on_drag_tick` on the current drop target (if any). Runs once
+    /// per layout pass while a drag session is active. The handler
+    /// receives the pointer position in the target's local coordinates.
+    /// Fires from both external and own handler buckets.
+    pub(super) fn process_drag_tick(&mut self) {
+        let Some((target_id, position)) = self
+            .active_drag
+            .as_ref()
+            .and_then(|d| d.current_target.map(|t| (t, d.current_position)))
+        else {
+            return;
+        };
+        if !self.arena.is_active(target_id) {
+            return;
+        }
+        let bounds = self.arena.bounds(target_id);
+        let local = fern_canvas::Point::new(position.x - bounds.x, position.y - bounds.y);
+        let (mut ext_handler, mut own_handler) = match self.arena.get_mut(target_id) {
+            Some(node) => (
+                node.external_handlers.on_drag_tick.take(),
+                node.handlers.on_drag_tick.take(),
+            ),
+            None => return,
+        };
+        if ext_handler.is_none() && own_handler.is_none() {
+            return;
+        }
+        let mut ctx =
+            crate::widget::EventContext::new().with_app_context(self.app_context.clone());
+        if let Some(h) = ext_handler.as_mut() {
+            h(local, &mut ctx);
+        }
+        if let Some(h) = own_handler.as_mut() {
+            h(local, &mut ctx);
+        }
+        if let Some(node) = self.arena.get_mut(target_id) {
+            node.external_handlers.on_drag_tick = ext_handler;
+            node.handlers.on_drag_tick = own_handler;
+        }
+        self.collect_from_ctx(ctx, target_id);
+        // If the tick handler scrolled content, the pointer is now over a
+        // different item — refresh the hover pipeline with the same
+        // pointer position so feedback reflects the new content offset.
+        if self.active_drag.is_some() {
+            self.handle_drag_move(position);
+        }
+    }
+
+    /// Fire `on_drag_leave` on the given widget (if it has one), mark it
+    /// needs_paint, and process any commands the handler emitted. Used
+    /// whenever a drop target stops being the current target — whether
+    /// because the pointer moved elsewhere, the drop completed, or the
+    /// drag was cancelled. Fires from both external and own buckets.
+    pub(super) fn fire_on_drag_leave(&mut self, target_id: WidgetId) {
+        if !self.arena.is_active(target_id) {
+            return;
+        }
+        let (mut ext_handler, mut own_handler) = match self.arena.get_mut(target_id) {
+            Some(node) => (
+                node.external_handlers.on_drag_leave.take(),
+                node.handlers.on_drag_leave.take(),
+            ),
+            None => return,
+        };
+        if ext_handler.is_none() && own_handler.is_none() {
+            // Still mark for repaint so any visual artefacts the
+            // framework owns (feedback lines, highlights) clear.
+            self.arena.mark_needs_paint(target_id);
+            return;
+        }
+        let mut ctx =
+            crate::widget::EventContext::new().with_app_context(self.app_context.clone());
+        if let Some(h) = ext_handler.as_mut() {
+            h(&mut ctx);
+        }
+        if let Some(h) = own_handler.as_mut() {
+            h(&mut ctx);
+        }
+        if let Some(node) = self.arena.get_mut(target_id) {
+            node.external_handlers.on_drag_leave = ext_handler;
+            node.handlers.on_drag_leave = own_handler;
+        }
+        self.collect_from_ctx(ctx, target_id);
+        self.arena.mark_needs_paint(target_id);
+    }
+
     /// Update the drag session on pointer move: find the drop target under the
     /// pointer and call its `on_drag_hover` handler.
     fn handle_drag_move(&mut self, position: fern_canvas::Point) {
@@ -1016,14 +1344,22 @@ impl WidgetTree {
             drag.current_position = position;
         }
 
-        // Update preview overlay position
-        if let Some(ref drag) = self.active_drag {
-            if let Some(overlay_id) = drag.preview_overlay_id {
-                self.overlay_manager.update_placement(
-                    overlay_id,
-                    crate::overlay::OverlayPlacement::AtPointer(position),
-                );
-            }
+        // Update preview overlay placement. `update_placement` only
+        // stores the new enum — the actual overlay bounds are recomputed
+        // by `position_overlays` which runs inside `WidgetTree::layout()`
+        // behind a `needs_layout` gate. Mark the content widget dirty so
+        // the next layout pass actually re-positions the preview instead
+        // of leaving it pinned at (0, 0).
+        let preview_content = self
+            .active_drag
+            .as_ref()
+            .and_then(|d| Some((d.preview_overlay_id?, d.preview_content_id?)));
+        if let Some((overlay_id, content_id)) = preview_content {
+            self.overlay_manager.update_placement(
+                overlay_id,
+                crate::overlay::OverlayPlacement::AtPointer(position),
+            );
+            self.arena.mark_needs_layout(content_id);
         }
 
         // Hit-test to find the widget under the pointer
@@ -1032,48 +1368,68 @@ impl WidgetTree {
         // Walk up from hit target to find a widget with on_drag_hover
         let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
 
-        // Update current target on the session
-        if let Some(ref mut drag) = self.active_drag {
-            let prev_target = drag.current_target;
-            drag.current_target = drop_target;
-
-            // If target changed, reset feedback
-            if prev_target != drop_target {
+        // Detect target change BEFORE firing new handlers so we can fire
+        // on_drag_leave on the outgoing target first.
+        let prev_target = self
+            .active_drag
+            .as_ref()
+            .and_then(|d| d.current_target);
+        if prev_target != drop_target {
+            if let Some(ref mut drag) = self.active_drag {
                 drag.feedback = crate::drag_state::DropFeedback::NoFeedback;
+                drag.current_target = drop_target;
+            }
+            if let Some(prev) = prev_target {
+                self.fire_on_drag_leave(prev);
             }
         }
 
-        // Call on_drag_hover on the target if it has one
+        // Call on_drag_hover on the target if it has one. Pointer position
+        // is passed in TARGET-LOCAL coordinates — same coordinate system as
+        // the handler's own `bounds`, so insertion-line / drop-index math
+        // doesn't have to know where it sits in the window.
+        //
+        // on_drag_hover is a "decision" handler (returns DropFeedback).
+        // When both buckets are set, own takes precedence — the widget's
+        // own feedback reflects its internal view of acceptance.
         if let Some(target_id) = drop_target {
-            // We need to temporarily take the drag payload reference for the callback.
-            // Since on_drag_hover takes &DragPayload (not owned), we can borrow from the session.
-            // But we also need &mut for the handler. Use take_widget pattern.
-            if let Some(node) = self.arena.get_mut(target_id) {
-                if let Some(mut handler) = node.handlers.on_drag_hover.take() {
-                    // Temporarily read position and create a minimal event context
-                    let mut ctx = crate::widget::EventContext::new()
-                        .with_app_context(self.app_context.clone());
-
-                    // We need access to the payload — borrow from active_drag
-                    if let Some(ref drag) = self.active_drag {
-                        let feedback = handler(&drag.payload, position, &mut ctx);
-                        // Put handler back
-                        if let Some(node) = self.arena.get_mut(target_id) {
-                            node.handlers.on_drag_hover = Some(handler);
-                        }
-                        // Store feedback
-                        if let Some(ref mut drag) = self.active_drag {
-                            drag.feedback = feedback;
-                        }
-                        // Process any commands emitted
-                        self.collect_from_ctx(ctx, target_id);
-                    } else {
-                        // Put handler back even if drag ended
-                        if let Some(node) = self.arena.get_mut(target_id) {
-                            node.handlers.on_drag_hover = Some(handler);
-                        }
-                    }
+            let target_bounds = self.arena.bounds(target_id);
+            let local = fern_canvas::Point::new(
+                position.x - target_bounds.x,
+                position.y - target_bounds.y,
+            );
+            let (mut ext_handler, mut own_handler) = match self.arena.get_mut(target_id) {
+                Some(node) => (
+                    node.external_handlers.on_drag_hover.take(),
+                    node.handlers.on_drag_hover.take(),
+                ),
+                None => return,
+            };
+            if ext_handler.is_none() && own_handler.is_none() {
+                return;
+            }
+            let mut ctx = crate::widget::EventContext::new()
+                .with_app_context(self.app_context.clone());
+            if let Some(ref drag) = self.active_drag {
+                let mut feedback = crate::drag_state::DropFeedback::NoFeedback;
+                if let Some(h) = ext_handler.as_mut() {
+                    feedback = h(&drag.payload, local, &mut ctx);
                 }
+                if let Some(h) = own_handler.as_mut() {
+                    feedback = h(&drag.payload, local, &mut ctx);
+                }
+                if let Some(node) = self.arena.get_mut(target_id) {
+                    node.external_handlers.on_drag_hover = ext_handler;
+                    node.handlers.on_drag_hover = own_handler;
+                }
+                if let Some(ref mut drag) = self.active_drag {
+                    drag.feedback = feedback;
+                }
+                self.collect_from_ctx(ctx, target_id);
+                self.arena.mark_needs_paint(target_id);
+            } else if let Some(node) = self.arena.get_mut(target_id) {
+                node.external_handlers.on_drag_hover = ext_handler;
+                node.handlers.on_drag_hover = own_handler;
             }
         }
     }
@@ -1089,36 +1445,72 @@ impl WidgetTree {
             None => return,
         };
         self.pointer_captured_by = None;
+        self.current_cursor = crate::widget::CursorIcon::Default;
+
+        // Fire on_drag_leave on the session's current target before on_drop
+        // runs — widgets own their feedback state and must be given a
+        // chance to clear it regardless of whether the drop is accepted.
+        if let Some(prev) = drag.current_target {
+            self.fire_on_drag_leave(prev);
+        }
 
         // Hit-test to find drop target
         let target = self.hit_test(position);
         let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
 
+        // on_drop is a "decision" handler (returns bool). Prefer own over
+        // external: the widget's own drop semantics trump any external
+        // listener. If the own bucket doesn't have it, fall back to
+        // external. Fires exactly once, not both.
         if let Some(target_id) = drop_target {
-            if let Some(node) = self.arena.get_mut(target_id) {
-                if let Some(mut handler) = node.handlers.on_drop.take() {
-                    let mut ctx = crate::widget::EventContext::new()
-                        .with_app_context(self.app_context.clone());
-                    let _accepted = handler(drag.payload, position, &mut ctx);
-                    // Put handler back
-                    if let Some(node) = self.arena.get_mut(target_id) {
-                        node.handlers.on_drop = Some(handler);
-                    }
-                    self.collect_from_ctx(ctx, target_id);
-                    return;
+            let target_bounds = self.arena.bounds(target_id);
+            let local = fern_canvas::Point::new(
+                position.x - target_bounds.x,
+                position.y - target_bounds.y,
+            );
+            let (taken_own, taken_ext) = match self.arena.get_mut(target_id) {
+                Some(node) => {
+                    let own = node.handlers.on_drop.take();
+                    let ext = if own.is_none() {
+                        node.external_handlers.on_drop.take()
+                    } else {
+                        None
+                    };
+                    (own, ext)
                 }
+                None => (None, None),
+            };
+            let picked = if let Some(h) = taken_own {
+                Some((h, /*is_own=*/ true))
+            } else {
+                taken_ext.map(|h| (h, /*is_own=*/ false))
+            };
+            if let Some((mut handler, is_own)) = picked {
+                let mut ctx = crate::widget::EventContext::new()
+                    .with_app_context(self.app_context.clone());
+                let _accepted = handler(drag.payload, local, &mut ctx);
+                if let Some(node) = self.arena.get_mut(target_id) {
+                    if is_own {
+                        node.handlers.on_drop = Some(handler);
+                    } else {
+                        node.external_handlers.on_drop = Some(handler);
+                    }
+                }
+                self.collect_from_ctx(ctx, target_id);
+                self.arena.mark_needs_paint(target_id);
+                return;
             }
         }
         // Drop was not accepted — payload is dropped (Rust Drop)
     }
 
     /// Walk up from a widget to find the nearest ancestor (or self) with a
-    /// drop handler (`on_drop` or `on_drag_hover`).
+    /// drop handler (`on_drop` or `on_drag_hover`) in either bucket.
     fn find_drop_target_at_or_above(&self, start: WidgetId) -> Option<WidgetId> {
         let mut current = Some(start);
         while let Some(id) = current {
             if let Some(node) = self.arena.get(id) {
-                if node.handlers.on_drop.is_some() || node.handlers.on_drag_hover.is_some() {
+                if node.any_handler(|h| h.on_drop.is_some() || h.on_drag_hover.is_some()) {
                     return Some(id);
                 }
             }
@@ -1865,6 +2257,723 @@ mod tests {
             received_value.get(),
             777,
             "Target should receive the typed payload from source"
+        );
+    }
+
+    #[test]
+    fn drop_on_child_walks_up_to_ancestor_drop_target() {
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // Parent container with `on_drop`; child has no drop handler. The
+        // framework should walk up from the hit target to find the parent.
+        let parent_fired = Rc::new(Cell::new(false));
+        let pf = parent_fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let child = tree.add(FillWidget::new());
+        let _parent = tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_drop(move |_payload, _pos, _ctx| {
+                    pf.set(true);
+                    true
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // Start a drag.
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(1_u8));
+        tree.collect_from_ctx(ctx, source);
+
+        // Drop at the child's center. Hit test lands on the child; drop
+        // should bubble up to the parent StackWidget.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(
+            parent_fired.get(),
+            "Parent's on_drop should fire via ancestor walk"
+        );
+    }
+
+    #[test]
+    fn drag_preview_overlay_created_and_dismissed() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let overlay_count_before = tree.overlay_manager().len();
+
+        // Start drag with a preview widget.
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(0_u32),
+            Box::new(FillWidget::new()),
+        );
+        tree.collect_from_ctx(ctx, source);
+
+        assert!(tree.active_drag.is_some(), "drag session should be active");
+        assert!(
+            tree.active_drag
+                .as_ref()
+                .unwrap()
+                .preview_overlay_id
+                .is_some(),
+            "preview overlay id should be recorded"
+        );
+        assert_eq!(
+            tree.overlay_manager().len(),
+            overlay_count_before + 1,
+            "overlay count should increase by one for the preview"
+        );
+
+        // Drop outside any target — cleanup should remove the overlay.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(999.0, 999.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(tree.active_drag.is_none(), "drag session should be cleared");
+        assert_eq!(
+            tree.overlay_manager().len(),
+            overlay_count_before,
+            "preview overlay should be dismissed on drop"
+        );
+    }
+
+    #[test]
+    fn drag_preview_follows_pointer_position() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed("p"),
+            Box::new(FillWidget::new()),
+        );
+        tree.collect_from_ctx(ctx, source);
+
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(73.0, 41.0),
+        });
+
+        let drag = tree.active_drag.as_ref().expect("active drag");
+        assert!(
+            (drag.current_position.x - 73.0).abs() < 0.01
+                && (drag.current_position.y - 41.0).abs() < 0.01,
+            "drag session position should track the pointer"
+        );
+
+        let overlay_id = drag.preview_overlay_id.expect("preview overlay");
+        let overlay = tree
+            .overlay_manager()
+            .overlay(overlay_id)
+            .expect("overlay looked up by id");
+        match &overlay.placement {
+            crate::overlay::OverlayPlacement::AtPointer(p) => {
+                assert!(
+                    (p.x - 73.0).abs() < 0.01 && (p.y - 41.0).abs() < 0.01,
+                    "preview overlay placement should follow pointer"
+                );
+            }
+            other => panic!("expected AtPointer placement, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn escape_during_hover_dismisses_preview() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_payload, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 100.0,
+                    }
+                })
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let overlay_count_before = tree.overlay_manager().len();
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(0_u32),
+            Box::new(FillWidget::new()),
+        );
+        tree.collect_from_ctx(ctx, source);
+
+        // Move over the target to establish feedback.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(150.0, 50.0),
+        });
+
+        assert!(tree.active_drag.is_some());
+        assert_eq!(tree.overlay_manager().len(), overlay_count_before + 1);
+
+        // Escape cancels: session cleared AND preview overlay dismissed.
+        tree.press_key(Key::Escape, Modifiers::NONE);
+
+        assert!(tree.active_drag.is_none(), "drag must be cancelled");
+        assert_eq!(
+            tree.overlay_manager().len(),
+            overlay_count_before,
+            "preview overlay must be dismissed after Escape"
+        );
+    }
+
+    #[test]
+    fn active_drag_blocks_on_tap_on_other_widgets() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // While a drag is in progress, PointerMove and PointerUp must go
+        // through the drag pipeline (handle_drag_move / handle_drag_drop) —
+        // NOT be dispatched to the hovered widget. A widget with `on_tap` in
+        // the drop location should not receive it.
+        let tap_fired = Rc::new(Cell::new(false));
+        let tf = tap_fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _other = tree.add(FillWidget::new().on_tap(move |_pos, _ctx| {
+            tf.set(true);
+        }));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Move over and release on the `on_tap` widget. Normally this would
+        // synthesize a Tap gesture — but an active drag short-circuits.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(150.0, 50.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(150.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert!(
+            !tap_fired.get(),
+            "on_tap must not fire during an active drag"
+        );
+    }
+
+    // --- on_drag_leave lifecycle ---------------------------------------
+
+    #[test]
+    fn on_drag_leave_fires_when_pointer_leaves_target_bounds() {
+        // Single drop target wrapped in an InsetWidget so its bounds do
+        // NOT fill the viewport — the pointer can be "inside the scene
+        // but outside the target" so a target-change (target → None) is
+        // reachable without destroying widgets. That is the main
+        // semantic we want `on_drag_leave` to cover.
+        use crate::test_widgets::InsetWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let leave = Rc::new(Cell::new(0_u32));
+        let l = leave.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 10.0,
+                    }
+                })
+                .on_drag_leave(move |_ctx| l.set(l.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        let _wrapper = tree.add(InsetWidget::new(40.0).set_child(target));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Pointer inside the inset (where the target lives).
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        assert_eq!(leave.get(), 0, "no leave yet — target just became active");
+
+        // Pointer in the inset area, outside the target's bounds — the
+        // only hit is the InsetWidget which has no drag handlers, so
+        // drop_target becomes None. Target changed → leave fires on the
+        // old target.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(10.0, 10.0),
+        });
+        assert_eq!(
+            leave.get(),
+            1,
+            "on_drag_leave fires when pointer exits the target's bounds"
+        );
+
+        // Moving back in shouldn't fire again.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        assert_eq!(leave.get(), 1, "leave fires at most once per leave transition");
+
+        // Leaving again fires a second time.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(10.0, 10.0),
+        });
+        assert_eq!(leave.get(), 2);
+    }
+
+    #[test]
+    fn on_drag_leave_fires_on_drop() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let leave = Rc::new(Cell::new(0_u32));
+        let l = leave.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 10.0,
+                    }
+                })
+                .on_drag_leave(move |_ctx| l.set(l.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        assert_eq!(leave.get(), 1, "on_drag_leave fires exactly once on drop");
+    }
+
+    #[test]
+    fn on_drag_leave_fires_on_escape_cancel() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let leave = Rc::new(Cell::new(0_u32));
+        let l = leave.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 10.0,
+                    }
+                })
+                .on_drag_leave(move |_ctx| l.set(l.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        tree.press_key(Key::Escape, Modifiers::NONE);
+
+        assert_eq!(
+            leave.get(),
+            1,
+            "Escape cancel must fire on_drag_leave on the current target"
+        );
+    }
+
+    #[test]
+    fn on_drag_leave_fires_when_source_destroyed_mid_drag() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let leave = Rc::new(Cell::new(0_u32));
+        let l = leave.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 10.0,
+                    }
+                })
+                .on_drag_leave(move |_ctx| l.set(l.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+
+        tree.arena.destroy(source);
+        // revalidate_interaction_state runs on the next process_pending_rebuilds
+        // — drive it by a no-op layout call.
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        assert!(
+            tree.active_drag.is_none(),
+            "active drag should have been cancelled"
+        );
+        assert_eq!(
+            leave.get(),
+            1,
+            "on_drag_leave fires on the drop target when the source is torn down"
+        );
+    }
+
+    #[test]
+    fn on_drag_tick_fires_per_layout_pass() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let ticks = Rc::new(Cell::new(0_u32));
+        let t = ticks.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 10.0,
+                    }
+                })
+                .on_drag_tick(move |_pos, _ctx| t.set(t.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+        // Move over the target so it becomes the current drop target.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+        assert_eq!(ticks.get(), 0, "tick shouldn't have fired yet");
+
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(ticks.get(), 1);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(ticks.get(), 3);
+
+        // End the drag; ticks stop.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 50.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        let after_drop = ticks.get();
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            ticks.get(),
+            after_drop,
+            "on_drag_tick must not fire after drag ends"
+        );
+    }
+
+    #[test]
+    fn on_drag_hover_and_on_drop_receive_widget_local_coordinates() {
+        // Regression for "drop indicator is always 2 items below the
+        // cursor": `on_drag_hover` and `on_drop` must receive the
+        // pointer in the target's local coordinates, not tree coords.
+        // Otherwise a widget placed below a header computes insertion
+        // indices against an absolute Y and the line renders offset by
+        // the header's height divided by row height.
+        use crate::test_widgets::InsetWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let hover_local = Rc::new(Cell::new(Point::new(-1.0, -1.0)));
+        let drop_local = Rc::new(Cell::new(Point::new(-1.0, -1.0)));
+        let h = hover_local.clone();
+        let d = drop_local.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        // Inset 40 pushes the drop target to (40, 40) in tree coords.
+        let target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(move |_p, pos, _ctx| {
+                    h.set(pos);
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 10.0,
+                    }
+                })
+                .on_drop(move |_payload, pos, _ctx| {
+                    d.set(pos);
+                    true
+                }),
+        );
+        let _wrapper = tree.add(InsetWidget::new(40.0).set_child(target));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+
+        // Move pointer to (100, 60) in tree coords — inside the inset
+        // target whose origin is (40, 40). Local position should be
+        // (60, 20).
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 60.0),
+        });
+        let hov = hover_local.get();
+        assert!(
+            (hov.x - 60.0).abs() < 0.01 && (hov.y - 20.0).abs() < 0.01,
+            "on_drag_hover should receive local coords, got {:?}", hov,
+        );
+
+        // Drop at (110, 55) tree coords → local (70, 15).
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(110.0, 55.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        let drp = drop_local.get();
+        assert!(
+            (drp.x - 70.0).abs() < 0.01 && (drp.y - 15.0).abs() < 0.01,
+            "on_drop should receive local coords, got {:?}", drp,
+        );
+    }
+
+    #[test]
+    fn active_drag_sets_grabbing_cursor() {
+        // Starting a drag with a preview must switch the tree's cursor
+        // to `Grabbing`; dropping or cancelling must reset to `Default`.
+        // fern-app applies the tree's cursor to the winit window after
+        // each pointer event, so this is what the user actually sees.
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert_eq!(tree.current_cursor(), CursorIcon::Default);
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(0_u32),
+            Box::new(FillWidget::new()),
+        );
+        tree.collect_from_ctx(ctx, source);
+        assert_eq!(tree.current_cursor(), CursorIcon::Grabbing);
+
+        // Drop somewhere.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(50.0, 25.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(tree.current_cursor(), CursorIcon::Default);
+    }
+
+    #[test]
+    fn escape_cancel_resets_cursor() {
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(0_u32),
+            Box::new(FillWidget::new()),
+        );
+        tree.collect_from_ctx(ctx, source);
+        assert_eq!(tree.current_cursor(), CursorIcon::Grabbing);
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert_eq!(tree.current_cursor(), CursorIcon::Default);
+    }
+
+    #[test]
+    fn drag_preview_composite_gets_built() {
+        // Regression — composite preview widgets must have their `build()`
+        // called after `start_drag_with_preview`. A plain `arena.insert`
+        // inserts the node but never runs build, leaving the preview tree
+        // empty (no children, zero area of useful content) and the overlay
+        // invisible. The fix routes through `add_boxed` so build fires.
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let built = Rc::new(Cell::new(false));
+        let b = built.clone();
+
+        #[derive(Debug)]
+        struct CheckingWidget {
+            built: Rc<Cell<bool>>,
+        }
+        impl Widget for CheckingWidget {
+            fn build(
+                &mut self,
+                _ctx: &mut crate::build_context::BuildContext,
+            ) -> Vec<WidgetId> {
+                self.built.set(true);
+                Vec::new()
+            }
+            fn size_that_fits(
+                &self,
+                _: SizeProposal,
+                _: &crate::widget::LayoutContext,
+            ) -> fern_canvas::Size {
+                fern_canvas::Size::new(50.0, 20.0)
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(0_u32),
+            Box::new(CheckingWidget { built: b }),
+        );
+        tree.collect_from_ctx(ctx, source);
+
+        assert!(built.get(), "preview's build() must fire on drag start");
+    }
+
+    #[test]
+    fn preview_placement_drives_layout_needs() {
+        // Regression for "preview stays at (0, 0)": each pointer move
+        // during drag updates the overlay placement via
+        // `update_placement`, but the overlay's bounds are only
+        // recomputed by `position_overlays` inside `layout()` — which
+        // early-returns when nothing is `needs_layout`. Verify the
+        // drag path marks the preview content dirty so layout actually
+        // runs.
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(0_u32),
+            Box::new(FillWidget::new()),
+        );
+        tree.collect_from_ctx(ctx, source);
+
+        // Right after drag start, the preview content should need layout
+        // so the first layout pass positions it.
+        assert!(
+            tree.needs_layout(),
+            "drag start must mark preview content for layout"
+        );
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        assert!(!tree.needs_layout(), "layout should have cleared dirty flag");
+
+        // A subsequent PointerMove must remark the preview so its
+        // overlay bounds get repositioned on the next layout pass.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(75.0, 120.0),
+        });
+        assert!(
+            tree.needs_layout(),
+            "PointerMove during drag must mark preview for layout"
+        );
+    }
+
+    #[test]
+    fn scroll_during_drag_routes_to_drop_target() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let scroll_count = Rc::new(Cell::new(0_u32));
+        let sc = scroll_count.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        let _target = tree.add(
+            FillWidget::new()
+                .on_drag_hover(|_p, _pos, _ctx| {
+                    crate::drag_state::DropFeedback::InsertionLine {
+                        y: 0.0,
+                        width: 10.0,
+                    }
+                })
+                .on_scroll(move |event, _ctx| match event {
+                    WidgetEvent::Scroll { .. } => {
+                        sc.set(sc.get() + 1);
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                })
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
+        tree.collect_from_ctx(ctx, source);
+        // Make target the current drop target.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 50.0),
+        });
+
+        // A wheel event during drag should reach the drop target (not the
+        // stale hover from before the drag started).
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: crate::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+        });
+        assert_eq!(
+            scroll_count.get(),
+            1,
+            "Scroll during drag must route to the current drop target"
         );
     }
 

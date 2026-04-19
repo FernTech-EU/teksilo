@@ -1890,6 +1890,19 @@ A `DragPayload` carries multiple MIME-typed representations of the same content.
 
 `DragSource` produces the payload and visual preview when a drag begins. `DropTarget` evaluates acceptance and handles the drop. Visual feedback (insertion lines, highlight rectangles) is rendered by the drop target during its paint pass, using `DropFeedback` descriptors.
 
+The source attaches `on_drag` and, on `DragPhase::Started`, calls either `EventContext::start_drag(..)` (no visible preview) or `EventContext::start_drag_with_preview(..)` (preview `Box<dyn Widget>` that floats at the pointer via `OverlayPlacement::AtPointer`). `ListView` and `TreeView` use the `_with_preview` variant by default — they re-invoke their delegate closure for the dragged row and wrap the result in a sized raised panel so the preview reads as "picked up" against the window.
+
+The drop target sees four lifecycle callbacks, in this order, each firing at most once per role per drag:
+
+1. `on_drag_hover(payload, pos, ctx) -> DropFeedback` — per `PointerMove` while this widget is the current drop target. The widget stashes feedback state (an insertion-line y, a highlight rect) and returns the matching descriptor.
+2. `on_drag_tick(local_pos, ctx)` — per layout frame while this widget is the current drop target. Used for time-driven behaviours (viewport-edge auto-scroll, spring-loaded folder expansion) that must keep progressing when the pointer is stationary.
+3. `on_drag_leave(ctx)` — when the widget stops being the drop target for any reason (pointer moved to another target, drop completed, Escape cancel, source destroyed). **Widgets own their feedback state and MUST clear it here** — the framework doesn't touch widget-held Signals or Cells.
+4. `on_drop(payload, pos, ctx) -> bool` — only on `PointerUp` if this widget is the drop target at the release position. Already preceded by `on_drag_leave`, so feedback is cleared by the time the drop handler runs.
+
+Widgets that expose their drop-feedback state via a `Signal<T>` bound at `BindingLevel::RepaintOnly` (the recommended pattern) get automatic invalidation on `set(...)` — both the hover-set and leave-clear repaint the widget on the next frame without a rebuild.
+
+**Scroll during drag.** When the wheel fires while `active_drag` is active, the framework routes the `Scroll` event to the drag's current target (instead of the stale `hovered` widget) and then re-fires the hover pipeline at the stationary pointer. The drop target's `on_scroll` handler moves content; the synthesised re-hover recomputes the insertion index against the new scroll offset.
+
 ### 14.4 Accessibility Contract
 
 Every drag-and-drop operation must have a keyboard-accessible equivalent that emits the same command. A `ReorderableList` supports both drag gesture and Alt+Arrow keyboard shortcuts, both calling the same `move_item` method and emitting the same `AppCmd::ReorderItem` command. The semantic operation is decoupled from the input gesture.

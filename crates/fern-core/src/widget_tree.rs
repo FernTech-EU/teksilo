@@ -894,6 +894,25 @@ impl WidgetTree {
         {
             self.hovered = None;
         }
+        // Pointer capture anchored at a destroyed widget would otherwise
+        // swallow every subsequent Move/Up — dispatch_to_widget rejects
+        // inactive targets. Drop the capture so events resume normal
+        // hit-test dispatch. Same for any in-flight drag session whose
+        // source was torn down: the user sees the drag "stick".
+        if let Some(id) = self.pointer_captured_by
+            && !self.arena.is_active(id)
+        {
+            self.pointer_captured_by = None;
+        }
+        let source_gone = self
+            .active_drag
+            .as_ref()
+            .is_some_and(|s| !self.arena.is_active(s.source_widget));
+        if source_gone {
+            // `cancel_active_drag` fires on_drag_leave on the current
+            // target before cleanup — the same contract as Escape.
+            self.cancel_active_drag();
+        }
     }
 
     /// Rebuild a single composite widget: destroy old children, re-run `build()`,
@@ -901,6 +920,14 @@ impl WidgetTree {
     /// binding at `BindingLevel::Rebuild` fires (data-driven rebuild). Theme
     /// and locale changes do **not** rebuild — they update reactive signals
     /// that widgets bind to via `theme_signal()` / `locale_signal()`.
+    /// Test-only: force-mark a widget for rebuild on the next layout
+    /// pass. Lets regression tests exercise the rebuild path without
+    /// needing to trip a Signal binding.
+    #[cfg(test)]
+    pub(crate) fn arena_mark_needs_rebuild_for_testing(&mut self, id: WidgetId) {
+        self.arena.mark_needs_rebuild(id);
+    }
+
     pub(crate) fn rebuild_single_widget(&mut self, widget_id: WidgetId) {
         // Per §9.4.5, drop the source handle first (stops further source-side
         // dispatch) and then remove the UI-side callback. Either order gives
@@ -929,6 +956,22 @@ impl WidgetTree {
             node.dirty.needs_rebuild = false;
             node.cached_paint = None;
             node.dirty.needs_paint = true;
+            // Reset only the OWN handler bucket so `apply_self_handlers`
+            // during this build's fresh build() starts from empty and
+            // doesn't stack N-fold handler chains across rebuilds.
+            // `external_handlers` — set by the `WidgetBuilder` chain at
+            // creation time or by a composing parent's
+            // `apply_handlers(child_id, ...)` — persists: those handlers
+            // come from outside the widget and aren't re-emitted by its
+            // own `build()`.
+            //
+            // `node_focusable` / `node_tab_index` / `node_cursor` /
+            // `clips_children` / `context_menu_factory` are simple
+            // values, not accumulating closures. Leave them alone —
+            // apply_self_handlers rewrites them if the new build
+            // specifies non-None values; otherwise values from the
+            // creation site survive the rebuild.
+            node.handlers = crate::event_handlers::EventHandlers::new();
             std::mem::take(&mut node.subscription_handles)
         } else {
             Vec::new()
@@ -1088,15 +1131,36 @@ impl WidgetTree {
         self.arena.set_clips_children(id, clips);
     }
 
-    /// Apply a `HandlerSet` to an existing node in the arena.
-    /// Used by `BuildContext::apply_self_handlers()` to attach handlers
-    /// from within `build()`.
-    pub(crate) fn apply_handler_set(
+    /// Apply a `HandlerSet` to an existing node in the arena, routed
+    /// into the rebuild-cleared `handlers` slot (the widget's own
+    /// self-applied handlers).
+    pub(crate) fn apply_self_handler_set(
         &mut self,
         id: WidgetId,
         handler_set: crate::widget_builder::HandlerSet,
     ) {
-        self.arena.apply_handler_set(id, handler_set);
+        self.arena.apply_handler_set(
+            id,
+            handler_set,
+            crate::arena::HandlerScope::Own,
+        );
+    }
+
+    /// Apply a `HandlerSet` to an existing node as *external* handlers —
+    /// the kind attached by a composing parent via
+    /// `BuildContext::apply_handlers(child_id, ...)` or by the
+    /// `WidgetBuilder` chain at insertion time. These persist across
+    /// the target widget's own rebuilds.
+    pub(crate) fn apply_external_handler_set(
+        &mut self,
+        id: WidgetId,
+        handler_set: crate::widget_builder::HandlerSet,
+    ) {
+        self.arena.apply_handler_set(
+            id,
+            handler_set,
+            crate::arena::HandlerScope::External,
+        );
     }
 
     /// Set a per-child alignment override on a widget.
@@ -1326,7 +1390,11 @@ impl WidgetTree {
                 if let Some(handler_set) = widget_box.take_handler_set() {
                     self.arena.restore_widget(id, widget_box);
                     if let Some(node) = self.arena.get_mut(id) {
-                        node.handlers = handler_set.handlers;
+                        // Handlers attached at the widget's creation site
+                        // are external from its own perspective — keep
+                        // them out of the rebuild-cleared `handlers`
+                        // slot so they survive data-driven rebuilds.
+                        node.external_handlers = handler_set.handlers;
                         node.node_focusable = handler_set.focusable;
                         node.node_tab_index = handler_set.tab_index;
                         node.node_cursor = handler_set.cursor;
@@ -1412,7 +1480,10 @@ impl WidgetTree {
                 if let Some(handler_set) = widget_box.take_handler_set() {
                     self.arena.restore_widget(id, widget_box);
                     if let Some(node) = self.arena.get_mut(id) {
-                        node.handlers = handler_set.handlers;
+                        // Creation-site handlers are external (persist
+                        // across the widget's own rebuilds) — see the
+                        // matching block in `insert_widget`.
+                        node.external_handlers = handler_set.handlers;
                         node.node_focusable = handler_set.focusable;
                         node.node_tab_index = handler_set.tab_index;
                         node.node_cursor = handler_set.cursor;
