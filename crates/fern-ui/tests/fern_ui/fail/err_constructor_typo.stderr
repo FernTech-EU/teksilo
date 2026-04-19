@@ -1,4 +1,4 @@
-error[E0433]: failed to resolve: use of undeclared type `Buton`
+error[E0433]: cannot find type `Buton` in this scope
  --> tests/fern_ui/fail/err_constructor_typo.rs:9:19
   |
 9 |     let _ = fern!(Buton("oops"));
