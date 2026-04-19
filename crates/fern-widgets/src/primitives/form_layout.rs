@@ -53,6 +53,7 @@ pub struct FormLayout {
     pending_rows: Vec<PendingFormRow>,
     label_gap: f32,
     row_spacing: f32,
+    a11y_label: Option<String>,
 }
 
 impl FormLayout {
@@ -63,6 +64,7 @@ impl FormLayout {
             pending_rows: Vec::new(),
             label_gap: 0.0,
             row_spacing: 0.0,
+            a11y_label: None,
         }
     }
 
@@ -76,6 +78,24 @@ impl FormLayout {
     pub fn row_spacing(mut self, spacing: f32) -> Self {
         self.row_spacing = spacing;
         self
+    }
+
+    /// Set an accessible name for this form. When set, the widget emits
+    /// the `Role::Form` landmark so assistive-technology users can
+    /// navigate directly to it and distinguish it from other forms on
+    /// the page. When unset, the widget demotes to a presentational
+    /// `GenericContainer` — an unnamed landmark is worse than no
+    /// landmark for AT users.
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.a11y_label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Add a label/field pair row.
@@ -371,7 +391,15 @@ impl Widget for FormLayout {
     fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {}
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::Form);
+        match self.a11y_label.as_deref() {
+            Some(name) => {
+                builder.set_role(fern_core::accesskit::Role::Form);
+                builder.set_name(name);
+            }
+            None => {
+                builder.set_role(fern_core::accesskit::Role::GenericContainer);
+            }
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

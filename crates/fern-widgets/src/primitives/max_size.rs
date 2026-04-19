@@ -1,4 +1,5 @@
 use fern_canvas::{Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
@@ -135,6 +136,10 @@ impl Widget for MaxSize {
 
     fn clips_children(&self) -> bool {
         self.max_width.is_some() || self.max_height.is_some()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_hidden();
     }
 
     fn children(&self) -> Vec<WidgetId> {

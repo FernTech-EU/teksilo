@@ -779,10 +779,12 @@ impl Widget for RichTextEditor {
 
         *st.synthetic_to_element.borrow_mut() = syn_map;
 
+        builder.add_action(Action::Focus);
         builder.add_action(Action::ScrollIntoView);
         builder.add_action(Action::SetTextSelection);
         if matches!(st.policy.access_role, AccessibilityRole::Editor) {
             builder.add_action(Action::SetValue);
+            builder.add_action(Action::ReplaceSelectedText);
         }
     }
 

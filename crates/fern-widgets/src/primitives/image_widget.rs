@@ -41,6 +41,10 @@ pub struct ImageWidget {
     display_height: Option<f32>,
     /// Accessibility description.
     alt: Option<String>,
+    /// When true, hide from the accessibility tree entirely —
+    /// appropriate for purely decorative images whose semantic
+    /// content is already conveyed by adjacent text.
+    a11y_hidden: bool,
 }
 
 impl ImageWidget {
@@ -56,6 +60,7 @@ impl ImageWidget {
             display_width: None,
             display_height: None,
             alt: None,
+            a11y_hidden: false,
         }
     }
 
@@ -70,6 +75,7 @@ impl ImageWidget {
             display_width: None,
             display_height: None,
             alt: None,
+            a11y_hidden: false,
         }
     }
 
@@ -101,6 +107,15 @@ impl ImageWidget {
     /// Set the accessibility alt text.
     pub fn alt(mut self, text: impl Into<String>) -> Self {
         self.alt = Some(text.into());
+        self
+    }
+
+    /// Mark this image as decorative — hidden from the accessibility
+    /// tree. Use when the image's semantic content is already conveyed
+    /// by adjacent text (e.g. a hero image next to its caption). ARIA
+    /// equivalent of `alt=""` / `role="presentation"`.
+    pub fn a11y_hidden(mut self) -> Self {
+        self.a11y_hidden = true;
         self
     }
 
@@ -206,6 +221,14 @@ impl Widget for ImageWidget {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.a11y_hidden {
+            builder.set_hidden();
+            return;
+        }
+        debug_assert!(
+            self.alt.is_some(),
+            "ImageWidget has no alt text — call .alt(\"…\") for meaningful images or .a11y_hidden() for decorative ones"
+        );
         builder.set_role(fern_core::accesskit::Role::Image);
         if let Some(ref alt) = self.alt {
             builder.set_name(alt);

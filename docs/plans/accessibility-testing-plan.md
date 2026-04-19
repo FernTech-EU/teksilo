@@ -183,23 +183,32 @@ Fix details:
 - `ShortcutSettings` — added a top-level `accessibility()` impl emitting `Role::Group` with the localised name "Shortcut settings"/"Paramètres des raccourcis". During capture, the row's keystroke cell is promoted to a new private `LiveStatusText` widget that emits `Role::Status` + `set_live(Live::Polite)`, so screen readers announce the "Press any key…" hint the instant Rebind is clicked. Static keystroke cells stay plain labels. Moved the hint text to an FTL key so it translates alongside the widget name.
 - New FTL keys in fern-widgets: `a11y-shortcut-settings-name`, `a11y-shortcut-settings-capture-hint` (en-US + fr-FR).
 
-### Batch 5 — Pending
+### Batch 5 ✅ — Audited and fixed
 
-| Widget | Role | Issues | Status |
+The original Batch 5 list included three stale entries (**GroupBox** and **SplitButton** were already fixed in Batch 4; **MenuContext** is an internal `pub(crate)` coordinator struct, not a `Widget`). Those are dropped from the table below.
+
+| Widget | Role | Issues found | Status |
 |---|---|---|---|
-| RichTextEditor | — | — | Pending (feature-gated) |
-| MenuContext | — | — | Pending |
-| ImageWidget | — | — | Pending |
-| MasonryLayout | — | — | Pending |
-| FormLayout | — | — | Pending |
-| Switcher | — | — | Pending |
-| AspectRatio | — | — | Pending |
-| MaxSize | — | — | Pending |
-| GroupBox | — | — | Pending |
-| SplitButton | — | — | Pending |
+| RichTextEditor | `MultilineTextInput` / `Document` | Already emits the right role, walks its flow snapshot into Paragraph/TextRun children, handles read-only vs editor naming. Missing `Action::Focus` (AT-initiated focus), and editor mode didn't register `Action::ReplaceSelectedText` (voice-control / password-manager "replace 'foo' with 'bar'" had no target) | ✅ Fixed |
+| MasonryLayout | `GenericContainer` | Already conventional — layout-only wrapper for independent items; no inherent list/grid semantics | ✅ No changes |
+| ImageWidget | `Image` (+ `set_name` from alt) | Silent-footgun when `.alt()` was never called — unnamed image announced as bare "image"; no way to opt out for purely decorative images | ✅ Fixed |
+| FormLayout | `Form` landmark / `GenericContainer` | Emitted an unnamed `Role::Form` landmark — AT announced a bare "form" landmark indistinguishable from any other, and landmark navigation lost its value | ✅ Fixed |
+| Switcher | (hidden) | Emitted a `GenericContainer` wrapper around an internal `ZStack` wrapper — dead node chain between parent and the one visible child | ✅ Fixed |
+| AspectRatio | (hidden) | Empty `accessibility()` impl → `Role::Unknown` dead node between parent and the constrained child | ✅ Fixed |
+| MaxSize | (hidden) | No `accessibility()` impl at all → default `Role::Unknown` dead node | ✅ Fixed |
+
+Fix details:
+- **RichTextEditor** — `accessibility()` now emits `Action::Focus` unconditionally, and (in editor mode) `Action::ReplaceSelectedText` alongside the existing `SetValue`/`SetTextSelection`. No changes to the sophisticated flow-snapshot → Paragraph/TextRun walk or the `read_only` / role flip that were already correct.
+- **ImageWidget** — added `a11y_hidden: bool` field + `.a11y_hidden()` builder mirroring [TextWidget::a11y_hidden at primitives/text_widget.rs:232](../../crates/fern-widgets/src/primitives/text_widget.rs#L232). `accessibility()` now `debug_assert!`s that either `.alt(...)` or `.a11y_hidden()` was called (matches the Checkbox/Toggle/BuiltInButton footgun pattern from Batches 1 and 4); when `a11y_hidden` is set the node is dropped via `set_hidden()`.
+- **FormLayout** — added `.label(LocalizedString)` / `.label_literal(&str)` builders matching the Toolbar / Breadcrumb pattern. When labelled, emits `Role::Form` + `set_name`; when unlabelled, demotes to `Role::GenericContainer` rather than leak an unnamed landmark. No FTL additions — the fallback is *structural* (drop the landmark), not a default name.
+- **Switcher / AspectRatio / MaxSize** — all three now call `builder.set_hidden()`. Semantics attach to the wrapper's parent. Matches the ClipPane (Batch 3), Snackbar-outer (Batch 2), and Repeater-default (Batch 4) precedent for layout-only wrappers.
 
 ### Layout / Decorative Primitives (no interactive a11y requirements)
 
 These set `Role::GenericContainer` or have no `accessibility()` impl — correct behavior, no audit needed unless they gain interactive semantics:
 
-`HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `Divider`, `IconWidget`, `RectWidget`, `TextWidget`, `ImageWidget` (decorative), `MasonryLayout`, `FormLayout`
+`HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `Divider`, `IconWidget`, `RectWidget`, `TextWidget`
+
+Layout wrappers that now call `set_hidden()` to avoid emitting dead `Role::Unknown` / presentational wrapper nodes (see Batches 3–5): `AspectRatio`, `MaxSize`, `Switcher`, `ClipPane` (Batch 3), `Snackbar` outer wrapper (Batch 2), `Repeater` default (Batch 4), `DragRegion` (Batch 3), `Panel::a11y_presentational()` (Batch 3).
+
+Not audited (not a `Widget`): `MenuContext` is an internal `pub(crate)` coordinator struct shared between the MenuBar trigger and the overlay host; it has no `Widget` impl and no accessibility surface.
