@@ -132,3 +132,58 @@ poll, deferred callback — it must have an explicit answer for each
 of the four gates. `ctx.prefers_reduced_motion()` is a fifth pre-gate
 for decorative motion: honor it, and you get the zero-motion
 accessibility behavior and a free idle win.
+
+## Two animation paths — signal vs shader
+
+FernUI carries two animation paths that coexist. Pick by shape:
+
+| Path | When to use | Cost when visible | `paint()` re-runs per frame? |
+| --- | --- | --- | --- |
+| **`Signal<f32>::animate_to` / `animate_looping`** (via `AnimationScheduler`) | Tweens driving arbitrary values: scroll offsets, sidebar slide, toggle knob, slider fill width, any custom interpolation your `paint()` consumes | CPU: `signal.set` → `paint()` → vertex-buffer rewrite → wgpu submit. Tight but per-frame. | Yes. |
+| **`ctx.animated_quad(kind)`** (via `AnimatedQuadRegistry`) | Decorative motion that fits a quad + shader: `ProgressBar::indeterminate` (procedural sweep), animated `IconWidget` (sprite-atlas frame cycling), future pulse / shimmer / skeleton | CPU: one `queue.write_buffer` of the `AnimParams` struct (64 B per active quad) + one `draw_indexed` call. `paint()` does not run. | **No.** |
+
+Use signal when `paint()` needs the current animated value to compute
+its draw commands (e.g., scroll offset shifts every child's
+coordinates). Use shader when the animation's visual is expressible as
+"draw a quad, let a fragment shader decide pixels from a small state
+struct."
+
+**Widget-author surface.** In `build()`:
+
+```rust
+// Procedural sweep (ProgressBar).
+self.handle = Some(ctx.animated_quad(AnimatedQuadKind::IndeterminateSweep {
+    period: Duration::from_millis(900),
+    sweep_ratio: 0.42,
+    track_color: SurfaceRole::Sunken.into(),
+    fill_color:  SurfaceRole::Accent.into(),
+}));
+
+// Sprite atlas (animated IconWidget — frames pre-packed into a grid).
+self.handle = Some(ctx.animated_quad(AnimatedQuadKind::SpriteCycle {
+    image_name: atlas_name.clone(),
+    frame_count, cols, rows,
+    period: icon.total_duration(),
+    tint: Some(TextRole::Primary.into()),  // None for FullColor icons
+}));
+```
+
+In `paint()`:
+
+```rust
+canvas.draw_animated_quad(bounds, handle.slot(), AnimatedQuadClass::Procedural);
+// or: AnimatedQuadClass::Sprite { image_name: atlas_name.clone() }
+```
+
+The four gates (pause-on-window-unfocused, per-widget paint-epoch
+visibility, widget-drop/rebuild auto-cancel, `prefers_reduced_motion`)
+apply to both paths in identical shape — the shader path reuses the
+same registry infrastructure as the signal scheduler. The only
+difference is where the animation tick runs: CPU-side for signal,
+shader-side for the quad.
+
+Adding a new kind: extend `AnimatedQuadKind`, add a `kind: u32`
+discriminator branch in `shaders/anim_procedural.wgsl` (or
+`anim_sprite.wgsl` for texture-sampling kinds), and update
+`AnimatedQuadRegistry::compute_params` to populate the shared
+`AnimParams` struct from the kind's fields.
