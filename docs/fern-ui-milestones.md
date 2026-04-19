@@ -62,7 +62,7 @@ The following capabilities are implemented and tested in the codebase.
 
 **Higher-level widgets.** Button, Panel, Card, Toolbar, StatusBar, Checkbox (two-state and tristate), RadioButton, Toggle/Switch, Slider (horizontal/vertical, stepped), SegmentedControl, ProgressBar (determinate and indeterminate), Badge, Accordion, Link, ScrollArea (overlay and permanent modes), ScrollBar, Tooltip, ComboBox (dropdown with keyboard navigation and type-ahead), MenuItem, MenuList, MenuBar, MenuSeparator, ContextMenu, TabWidget, SplitView with SplitHandle, Dialog with DialogContent and ModalContainer, Popover, Snackbar (queued auto-dismissing with animated slide-in), Breadcrumb (clickable path segments with chevron separators), Wizard (multi-step flow with header, footer, and step switching), Repeater, ListView, TreeView, TitleBar with custom controls and drag region.
 
-**Examples.** `simple_button` (M1), `text_and_layout` (M2), `widget_catalog` (M3), `menus_and_dropdowns` (M4), `split_view` (M5), `tab_widget` (M5), `dialogs_and_popovers` (M5), `data_collections` (M6), `internationalization` (M7), `title_bar_demo` (title bar subsystem), `shortcuts_demo` (Shortcut / Intent / Action system with typed `IntentKind` payloads).
+**Examples.** `simple_button` (M1), `text_and_layout` (M2), `widget_catalog` (M3), `menus_and_dropdowns` (M4), `split_view` (M5), `tab_widget` (M5), `dialogs_and_popovers` (M5), `data_collections` (M6), `internationalization` (M7), `rich_text_viewer` (M8a read-only preset), `rich_text_editor` (M8b editable preset + mixed editable/read-only on the same document), `spin_box` (M9 SpinBox with generic SpinValue trait, wrap modes, step types), `title_bar_demo` (title bar subsystem), `shortcuts_demo` (Shortcut / Intent / Action system with typed `IntentKind` payloads).
 
 **Divergence note.** The i18n implementation diverged from the architecture doc in one substantive way: framework bundle registration for fern-widgets is **explicit**, not automatic. Applications that use fern-widgets must call `.framework_locales(fern_widgets::framework_locales())` on the `I18nConfig` builder chain. See architecture §12.13.3 for the rationale (fern-app is deliberately widget-agnostic) and the forgiving fallback path: apps that forget to register still see correct English accessibility labels via the proc macro's compile-time fallback.
 
@@ -220,9 +220,17 @@ Substantially delivered. Fluent-based translation runtime with compile-time key 
 
 ---
 
-## Milestone 8: Rich Text Editor
+## Milestone 8: Rich Text Editor ✅ (largely)
 
-**Goal:** A functional rich text widget using text-document and text-typeset, with formatting toolbar and context menu for the editable preset and a read-only preset for documentation displays, help panels, and message rendering. All UI strings use the `tr!` / `tr_widget!` macros from Milestone 7.
+Substantially delivered. Both construction presets ship: `RichTextEditor::read_only(document, typesetter)` (M8a) and `RichTextEditor::editor(document, typesetter)` (M8b) share a single implementation with per-preset policy bundles. Live in [`crates/fern-widgets/src/rich_text.rs`](../crates/fern-widgets/src/rich_text.rs) plus the `rich_text/` support modules: `policy.rs` (PolicyBundle + CommandFilter + CaretPolicy + AccessibilityRole + ClipboardPolicy), `keyboard.rs` (~22 KB of key routing + undo coalescing), `mouse.rs`, `frame_loop.rs` (the text-document → Signal bridge), `clipboard.rs`, `state.rs` — plus `tests.rs` at ~48 KB, the real validation that this milestone landed. Examples: [`examples/rich_text_viewer`](../examples/rich_text_viewer/) (read-only preset bound to a static document) and [`examples/rich_text_editor`](../examples/rich_text_editor/) (full editor + a read-only preview of the same document in one window, exercising the "mixed" cross-preset tests). Recent polish includes the opt-in system color-emoji fallback in text-typeset (commit af425dc).
+
+**Remaining polish (not blocking):**
+
+- **Rich-format clipboard.** Current clipboard is plain text. RTF / HTML import-export on cut/copy/paste is a post-milestone refinement.
+- **Keyboard Alt+Arrow reorder contract for embedded lists.** Hooked up plumbing exists but per-widget verification is outstanding.
+- **Unfinalized command filter entries.** A handful of less-common editing commands (block quote, horizontal rule insertion) are tracked as incremental adds against the existing command filter.
+
+**Goal (preserved from the pre-implementation spec):** A functional rich text widget using text-document and text-typeset, with formatting toolbar and context menu for the editable preset and a read-only preset for documentation displays, help panels, and message rendering. All UI strings use the `tr!` / `tr_widget!` macros from Milestone 7.
 
 **Delivers:**
 
@@ -281,9 +289,13 @@ Mixed:
 
 ---
 
-## Milestone 9: Text Input
+## Milestone 9: Text Input ✅ (IME still deferred)
 
-**Goal:** Single-line plain text editing, derived from the Rich Text Editor by constraining formatting to a single paragraph of plain text. This reverses the common GUI evolution path (plain-to-rich) — in FernUI the rich editor is the fundamental widget, and TextInput is the constrained specialization.
+Delivered. `TextInput` ships as a single-line composite built on `RichTextEditor` with `multiline(bool)` for the opt-in multi-line variant ([`crates/fern-widgets/src/text_input.rs`](../crates/fern-widgets/src/text_input.rs), 474 lines). The numeric specialization ships as a generic `SpinBox<T>` with an associated `SpinValue` trait implemented for `i32` / `f32` ([`crates/fern-widgets/src/spin_box.rs`](../crates/fern-widgets/src/spin_box.rs), ~1,400 lines) supporting `WrapMode::{Clamp, Wrap, Cycle}`, `StepType::{Fixed, Adaptive}`, and platform-aware formatting. Example: [`examples/spin_box`](../examples/spin_box/) demonstrates the full widget with step types and wrap modes. Both composites are behind the `rich-text` feature flag (inherited from the underlying editor). Recent relevant commits include 34481a2 (SpinValue trait + demo), 8f676cf (Signal handling for checkbox/radio/text_input), 9248377 (`TextInputField` promoted to primitives), 1be6415 (show_clear_button icon via built-in SVG), and the Signal<Role> migration in fc4cca2.
+
+**Remaining (design-deferred):** IME composition window positioning, composition-text rendering, and CJK input handling. These require platform-specific work in fern-platform (winit IME events are wired; the *positioning* of the composition UI and the composition rendering are the open pieces). The TextInput and RichTextEditor APIs don't change when this lands — the handler hooks are already in place. Latin-script editing works today.
+
+**Goal (preserved from the pre-implementation spec):** Single-line plain text editing, derived from the Rich Text Editor by constraining formatting to a single paragraph of plain text. This reverses the common GUI evolution path (plain-to-rich) — in FernUI the rich editor is the fundamental widget, and TextInput is the constrained specialization.
 
 **Delivers:**
 
@@ -351,6 +363,16 @@ Multi-window application tests: the infrastructure exists, but a real multi-wind
 
 ---
 
+## Next Candidates
+
+Beyond the Milestone 6 / 7 / 8 / 10 tails tracked above, five areas are the obvious next-up work. None are promoted to numbered milestones yet — they're here so the roadmap is honest about what's in the pipeline:
+
+- **IME / CJK input.** Platform-side composition window positioning + composition rendering in `fern-platform` + dead-key handling. The TextInput and RichTextEditor APIs don't change when this lands; the handler hooks are already in place. Blocked on winit IME glue and per-OS composition-window surface work.
+- **Cross-application DnD backends.** `PlatformDragBackend` implementations per OS: `WaylandDragBackend` (wl_data_device), `X11DragBackend` (XDnD), `WindowsDragBackend` (OLE IDataObject / IDropTarget), `MacOsDragBackend` (NSPasteboard / NSDraggingSource). Intra-app drag already works everywhere; this unlocks dragging between a FernUI window and other applications. Payload and handler APIs are stable.
+- **Native menu bar on macOS + native file dialogs.** `NSMenu` binding so a single declarative menu description routes to native on macOS and to the existing widget-based `MenuBar` elsewhere. Native file open/save dialog via `rfd`, with async result through `EventLoopProxy`. These are the remainder of Milestone 10.
+- **Virtualized dropdowns.** Retroactive `max_visible_items` virtualization inside `ComboBox` and `MenuList` (TODO markers already in place at the call sites). Not blocking anything, but low-cost cleanup.
+- **ShortcutFormatter (locale + platform).** `shortcut.rs` currently renders chords as `Ctrl+S` regardless of platform or locale. The design calls for `⌘S` on macOS and translated modifier names (`Strg+S` in German). A single formatter hook consulted by `MenuItem::for_shortcut(id)` and `TooltipContent::for_shortcut(id)` — tracked as part of the M7 polish tail.
+
 ## Summary
 
 | # | Milestone | Status | Key Capability |
@@ -362,6 +384,6 @@ Multi-window application tests: the infrastructure exists, but a real multi-wind
 | 5 | Tabs, SplitView, Dialogs, Modals | ✅ Done | TabWidget, SplitView+SplitHandle, Dialog, ModalContainer, Popover, Snackbar, Breadcrumb, Wizard, DragRecognizer, in-tree and native modal presentations |
 | 6 | Data-Driven Collections + Drag & Drop | ✅ Largely done | fern-data crate, ListModel/TreeModel/TreeSlice/SelectionModel, Repeater/ListView/TreeView with virtualization, typed DnD with preview overlay. Cross-app platform backends remaining. |
 | 7 | Internationalization | ✅ Largely done | fern-i18n + fern-i18n-macros, `tr!`/`tr_widget!` with compile-time validation and Levenshtein suggestions, compile-time fallback, dual-bundle with explicit framework registration, hot-reload, RTL with Arabic/Hebrew fonts. ShortcutFormatter remaining. |
-| 8 | Rich Text Editor | Not started | text-document integration, formatting, undo, clipboard |
-| 9 | Text Input | Not started | Plain-text specialization of RichTextEditor; IME deferred |
+| 8 | Rich Text Editor | ✅ Largely done | Both presets delivered: `RichTextEditor::read_only` (M8a) + `RichTextEditor::editor` (M8b). Shared core with per-preset PolicyBundle. Rich-format clipboard + a few command filter entries remain. |
+| 9 | Text Input | ✅ Done | TextInput (single-line, opt-in multiline) + generic SpinBox<T> with SpinValue trait. IME composition / CJK deferred to platform work — TextInput API unchanged when that lands. |
 | 10 | Multi-Window and Platform | Partial | Multi-window infrastructure done (M5); native menu bar, file dialogs, multi-window example remaining |

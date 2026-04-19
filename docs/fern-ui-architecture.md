@@ -1,49 +1,73 @@
 # FernUI Architecture Document
 
-**Version:** 0.1 — Initial Architecture  
-**Date:** March 31, 2026  
+**Version:** 0.2 — V2 refresh  
+**Date:** April 19, 2026  
 **Author:** Cyril Jacquet, with architectural design by Claude (Anthropic)  
-**Status:** Pre-implementation reference document
+**Status:** Living reference — architecture stabilized, Milestones 1–9 delivered
 
-> **Status note — command / action layer superseded.** Sections 9.2
-> ("Typed Command Flow") and 11 ("Shortcuts") describe the original
-> `AppCommand` trait + `FernAppBuilder::on_command` centralised dispatch
-> design, and the initial `ShortcutMap<C: AppCommand>` keyboard binding.
-> Both were replaced by the Shortcut / Intent / Action pipeline:
+> **Document scope.** This document covers the *why* of FernUI's architecture.
+> Where the *how* is already documented elsewhere — in a dedicated doc or in
+> an up-to-date source file — the relevant section here summarizes the
+> rationale and points at the authoritative reference rather than duplicating
+> code. Readers learning the framework should read this doc for mental model
+> and skim the referenced docs for API detail.
+
+> **Status note — V1 surfaces retired.** The original (V1) shapes of several
+> subsystems remain described below for historical rationale, but the public
+> API they describe is gone. Where you see a V1 section, a short lead-in
+> points at the V2 replacement:
 >
-> - `AppCommand` trait → `IntentKind` trait (usually derived with
->   `#[derive(IntentKind)]` and `#[name = "..."]` on each variant).
-> - `ctx.emit(cmd)` → `ctx.send_intent(AppIntent::X)`.
-> - `FernAppBuilder::on_command` → `Action::new("id").on_invoke(...)`
->   registered inside a root widget via `ctx.register_action(...)`.
-> - `CommandContext::{set_theme, set_locale, close_window}` → same
->   methods on `EventContext`, available from every handler.
-> - `ShortcutMap<C: AppCommand>` → `ShortcutRegistry` with two-layer
->   defaults + per-slot user overrides and graveyard semantics.
+> - **§5 Widget Extensibility** — the `CompositeWidget` / `Widget` split is
+>   replaced by the unified `Widget` trait. See **§28 V2 Widget Authoring
+>   Model**.
+> - **§7 Reactivity Model** — `State<T>` / `DerivedState<T>` / `Reactive<T>`
+>   are gone. `Signal<T>` and `Prop<T>` are the only reactive primitives.
+>   See **§28.4**.
+> - **§9.1 Input Event Routing** + **§9.2 Typed Command Flow** — the monolithic
+>   `event()` method and `AppCommand` trait are replaced by attached handlers
+>   and the Shortcut / Intent / Action pipeline. See
+>   [`events-and-gestures.md`](events-and-gestures.md) and
+>   [`shortcut-intent-action.md`](shortcut-intent-action.md).
+> - **§11 Keyboard Shortcuts** — `ShortcutMap<C: AppCommand>` replaced by
+>   `ShortcutRegistry` with two-layer defaults + user overrides. See
+>   [`shortcut-intent-action.md`](shortcut-intent-action.md).
+> - **§25 Button — Reference Widget Design** — the V1 `CompositeWidget`
+>   pattern; the actual Button code follows the V2 exemplar in §28.1. See
+>   [`crates/fern-widgets/src/button.rs`](../crates/fern-widgets/src/button.rs).
 >
-> The surface in those sections is historical. For the current
-> system see [`shortcut-intent-action.md`](shortcut-intent-action.md)
-> and the working demo at
-> [`examples/shortcuts_demo`](../examples/shortcuts_demo/src/main.rs).
-> The *design rationale* (single source of truth for app behavior,
-> testable dispatch, rebindable keystrokes, platform-independent
-> formatting) survives unchanged — only the Rust API it lands on has
-> moved. Individual examples below have been updated where a stale
-> snippet would actively mislead.
+> The *design rationale* in each V1 section survives unchanged — only the
+> Rust API it lands on has moved. A reader interested in why FernUI unified
+> its widget trait, why it kept preview+bubble dispatch but moved handler
+> storage off the trait, or why it collapsed four reactivity types into one,
+> will find the story in those sections plus the V2 references.
+
+> **See also — dedicated docs in this directory:**
+>
+> - [`animation.md`](animation.md) — `Signal<f32>::animate_to`, scheduler, MotionTokens.
+> - [`events-and-gestures.md`](events-and-gestures.md) — attached handlers, preview/bubble, recognizers, `EventContext`.
+> - [`data-models.md`](data-models.md) — `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, MVVM flow.
+> - [`reactive-theme.md`](reactive-theme.md) — `Signal<Theme>`, role enums, `ColorProp`, `TextStyleProp`.
+> - [`shortcut-intent-action.md`](shortcut-intent-action.md) — rebindable keystrokes, typed intents, widget-owned actions.
+> - [`fern-macro-reference.md`](fern-macro-reference.md) — `fern!` DSL user-facing reference.
+> - [`fern-language-spec-v3.md`](fern-language-spec-v3.md) — `fern!` DSL grammar and desugaring spec.
+> - [`icons-and-resources.md`](icons-and-resources.md) — `res!()` macro, icon formats, asset embedding.
+> - [`fern-ui-milestones.md`](fern-ui-milestones.md) — what's delivered, what's next.
 
 ---
 
 ## 1. Vision and Positioning
 
-FernUI is a pure-Rust GUI framework designed for serious desktop application development. It is not a general-purpose widget toolkit competing with egui or iced for weekend prototypes. It is the UI infrastructure layer for Skribisto, a cross-platform writing application, and for any Qleany-structured application that needs a native, accessible, high-performance interface.
+FernUI is a pure-Rust GUI framework for serious desktop applications — the kind of software where a user sits down for hours at a time and reaches for the keyboard first. A writing tool for novelists, an IDE, a dispatch console, a course manager for a taxi company's driver training. FernUI is not a general-purpose widget toolkit competing with egui or iced for weekend prototypes; it is infrastructure for professional desktop software that needs native look and feel, full keyboard and screen-reader accessibility, and a rich text surface built from the ground up.
 
-FernUI's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a solved problem — the text-document and text-typeset crates provide a complete document model and typesetting engine that no other Rust GUI framework can match. Third, the framework is designed to be consumed by applications with structured architecture (Qleany's Clean Architecture with vertical slices), providing typed command flow and MVVM data binding rather than leaving application structure as an exercise for the developer.
+FernUI's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a solved problem — the text-document and text-typeset crates provide a complete document model and typesetting engine that no other Rust GUI framework can match. Third, the framework is designed to be consumed by applications with structured architecture (Clean Architecture, MVVM), providing a typed Shortcut / Intent / Action pipeline and reactive data-model crate (`fern-data`) rather than leaving application structure as an exercise for the developer.
 
-### 1.1 Relationship to Qleany
+### 1.1 Relationship to structured application architectures
 
-FernUI is infrastructure. Qleany applications consume it as their outermost layer — the "Frameworks & UI" ring in Clean Architecture's concentric circles. FernUI has no dependency on Qleany. Qleany has no dependency on FernUI. The integration surface is the typed command system (FernUI widgets emit application-defined commands that Qleany controllers handle) and the data source traits (application-written ViewModels bridge Qleany DTOs to FernUI's display layer).
+FernUI is the outermost layer of an application — the "Frameworks & UI" ring in Clean Architecture's concentric circles. It has no dependency on any particular application framework. A Qleany-structured application is one supported integration path and was the stress test that shaped several of FernUI's architectural choices (typed intents for command flow, view-models over raw entities, data sources for paged external collections), but nothing in FernUI *requires* Qleany. An application that uses diesel + hand-rolled entities, or one that streams events off Kafka and holds view-state in plain structs, fits the same shape.
 
-The decision not to structure FernUI's internals using Qleany's architecture was deliberate. The Qleany experiment with text-document (entities, use cases, repositories, Unit-of-Work for an in-memory document model) was a productive stress test that revealed and solved performance problems in Qleany itself. Repeating that experiment inside a GUI framework, where the performance characteristics are fundamentally different (layout and rendering are hot paths, not transactional operations), would provide diminishing returns.
+The integration surface is the typed intent system (FernUI widgets emit application-defined intent variants that ancestor `Action`s consume — see [`shortcut-intent-action.md`](shortcut-intent-action.md)) and the reactive data models in `fern-data` (application-written view-models hold entity collections as `ListModel<EntityVM>` / `TreeModel<EntityVM>` that widgets bind to — see [`data-models.md`](data-models.md)).
+
+The decision not to structure FernUI's internals using a Clean-Architecture split was deliberate. Layout, rendering, and event dispatch are hot paths with fundamentally different performance characteristics from transactional domain operations; the useful seams fall in different places. FernUI instead splits into ten focused crates (see §24) each with a single concern, which is the right decomposition for a framework whose internal churn pattern is "rendering backend changes independently of widget tree changes independently of the data model layer."
 
 ### 1.2 Reuse Strategy
 
@@ -235,46 +259,13 @@ The framework processes the tree through well-defined passes (event, layout, acc
 
 ## 5. Widget Extensibility
 
-FernUI provides two tiers of widget creation, both first-class citizens.
+> **V1 (superseded).** The original design split extensibility in two. A `CompositeWidget` trait described *what a widget is made of* via `fn build(&self, ctx) -> WidgetId`, deliberately omitted any sizing override, and delegated layout to its composed subtree. A separate `Widget` trait described *how a widget paints itself* via `paint()`, with the full layout surface (`size_that_fits`, `place_children`) for widgets with no pre-existing visual equivalent — color pickers, node graphs, the RichTextEditor.
+>
+> The split forced authors to *choose at definition time* between composition and custom paint. Real widgets regularly want both (a Card that composes children but paints its own background; a ScrollArea that composes children but clips them with a scissor rect), which pushed the framework into a compatibility adapter and widgets into awkward indirection. The `CompositeWidget::build(&self)` signature — immutable receiver — also forced every stateful composite into the `RefCell<Option<State<T>>>` pattern so mutation-needing event handlers could reach state created in `build`.
+>
+> **V2 (current).** The two traits are one. The unified `Widget` trait has a single `build(&mut self, ctx)` for composition, a single `paint()` for own-visuals, and both are optional with sensible defaults. There is no composite adapter; widgets are widgets. See [§28.1 Unified Widget Trait](#281-unified-widget-trait) for the full signature and the four common widget shapes (leaf / container / composing / hybrid). The V2 model is what the entire widget library is written against — no `CompositeWidget` references remain in the codebase.
 
-### 5.1 Level 1: CompositeWidget (Composition)
-
-A composite widget describes what it is made of by implementing a `build()` method that combines existing widgets. The `build()` method constructs the initial subtree and wires reactive property bindings between state handles and child widget properties (see Section 7.1.1). Ongoing behavior (event handling, focus management, accessibility) is declared through additional trait methods.
-
-```rust
-pub trait CompositeWidget {
-    fn build(&self, ctx: &mut BuildContext) -> WidgetId;
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-        EventResponse::Ignored
-    }
-    fn focus_policy(&self) -> FocusPolicy { FocusPolicy::Default }
-    fn is_focusable(&self) -> bool { false }
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {}
-}
-```
-
-The `CompositeWidget` trait deliberately does not include `size_that_fits` or any sizing override. A composite's size is determined entirely by its composed subtree's layout negotiation. The framework's composite adapter delegates `size_that_fits` to the root child ID returned by `build()`, which queries its own children recursively through the normal SwiftUI-style propose/respond/place protocol. The composite author never writes sizing logic — that is the subtree's responsibility.
-
-If a composite needs to enforce constraints on its overall size (such as a minimum touch target for a button), it achieves this by including a `MinSize` wrapper widget or equivalent constraint widget in its composed subtree, not by overriding sizing on the composite itself. This ensures that all sizing logic lives within the layout system and is visible in the widget tree.
-
-### 5.2 Level 2: Widget (Custom Rendering)
-
-A custom widget implements the full `Widget` trait, including `paint()` for direct rendering via the Canvas API. This is for widgets with no pre-existing visual equivalent — color pickers, node graphs, timeline rulers, or the RichTextEditor that wraps text-typeset.
-
-```rust
-pub trait Widget {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
-    fn place_children(&self, bounds: Rect, proposal: SizeProposal,
-                      children: &mut [WidgetPlacement], ctx: &LayoutContext);
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext);
-    fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse;
-    fn accessibility(&self, builder: &mut AccessNodeBuilder);
-}
-```
-
-From the outside, a `CompositeWidget` and a `Widget` are indistinguishable — both are `WidgetId` entries in the arena, both are testable the same way, both participate in layout, events, and accessibility identically.
-
-### 5.3 The Slot System
+### 5.1 The Slot System
 
 Standard widgets ship with named extension points — slots — at structural boundaries where extension is anticipated. A slot is an optional placeholder that takes zero space when empty and accommodates arbitrary widget content when filled.
 
@@ -350,78 +341,19 @@ The boundary is clear: if the content structure is fixed for the lifetime of the
 
 ## 7. Reactivity Model
 
-FernUI uses a hybrid reactivity model that draws a clean line between simple property binding and structural mutation.
+The core question this section answers — how does a widget stay in sync with mutable state without full view diffing — has the same answer in V1 and V2. The V2 API cleaned up the surface; the V1 description below stays here for the rationale.
 
-### 7.1 Property Bindings (Declarative)
+> **V1 (superseded).** The original design had four reactive types: `State<T>` (mutable handle, owned by a widget), `DerivedState<T>` (read-only, `.map()` of another handle), `Reactive<T>` (widget property that might be either static or bound), and `StateHandle<T>` (erased inter-handle reference). Bindings wired state to widget properties via method pairs: `.background(Color)` for a fixed value, `.bind_background(State<Color>)` for a reactive link. A composite's `build(&self, ctx)` returned `&self`, forcing the `RefCell<Option<State<T>>>` pattern so mutation-needing event handlers could reach state created in `build`. The framework rebuilt on theme/environment change to re-capture derived-state closures that had frozen-in theme values.
+>
+> **V2 (current).** `Signal<T>` replaces `State<T>` and `DerivedState<T>` (derived signals are just `signal.map(|v| ...)`), `Prop<T>` replaces `Reactive<T>`, and `ObserverHandle` replaces `StateHandle<T>`. `Signal::new(x)` is mutable; `signal.map(f)` is read-only and derived. `build(&mut self, ctx)` takes `&mut self`, so event handlers close over `Signal<T>` clones (not `RefCell<Option<…>>`) and mutate them directly. The dual static-vs-bound method pair (`background()` / `bind_background()`) collapses into a single method taking `impl Into<ColorProp>` — the prop type knows whether to track a signal. Theme changes no longer trigger rebuild: the theme is itself a `Signal<Theme>` and role-based props resolve at paint time. See **§28.4** for the full unified model and [`reactive-theme.md`](reactive-theme.md) for the theme-reactivity mechanism.
 
-`State<T>` is a lightweight reactive handle stored in a state arena (separate from the widget arena). Property bindings connect a state value to a widget property:
+### 7.1 Why declarative bindings plus imperative structural change
 
-```rust
-Button::new(tr!("btn-save"))
-    .visible_when(has_unsaved_changes)      // Signal<bool> → visibility
-    .enabled_when(document_is_valid)         // Signal<bool> → enabled
+What survives unchanged from V1 is the division of labor. Simple property reactivity (a label shows different text when the model changes, a button disables when a form is invalid, a panel hides when a feature flag is off) is **declarative** — the widget declares a binding, and the framework reacts. Structural changes (switching tabs, adding or removing children from a dynamic list, activating or dormant-ing a subtree) are **imperative** — explicitly requested from a handler.
 
-TextWidget::new()
-    .bind_text(status_message)              // Signal<String> → text content
-```
+This split is what lets FernUI avoid both full view diffing (Xilem/React reconciliation) and ad-hoc observer soup (imperative GTK callbacks). Reconciliation is expensive and predictable only for the common case; it pays a cost on every update. Ad-hoc observer registration is fast but fragile — cleanup, cycles, and order-of-notification bite you forever. Declarative bindings for the common case (a property depends on a value; keep them in sync) plus imperative for the rare structural case give cheap updates for the frequent path without surrendering control over the rare one.
 
-`State<T>::map()` creates derived, read-only state for computed properties:
-
-```rust
-let show_clear = text.map(|t| !t.is_empty());
-Button::icon_only(Icon::Clear).visible_when(show_clear)
-```
-
-When the underlying state changes, the framework updates the bound property and marks the widget for repaint. No general-purpose observer callbacks, no closure-based side effects — the binding is a direct property-to-state link managed by the framework.
-
-### 7.1.1 State-to-Property Propagation
-
-Property bindings are the mechanism that connects a state change on a composite widget to a visual change on its child primitive widgets. This is not automatic — the composite widget author must explicitly create the binding during `build()` using methods like `bind_background()`, `bind_color()`, and `bind_border_color()` on primitive widgets, passing a `State<T>` or `DerivedState<T>` handle.
-
-When a composite's event handler calls `interaction_state.set(Hovered)`, the framework detects that the state value has changed, finds all widgets with properties bound to that state (or to derived states computed from it), and marks those widgets for repaint. During the next paint pass, the bound widgets read the current value from the state handle and render accordingly.
-
-This means the composite's `build()` method must wire the bindings explicitly:
-
-```rust
-// In build(): create state and wire bindings to child widgets
-let interaction = ctx.state(InteractionState::Idle);
-
-let bg_color = interaction.map(move |s| resolve_bg(style, *s, &colors));
-let rect = RectWidget::new().bind_background(bg_color);  // binding, not static value
-
-// In event(): just set state — the bindings propagate automatically
-self.interaction.set(InteractionState::Hovered);
-// → framework detects change → marks rect for repaint → rect reads new bg_color
-```
-
-Static property methods (`.background(color)`) set a fixed value that never changes. Binding methods (`.bind_background(state)`) create a reactive link that updates when the state changes. Both are available on primitive widgets; the composite author chooses which to use based on whether the property needs to react to state changes.
-
-### 7.1.2 Build-Time Capture and Environment Changes
-
-*Superseded — the sections below describe the original design. See [docs/reactive-theme.md](./reactive-theme.md) and Section 19 for the current mechanism.*
-
-In the original design, derived state closures created via `State::map()` captured their computation context at build time — including `Theme` tokens. That snapshot meant a theme switch produced stale results, so the framework triggered a **composite rebuild** on `set_theme` to re-run `build()` and re-capture.
-
-The current design avoids the rebuild entirely. The theme is a reactive `Signal<Theme>`; semantic **role enums** (`TextRole`, `SurfaceRole`, `BorderRole`, `TextStyleRole`) and the `ColorProp` / `TextStyleProp` wrappers resolve against the current theme at paint/layout time. `set_theme` updates the signal and calls `mark_all_dirty` — no rebuild, no capture invalidation, focus and scroll state survive the switch. Interaction-driven colors emit `Signal<Role>` from the interaction signal and rely on the same paint-time resolver. The full mechanism lives in Section 19 and the standalone reactive-theme reference.
-
-### 7.2 Structural Mutations (Imperative)
-
-Structural changes to the widget tree — activating/dormanting subtrees for tab switching, adding/removing children dynamically — are performed explicitly in the composite widget's event handler.
-
-```rust
-fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse {
-    if let Some(new_index) = self.extract_tab_switch(event) {
-        ctx.set_dormant(self.content_ids[self.active]);
-        ctx.activate(self.content_ids[new_index]);
-        self.active = new_index;
-        EventResponse::Handled
-    } else {
-        EventResponse::Ignored
-    }
-}
-```
-
-This hybrid avoids the complexity of full view diffing (Xilem/React) while providing the convenience of declarative bindings for common cases. The boundary is clear: property bindings for simple reactivity, event handlers for structural changes.
+Structural mutations are expressed as operations on `EventContext` (`ctx.set_dormant(id)`, `ctx.activate(id)`, `ctx.destroy(id)`) and applied after the current handler returns — see [`events-and-gestures.md`](events-and-gestures.md) §5 for the deferred-operations pattern.
 
 ---
 
@@ -449,206 +381,94 @@ Atlas entries for dormant widgets are evicted via LRU. When a dormant widget rea
 
 ## 9. Event System
 
-### 9.1 Input Event Routing
+The event system answers two questions: how does input reach the widget that should handle it, and how does that handler request application-level behavior. The two-pass preview+bubble routing and the typed-command-flow rationale below survive unchanged from V1; the surface API that lands them — attached handlers replacing a monolithic `event()` method, Shortcut/Intent/Action replacing `AppCommand` — is V2. The dedicated docs [`events-and-gestures.md`](events-and-gestures.md) and [`shortcut-intent-action.md`](shortcut-intent-action.md) cover the current API in detail; the sections below focus on the "why."
 
-Platform input from winit is translated into high-level `WidgetEvent` variants and routed through the widget tree using a two-pass system.
+### 9.1 Input Event Routing — Preview and Bubble
 
-**Preview pass (tunneling):** root → target. Allows parents to intercept events before children see them. Used for application-level keyboard shortcuts that must override widget behavior.
+Platform input from winit is translated into high-level `WidgetEvent` variants and routed through the widget tree in two passes:
 
-**Bubble pass:** target → root. The standard dispatch path. The widget returns `EventResponse::Handled` to stop propagation or `EventResponse::Ignored` to let the event bubble upward.
+**Preview pass:** root → target. Ancestors get a chance to intercept events before the target sees them — a `MenuList` overlay swallowing Arrow keys before any menu item sees them, a modal scrim discarding pointer events outside the modal.
 
-Pointer events are routed via hit testing against the layout tree. Keyboard events are routed to the focused widget. AccessKit actions (from screen readers) are routed to the target widget as `WidgetEvent::AccessAction`, flowing through the same event system as pointer and keyboard input.
+**Bubble pass:** target → root. The standard dispatch path — the target handles first; unhandled events walk up the parent chain until something returns `EventResponse::Handled` or the root is reached.
 
-### 9.2 Typed Application Commands
+Pointer events target the deepest hit via hit testing against layout bounds. Keyboard events target the focused widget. AccessKit action requests target their stated node directly. Scroll events hit-test at the pointer and bubble to the nearest handler (a ScrollArea ancestor, typically).
 
-> **Historical record.** The `AppCommand` trait and
-> `FernAppBuilder::on_command` described below were replaced by the
-> Shortcut / Intent / Action pipeline. The design goals of this
-> section — typed, exhaustive, centrally-routed application behavior
-> with rebindable shortcuts and test-friendly dispatch — all survive
-> in the new system; the trait shape and dispatcher entry point
-> changed. See [`shortcut-intent-action.md`](shortcut-intent-action.md)
-> for the current API and the examples at the top of this document
-> for the migration mapping.
+> **V1 (superseded) — handler storage.** V1 required every widget to implement `fn event(&mut self, event: &WidgetEvent, ctx: &mut EventContext) -> EventResponse` — one giant `match` covering every variant it cared about. Gesture recognizers had to be instantiated by hand. Handler composition (a wrapper listening for taps on a child) required proxying through the outer widget's `event()` method. Mutable access to state created in `build()` forced `RefCell<Option<State<T>>>` everywhere.
+>
+> **V2 (current) — attached handlers.** Widgets register typed closures per event type via the `WidgetBuilder` trait (`.on_tap(...)`, `.on_hover(...)`, `.on_key(...)`, etc.) or via `HandlerSet` + `ctx.apply_self_handlers()` for the composite's own node. The framework stores closures on the arena node and dispatches them automatically. Gesture recognizers auto-wire from attached handlers; handler composition is just layering wrappers that carry their own handlers; handlers close over `Signal<T>` clones and mutate freely without `&mut self` on the widget. See [`events-and-gestures.md`](events-and-gestures.md) for the full catalogue of attached-handler types and the `HandlerSet` pattern.
 
-Widgets communicate with the application layer through typed command enums. The command type is defined by the application, not by FernUI. FernUI imposes only a trait bound:
+### 9.2 Typed Application Behavior: The Intent / Action Pipeline
 
-```rust
-pub trait AppCommand: 'static + Send + Clone + std::fmt::Debug {}
-```
+Widgets don't call into application code directly. They emit a typed **intent** (an application-defined enum variant), and ancestor **actions** — widget-owned handlers keyed by intent name — pick the intent up as it walks from source widget to root. Rebindable keyboard **shortcuts** are a third layer on top: a shortcut maps a keystroke to an intent name, and firing the shortcut is indistinguishable from an intent emitted by a widget.
 
-Commands are emitted through closures that capture the concrete type and erase it at the widget level (Approach B — non-generic Widget trait). The application root receives commands via a handler with exhaustive `match`, providing compile-time verification that all command variants are handled:
+The V2 surface lives in [`shortcut-intent-action.md`](shortcut-intent-action.md). The "why" behind this choice is worth recording here because it's the most opinionated decision in the framework.
 
-```rust
-let app = FernApp::new()
-    .on_command(|cmd: AppCmd, ctx| match cmd {
-        AppCmd::DocumentSave => { /* call controller */ }
-        AppCmd::FormatBold => { /* call controller */ }
-        // compiler error if a variant is missing
-    });
-```
+#### 9.2.1 Closures vs. typed values — the bet FernUI places
 
-#### 9.2.1 Two Documented Approaches to Widget Actions
+Retained-mode GUI frameworks split roughly into two schools on wiring user actions to application logic.
 
-There are two well-established ways to wire user actions to application logic in retained-mode GUI frameworks. Both are common, both have strong proponents, and both have decades of production use behind them.
+**Closure-based.** The widget accepts a callback. SwiftUI (`Button(action: { ... })`), Jetpack Compose (`onClick = { ... }`), Flutter (`onPressed:`), GTK signal handlers, Qt signal/slot, every web framework (`onClick`). The more common school by user count.
 
-**Closure-based actions.** The widget accepts a closure (callback function) that runs when the user activates the widget. This is what SwiftUI does (`Button(action: { ... })`), what Jetpack Compose does (`Button(onClick = { ... })`), what Flutter does (`onPressed: () { ... }`), what GTK does (signal handlers), what Qt does (signal/slot connections), and what every web framework does (`onClick`). This is the more common approach by user count, and it is the default in most mainstream retained-mode frameworks.
+**Typed message/command actions.** The widget emits a typed value of an application-defined enum; a handler matches on it. Elm (`Msg`), Iced (`Message`), The Composable Architecture (`Action`), Redux (action objects), Bubble Tea (`tea.Msg`). The minority school by user count, but dominant in frameworks that prioritize testability, undo, and large-application correctness.
 
-**Typed message/command actions.** The widget emits a typed value of an application-defined enum, and a single root handler matches on the enum to dispatch behavior. This is what Elm does (`Msg`), what Iced in Rust does (`Message`), what The Composable Architecture for SwiftUI does (`Action`), what Redux on top of React does (action objects), and what Bubble Tea in Go does (`tea.Msg`). This is the minority approach by user count, but it is the dominant approach in frameworks that prioritize testability, undo systems, and large-application correctness.
+FernUI goes with typed. The bet is that the target applications — writing tools, IDEs, dispatch consoles, course managers — are long-lived and grow large. Applications with hundreds of operations, complex undoable state, accessibility automation requirements, and multi-year lifespans benefit more from enumerating every operation in one place than they suffer from the prototyping friction. A dozen-button weekend prototype would find the discipline excessive — but that's not what FernUI is for.
 
-**FernUI uses typed commands.** This is a deliberate bet, not a claim that closures are wrong. The bet is that FernUI's target — a Qt replacement for commercial desktop applications, which by definition are long-lived and grow large — benefits more from the typed-command discipline than it suffers from the friction. Applications with hundreds of operations, complex undoable state, accessibility automation requirements, and multi-year lifespans benefit from having every operation enumerated in one place. Applications with a dozen buttons and a six-month lifespan would find the discipline excessive.
+#### 9.2.2 What the typed-intent pipeline gains
 
-#### 9.2.2 What FernUI Gains from Typed Commands
+- **Central command routing.** The application has one place that lists every operation it can perform — the union of its `Action`s. Adding a cross-cutting concern (logging, undo, permission gating) touches one layer, not every widget construction site. Reading the action list tells you what the application does.
+- **Undo and replay.** A typed intent is a value: serializable, inspectable, recordable. Recording intent sequences gives an undo log, a replay file, a macro recorder. A closure cannot be recorded.
+- **Testing.** Tests assert `captured_intents == vec![AppIntent::Save, AppIntent::Close]` without knowing which widget triggered each. The test decouples from implementation details.
+- **External automation.** Command palettes (the Ctrl+Shift+P pattern), accessibility automation, scripting interfaces — all need a vocabulary of operations they can invoke programmatically. Typed intents are that vocabulary.
+- **Compile-time exhaustiveness.** `#[derive(IntentKind)]` on the enum produces a variant list; ancestor `Action`s opt in to the subset they care about via `Action::new("id")`. A new variant is guaranteed to be either handled or visibly unhandled.
+- **Rebindable keystrokes.** `ShortcutRegistry` maps keystrokes to intent names, with two-layer defaults + user overrides. Because the shortcut fires an intent (not a closure), rebinding Ctrl+S to Ctrl+Alt+S requires no change to the widget tree — the `Action` listening for `"app.save"` is the same either way.
 
-**Central command routing.** The application has one place that lists every operation it can perform — the exhaustive `match` in `on_command`. Adding a cross-cutting concern (logging every action, recording for replay, implementing undo, gating actions behind permission checks) requires changing one function, not editing every widget construction site. Reading the handler tells you what the application does.
+#### 9.2.3 What typed intents cost
 
-**Undo and replay.** A typed command is a value: serializable, inspectable, recordable. Recording a sequence of commands gives you an undo log, a replay file for crash reproduction, a macro recorder, or a script export. These are not theoretical features for a writing application or a creative tool — they are core requirements. A closure cannot be recorded, replayed, serialized, or inspected.
+- **Friction during prototyping.** Defining the variant, registering the action, only then writing the behavior is slower than writing click behavior inline. Mature applications don't feel this (the intent set stabilizes); exploratory work does. See §9.2.5 on the escape hatch.
+- **Third-party widget libraries.** A library widget cannot anticipate the host application's intent type. Iced threads a `Message` generic through every widget signature; FernUI's non-generic `Widget` trait (see §28) cannot do that. Library widgets that need to fire application-level behavior have to either take a closure at the boundary (the `.on_activate_fn(...)` escape hatch) or define their own internal intent type that the host translates.
+- **Highly dynamic UIs.** A plugin system where plugins contribute buttons with their own actions cannot have those variants in a central enum at compile time. A scripting console where users type arbitrary run-on-click code has no compile-time vocabulary for "this specific code." See §9.2.5.
+- **Cognitive overhead.** A developer coming from SwiftUI or Compose expects inline `Button(onClick: { doSomething() })`. The typed-intent pattern requires understanding why that's not how this framework works. The documentation has to teach the pattern; code review enforces it.
 
-**Testing.** Tests can simulate user interactions and assert that specific commands were emitted: `assert_eq!(captured_commands, vec![AppCmd::Save, AppCmd::Close])`. This decouples tests from implementation details. The test does not need to know which widget triggered the command, what intermediate state was touched, or how the closure was wired up. It only needs to know what the user did and what command should result.
+For long-lived commercial applications these costs absorb quickly and the benefits compound. For small utilities they may exceed the benefits — FernUI targets the former.
 
-**External automation.** Scripting interfaces, accessibility automation, remote control protocols, and command palettes all need a vocabulary of operations they can invoke programmatically. Typed commands are that vocabulary. A "command palette" feature (the Ctrl+Shift+P pattern from VS Code) requires only iterating over the command enum's variants. Closures cannot be invoked from outside the program that constructed them.
+#### 9.2.4 Local view state is not an intent
 
-**Compile-time exhaustiveness.** Adding a command variant produces compile errors at every handler that does not handle it. This is the same correctness guarantee that Rust's `match` provides for any sum type, applied to the application's operation set.
+The intent pipeline is for *application-level* behavior — operations that affect persistent state, the domain model, or cross-widget coordination. It is not for local view state.
 
-#### 9.2.3 What Typed Commands Cost
+A disclosure triangle's open/closed state is a `Signal<bool>` mutated directly. A character counter binds to the input's signal and recomputes via `signal.map(...)`. A tooltip's delay timer is internal. None of these are intents: they live inside the widget and the application doesn't know or care.
 
-Closures are not free of these benefits — they trade them for a different set of advantages. The honest accounting:
+Rule of thumb: *would the application care if this widget were swapped for a different one with the same purpose?* If yes (save is save, regardless of button or menu item), emit an intent. If no (disclosure triangles are part of the widget), mutate a signal. A checkbox for "show advanced options" is local; a checkbox for a persisted setting is an intent. The framework doesn't decide; the developer does.
 
-**Friction during prototyping.** With a closure, you write the click behavior inline next to the button and iterate. With a typed command, you must define the variant in the enum, add a handler arm, and only then write the behavior. The first hour of trying out a UI idea is slower. Mature applications do not feel this cost (the command set stabilizes), but exploratory work does.
+#### 9.2.5 Escape hatch: `on_activate_fn`
 
-**Difficulty for third-party widget libraries.** A library widget cannot anticipate the host application's command type. Iced solves this by making every widget generic over the message type, which works but spreads generic parameters through every type signature. FernUI's choice of non-generic widgets (Approach B from Section 5) makes this harder — there is no message-type parameter to thread through. A library widget that needs to emit application-specific actions has three options: take a closure (escape hatch, see 9.2.6), take an `Any`-typed payload that the host downcasts, or define its own internal event type and ask the host to translate. None of these are as clean as Iced's approach.
-
-**Highly dynamic UIs.** A plugin system where plugins contribute their own buttons with their own actions cannot have those actions in a central enum at compile time, because the enum cannot list every plugin's variants. A scripting console where the user types arbitrary code that runs on click cannot have a typed command for "run this string." See 9.2.6 for how FernUI handles these cases.
-
-**Cognitive overhead for new contributors.** A developer coming from SwiftUI or Compose expects to write `Button(onClick: { doSomething() })`. The typed-command pattern requires understanding why that is not how this framework works, what to do instead, and where to put the actual logic. The architecture documentation has to teach this pattern, and code review has to enforce it. There is a learning cost.
-
-For an application with the scope of a professional writing tool, an IDE, a digital audio workstation, or an accounting suite, these costs are absorbed quickly and the benefits compound over years. For a small utility or a one-off tool, the costs may exceed the benefits. The framework targets the former.
-
-#### 9.2.4 Local View State Belongs to Signals, Not Commands
-
-The typed-command pattern applies to *application-level* state changes — operations that affect persistent data, mutate the domain model, or coordinate cross-widget behavior. It does not apply to local view state.
-
-A disclosure widget that toggles its open/closed visual state does not emit a command. It owns a `Signal<bool>` and the click handler calls `signal.set(!signal.get())` directly. A character counter that updates as the user types does not emit a command. It binds to the text input's signal and recomputes its display via `signal.map()`. A tooltip delay timer does not emit a command. It manages its own state internally.
-
-The distinction is the same one React draws between `useState` (local component state) and `dispatch` (Redux action that affects the global store). Local view state is owned by Signals on the widget, mutated directly, and never crosses the application command boundary. Application state changes go through commands.
-
-When in doubt, ask: would the application care if this widget were removed and replaced with a different one that has different visual structure but the same purpose? If yes, the relevant interaction emits a command (the application cares about "save was requested," not about whether a button or a menu item triggered it). If no, the interaction is local view state (a disclosure triangle is part of the widget, not part of the application).
-
-This distinction is not always sharp. A checkbox could be local view state (a "show advanced options" toggle) or an application command (a setting that gets persisted). The framework cannot decide for the developer. The rule of thumb is: if mutating a Signal is sufficient and no other part of the application needs to know, it is local. If anything outside the immediate widget needs to react, it is a command.
-
-#### 9.2.5 Parameterizing Commands to Avoid Variant Explosion
-
-A common concern is that typed commands lead to a proliferation of variants — separate `AddTag`, `AddListItem`, `AddTreeNode` commands for what is conceptually one "add" operation. The solution is to parameterize commands with data, not to multiply variants:
+Every activation-firing widget provides a closure-taking variant alongside the intent-taking one:
 
 ```rust
-// Multiplies as collections grow:
-enum AppCmd {
-    AddTag(TagPayload),
-    RemoveTag(TagId),
-    AddListItem(ItemPayload),
-    RemoveListItem(usize),
-    AddTreeNode(NodePayload),
-    RemoveTreeNode(NodeId),
-    // ... 40 more variants for 20 collections
-}
+// Standard path — emits an intent:
+Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save))
 
-// One pair per operation, parameterized by collection identity:
-enum AppCmd {
-    AddItem { collection: CollectionId, item: ItemPayload },
-    RemoveItem { collection: CollectionId, key: ItemKey },
-    // ... rest of the application's operations
-}
+// Plugin button — closure captures plugin-loaded-at-runtime action:
+Button::new(&plugin.label).on_activate_fn({
+    let plugin = plugin.clone();
+    move |ctx| plugin.invoke(ctx)
+})
 ```
 
-The handler matches on the operation, then dispatches by `collection` to the appropriate controller. This keeps the central command-routing pattern while collapsing pairs of variants into single ones. The collection identity is data, not a separate command type. Dynamic command construction in loops is natural:
+Both variants store the same `Box<dyn FnMut(&mut EventContext)>` internally. The `_fn` form documents "this call site has opted out of the typed-intent discipline" — grep for it to audit. Losing the discipline means losing recordability, command-palette discoverability, undo recording, and assertion-based tests *for that specific action*; the other 200 buttons in the application still have them.
 
-```rust
-for tag in tags.iter() {
-    Button::new(&tag.name).on_activate(AppCmd::AddItem {
-        collection: CollectionId::Tags,
-        item: ItemPayload::Tag(tag.id),
-    })
-}
-```
+The canonical form — `.on_activate_fn(|ctx| ctx.send_intent(AppIntent::X))` — is explicit about what it does: produce and send a typed intent. It's slightly more verbose than a magic `.on_activate(AppIntent::X)` would be, but it makes the intent emission visible at the call site and collapses the "one method per interaction shape" combinatorial explosion into a single method-plus-closure.
 
-This pattern scales to applications with hundreds of operations across dozens of collections without the variant count growing past the number of distinct operations.
+#### 9.2.6 Naming: `on_activate`, not `on_click`
 
-#### 9.2.6 Escape Hatch: `on_activate_fn`
-
-Some applications cannot enumerate their command set at compile time. A plugin system where plugins contribute buttons with their own actions cannot list every plugin's actions in the host's command enum. A scripting console where users type arbitrary code that runs on click has no compile-time vocabulary for "this specific code." A third-party widget library cannot anticipate the host application's command type.
-
-For these cases, every action-firing widget provides `on_activate_fn` alongside `on_activate`:
-
-```rust
-impl Button {
-    /// Standard typed command. Recordable, replayable, testable, scriptable.
-    /// The application's command handler dispatches based on the variant.
-    pub fn on_activate<C: AppCommand>(self, command: C) -> Self;
-
-    /// Escape hatch: arbitrary closure invoked on activation. Use only when
-    /// the action cannot be expressed as a typed command — plugin systems,
-    /// scripting consoles, third-party library widgets that cannot know the
-    /// host's command type. Loses recordability, command palette integration,
-    /// undo recording, and assertion-based testing. Document the reason in
-    /// a comment at the call site.
-    pub fn on_activate_fn(self, f: impl FnMut(&mut EventContext) + 'static) -> Self;
-}
-```
-
-The same pair exists on `Link`, `BreadcrumbItem`, and `MenuItem`. Internally both methods store a `Box<dyn FnMut(&mut EventContext)>` — the typed-command path produces a closure that emits the command, the escape-hatch path stores the closure directly. The dispatch code is identical; only the construction differs.
-
-```rust
-// Standard usage — typed command:
-Button::new("Save").on_activate(AppCmd::Save)
-
-// Plugin button — closure escape hatch:
-Button::new(&plugin.label)
-    .on_activate_fn({
-        // Plugin actions are loaded at runtime and cannot appear in AppCmd.
-        // The plugin runtime handles its own logging and undo.
-        let plugin = plugin.clone();
-        move |ctx| plugin.invoke(ctx)
-    })
-
-// Scripting console — closure escape hatch:
-Button::new("Run")
-    .on_activate_fn({
-        // The script content is user-typed at runtime.
-        let script = script_text.clone();
-        move |ctx| {
-            let result = scripting_engine.run(&script.get());
-            ctx.emit(AppCmd::ScriptCompleted { result });
-        }
-    })
-```
-
-**Why a method instead of a separate widget type.** A `DynamicButton` would duplicate every line of `Button`'s 650-line implementation — styles, accessibility, focus handling, hover states, keyboard activation, theme integration — for a difference that lives entirely in the action wiring. The user-visible button is identical; only the internal closure storage differs. Encoding that difference in the widget type is a leak: an internal implementation detail surfacing in the public type system without any user-visible distinction. Doubling the widget catalog (`DynamicButton`, `DynamicLink`, `DynamicBreadcrumbItem`, `DynamicMenuItem`) adds maintenance burden for no benefit.
-
-The method name `on_activate_fn` is the signal that the call site has opted out of the typed-command discipline. Code review can flag inappropriate uses by grepping for the method name. The `_fn` suffix is a recognized Rust convention for closure-accepting variants of typed-value methods.
-
-**The discipline is preserved by convention, not by the type system.** A function returning `Vec<Button>` cannot guarantee that no button uses `on_activate_fn`. This is a tradeoff: enforcement happens at code review and through team conventions, not at compile time. For modules that genuinely need type-level enforcement of "no closures here" (some kind of pure-command boundary), the team can wrap `Button` in a newtype that exposes only `on_activate`. This is rare in practice.
-
-**What you lose with `on_activate_fn`.** The same things that the typed-command path gives you in 9.2.2:
-- The action is not a value, so it cannot be recorded for undo, replayed, or serialized.
-- The action is not in the central command enum, so a command palette cannot find it and an automation tool cannot invoke it.
-- Tests cannot assert on emitted commands. They must observe side effects, which is more brittle.
-- Application-wide cross-cutting concerns (logging, telemetry, permission gating) do not see the closure unless the closure explicitly calls into them.
-
-These losses are real. An application that uses `on_activate_fn` for one plugin button still gets all the benefits for the other 200 typed-command buttons. An application that uses `on_activate_fn` for everything has paid the closure cost, by choice, and should use a closure-based framework instead — FernUI is not the right tool for that case.
-
-**Repeated calls.** If both methods are called on the same widget, the last call wins. This is consistent with the rest of the builder API (calling `.label("A").label("B")` produces a button labeled "B"). The action is a single field on the widget; the last setter overwrites the previous.
-
-#### 9.2.7 Method Naming: `on_activate`, not `on_click`
-
-Activation can come from many sources: a pointer click, a keyboard Enter or Space, an accessibility action from a screen reader, a synthetic activation from a parent widget, a hover-then-tap on a touch device. The widget's action fires identically in all cases — there is no way for the handler to distinguish them, and there should not be, because that would let widgets behave differently for keyboard users and screen reader users than for mouse users.
-
-The verb `click` is misleading because it suggests a pointer-specific event. The correct verb is `activate` — the widget is being activated, regardless of how. FernUI uses `on_activate` consistently across `Button`, `Link`, `BreadcrumbItem`, and `MenuItem`. There is no `on_click` method.
+Activation can come from a pointer click, a keyboard Enter / Space, an accessibility action from a screen reader, or a synthetic activation from a parent. The handler fires identically in all cases — there is no way to distinguish them, and there should not be, because that would let widgets behave differently for keyboard and screen-reader users than for mouse users. `click` is misleading; `activate` is correct.
 
 ### 9.3 Focus Management
 
-The tree maintains a `focused_widget: Option<WidgetId>`. Tab/Shift-Tab cycles focus through focusable widgets in tree order (document order). Widgets declare focusability and optional tab index. `FocusPolicy::Scope` allows a composite to act as a single focus unit (the clearable text input pattern — internal buttons respond to clicks but don't participate in tab navigation).
+The tree maintains a single `focused: Option<WidgetId>`. Tab / Shift-Tab cycles focus through widgets whose node has `focusable = true` (set via `.focusable(true)` on the builder or on a `HandlerSet`) in tree order. Explicit `.tab_index(n)` overrides document order.
 
-When dormant subtrees reactivate, focus is restored to the previously focused widget within that subtree.
+Focus carries a **focus origin** — `Keyboard`, `Pointer`, or `Programmatic` — that widgets can observe to paint a focus ring only on keyboard focus by default (Int UI style). `FocusGained` / `FocusLost` events dispatch to the widget via `on_focus(gained: bool, ctx)`.
+
+Programmatic focus transfer is a single call: `ctx.request_focus(id)` from any handler. `first_focusable_descendant(id)` is used by modal openers to land focus on the primary action button. Focus changes synthesize a `ScrollIntoView` event that bubbles to the nearest clipping ancestor so tab-focusing an offscreen widget slides it into view. When dormant subtrees reactivate, focus is restored to the previously focused widget within that subtree.
 
 ### 9.4 Backend Events: Direct Subscription via the EventSource Trait
 
@@ -1195,50 +1015,29 @@ These operations compose: a menu bar Left-arrow handler can dismiss the current 
 
 ## 10. Gesture Recognition
 
-FernUI uses a UIKit-style gesture recognizer model. Gesture recognizers are composable state machines attached to widgets. Each recognizer monitors the raw event stream and emits recognized gestures when patterns complete.
+FernUI uses a UIKit-style gesture recognizer model: composable state machines that monitor the raw pointer event stream and emit recognized gestures when patterns complete. Built-in recognizers include tap, double-tap, triple-tap, long-press, drag, and swipe; pinch and rotation arrive pre-recognized from the OS on desktop (winit's `TouchpadMagnify` / `RotationGesture`). A `GestureArena` arbitrates competing recognizers with cooperative-or-reset semantics.
 
-```rust
-pub trait GestureRecognizer {
-    fn process(&mut self, event: &RawPointerEvent) -> GestureResult;
-    fn reset(&mut self);
-    fn priority(&self) -> u32;
-}
-```
+Recognizers are pure platform-free state machines, trivially unit-testable. In the V1 design, widget authors instantiated them per-widget and plumbed the raw events in by hand. In V2, attaching a handler (`.on_tap(...)`, `.on_long_press(...)`, etc.) auto-wires the relevant recognizer on the node's gesture arena — widget authors never touch recognizer state machines directly.
 
-Built-in recognizers include tap, double-tap, long-press, drag, pinch, and swipe. When multiple recognizers could match the same input (tap vs. drag vs. long-press), they run in parallel with priority-based arbitration. When one commits, the others reset.
-
-On desktop, most trackpad gestures arrive as already-recognized events from the OS (winit's `TouchpadMagnify`, `TouchpadRotate`). The recognizer pipeline becomes essential for touch targets.
-
-Gesture recognizers are pure state machines with no platform dependencies, making them trivially unit-testable.
+Full catalogue, arena rules, and the `DragPhase` / `PinchPhase` / `SwipeDirection` handler signatures live in [`events-and-gestures.md`](events-and-gestures.md) §4.
 
 ---
 
-## 11. Keyboard Shortcuts
+## 11. Actions, Intents, and Shortcuts
 
-> **Historical record.** The initial `ShortcutMap<C: AppCommand>`
-> described below was superseded by the `Shortcut` / `ShortcutRegistry`
-> design (two-layer defaults + per-slot user overrides, graveyard
-> semantics, typed `IntentKind` DTOs, source → root dispatch). The
-> rationale preserved here — interception before widget dispatch,
-> rebindability as first-class data, automatic menu-label refresh —
-> still holds. See [`shortcut-intent-action.md`](shortcut-intent-action.md)
-> for the current API.
+The V1 "Keyboard Shortcuts" section described a `ShortcutMap<C: AppCommand>` — a bidirectional map between key chords and application command variants, consulted during the preview pass, rebindable at runtime. That mechanism is gone; its three-way successor is the **Action / Intent / Shortcut** pipeline in fern-core. The dedicated reference is [`shortcut-intent-action.md`](shortcut-intent-action.md); this section records the "why" for anyone reading top-to-bottom.
 
-### 11.1 The ShortcutMap
+Three concerns were conflated in V1 and are separate layers in V2:
 
-Shortcuts are stored in a `ShortcutMap<C: AppCommand>` — a bidirectional map between `Shortcut` (key + modifiers) and application commands. The map is consulted during the preview (tunneling) pass, before any widget sees the key event.
+1. **The operation the application can perform** is a typed intent — an application-defined enum variant ("save this document," "open file X," "scroll this view by N"). Intents are values: serializable, recordable, replayable, testable. `#[derive(IntentKind)]` wires the enum into a name-keyed DTO bridge. See §9.2 for the rationale behind typed operations generally.
+2. **The handler that reacts to an operation** is an `Action` — a widget-owned, name-keyed callback registered in a widget's `build()`. Actions compose: a button emits an intent; the intent walks source → root; *every* `Action` along the way matching the intent's name fires. An ancestor can intercept with a more specific action; a root can provide the default. `Action::enabled_when(Signal<bool>)` gates activation without tree rebuild.
+3. **The trigger that fires an operation** is a `Shortcut` — a named keystroke (or two) that produces an intent. Users rebind the keystroke; the widget tree doesn't change. `ShortcutRegistry` holds the two-layer defaults + user overrides with graveyard semantics (explicitly-unbound-by-user defaults stay unbound across registry replays). A menu item or tooltip that references a shortcut by id re-renders on rebind via the registry's `version()` signal — no manual wiring.
 
-Shortcuts are data, not code. They are modifiable at runtime (user preferences) and persistable (the application chooses the storage format). When the user remaps a shortcut, the change takes effect immediately — no restart, no widget tree rebuild.
+The three layers buy what V1's single `ShortcutMap` couldn't cleanly express: a shortcut can fire the same intent as a button without any coupling (press Ctrl+S or click the toolbar save button — same code path), an action can be moved up or down the tree to change scope without editing widgets, and shortcut labels on menu items track rebinds without the widget knowing it's bound to a shortcut.
 
-### 11.2 Translatable Display
+Shortcut labels remain translatable and platform-aware — "Ctrl+S" / "⌘S" / "Strg+S" — via a `ShortcutFormatter` hook (still pending implementation as of April 2026; see [`fern-ui-milestones.md`](fern-ui-milestones.md) M7 remaining work). Shortcuts bind to logical keys (character produced), not scancodes, so Ctrl+Z works on AZERTY keyboards where the Z key is physically elsewhere.
 
-Shortcut display strings are locale-aware and platform-aware. A `ShortcutFormatter` in fern-i18n handles the conversion: "Ctrl+S" on Windows/Linux becomes "⌘S" on macOS and "Strg+S" in German. Modifier translations ship with fern-i18n as built-in Fluent entries.
-
-### 11.3 Automatic Menu Integration
-
-`MenuItem` widgets automatically look up their command's shortcut binding in the `ShortcutMap` and display the formatted shortcut string. The developer never writes the shortcut label manually. If the user remaps the shortcut, the menu label updates automatically on the next render pass.
-
-Shortcuts bind to logical keys (the character the key produces), not physical key positions (scancodes). This ensures that "Ctrl+Z" works on AZERTY keyboards where the Z key is in a different physical position.
+Working demo: [`examples/shortcuts_demo`](../examples/shortcuts_demo/src/main.rs).
 
 ---
 
@@ -2039,7 +1838,7 @@ Context menus render as native popup overlays (`OverlayLayer::NativePopup`) beca
 
 **Keyboard navigation within menus.** When a menu is open, Arrow Up and Arrow Down move the highlight between items (skipping separators and disabled items). Arrow Right opens a submenu on the highlighted item. Arrow Left closes the current submenu and returns to the parent menu. Enter activates the highlighted item. Escape closes the topmost menu. Home and End jump to the first and last items. Type-ahead (typing a character) jumps to the next item whose label starts with that character.
 
-**Accessibility.** The menu's AccessKit structure uses `Role::Menu` for the container and `Role::MenuItem` for each item. Submenu triggers declare `HasPopup::Menu`. The anchor widget declares `HasPopup::Menu` when a context menu is attached. Disabled items are marked with the disabled state. Keyboard shortcut labels are included via the `KeyboardShortcut` property, resolved from the `ShortcutMap`.
+**Accessibility.** The menu's AccessKit structure uses `Role::Menu` for the container and `Role::MenuItem` for each item. Submenu triggers declare `HasPopup::Menu`. The anchor widget declares `HasPopup::Menu` when a context menu is attached. Disabled items are marked with the disabled state. Keyboard shortcut labels are included via the `KeyboardShortcut` property, resolved from the `ShortcutRegistry` (see [`shortcut-intent-action.md`](shortcut-intent-action.md)).
 
 ### 13.7 Dropdown (Combobox / Select)
 
@@ -2099,9 +1898,24 @@ Every drag-and-drop operation must have a keyboard-accessible equivalent that em
 
 ## 15. Data Model
 
-### 15.1 Why Data Models Exist
+### 15.1 Why Data Models Are Their Own Crate
 
-Virtualization (a list with 10,000 items cannot instantiate 10,000 widget subtrees), shared data across multiple views, and change notification for incremental updates all require a data model abstraction between the domain layer and the view widgets. FernUI provides two concrete reactive collection types (`ListModel<T>`, `TreeModel<T>`) for the common case, and one trait (`ListDataSource`) for large or external datasets.
+Three things force an abstraction between domain data and view widgets: virtualization (a list with 10,000 items cannot instantiate 10,000 widget subtrees), sharing across multiple views (a sidebar tree and a "Move to…" dialog operating on the same document outline), and change notification for incremental updates (a single item insertion must not rebuild the entire view). FernUI answers all three with reactive collection types in a dedicated crate — `fern-data` — sitting *above* fern-core in the dependency graph.
+
+The separation matters because collections are a higher-level concept than the widget tree. A view-model layer wants to hold domain entities in reactive collections without pulling in the renderer; a test wants to assert on model state without instantiating widgets; a Qleany-style Clean Architecture application wants its domain crate to depend on fern-data without inheriting widget-authoring concerns. Keeping the collection types out of fern-core enforces this separation in the dependency graph, not just by convention.
+
+The crate contains five concrete types and one trait:
+
+- **`ListModel<T>`** — concrete reactive list. `Vec<T>` behind `Rc<RefCell<…>>`. Every mutation method emits a `DataChange` notification after releasing the mutable borrow. Cloneable for shared access.
+- **`ListDataSource` trait** — escape hatch for datasets that don't fit in memory (paged DB cursor, filesystem listing, memory-mapped log). Implementors own the data and emit `DataChange` manually. Not object-safe, not a supertype of `ListModel<T>` — two separate input paths on `ListView`.
+- **`TreeModel<T>`** — concrete reactive tree. SlotMap-backed; `NodeId` handles are stable across mutations. Emits `TreeChange`.
+- **`TreeSlice<T>`** — per-view flattened projection of a `TreeModel`. Owns its own expand/collapse state, so two `TreeView`s sharing a model have independent expansion. Exposes a `version: Signal<u64>` that bumps on each re-flatten.
+- **`SelectionModel`** — `Signal<BTreeSet<usize>>` plus an anchor for Shift+click, in three modes (None / Single / Multi). Consumed by both `ListView` and `TreeView`.
+- **`DataChange` / `TreeChange`** — the notification enums.
+
+The MVVM command flow stays one-way: widget emits a typed intent → ancestor `Action` runs → domain mutation → model notification → widgets repaint. The view never writes directly to the model. See §9.2 for the intent layer and [`shortcut-intent-action.md`](shortcut-intent-action.md) for its surface API.
+
+**Authoritative reference:** [`data-models.md`](data-models.md) covers the full API, worked examples, Repeater-vs-ListView tradeoffs, intra-widget DnD integration, testing patterns, and a worked MVVM diagram. The section below keeps its V1 shape intact for now (the type signatures here predate the actual fern-data crate — the current API is in data-models.md and in [`crates/fern-data/src/`](../crates/fern-data/src/)). The design rationale — why virtualization forces a model abstraction, why the model owns the data and the view owns the view state, why `TreeSlice` is per-view — is what matters.
 
 ### 15.2 ListModel<T>
 
@@ -2280,17 +2094,17 @@ If the consumer needs programmatic control over expand state (expand-all from a 
 
 ### 15.7 MVVM Command Flow
 
-The overall architecture follows MVVM with unidirectional command flow. User interaction produces typed commands that reach Qleany controllers. The domain model emits events through the event hub. The data model receives these events, updates its cached data (via `ListModel` and `TreeModel` mutations), and the reactive binding system propagates the changes to the view.
+The overall architecture follows MVVM with unidirectional flow. User interaction produces typed intents that reach application `Action`s (see §9.2 and [`shortcut-intent-action.md`](shortcut-intent-action.md)). The domain mutation fires, the data model receives the resulting change event, updates its cached collection, and the notification propagates to the view:
 
-```
-User clicks "Delete" -> View emits AppCmd::DeleteProject(id)
-    -> Controller calls use case -> Domain emits ProjectDeleted
-        -> ViewModel calls projects.remove(index)
-            -> ListModel emits DataChange::ItemsRemoved
-                -> ListView removes visible widget, relayouts
+```text
+User clicks "Delete" → Widget fires AppIntent::DeleteProject(id)
+    → Ancestor Action runs → Domain use case executes
+        → ViewModel calls projects.remove(index)
+            → ListModel emits DataChange::ItemsRemoved
+                → ListView removes visible widget, relayouts
 ```
 
-The view never mutates the data model directly in response to user actions — it emits commands. The data model never pushes UI updates directly — it mutates its reactive collections, and the binding system propagates the changes. This is unidirectional data flow.
+The view never mutates the data model directly in response to user actions — it emits intents. The data model never pushes UI updates directly — it mutates its reactive collections, and the notification system propagates the changes. This is unidirectional data flow.
 
 ### 15.8 Qleany Integration — Generated EntityListModel
 
@@ -2322,6 +2136,8 @@ ListView::new(model.items.clone(), |project| {
 ```
 
 When the user selects a workspace in the sidebar, a handler calls `model.parent_id.set(Some(workspace_id))`. The observer inside the model triggers a refetch. The `ListModel` emits `DataChange::Reset`. The ListView rebuilds its visible items.
+
+Nothing in fern-data requires Qleany. Applications using diesel + hand-rolled entities, sqlx, or Kafka-event-driven view-models follow the same shape with their own entity-to-ViewModel transform.
 
 ### 15.9 Model Lifetime and Scope
 
@@ -2500,7 +2316,7 @@ FernUI ships with two built-in themes: `Theme::light_default()` and `Theme::dark
 Custom themes are created either from scratch or by modifying an existing theme using Rust's struct spread syntax:
 
 ```rust
-let skribisto_light = Theme {
+let editor_light = Theme {
     colors: ColorTokens {
         accent: Color::from_hex("#2E7D32"),
         accent_hover: Color::from_hex("#1B5E20"),
@@ -2568,13 +2384,21 @@ Operations that take 5–50ms (too short for a background thread, too long for a
 
 The winit event loop uses `ControlFlow::Wait` — it sleeps when no events are pending and no widgets are dirty. CPU and GPU consumption is near-zero when the user is not interacting.
 
+### 20.5 Animation
+
+FernUI does not ship a separate animation subsystem. Animation is a thin layer over `Signal<f32>`: `signal.animate_to(target, duration, easing)` asks the tree's `AnimationScheduler` to smoothly interpolate the value over time, and any widget bound to the signal re-paints on each tick as the value slides. The scheduler integrates with the frame lifecycle (pause when the window is occluded, rebase on resume, skip offscreen ticks, cancel animations on widget rebuild/destroy), so widgets never own animation lifetime manually.
+
+The design intent is narrow: motion is reserved for a small set of floating transitions — dialog appearance, snackbar slide-in, accordion expansion, toggle thumb motion, indeterminate progress, smooth programmatic scroll. Hover, press, and focus state changes are explicitly *instant* in Int UI's vocabulary; they are expressed as `Signal<Role>` mapped from an interaction signal and resolved per-frame through the theme, not through the animation scheduler. Looping animations respect `ctx.prefers_reduced_motion()`.
+
+Full rationale, API, worked examples, and testing patterns: [`animation.md`](animation.md).
+
 ---
 
 ## 21. Accessibility
 
 ### 21.1 First-Class Integration
 
-AccessKit is integrated at the trait level. Every `Widget` and `CompositeWidget` implementation includes an `accessibility()` method that declares the widget's role, name, state, and available actions. CompositeWidget automatically generates AccessKit nodes from its composed children.
+AccessKit is integrated at the trait level. The unified `Widget` trait includes an `accessibility()` method that declares the widget's role, name, state, and available actions. Widgets that compose children via `build()` automatically contribute AccessKit nodes for each child as part of the arena traversal — the composite itself declares its own identity (e.g. `Role::Group` or `Role::Button`) and its children's nodes sit underneath.
 
 ### 21.2 Structural Guarantees
 
@@ -2590,7 +2414,7 @@ Dormant subtrees produce no AccessKit nodes (screen readers only see active cont
 
 ### 22.1 Architecture: Per-Window Trees with Shared Application State
 
-Each window owns its own independent `WidgetTree`, its own layout pass, its own paint pass, its own `RenderFrame`, and its own wgpu surface. What windows share is application-level context: the theme, the locale, the `ShortcutMap`, the data sources, the command handler, and the Qleany backend. This is the same model used by Qt, SwiftUI, and WPF.
+Each window owns its own independent `WidgetTree`, its own layout pass, its own paint pass, its own `RenderFrame`, and its own wgpu surface. What windows share is application-level context: the theme, the locale, the `ShortcutRegistry`, the data-model handles (`ListModel` / `TreeModel` clones are cheap `Rc` handles), the root widget's registered `Action`s, and any app-scoped backend wiring. This is the same model used by Qt, SwiftUI, and WPF.
 
 This approach requires no changes to `fern-core`'s tree, layout, event dispatch, or rendering logic. A `WidgetTree` remains a single-rooted tree with all existing behavior intact. Multi-window management lives entirely in `fern-app` (window manager, environment broadcast) and `fern-platform` (multi-window event routing, per-window surface management).
 
@@ -2604,7 +2428,7 @@ Window closure is initiated either by the user (clicking the OS close button) or
 
 Winit tags every event with a window ID. The `fern-platform` event loop routes each event to the correct window's `WidgetTree`. Keyboard events go to the active window (the one with OS-level focus). When the user clicks on a different window, the previously active window receives a deactivation event and the newly active window receives an activation event.
 
-Keyboard shortcuts are handled per-window during the preview pass, but the resulting command reaches the shared application command handler. The `ShortcutMap` is shared, so the same shortcuts work in every window.
+Keyboard shortcuts are handled per-window: each window's tree consults the shared `ShortcutRegistry` during dispatch. A shortcut fires in whichever window has focus, emits an intent, and the intent walks source-widget → root inside that window's tree. Cross-window effects go through the intent's handler (which can close a window, open another, or mutate shared data).
 
 ### 22.4 Focus Across Windows
 
@@ -2802,7 +2626,7 @@ The standard application developer depends on a single crate:
 fern-ui = "0.1"
 ```
 
-fern-ui re-exports the public API and controls feature flags. `text`, `i18n`, and `rich-text` are default features (opt-out, not opt-in), because virtually every application needs text rendering, most need translations, and the primary target (Skribisto) requires rich text editing.
+fern-ui re-exports the public API and controls feature flags. `text`, `i18n`, and `rich-text` are default features (opt-out, not opt-in), because the kinds of applications FernUI targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. `TextInput` itself derives from the rich-text widget (see [`fern-ui-milestones.md`](fern-ui-milestones.md) M9), so anything with an editable text field pulls in `rich-text` anyway.
 
 ```toml
 [features]
@@ -2813,13 +2637,13 @@ i18n = ["dep:fern-i18n"]
 rich-text = ["fern-widgets/rich-text"]
 ```
 
-A Skribisto application's dependencies:
+A typical application's dependencies:
 
 ```toml
 [dependencies]
 fern-ui = "0.1"
 text-document = "0.1"    # direct dependency for document model access
-skribisto-core = { path = "../skribisto-core" }
+app-core = { path = "../app-core" }
 ```
 
 The application depends on text-document directly — not through FernUI — for full access to the document model API (highlighter setup, cursor operations, format queries, import/export, document events). The `RichTextEditor` widget accepts a reference to the externally-owned `TextDocument` and renders it; it does not expose text-document's API.
@@ -2830,23 +2654,18 @@ Sub-crates remain independently publishable for advanced users (custom widget au
 
 ## 25. Button — Reference Widget Design
 
-The button serves as the reference implementation exercising most architectural features. It is a `CompositeWidget` composed of primitives.
+The button serves as the reference implementation exercising most architectural features: composition of primitives, interaction state as a `Signal<InteractionState>`, role-based color resolution per visual state, attached handler activation from multiple input paths, AccessKit role and actions. A new widget author implementing their first custom widget should read Button's source alongside this doc.
 
-### 25.1 Composition
+> **V1 (superseded).** The original description below framed Button as a `CompositeWidget` — the two-trait split — with interaction state stored in `RefCell<Option<State<InteractionState>>>` and an `event()` method that matched `PointerEnter` / `PointerLeave` / `PointerDown` / `PointerUp` / `KeyDown`. The V2 Button at [`crates/fern-widgets/src/button.rs`](../crates/fern-widgets/src/button.rs) is about half the size, uses `Signal<InteractionState>` directly, registers attached handlers via `HandlerSet` in `build(&mut self)`, and resolves colors through `Signal<Role>` mapped from the interaction signal (see [`reactive-theme.md`](reactive-theme.md)). Read the file; it's the authoritative exemplar.
 
-A button is composed of a `RectWidget` (background, border, corner radius, shadow), an internal layout container (HStack or VStack depending on icon position), a `TextWidget` (label), and optionally an `IconWidget`. The internal layout direction follows `IconPosition::Leading`/`Trailing`/`Top`/`Bottom`, with Leading/Trailing respecting the locale's `LayoutDirection`.
+### 25.1 What the V1 and V2 versions agree on
 
-### 25.2 Visual States
+- **Composition.** A button is a `RectWidget` (background, border, corner radius) wrapping an internal `HStack` or `VStack` (by `IconPosition`) containing an optional `IconWidget` and a `TextWidget` label. Leading/Trailing positions respect locale `LayoutDirection`.
+- **Visual states.** Five: idle, hovered, pressed, focused, disabled. Each resolves to a different color role. Four styles: Filled, Outlined, Flat, Tonal. Style × state → (background role, border role, text role) resolved at paint time.
+- **Behavior.** Pointer enter/leave/down/up drives interaction state; keyboard Space/Enter triggers activation; cursor is `Pointer` on hover; `TapRecognizer` commits the click.
+- **Accessibility.** `Role::Button`, name from label (resolved via `tr!` / `tr_widget!`), disabled state, actions (`Click`, `Focus`). Focus ring painted only on keyboard focus (origin-aware).
 
-Five visual states: idle, hovered, pressed, focused, disabled. Each state resolves different color tokens from the palette. Four button styles: Filled, Outlined, Flat, Tonal. The combination of state and style determines background, border, and text colors.
-
-### 25.3 Behavior
-
-Pointer events (enter/leave/down/up) drive visual state transitions. Keyboard activation (Space, Enter) triggers the button when focused. A `TapRecognizer` gesture provides the click interaction. The cursor changes to `Pointer` on hover.
-
-### 25.4 Accessibility
-
-Role::Button, name from the label (resolved from TextContent/translation key), disabled state, available actions (Click, Focus). Focus ring rendered when focused via keyboard.
+What changed was only the Rust code that lands these behaviors. The widget is the same from the outside.
 
 ---
 
@@ -2928,7 +2747,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 ### 27.4 Interactive Controls (`fern-widgets/src/`)
 
-**Button** — exists. Non-generic composite with closure-based command erasure (Approach B). Four visual styles (Filled, Outlined, Flat, Tonal), five interaction states (Idle, Hovered, Pressed, Focused, Disabled). Reactive color bindings driven by `State<InteractionState>` and `DerivedState<Color>`. TapRecognizer for pointer interaction. MinSize wrapper for touch target enforcement. Supports optional icon (leading or trailing) via the slot system. Tooltip attachment via builder method. Accessibility: `Role::Button`.
+**Button** ✅ implemented. Non-generic composite using the V2 unified `Widget` trait. Four visual styles (Filled, Outlined, Flat, Tonal), five interaction states (Idle, Hovered, Pressed, Focused, Disabled). Reactive color bindings driven by `Signal<InteractionState>` mapped to `Signal<Role>` (see [`reactive-theme.md`](reactive-theme.md)). Attached `on_tap` handler auto-wires the TapRecognizer. MinSize wrapper for touch target enforcement. Supports optional icon (leading or trailing) via the slot system. Tooltip attachment via builder method. Accessibility: `Role::Button`.
 
 **Checkbox** — new composite. An HStack containing a check box (ZStack of a bordered RectWidget and a checkmark IconWidget) and an optional TextWidget label. Bound to a `Signal<bool>`. Clicking or pressing Space toggles the state. The checkmark icon's visibility is driven by `visible_when` on the `Signal<bool>`. The box's border and background change on hover/press via interaction state bindings, identical to Button's pattern. Accessibility: `Role::CheckBox` with `set_toggled`.
 
@@ -2948,7 +2767,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **MenuList** ✅ implemented (Milestone 4). A vertical container for `MenuItem` and `MenuSeparator` widgets, providing a themed surface (background, border, corner radius) and keyboard navigation (Arrow Up/Down, Enter, Escape). `KeyboardHighlightWrapper` adds a subtle background behind the currently focused item, driven by a shared `focused_index` signal. Used by MenuBar, ContextMenu, and any widget that needs a vertical menu structure.
 
-**MenuItem** ✅ implemented (Milestone 4). A single clickable item in a MenuList. Non-generic, closure-based command erasure (same pattern as Button). Supports icon, label, shortcut label (auto-looked-up from ShortcutMap via `ctx.shortcut_label_for_any()` — the developer never writes the label manually), disabled state, and submenu triggers. Submenu opens after 200ms of hover (providing diagonal movement tolerance across other menu items) and closes after 150ms. Keyboard Enter activates the item and closes the menu stack; Arrow Right opens a submenu; Arrow Left closes the current submenu. Accessibility: `Role::MenuItem` with `set_disabled`, keyboard shortcut in `KeyboardShortcut`, `HasPopup::Menu` for submenu items.
+**MenuItem** ✅ implemented (Milestone 4). A single clickable item in a MenuList. Non-generic, closure-based activation (`.on_activate_fn(|ctx| ctx.send_intent(AppIntent::X))`). Supports icon, label, shortcut label (auto-looked-up from the `ShortcutRegistry` via `MenuItem::for_shortcut("id")` — the developer never writes the label manually, and labels re-render on rebind through the registry's `version()` signal), disabled state, and submenu triggers. Submenu opens after ~200ms of hover (providing diagonal movement tolerance across other menu items) and closes after ~150ms. Keyboard Enter activates the item and closes the menu stack; Arrow Right opens a submenu; Arrow Left closes the current submenu. Accessibility: `Role::MenuItem` with `set_disabled`, keyboard shortcut in `KeyboardShortcut`, `HasPopup::Menu` for submenu items.
 
 **MenuSeparator** ✅ implemented (Milestone 4). A 1px horizontal line with 4px padding top and bottom. Themed via `theme.colors.border` at 0.3 alpha. Accessibility: `Role::Splitter`.
 
@@ -3003,16 +2822,16 @@ These are higher-level widgets built from primitives, providing themed visual fr
 ### 27.10 Text Editing (`fern-widgets/src/`, feature-gated)
 
 > **Note on `AppCommand` in this section.** The API surface below
-> (event callbacks typed as `Fn(...) -> Box<dyn AppCommand>`, typed
-> command enums for editor events) was written against the original
-> command system. The rich text editor has not yet been implemented.
-> When it lands, the equivalent hooks will return `Intent` / use
-> `EventContext::send_intent(AppIntent::X)` so the same intent walks
-> through the source → root dispatch chain as every other widget
-> handler. The information architecture the section describes —
-> constructor-function closures that build a typed DTO from runtime
-> data (URL, image name, undo/redo flags) — carries over verbatim,
-> just with `Intent` in place of `Box<dyn AppCommand>`.
+> (event callbacks typed as `Fn(...) -> Box<dyn AppCommand>`) is from
+> the pre-implementation draft. As of Milestone 8 the rich text editor
+> ships in [`crates/fern-widgets/src/rich_text.rs`](../crates/fern-widgets/src/rich_text.rs)
+> and the equivalent hooks take closures that call
+> `ctx.send_intent(AppIntent::X)`. The *information architecture* the
+> section describes — separate presets for editable vs. read-only,
+> policy bundles covering command filter / caret / accessibility
+> role / clipboard, shared document across widgets, frame-loop bridge
+> from document events to Signals — carries over verbatim, just with
+> `Intent` in place of `Box<dyn AppCommand>`.
 
 This section is longer than other widget catalog entries because the rich text editor is the most architecturally distinctive widget in FernUI. It cannot use ScrollArea, it cannot delegate text layout to TextWidget, and its frame loop has to bridge text-document's deferred event model into FernUI's reactive Signal model. The design below is informed by `godot-rich-text`, a working reference implementation of the same `text-document` + `text-typeset` integration in Godot 4 (~2,100 lines of editor logic, plus a 780-line read-only viewer).
 
@@ -3045,10 +2864,10 @@ let editor = ctx.add(
     RichTextEditor::editor(document.clone(), shared_typesetter.clone())
         .wrap_mode(WrapMode::Word)
         .zoom(1.0)
-        .on_text_changed(AppCmd::DocumentMarkDirty)
-        .on_link_clicked(|href| AppCmd::OpenUrl(href.into()))
-        .on_undo_redo_changed(|can_undo, can_redo| {
-            AppCmd::UpdateUndoButtons { can_undo, can_redo }
+        .on_text_changed(|ctx| ctx.send_intent(AppIntent::DocumentMarkDirty))
+        .on_link_clicked(|href, ctx| ctx.send_intent(AppIntent::OpenUrl(href.into())))
+        .on_undo_redo_changed(|can_undo, can_redo, ctx| {
+            ctx.send_intent(AppIntent::UpdateUndoButtons { can_undo, can_redo })
         })
 );
 
@@ -3057,7 +2876,7 @@ let viewer = ctx.add(
     RichTextEditor::read_only(documentation_doc.clone(), shared_typesetter.clone())
         .wrap_mode(WrapMode::Word)
         .zoom(1.0)
-        .on_link_clicked(|href| AppCmd::OpenDocsUrl(href.into()))
+        .on_link_clicked(|href, ctx| ctx.send_intent(AppIntent::OpenDocsUrl(href.into())))
 );
 ```
 
@@ -3839,6 +3658,8 @@ fern! {
 
 The macro compiles to the builder calls. No runtime overhead, no hidden allocation. Builder and DSL can be mixed — use DSL for tree structure, drop to builder for complex conditional logic. The macro can be added later without changing any widget code because the underlying builder API is the stable target.
 
+**Status.** The `fern!` DSL has since shipped as [`fern-ui-macros`](../crates/fern-ui-macros/) (re-exported from the `fern-ui` umbrella crate as `fern!`). The surface is block-structured with newline-separated body items rather than the property-in-parens sketch above; every construct desugars one-to-one to the V2 builder calls at macro-expansion time — no runtime, no virtual tree. The user-facing reference is [`fern-macro-reference.md`](fern-macro-reference.md) (cheat sheet, limitations, worked translations). The formal grammar, error reporting, and desugaring rules are in [`fern-language-spec-v3.md`](fern-language-spec-v3.md). The widget_catalog example uses both the classic builder form and the `fern!` form side by side in split panes; see [`examples/widget_catalog`](../examples/widget_catalog/).
+
 ### 28.10 Impact Assessment (Post-Migration)
 
 The V2 migration is complete. All widgets use the unified Widget trait and Signal<T> reactivity.
@@ -3870,19 +3691,21 @@ Sections 2 (Layout Model), 3 (Scrolling), 6 (UI Construction Patterns), 8 (Dorma
 
 ---
 
-## 29. Open Questions for Post-First-Milestone
+## 29. Open Questions (Current, April 2026)
 
-The following topics have been identified but not fully designed.
+The bulk of the original post-milestone question list has landed. The short list below is what remains actively open; see [`fern-ui-milestones.md`](fern-ui-milestones.md) for detailed status and the Next-candidates roadmap.
 
-**Text input and IME.** Complete TextInputCore design, IME composition interaction with the overlay system (composition window positioning), CJK input handling.
+**IME composition and CJK input.** The text input widget ships (Milestone 9), but IME composition window positioning, composition-text rendering, and dead-key / CJK input handling still need platform backends in `fern-platform`. The TextInput and RichTextEditor APIs don't change when this lands — the hooks are already in place.
 
-**Selection model.** Single, multi (Ctrl+click), range (Shift+click), and select-all for lists and trees. Selection state location (data source vs. view).
+**Cross-application drag-and-drop.** Intra-app DnD works everywhere (Milestone 6). Dragging between a FernUI window and a file manager or other app requires per-OS backends: `WaylandDragBackend` (wl_data_device), `X11DragBackend` (XDnD), `WindowsDragBackend` (OLE IDataObject / IDropTarget), `MacOsDragBackend` (NSPasteboard / NSDraggingSource). The payload type (`DragPayload`) and the widget-side handler API are stable; what's pending is the platform integration surface.
 
-**Native menu bars.** The application menu bar (File, Edit, View, Help) is a native `NSMenu` on macOS but a widget rendered inside the window on Windows and Linux. FernUI must abstract this platform difference.
+**Native menu bar on macOS + native file dialogs.** The widget-based `MenuBar` (Milestone 4) is correct for Windows and Linux where menu bars live inside the window chrome. On macOS the OS expects menus to live in the global `NSMenu`. The remaining work is a platform abstraction that routes a single declarative menu description through either path. Native file dialogs (via `rfd`) follow the same pattern — async result through `EventLoopProxy`.
 
-**Clipboard.** Copy/paste sharing the MIME-typed payload model with drag-and-drop. Integration with text-document's existing clipboard operations.
+**Virtualized dropdowns.** `ComboBox` and `MenuList` have TODO markers for a `max_visible_items` option that would switch the dropdown to a virtualized `ListView` internally. Not blocking; a cleanup task carrying ~few hundred lines of wiring.
 
-**Widget-level undo.** Text input undo (last few characters) vs. application-level undo (Qleany use case). Coexistence strategy.
+**ShortcutFormatter.** `shortcut.rs` still renders chords as `Ctrl+S` regardless of platform or locale. The design calls for `⌘S` on macOS and translated modifier names (`Strg+S` in German). Scope is a single formatter hook consulted by `MenuItem::for_shortcut(id)` and `TooltipContent::for_shortcut(id)`. Tracked alongside the M7 polish.
+
+**Widget-level vs. application-level undo.** Text input undo (last few typed characters coalesced into one undo step) and application undo (the domain's use-case undo stack) coexist in the rich text editor. The current design keeps them separate and lets the application decide when to promote widget-local undo records into the domain log. The generalization to other widgets — undo for a slider drag, undo for a selection change — has not been designed and may or may not prove necessary.
 
 ---
 
