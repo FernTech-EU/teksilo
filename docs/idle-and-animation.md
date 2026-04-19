@@ -187,3 +187,60 @@ discriminator branch in `shaders/anim_procedural.wgsl` (or
 `anim_sprite.wgsl` for texture-sampling kinds), and update
 `AnimatedQuadRegistry::compute_params` to populate the shared
 `AnimParams` struct from the kind's fields.
+
+## Damage rects — measured, deferred
+
+A natural next optimisation for shader-driven animations would be
+**damage rects**: track per-frame dirty regions, set
+`wgpu::RenderPass::set_scissor_rect` so the GPU only rasterises the
+changed pixels, and pass a damage region to the OS compositor so it
+skips recompositing the rest of the window. Wayland has
+`wl_surface.damage_buffer`; macOS has `CAMetalLayer` dirty rects.
+
+**We measured before committing to this.** With three
+`ProgressBar::indeterminate` on the Animated tab of
+[`examples/animations`](../examples/animations/src/main.rs):
+
+| Metric | Value |
+| --- | --- |
+| CPU (process) | **1.83 %** of one core |
+| GPU delta vs baseline | **+0 pt** (within sysfs `gpu_busy_percent` noise) |
+| Idle / Static tab CPU | **0.00 %** |
+
+Profile breakdown (perf, 8 s window on Animated tab) — the 1.83 %
+is dominated by:
+
+- kernel + amdgpu + vulkan memory allocation via `ioctl` (~3 % of
+  samples) — wgpu's internal staging for
+  `queue.write_buffer(anim_uniforms, 8 KiB)` every frame,
+- `Renderer::render` command encoding (1.28 %),
+- winit event dispatch (0.93 %),
+- miscellaneous one-shot setup (font hinting) that amortises to
+  zero in longer windows.
+
+**None of that is rasterisation time.** Damage rects reduce GPU
+pixel work and compositor recomposite work — neither is on the hot
+path at this scale. Implementing damage rects would require a
+multi-day refactor (persistent swap-chain back buffer, per-widget
+dirty-rect tracking through overlays / clips / DPI changes, per-OS
+compositor integration) for no measurable win on Skribisto-sized
+workloads.
+
+**Revisit when any of these trigger:**
+
+- 60 Hz or 120 Hz looping animations become common (we're 30 Hz).
+- Target display resolution goes 4K / multi-monitor.
+- Many simultaneous animated widgets (dozens of spinners across a
+  dashboard).
+- Battery-sensitive hand-held / laptop deployment where every
+  milliwatt counts.
+- Real workload profiling shows rasterisation or compositor cost
+  exceeding the CPU cost we measured above.
+
+**Cheaper follow-up that would actually help today**: the wgpu
+staging-buffer allocation for the per-frame `queue.write_buffer` is
+the biggest remaining cost. A persistent mapped uniform buffer, or
+writing only the slots that changed since the last tick, would
+directly target the ~3 % kernel-side overhead. Single-file change,
+no architectural lift — the natural next step if the 1.83 % ever
+needs to drop further.
