@@ -28,7 +28,7 @@ use fern_core::widget_id::WidgetId;
 use fern_core::PlatformTitleBarHost;
 use fern_tokens::{Color, TextStyleRole};
 
-use crate::primitives::{Center, FixedSize, HStack, RectWidget, TextWidget, ZStack};
+use crate::primitives::{Center, FixedSize, HStack, RectWidget, Switcher, TextWidget, ZStack};
 use crate::title_bar::CloseAction;
 
 /// Action invoked when a [`ControlButton`] is tapped.
@@ -257,15 +257,15 @@ impl Widget for WindowControls {
 
         let host_min = self.host.clone();
         let host_max = self.host.clone();
-        let host_max_signal = self.is_maximized.clone();
         let host_close = self.host.clone();
         let close_override = self.close_action.clone();
 
         let minimize_action: ControlAction = Rc::new(move |_ctx| host_min.minimize());
-        let maximize_action: ControlAction = Rc::new(move |_ctx| {
-            host_max_signal.set(!host_max_signal.get());
-            host_max.toggle_maximize();
-        });
+        // The host drives the `is_maximized` signal now: `toggle_maximize`
+        // flips the OS state, and the subsequent `WindowEvent::Resized`
+        // dispatches `host.notify_window_resized()` which pushes the new
+        // value onto the signal. Don't speculatively mutate it here.
+        let maximize_action: ControlAction = Rc::new(move |_ctx| host_max.toggle_maximize());
         let close_action: ControlAction = match close_override {
             Some(user_action) => user_action,
             None => Rc::new(move |_ctx| host_close.close()),
@@ -276,27 +276,34 @@ impl Widget for WindowControls {
         // freeze the English string at build time.
         let minimize_name = fern_i18n::tr_widget!(a11y_window_minimize_name()).to_signal();
         let close_name = fern_i18n::tr_widget!(a11y_window_close_name()).to_signal();
-        let maximize_sig = fern_i18n::tr_widget!(a11y_window_maximize_name()).to_signal();
-        let restore_sig = fern_i18n::tr_widget!(a11y_window_restore_name()).to_signal();
-        let maximize_name = self
-            .is_maximized
-            .zip3(&maximize_sig, &restore_sig)
-            .map(|(maxed, max_s, restore_s)| {
-                if *maxed {
-                    restore_s.clone()
-                } else {
-                    max_s.clone()
-                }
-            });
+        let maximize_name = fern_i18n::tr_widget!(a11y_window_maximize_name()).to_signal();
+        let restore_name = fern_i18n::tr_widget!(a11y_window_restore_name()).to_signal();
 
         let minimize = ControlButton::new("\u{2014}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(minimize_action)
             .bind_a11y_name(minimize_name);
-        let maximize = ControlButton::new("\u{25A1}", cell_w, cell_h, fg)
+        // Maximize/restore glyph swap. `□` (U+25A1) when the window is
+        // normal, `❐` (U+2750) when maximized. Wrapping both in a
+        // `Switcher` driven by `is_maximized` keeps the geometry stable
+        // (Switcher lays out all children, shows one) — and the hidden
+        // child's a11y node doesn't reach AT, so each button gets its
+        // own static name rather than a reactive toggle.
+        let switcher_idx = self
+            .is_maximized
+            .map(|b| if *b { 1usize } else { 0usize });
+        let maximize_action_restore = maximize_action.clone();
+        let maximize_normal = ControlButton::new("\u{25A1}", cell_w, cell_h, fg)
             .hover_background(hover_bg)
             .with_action(maximize_action)
             .bind_a11y_name(maximize_name);
+        let maximize_zoomed = ControlButton::new("\u{2750}", cell_w, cell_h, fg)
+            .hover_background(hover_bg)
+            .with_action(maximize_action_restore)
+            .bind_a11y_name(restore_name);
+        let maximize = Switcher::new(switcher_idx)
+            .child(maximize_normal)
+            .child(maximize_zoomed);
         // U+00D7 (Latin-1 ×) instead of U+2715 (Dingbats ✕): the latter
         // is missing from many default Linux sans-serif fonts, leaving the
         // close cell unlabelled. The Latin-1 multiplication sign is in

@@ -93,17 +93,21 @@ fn main() {
                     .add_child(body_id),
             );
 
-            // Wrap in a 6 px resize frame on the 4 edges. WindowFrame
-            // does the layout itself with absolute coordinates, so the
-            // inner content always gets `(window_w - 12, window_h - 12)`
-            // — no fragile spacer chains to maintain.
+            // Wrap in a 6 px resize frame on the 4 edges *only* when the
+            // active host needs the application to drive edge resize. On
+            // macOS the native NSWindow frame still services edges even
+            // with `titlebarAppearsTransparent + fullSizeContentView`, so
+            // `needs_custom_resize_handles()` returns false and we skip
+            // the overlay — otherwise our strips would fight the OS.
             //
-            // On platforms where the host is None (Windows / macOS stub
-            // backends, X11) the frame can't be created either; we just
-            // return the inner content uncovered.
+            // On platforms where the host is None (X11, unsupported
+            // Unix) the frame can't be created either; we just return
+            // the inner content uncovered.
             match tree.title_bar_host() {
-                Some(host) => tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner)),
-                None => inner,
+                Some(host) if host.needs_custom_resize_handles() => {
+                    tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner))
+                }
+                _ => inner,
             }
         })
         .run();

@@ -7,8 +7,11 @@
 //! tree.
 
 use std::fmt;
+use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size};
+
+use crate::Signal;
 
 /// Capabilities the title bar widget needs from the windowing layer.
 pub trait PlatformTitleBarHost {
@@ -25,6 +28,12 @@ pub trait PlatformTitleBarHost {
     /// buttons. `true` on Windows and Wayland; `false` on macOS where the OS
     /// draws the traffic lights.
     fn renders_custom_controls(&self) -> bool;
+
+    /// Whether the application should install a [`WindowFrame`]-style overlay
+    /// with invisible edge / corner resize strips. `true` on Windows and
+    /// Wayland where the client draws the entire frame; `false` on macOS
+    /// where the native `NSWindow` frame still services edge resize.
+    fn needs_custom_resize_handles(&self) -> bool;
 
     /// Begin an interactive window move. Called on left-press inside a drag
     /// region. The OS takes over until the user releases the button.
@@ -43,12 +52,61 @@ pub trait PlatformTitleBarHost {
     fn close(&self);
     fn is_maximized(&self) -> bool;
 
+    /// Reactive view of the OS's current maximize state. Created by the host
+    /// at construction and refreshed from [`notify_window_resized`]. Consumed
+    /// by `TitleBar` / `WindowControls` for the maximize-vs-restore glyph
+    /// swap, so OS-initiated maximize (green-light zoom, drag-to-top-snap)
+    /// stays in sync with button rendering.
+    fn is_maximized_signal(&self) -> Signal<bool>;
+
+    /// Called from `WindowManager` on every `WindowEvent::Resized`. Default
+    /// implementation refreshes [`is_maximized_signal`] from
+    /// [`is_maximized`]. Platform hosts may override to reposition native
+    /// chrome (e.g. macOS traffic lights when the title bar height differs
+    /// from the OS default).
+    fn notify_window_resized(&self) {
+        let signal = self.is_maximized_signal();
+        let current = self.is_maximized();
+        if signal.get() != current {
+            signal.set(current);
+        }
+    }
+
     /// Publish the current physical-pixel rectangles of the title bar's
     /// interactive sub-regions. The Windows backend reads these from its
     /// `WM_NCHITTEST` handler each frame; other backends ignore them.
     ///
     /// Called from `TitleBar::paint` on every frame.
     fn update_hit_regions(&self, regions: &HitRegions);
+}
+
+/// Callbacks the window manager hands to a platform host at construction
+/// time. Hosts invoke these for operations that must go through the event
+/// loop, in particular closing a window: winit 0.30 offers no synchronous
+/// `Window::request_close`, so the host posts a user event and the
+/// application routes it to `WindowManager::queue_close` on the next tick.
+#[derive(Clone)]
+pub struct TitleBarHostCallbacks {
+    /// Request that this host's window be closed. The callback boxes a
+    /// `CloseWindowRequest`-style payload onto the event loop; the concrete
+    /// wiring lives in `fern-app`.
+    pub request_close: Rc<dyn Fn()>,
+}
+
+impl TitleBarHostCallbacks {
+    /// Callbacks that do nothing. Useful for tests and for platform stubs
+    /// that never construct a host (e.g. X11).
+    pub fn noop() -> Self {
+        Self {
+            request_close: Rc::new(|| {}),
+        }
+    }
+}
+
+impl fmt::Debug for TitleBarHostCallbacks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TitleBarHostCallbacks").finish_non_exhaustive()
+    }
 }
 
 /// Set of physical-pixel rectangles inside the window client area that the

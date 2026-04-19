@@ -7,17 +7,24 @@
 use std::sync::Arc;
 
 use fern_canvas::{Point, Size};
-use fern_core::{HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge};
+use fern_core::{
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, Signal, TitleBarHostCallbacks,
+};
 use winit::window::Window;
 
 #[allow(dead_code)]
 pub struct WindowsHost {
     window: Arc<Window>,
+    is_max: Signal<bool>,
+    callbacks: TitleBarHostCallbacks,
 }
 
 impl WindowsHost {
     #[allow(dead_code)]
-    pub fn new(_window: Arc<Window>) -> Result<Self, PlatformError> {
+    pub fn new(
+        _window: Arc<Window>,
+        _callbacks: TitleBarHostCallbacks,
+    ) -> Result<Self, PlatformError> {
         Err(PlatformError::Unsupported)
     }
 }
@@ -32,6 +39,9 @@ impl PlatformTitleBarHost for WindowsHost {
     fn renders_custom_controls(&self) -> bool {
         true
     }
+    fn needs_custom_resize_handles(&self) -> bool {
+        true
+    }
     fn begin_drag(&self) -> Result<(), PlatformError> {
         Err(PlatformError::Unsupported)
     }
@@ -43,9 +53,14 @@ impl PlatformTitleBarHost for WindowsHost {
     }
     fn minimize(&self) {}
     fn toggle_maximize(&self) {}
-    fn close(&self) {}
+    fn close(&self) {
+        (self.callbacks.request_close)();
+    }
     fn is_maximized(&self) -> bool {
         false
+    }
+    fn is_maximized_signal(&self) -> Signal<bool> {
+        self.is_max.clone()
     }
     fn update_hit_regions(&self, _regions: &HitRegions) {}
 }

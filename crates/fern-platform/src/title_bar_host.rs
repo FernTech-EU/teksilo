@@ -10,7 +10,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use fern_core::{PlatformError, PlatformTitleBarHost};
+use fern_core::{PlatformError, PlatformTitleBarHost, TitleBarHostCallbacks};
 use winit::window::Window;
 
 mod macos;
@@ -30,27 +30,31 @@ pub use x11::X11Host;
 ///
 /// The host borrows an `Arc` clone of the window so it can keep calling
 /// winit (`drag_window`, `set_minimized`, ...) for the lifetime of the
-/// title bar widget.
+/// title bar widget. `callbacks` carries closures that route operations
+/// which must hop through the event loop (currently just `close`) back
+/// to `WindowManager` — see [`TitleBarHostCallbacks`].
 pub fn create_title_bar_host(
     window: Arc<Window>,
+    callbacks: TitleBarHostCallbacks,
 ) -> Result<Rc<dyn PlatformTitleBarHost>, PlatformError> {
     #[cfg(target_os = "windows")]
     {
-        return WindowsHost::new(window).map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>);
+        return WindowsHost::new(window, callbacks)
+            .map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>);
     }
 
     #[cfg(target_os = "macos")]
     {
-        return MacOsHost::new(window).map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>);
+        return MacOsHost::new(window, callbacks)
+            .map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>);
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         use crate::window_system::{WindowSystem, active_window_system};
         match active_window_system() {
-            WindowSystem::Wayland => {
-                WaylandHost::new(window).map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>)
-            }
+            WindowSystem::Wayland => WaylandHost::new(window, callbacks)
+                .map(|h| Rc::new(h) as Rc<dyn PlatformTitleBarHost>),
             WindowSystem::X11 => {
                 eprintln!(
                     "fern-platform: custom TitleBar is not supported on X11; \
@@ -70,7 +74,7 @@ pub fn create_title_bar_host(
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
     {
-        let _ = window;
+        let _ = (window, callbacks);
         Err(PlatformError::Unsupported)
     }
 }

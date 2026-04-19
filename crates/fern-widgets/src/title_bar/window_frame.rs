@@ -283,13 +283,23 @@ impl Widget for WindowFrame {
 mod tests {
     use super::*;
     use fern_canvas::Point;
+    use fern_core::Signal;
     use fern_core::widget_tree::WidgetTree;
     use fern_core::{HitRegions, PlatformError};
     use std::cell::Cell;
 
-    #[derive(Default)]
     struct TestHost {
         last_resize_edge: Cell<Option<ResizeEdge>>,
+        is_max: Signal<bool>,
+    }
+
+    impl Default for TestHost {
+        fn default() -> Self {
+            Self {
+                last_resize_edge: Cell::new(None),
+                is_max: Signal::new(false),
+            }
+        }
     }
 
     impl PlatformTitleBarHost for TestHost {
@@ -300,6 +310,9 @@ mod tests {
             Size::ZERO
         }
         fn renders_custom_controls(&self) -> bool {
+            true
+        }
+        fn needs_custom_resize_handles(&self) -> bool {
             true
         }
         fn begin_drag(&self) -> Result<(), PlatformError> {
@@ -316,7 +329,10 @@ mod tests {
         fn toggle_maximize(&self) {}
         fn close(&self) {}
         fn is_maximized(&self) -> bool {
-            false
+            self.is_max.get()
+        }
+        fn is_maximized_signal(&self) -> Signal<bool> {
+            self.is_max.clone()
         }
         fn update_hit_regions(&self, _regions: &HitRegions) {}
     }

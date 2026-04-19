@@ -5,17 +5,29 @@
 use std::sync::Arc;
 
 use fern_canvas::{Point, Size};
-use fern_core::{HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge};
+use fern_core::{
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, Signal, TitleBarHostCallbacks,
+};
 use winit::dpi::LogicalPosition;
 use winit::window::{ResizeDirection, Window};
 
 pub struct WaylandHost {
     window: Arc<Window>,
+    is_max: Signal<bool>,
+    callbacks: TitleBarHostCallbacks,
 }
 
 impl WaylandHost {
-    pub fn new(window: Arc<Window>) -> Result<Self, PlatformError> {
-        Ok(Self { window })
+    pub fn new(
+        window: Arc<Window>,
+        callbacks: TitleBarHostCallbacks,
+    ) -> Result<Self, PlatformError> {
+        let is_max = Signal::new(window.is_maximized());
+        Ok(Self {
+            window,
+            is_max,
+            callbacks,
+        })
     }
 }
 
@@ -29,6 +41,12 @@ impl PlatformTitleBarHost for WaylandHost {
     }
 
     fn renders_custom_controls(&self) -> bool {
+        true
+    }
+
+    fn needs_custom_resize_handles(&self) -> bool {
+        // Wayland with `with_decorations(false)` leaves all frame painting
+        // and edge resizing to the client — we install a WindowFrame overlay.
         true
     }
 
@@ -59,19 +77,19 @@ impl PlatformTitleBarHost for WaylandHost {
     }
 
     fn close(&self) {
-        // winit 0.30 has no direct "close window" call; the application
-        // observes `WindowEvent::CloseRequested` and tears down the
-        // `PlatformWindow`. The closest equivalent is to drop the window,
-        // which we cannot do from behind a shared `Arc`. Instead, the
-        // application is expected to wire its title-bar close button
-        // through `TitleBar::close_action`, whose closure receives an
-        // `EventContext` and can call `EventContext::close_window`
-        // directly (or dispatch an `Intent` whose root `Action` does).
-        // Until that wiring exists we leave this as a no-op.
+        // winit 0.30 has no synchronous `Window::request_close`, so we
+        // hop through the application event loop: the callback posts a
+        // `CloseWindowRequest` that `FernAppHandler::user_event` routes
+        // to `WindowManager::queue_close`.
+        (self.callbacks.request_close)();
     }
 
     fn is_maximized(&self) -> bool {
         self.window.is_maximized()
+    }
+
+    fn is_maximized_signal(&self) -> Signal<bool> {
+        self.is_max.clone()
     }
 
     fn update_hit_regions(&self, _regions: &HitRegions) {
