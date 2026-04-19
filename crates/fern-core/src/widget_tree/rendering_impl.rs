@@ -13,7 +13,7 @@ impl WidgetTree {
     /// re-painted; clean widgets reuse their cached paint output.
     /// Also caches the full assembled frame — if no widget needs painting,
     /// the previous frame is returned immediately.
-    pub fn render(&mut self) -> RenderFrame {
+    pub fn render(&mut self) -> std::rc::Rc<RenderFrame> {
         self.process_state_changes();
 
         // Always tick the animated-quad registry — even on the cache-hit
@@ -23,15 +23,17 @@ impl WidgetTree {
         // their last DrawCommand::AnimatedQuad in the cached frame;
         // the renderer reads the live params from `frame.anim_params`
         // at the slot index stored in the draw command.
-        let anim_params: Vec<fern_canvas::AnimParams> = self
-            .animated_quads
-            .tick(
-                std::time::Instant::now(),
-                &self.arena,
-                self.paint_epoch,
-                &self.theme,
-            )
-            .to_vec();
+        //
+        // The registry's internal `scratch` buffer owns the params; we
+        // only copy when actually writing them into the frame (below).
+        // Taking a borrow here lets us skip the copy entirely in the
+        // non-cache-hit branch where we allocate a fresh frame anyway.
+        let now = std::time::Instant::now();
+        let has_animations = self.animated_quads.has_running();
+        if has_animations {
+            self.animated_quads
+                .tick(now, &self.arena, self.paint_epoch, &self.theme);
+        }
 
         // Cache-hit short-circuit: nothing in the tree was marked
         // needs_paint, so the pixels are identical to the previous
@@ -39,18 +41,28 @@ impl WidgetTree {
         // do NOT bump `paint_epoch` here — if we did, every widget's
         // `last_painted_epoch` would silently age out and the animation
         // scheduler would treat them as "off-screen" on the next tick.
-        // Holding the epoch steady preserves the
-        // `last_painted_epoch + 1 >= paint_epoch` visibility gate
+        // Holding the epoch steady preserves the visibility gate
         // through arbitrarily many idle cache-hit frames. The fresh
         // `anim_params` we just computed are attached so shader-driven
         // animations keep advancing even when paint() doesn't run.
+        //
+        // `Rc::make_mut` short-circuits to a mutable borrow when the
+        // tree is the sole owner of the cached frame — which is the
+        // common case, since the app-side caller typically drops the
+        // previous frame before calling `render()` again. If the
+        // caller holds a second Rc clone (e.g. two back-to-back
+        // renders without letting the first drop) we fall back to a
+        // single deep clone for that frame.
         if !self.arena.any_needs_paint()
-            && let Some(ref cached) = self.cached_frame
+            && let Some(cached) = self.cached_frame.as_mut()
         {
-            let mut frame = cached.clone();
-            frame.anim_params = anim_params.clone();
-            self.cached_frame = Some(frame.clone());
-            return frame;
+            let frame = std::rc::Rc::make_mut(cached);
+            if has_animations {
+                let src = self.animated_quads.scratch_slice();
+                frame.anim_params.clear();
+                frame.anim_params.extend_from_slice(src);
+            }
+            return std::rc::Rc::clone(cached);
         }
 
         self.paint_epoch = self.paint_epoch.saturating_add(1);
@@ -97,10 +109,15 @@ impl WidgetTree {
             }
         }
 
-        frame.anim_params = anim_params;
+        if has_animations {
+            frame
+                .anim_params
+                .extend_from_slice(self.animated_quads.scratch_slice());
+        }
         frame.debug_validate_stacks();
-        self.cached_frame = Some(frame.clone());
-        frame
+        let rc = std::rc::Rc::new(frame);
+        self.cached_frame = Some(std::rc::Rc::clone(&rc));
+        rc
     }
 }
 

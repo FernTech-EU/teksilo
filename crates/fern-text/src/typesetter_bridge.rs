@@ -255,11 +255,25 @@ impl TypesetterBridge {
         let rich_dirty = self.rich_text_atlas_dirty;
         self.rich_text_atlas_dirty = false;
         self.had_text_activity = false;
+        let dirty = snapshot.dirty || rich_dirty;
+        // Only copy the atlas pixels when the renderer is actually
+        // going to upload them. Callers consult `dirty` first and
+        // skip `upload_atlas` otherwise — so a clean-atlas frame no
+        // longer pays for a ~1 MB memcpy (512×512×4 or larger).
+        // Profiling the animations example showed this clone
+        // dominating self-time at ~6 % during shader-driven
+        // animations, purely because it ran at the ~30 Hz frame
+        // rate even though nothing in the atlas had changed.
+        let pixels = if dirty {
+            snapshot.pixels.to_vec()
+        } else {
+            Vec::new()
+        };
         AtlasInfo {
-            dirty: snapshot.dirty || rich_dirty,
+            dirty,
             width: snapshot.width,
             height: snapshot.height,
-            pixels: snapshot.pixels.to_vec(),
+            pixels,
             glyphs_evicted: snapshot.glyphs_evicted,
         }
     }

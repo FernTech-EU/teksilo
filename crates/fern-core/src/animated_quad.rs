@@ -259,6 +259,17 @@ impl AnimatedQuadRegistry {
         self.scratch.len()
     }
 
+    /// Borrow the params buffer populated by the most recent
+    /// [`Self::tick`]. Used by `WidgetTree::render` to copy fresh
+    /// values into the outgoing `RenderFrame` without allocating an
+    /// intermediate `Vec`. Slots that were skipped on the last tick
+    /// (offscreen / paused) keep their previous values — the fragment
+    /// shader still draws them, just with a stale phase that the next
+    /// tick will overwrite.
+    pub fn scratch_slice(&self) -> &[AnimParams] {
+        &self.scratch
+    }
+
     /// Compute fresh [`AnimParams`] for every live slot and return a
     /// `&[AnimParams]` indexed by slot. Slots whose widget is dormant,
     /// offscreen, or whose window is inactive keep their previous

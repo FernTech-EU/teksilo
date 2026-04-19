@@ -127,7 +127,13 @@ pub struct WidgetTree {
     /// can't be decoded back to a WidgetId by value alone.
     pub(crate) synthetic_parent_map: std::collections::HashMap<accesskit::NodeId, WidgetId>,
     /// Cached full render frame — reused when no widget needs painting.
-    cached_frame: Option<RenderFrame>,
+    /// `Rc<RenderFrame>` rather than `RenderFrame` so cache-hit frames
+    /// cost an atomic refcount bump instead of a deep clone of every
+    /// draw-command Vec. `render()` uses `Rc::make_mut` to update
+    /// `anim_params` in place when the tree is the sole owner (the
+    /// common case — the caller usually drops the previous frame
+    /// before calling render() again).
+    cached_frame: Option<std::rc::Rc<RenderFrame>>,
     /// Widget that has captured the pointer (receives all PointerMove/PointerUp
     /// regardless of hit-test). Set via `EventContext::capture_pointer()`.
     pointer_captured_by: Option<WidgetId>,
