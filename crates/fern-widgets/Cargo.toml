@@ -35,3 +35,6 @@ fern-text = { workspace = true, optional = true, features = ["rich-text"] }
 # `arboard` through `fern-platform/clipboard`, which is chained in by
 # `fern-app/clipboard` → `fern-ui/clipboard`, not by this feature.
 fern-platform = { workspace = true, optional = true }
+
+[dev-dependencies]
+accesskit_consumer = "0.35.0"

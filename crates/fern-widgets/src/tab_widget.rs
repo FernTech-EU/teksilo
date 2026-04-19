@@ -803,6 +803,9 @@ impl Widget for TabWidget {
 }
 
 #[cfg(test)]
+mod a11y_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use fern_core::event::Modifiers;

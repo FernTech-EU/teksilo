@@ -1029,6 +1029,7 @@ name = "fern-core"
 version = "0.1.0"
 dependencies = [
  "accesskit",
+ "accesskit_consumer",
  "fern-canvas",
  "fern-tokens",
  "serde",
@@ -1158,6 +1159,7 @@ dependencies = [
 name = "fern-widgets"
 version = "0.1.0"
 dependencies = [
+ "accesskit_consumer",
  "fern-canvas",
  "fern-core",
  "fern-data",

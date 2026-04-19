@@ -33,17 +33,37 @@ impl WidgetTree {
         let mut nodes: Vec<(accesskit::NodeId, accesskit::Node)> = Vec::new();
         let mut synthetic_parents: std::collections::HashMap<accesskit::NodeId, WidgetId> =
             std::collections::HashMap::new();
+        // Global deduplication: AccessKit's consumer panics if the same child
+        // NodeId appears in more than one node's children list across a TreeUpdate.
+        // Track which widget first claimed each child so we can skip duplicates
+        // and emit a diagnostic pointing at the two conflicting parents.
+        let mut seen_children: std::collections::HashMap<accesskit::NodeId, WidgetId> =
+            std::collections::HashMap::new();
 
         let mut root = accesskit::Node::new(accesskit::Role::Window);
         for &root_id in &roots {
             if self.arena.is_active(root_id) {
-                root.push_child(widget_id_to_node_id(root_id));
+                let child_nid = widget_id_to_node_id(root_id);
+                if seen_children.insert(child_nid, root_id).is_none() {
+                    root.push_child(child_nid);
+                } else {
+                    eprintln!(
+                        "FernUI bug: duplicate accessibility child {:?} in Window root — \
+                         already claimed by another parent. Please file a bug report.",
+                        root_id
+                    );
+                }
             }
         }
         nodes.push((root_node_id(), root));
 
         for &root_id in &roots {
-            self.build_accessibility_recursive(root_id, &mut nodes, &mut synthetic_parents);
+            self.build_accessibility_recursive(
+                root_id,
+                &mut nodes,
+                &mut synthetic_parents,
+                &mut seen_children,
+            );
         }
 
         let focus = self
@@ -51,6 +71,35 @@ impl WidgetTree {
             .filter(|id| self.arena.is_active(*id))
             .map(widget_id_to_node_id)
             .unwrap_or_else(root_node_id);
+
+        // Strip relationship targets (controls, described_by) that reference
+        // NodeIds absent from the emitted tree. Dormant widgets (e.g. inactive
+        // tab panels) are excluded from the TreeUpdate; if a node still holds a
+        // `push_controlled` or `push_described_by` reference to one of them,
+        // accesskit_macos will unwrap() it and panic when VoiceOver follows the
+        // linked_ui_elements attribute.
+        let emitted: std::collections::HashSet<accesskit::NodeId> =
+            nodes.iter().map(|(id, _)| *id).collect();
+        for (_, node) in &mut nodes {
+            let controlled: Vec<_> = node
+                .controls()
+                .iter()
+                .filter(|id| emitted.contains(*id))
+                .copied()
+                .collect();
+            if controlled.len() != node.controls().len() {
+                node.set_controls(controlled);
+            }
+            let described: Vec<_> = node
+                .described_by()
+                .iter()
+                .filter(|id| emitted.contains(*id))
+                .copied()
+                .collect();
+            if described.len() != node.described_by().len() {
+                node.set_described_by(described);
+            }
+        }
 
         (
             accesskit::TreeUpdate {
@@ -77,6 +126,7 @@ impl WidgetTree {
         id: WidgetId,
         nodes: &mut Vec<(accesskit::NodeId, accesskit::Node)>,
         synthetic_parents: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
+        seen_children: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
     ) {
         use crate::accessibility::widget_id_to_node_id;
 
@@ -91,9 +141,18 @@ impl WidgetTree {
         let children = self.arena.children(id);
         for &child_id in children {
             if self.arena.is_active(child_id) {
-                builder
-                    .inner_mut()
-                    .push_child(widget_id_to_node_id(child_id));
+                let child_nid = widget_id_to_node_id(child_id);
+                if let Some(&prior_parent) = seen_children.get(&child_nid) {
+                    eprintln!(
+                        "FernUI bug: duplicate accessibility child {:?}: \
+                         first claimed by parent {:?}, now also claimed by {:?}. \
+                         Please file a bug report.",
+                        child_id, prior_parent, id
+                    );
+                    continue;
+                }
+                seen_children.insert(child_nid, id);
+                builder.inner_mut().push_child(child_nid);
             }
         }
 
@@ -132,7 +191,12 @@ impl WidgetTree {
         }
 
         for &child_id in children {
-            self.build_accessibility_recursive(child_id, nodes, synthetic_parents);
+            self.build_accessibility_recursive(
+                child_id,
+                nodes,
+                synthetic_parents,
+                seen_children,
+            );
         }
     }
 
@@ -155,6 +219,9 @@ impl WidgetTree {
         }
         if !self.arena.is_enabled(id) {
             info = info.with_disabled(true);
+        }
+        if builder.is_hidden() {
+            info = info.with_hidden(true);
         }
         info
     }
@@ -215,8 +282,57 @@ impl WidgetTree {
 }
 
 #[cfg(test)]
+pub(crate) mod test_helpers {
+    /// Feed a `TreeUpdate` into `accesskit_consumer::Tree`, which runs the
+    /// same validation that every platform AT (VoiceOver, NVDA, …) runs on
+    /// activation. Panics on duplicate children, dangling relationship
+    /// targets, orphaned nodes, and invalid focus — turning those runtime
+    /// crashes into CI failures.
+    pub(crate) fn assert_a11y_tree_valid(update: &accesskit::TreeUpdate) {
+        accesskit_consumer::Tree::new(update.clone(), false);
+    }
+
+    /// Assert that every NodeId referenced in `controls()` or
+    /// `described_by()` of any node is present in the tree. This is the
+    /// invariant our post-processing pass enforces; having a test here means
+    /// a future refactor can't silently drop the pass and regress it.
+    pub(crate) fn assert_no_dangling_relationships(update: &accesskit::TreeUpdate) {
+        let emitted: std::collections::HashSet<accesskit::NodeId> =
+            update.nodes.iter().map(|(id, _)| *id).collect();
+        for (parent_id, node) in &update.nodes {
+            for &target in node.controls() {
+                assert!(
+                    emitted.contains(&target),
+                    "node {parent_id:?} has controls() → {target:?} which is absent from the tree"
+                );
+            }
+            for &target in node.described_by() {
+                assert!(
+                    emitted.contains(&target),
+                    "node {parent_id:?} has described_by() → {target:?} which is absent from the tree"
+                );
+            }
+        }
+    }
+
+    /// Return all NodeIds whose role matches `role`.
+    pub(crate) fn nodes_with_role(
+        update: &accesskit::TreeUpdate,
+        role: accesskit::Role,
+    ) -> Vec<accesskit::NodeId> {
+        update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == role)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use super::test_helpers::*;
     use crate::test_widgets::{FillWidget, StackWidget};
 
     #[derive(Debug)]
@@ -309,6 +425,7 @@ mod tests {
         assert_eq!(update.nodes.len(), 3);
         assert_eq!(update.nodes[0].0, accesskit::NodeId(0));
         assert!(update.tree.is_some());
+        assert_a11y_tree_valid(&update);
     }
 
     #[test]
@@ -322,6 +439,7 @@ mod tests {
 
         let update = tree.sync_accessibility();
         assert_eq!(update.nodes.len(), 2);
+        assert_a11y_tree_valid(&update);
     }
 
     #[test]
@@ -334,6 +452,7 @@ mod tests {
         let update = tree.sync_accessibility();
         let expected_focus = crate::accessibility::widget_id_to_node_id(widget);
         assert_eq!(update.focus, expected_focus);
+        assert_a11y_tree_valid(&update);
     }
 
     #[test]
@@ -356,6 +475,7 @@ mod tests {
 
         let child_node_id = crate::accessibility::widget_id_to_node_id(child);
         assert!(parent_node.children().contains(&child_node_id));
+        assert_a11y_tree_valid(&update);
     }
 
     #[test]
@@ -429,5 +549,45 @@ mod tests {
 
         assert_eq!(tree.text_value(widget), Some("75%".to_string()));
         assert_eq!(tree.text_content(widget), Some("Volume".to_string()));
+    }
+
+    #[test]
+    fn sync_accessibility_has_no_duplicate_children() {
+        // Regression test for the AccessKit "duplicate child" crash (VoiceOver/NVDA).
+        // assert_a11y_tree_valid already catches this via the consumer, but the
+        // manual check here provides a more actionable failure message.
+        let mut tree = WidgetTree::new();
+        let grandchild = tree.add(FillWidget::new().label("Grandchild"));
+        let child_a = tree.add(StackWidget::new().add_child(grandchild));
+        let child_b = tree.add(FillWidget::new().label("Sibling"));
+        let _root = tree.add(StackWidget::new().add_child(child_a).add_child(child_b));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let update = tree.sync_accessibility();
+
+        let mut all_children: std::collections::HashMap<accesskit::NodeId, accesskit::NodeId> =
+            std::collections::HashMap::new();
+        for (parent_id, node) in &update.nodes {
+            for &child_id in node.children() {
+                let prev = all_children.insert(child_id, *parent_id);
+                assert!(
+                    prev.is_none(),
+                    "duplicate child NodeId {child_id:?}: claimed by both {prev:?} and {parent_id:?}"
+                );
+            }
+        }
+        assert_a11y_tree_valid(&update);
+    }
+
+    #[test]
+    fn no_dangling_relationships_in_basic_tree() {
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new().label("Child"));
+        let _parent = tree.add(StackWidget::new().add_child(child));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        let update = tree.sync_accessibility();
+        assert_no_dangling_relationships(&update);
+        assert_a11y_tree_valid(&update);
     }
 }
