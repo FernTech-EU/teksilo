@@ -12,9 +12,13 @@
 
 use std::borrow::Cow;
 
-use fern_canvas::{AnimatedIcon, Canvas, Path, PathCommand, Point, Rect, RasterIcon, Size, SizeProposal};
+use fern_canvas::{
+    AnimatedIcon, AnimatedQuadClass, Canvas, Path, PathCommand, Point, RasterIcon, Rect, Size,
+    SizeProposal,
+};
 use fern_canvas::svg::SvgIcon;
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::animated_quad::{AnimatedQuadHandle, AnimatedQuadKind};
 use fern_core::color_prop::ColorProp;
 use fern_core::signal::{Prop, Signal};
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
@@ -44,15 +48,50 @@ enum IconSource {
         upload_pixels: Vec<u8>,
     },
     /// An animated image (animated WebP).
-    /// `frame_upload_pixels` holds pre-computed pixels per frame.
-    /// `frame_signal` is a looping animated Signal<f32> from 0 to frame_count,
-    /// driven by the animation scheduler.
+    /// `frame_upload_pixels` holds pre-computed pixels per frame — used
+    /// by the legacy signal-based path (reduced-motion fallback and
+    /// the static first-frame render). `sprite_atlas` is the shader
+    /// path's pre-packed grid of all frames, built lazily on first
+    /// build() when reduced-motion is off. `anim_handle` is the
+    /// registry slot returned by `ctx.animated_quad` — set in pair
+    /// with `sprite_atlas`, used at paint time.
     Animated {
         name: String,
         icon: AnimatedIcon,
         frame_upload_pixels: Vec<Vec<u8>>,
+        /// Legacy signal-based frame index driver. `Some` only when
+        /// shader pipeline is disabled (reduced-motion, atlas build
+        /// failed, etc.); otherwise frame cycling runs shader-side.
         frame_signal: Option<Signal<f32>>,
+        /// Sprite-atlas state for the shader pipeline. `Some` once
+        /// `build()` has packed the frames into a grid.
+        sprite_atlas: Option<SpriteAtlas>,
+        /// Animated-quad handle returned by `ctx.animated_quad`.
+        /// `Some` only when the shader path is active (paired with
+        /// `sprite_atlas`).
+        anim_handle: Option<AnimatedQuadHandle>,
     },
+}
+
+/// Packed frame-grid for an animated icon, prepared once per mount
+/// and reused across every paint. The renderer uploads the atlas
+/// pixels as a single texture; the shader samples the cell for the
+/// current frame based on `AnimParams::phase` written by the tree.
+#[derive(Debug, Clone)]
+struct SpriteAtlas {
+    /// Unique name under which the atlas is registered with
+    /// `Canvas::ensure_image_registered` / the renderer's
+    /// `ImageManager`.
+    name: String,
+    /// Full atlas pixels in RGBA row-major. `cols × frame_w` wide,
+    /// `rows × frame_h` tall. Owned `Vec<u8>` so the widget can pass
+    /// `Cow::Owned` to `ensure_image_registered` each paint without
+    /// recomputing; uploaded once by the renderer's image manager.
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    cols: u32,
+    rows: u32,
 }
 
 /// A leaf widget that renders an icon from various sources.
@@ -203,7 +242,9 @@ impl IconWidget {
                     name,
                     icon: anim,
                     frame_upload_pixels,
-                    frame_signal: None, // initialized in build()
+                    frame_signal: None,
+                    sprite_atlas: None,
+                    anim_handle: None,
                 },
                 design_size: size,
                 display_size: size,
@@ -262,7 +303,9 @@ impl IconWidget {
                 name,
                 icon: icon.clone(),
                 frame_upload_pixels,
-                frame_signal: None, // initialized in build()
+                frame_signal: None,
+                sprite_atlas: None,
+                anim_handle: None,
             },
             design_size: size,
             display_size: size,
@@ -282,12 +325,23 @@ impl IconWidget {
             IconSource::Raster { icon, upload_pixels, .. } => {
                 *upload_pixels = prepare_pixels(icon, mode);
             }
-            IconSource::Animated { icon, frame_upload_pixels, .. } => {
+            IconSource::Animated {
+                icon,
+                frame_upload_pixels,
+                sprite_atlas,
+                anim_handle,
+                ..
+            } => {
                 *frame_upload_pixels = icon
                     .frames()
                     .iter()
                     .map(|f| prepare_pixels(f, mode))
                     .collect();
+                // Invalidate the atlas — pixels bake the mode
+                // (Tintable pre-applies the alpha mask, FullColor
+                // keeps raw RGBA); the next build() repacks.
+                *sprite_atlas = None;
+                *anim_handle = None;
             }
             IconSource::Path(_) | IconSource::Svg(_) => {}
         }
@@ -453,34 +507,74 @@ impl Widget for IconWidget {
             );
         }
 
-        // For animated icons: create a looping animation signal that
-        // drives frame cycling. Capped at 30 fps. Skipped entirely
-        // under the OS reduced-motion preference — animated icons are
-        // decorative, and staying on the first frame respects the
-        // user's stated motion tolerance while drawing zero CPU/GPU.
-        if let IconSource::Animated { icon, frame_signal, .. } = &mut self.source {
+        // For animated icons: prefer the shader-driven sprite path
+        // (paint() emits ONE AnimatedQuad and doesn't re-run per
+        // frame; the GPU samples the current frame from a packed
+        // atlas). When reduced-motion is on, fall back to the static
+        // first-frame render — no animation scheduled at all.
+        let mode = self.mode;
+        let icon_color = self.color.clone();
+        if let IconSource::Animated {
+            name,
+            icon,
+            frame_upload_pixels,
+            frame_signal,
+            sprite_atlas,
+            anim_handle,
+        } = &mut self.source
+        {
             if ctx.prefers_reduced_motion() {
                 *frame_signal = None;
+                *sprite_atlas = None;
+                *anim_handle = None;
             } else {
-                let signal = ctx.animated_signal(0.0);
-                {
-                    let self_id = ctx.self_id();
-                    let registry = ctx.binding_registry();
-                    signal.bind_to(
-                        self_id,
-                        registry,
-                        fern_core::binding::BindingLevel::RepaintOnly,
-                    );
+                // Pack frames into an atlas once; reuse across rebuilds.
+                if sprite_atlas.is_none() {
+                    *sprite_atlas = build_sprite_atlas(name, icon, frame_upload_pixels);
                 }
-                let frame_count = icon.frame_count() as f32;
-                let period = icon.total_duration();
-                signal.animate_looping(
-                    frame_count,
-                    period,
-                    Easing::Linear,
-                    Some(std::time::Duration::from_millis(33)), // 30fps cap
-                );
-                *frame_signal = Some(signal);
+                if let Some(atlas) = sprite_atlas.as_ref() {
+                    // Tintable icons bake an alpha mask in the pixel
+                    // buffer, so the shader must multiply by the
+                    // widget's color to get the final tint. FullColor
+                    // icons pass pixels through untouched (no tint).
+                    let tint = match mode {
+                        IconMode::Tintable => Some(icon_color),
+                        IconMode::FullColor => None,
+                    };
+                    *anim_handle = Some(ctx.animated_quad(AnimatedQuadKind::SpriteCycle {
+                        image_name: atlas.name.clone(),
+                        frame_count: icon.frame_count() as u32,
+                        cols: atlas.cols,
+                        rows: atlas.rows,
+                        period: icon.total_duration(),
+                        tint,
+                    }));
+                    // Shader drives everything now — drop the legacy
+                    // signal so the scheduler doesn't tick it.
+                    *frame_signal = None;
+                } else {
+                    // Atlas build failed (e.g. zero-size frames);
+                    // fall back to the legacy signal path.
+                    let signal = ctx.animated_signal(0.0);
+                    {
+                        let self_id = ctx.self_id();
+                        let registry = ctx.binding_registry();
+                        signal.bind_to(
+                            self_id,
+                            registry,
+                            fern_core::binding::BindingLevel::RepaintOnly,
+                        );
+                    }
+                    let frame_count = icon.frame_count() as f32;
+                    let period = icon.total_duration();
+                    signal.animate_looping(
+                        frame_count,
+                        period,
+                        Easing::Linear,
+                        Some(std::time::Duration::from_millis(33)),
+                    );
+                    *frame_signal = Some(signal);
+                }
             }
         }
 
@@ -507,8 +601,39 @@ impl Widget for IconWidget {
                 self.paint_raster(bounds, canvas, name, icon.width(), icon.height(), upload_pixels, color);
             }
             IconSource::Animated {
-                name, icon, frame_upload_pixels, frame_signal, ..
+                name,
+                icon,
+                frame_upload_pixels,
+                frame_signal,
+                sprite_atlas,
+                anim_handle,
             } => {
+                // Shader path: one AnimatedQuad — the renderer
+                // samples the packed atlas at the current frame's
+                // cell, driven by per-frame uniforms from the tree.
+                if let (Some(atlas), Some(handle)) = (sprite_atlas, anim_handle) {
+                    // Register the atlas pixels (idempotent — skipped
+                    // if already pending or uploaded this frame).
+                    canvas.ensure_image_registered(
+                        atlas.name.clone(),
+                        atlas.width,
+                        atlas.height,
+                        std::borrow::Cow::Owned(atlas.pixels.clone()),
+                    );
+                    canvas.draw_animated_quad(
+                        bounds,
+                        handle.slot(),
+                        AnimatedQuadClass::Sprite {
+                            image_name: atlas.name.clone(),
+                        },
+                    );
+                    return;
+                }
+                // Legacy path: signal-driven frame index with one
+                // per-frame image registration. Used when
+                // reduced-motion is on (frame_signal is None →
+                // frame 0 shown statically) or when atlas build
+                // failed and we fell back.
                 let idx = frame_signal
                     .as_ref()
                     .map(|s| (s.get() as usize).min(icon.frame_count().saturating_sub(1)))
@@ -524,6 +649,70 @@ impl Widget for IconWidget {
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
         // Icons are typically decorative — the parent widget sets the semantic role.
     }
+}
+
+/// Pack animated-icon frames into a single square-ish sprite atlas.
+/// The returned `SpriteAtlas` carries the packed pixels, grid layout,
+/// and a placeholder handle (`handle.slot() == 0`) that `build()`
+/// overwrites with the real scheduler-issued handle before paint runs.
+///
+/// Frames are laid out row-major: frame index `i` occupies cell
+/// `(i % cols, i / cols)`. Unused tail cells (when `frame_count <
+/// cols * rows`) are left zeroed — the shader clamps the sampled
+/// frame index so it never reads past the last frame.
+///
+/// Returns `None` when the frames have zero dimensions; the caller
+/// falls back to the legacy signal-driven path.
+fn build_sprite_atlas(
+    name: &str,
+    icon: &AnimatedIcon,
+    frame_pixels: &[Vec<u8>],
+) -> Option<SpriteAtlas> {
+    let frames = icon.frames();
+    if frames.is_empty() {
+        return None;
+    }
+    let frame_w = frames[0].width();
+    let frame_h = frames[0].height();
+    if frame_w == 0 || frame_h == 0 {
+        return None;
+    }
+
+    let n = frames.len() as u32;
+    let cols = (n as f32).sqrt().ceil() as u32;
+    let rows = n.div_ceil(cols);
+    let atlas_w = cols * frame_w;
+    let atlas_h = rows * frame_h;
+    let mut pixels = vec![0u8; (atlas_w * atlas_h * 4) as usize];
+
+    for (i, cell) in frame_pixels.iter().enumerate() {
+        let i = i as u32;
+        let col = i % cols;
+        let row = i / cols;
+        let dst_x = col * frame_w;
+        let dst_y = row * frame_h;
+        // Copy row-by-row; source is tightly packed (frame_w × 4 bytes
+        // per row), destination stride is atlas_w × 4.
+        for y in 0..frame_h {
+            let src_start = (y * frame_w * 4) as usize;
+            let src_end = src_start + (frame_w * 4) as usize;
+            if src_end > cell.len() {
+                break; // truncated frame — shouldn't happen, but be defensive
+            }
+            let dst_start = (((dst_y + y) * atlas_w + dst_x) * 4) as usize;
+            let dst_end = dst_start + (frame_w * 4) as usize;
+            pixels[dst_start..dst_end].copy_from_slice(&cell[src_start..src_end]);
+        }
+    }
+
+    Some(SpriteAtlas {
+        name: format!("{name}_sprite_atlas"),
+        pixels,
+        width: atlas_w,
+        height: atlas_h,
+        cols,
+        rows,
+    })
 }
 
 #[cfg(test)]

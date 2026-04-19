@@ -26,12 +26,20 @@ pub struct Renderer {
     /// future Pulse / Shimmer kinds. Binds group 0 to a uniform buffer
     /// holding an array of `AnimParams` (one per slot).
     anim_proc_pipeline: wgpu::RenderPipeline,
-    /// Uniform buffer backing the procedural pipeline's per-slot state.
-    /// Rewritten wholesale at the top of each `render()` from
+    /// Sprite-atlas animated-quad pipeline — frame-cycling for
+    /// `AnimatedQuadKind::SpriteCycle`. Shares the same uniform buffer
+    /// as the procedural pipeline at group 0; group 1 carries the
+    /// per-atlas texture bind group. Reuses the quad_pipeline's
+    /// bind-group layout for group 1, so the bind groups that
+    /// `ImageManager` builds for static images are also usable here
+    /// without a second registration.
+    anim_sprite_pipeline: wgpu::RenderPipeline,
+    /// Uniform buffer backing both animated-quad pipelines' per-slot
+    /// state. Rewritten wholesale at the top of each `render()` from
     /// `frame.anim_params`. Fixed size (`MAX_ANIM_SLOTS * 64 B`); the
     /// tree's registry truncates if it ever exceeds.
     anim_uniform_buffer: wgpu::Buffer,
-    /// Bind group for the procedural pipeline (buffer above, binding 0).
+    /// Bind group for the animated pipelines (group 0 on both).
     anim_uniform_bind_group: wgpu::BindGroup,
     atlas_texture: Option<AtlasTexture>,
     path_atlas: PathAtlas,
@@ -62,8 +70,22 @@ impl Renderer {
         let sdf_pipeline = create_sdf_pipeline(&device, surface_format);
         let quad_pipeline = create_quad_pipeline(&device, surface_format);
         let shadow_pipeline = create_shadow_pipeline(&device, surface_format);
-        let (anim_proc_pipeline, anim_uniform_buffer, anim_uniform_bind_group) =
-            create_anim_proc_pipeline(&device, surface_format);
+        let (
+            anim_proc_pipeline,
+            anim_uniform_buffer,
+            anim_uniform_bind_group,
+            anim_uniform_layout,
+        ) = create_anim_proc_pipeline(&device, surface_format);
+        // Reuse the quad pipeline's texture/sampler layout so bind
+        // groups registered by `ImageManager` for static images work
+        // equally well as the sprite animation's atlas binding.
+        let quad_texture_layout = quad_pipeline.get_bind_group_layout(0);
+        let anim_sprite_pipeline = create_anim_sprite_pipeline(
+            &device,
+            surface_format,
+            &anim_uniform_layout,
+            &quad_texture_layout,
+        );
 
         Self {
             device,
@@ -73,6 +95,7 @@ impl Renderer {
             quad_pipeline,
             shadow_pipeline,
             anim_proc_pipeline,
+            anim_sprite_pipeline,
             anim_uniform_buffer,
             anim_uniform_bind_group,
             atlas_texture: None,
@@ -814,11 +837,6 @@ impl Renderer {
                         let Some(draw) = frame.animated_quads.get(*idx) else {
                             continue;
                         };
-                        // Sprite pipeline lands in Phase C; until then
-                        // only procedural variants draw.
-                        if !matches!(draw.class, fern_canvas::AnimatedQuadClass::Procedural) {
-                            continue;
-                        }
                         // Flush every other pipeline first so painter's
                         // order is preserved across pipeline boundaries.
                         flush_all!(
@@ -839,15 +857,82 @@ impl Renderer {
                             index_binding
                         );
                         quad_source = None;
-                        let verts = AnimQuadVertex::from_animated_quad(draw, scale_factor);
-                        for v in &verts {
-                            let tp = apply_transform_pixel(v.position, &current_transform);
-                            anim_proc_batch.push(AnimQuadVertex {
-                                position: pixel_to_ndc(tp, viewport_width, viewport_height),
-                                uv: v.uv,
-                                slot: v.slot,
-                                _pad: v._pad,
-                            });
+                        match &draw.class {
+                            fern_canvas::AnimatedQuadClass::Procedural => {
+                                let verts =
+                                    AnimQuadVertex::from_animated_quad(draw, scale_factor);
+                                for v in &verts {
+                                    let tp =
+                                        apply_transform_pixel(v.position, &current_transform);
+                                    anim_proc_batch.push(AnimQuadVertex {
+                                        position: pixel_to_ndc(
+                                            tp,
+                                            viewport_width,
+                                            viewport_height,
+                                        ),
+                                        uv: v.uv,
+                                        slot: v.slot,
+                                        _pad: v._pad,
+                                    });
+                                }
+                            }
+                            fern_canvas::AnimatedQuadClass::Sprite { image_name } => {
+                                // Sprite quads need a per-atlas bind
+                                // group, so each draws individually —
+                                // same shape as the static Image path.
+                                // Typical scene has ~1 animated sprite
+                                // icon at a time, so batching is moot.
+                                let Some(atlas_bg) =
+                                    self.image_manager.get_bind_group(image_name)
+                                else {
+                                    continue;
+                                };
+                                let verts =
+                                    AnimQuadVertex::from_animated_quad(draw, scale_factor);
+                                let mut ndc_verts = [AnimQuadVertex {
+                                    position: [0.0; 2],
+                                    uv: [0.0; 2],
+                                    slot: 0,
+                                    _pad: 0,
+                                }; 4];
+                                for (i, v) in verts.iter().enumerate() {
+                                    let tp =
+                                        apply_transform_pixel(v.position, &current_transform);
+                                    ndc_verts[i] = AnimQuadVertex {
+                                        position: pixel_to_ndc(
+                                            tp,
+                                            viewport_width,
+                                            viewport_height,
+                                        ),
+                                        uv: v.uv,
+                                        slot: v.slot,
+                                        _pad: v._pad,
+                                    };
+                                }
+                                let bytes: &[u8] = bytemuck::cast_slice(&ndc_verts);
+                                if let (Some((vb, v_off, v_len)), Some((ib, _, _))) = (
+                                    self.streams.anim_proc.write(&self.queue, bytes),
+                                    index_binding,
+                                ) {
+                                    let index_bytes: u64 = 6 * 2;
+                                    pass.set_pipeline(&self.anim_sprite_pipeline);
+                                    pass.set_bind_group(
+                                        0,
+                                        &self.anim_uniform_bind_group,
+                                        &[],
+                                    );
+                                    pass.set_bind_group(1, atlas_bg, &[]);
+                                    pass.set_vertex_buffer(
+                                        0,
+                                        vb.slice(v_off..v_off + v_len),
+                                    );
+                                    pass.set_index_buffer(
+                                        ib.slice(0..index_bytes),
+                                        wgpu::IndexFormat::Uint16,
+                                    );
+                                    pass.draw_indexed(0..6, 0, 0..1);
+                                }
+                            }
                         }
                     }
                     fern_canvas::DrawCommand::SetBlendMode(mode) => {
@@ -1533,13 +1618,19 @@ fn create_shadow_pipeline(
 }
 
 /// Build the procedural-animation pipeline plus its per-slot uniform
-/// buffer and bind group. The buffer is sized for
-/// [`MAX_ANIM_SLOTS`] × `size_of::<fern_canvas::AnimParams>()`; the
-/// tree's registry truncates writes past that cap (logged in debug).
+/// buffer, bind group, and bind-group layout. The layout is returned
+/// so the sprite pipeline can reuse it as its `group 0`. Buffer is
+/// sized for [`MAX_ANIM_SLOTS`] × `size_of::<fern_canvas::AnimParams>()`;
+/// the tree's registry truncates writes past that cap.
 fn create_anim_proc_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
-) -> (wgpu::RenderPipeline, wgpu::Buffer, wgpu::BindGroup) {
+) -> (
+    wgpu::RenderPipeline,
+    wgpu::Buffer,
+    wgpu::BindGroup,
+    wgpu::BindGroupLayout,
+) {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("anim_procedural_shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("shaders/anim_procedural.wgsl").into()),
@@ -1588,27 +1679,7 @@ fn create_anim_proc_pipeline(
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<AnimQuadVertex>() as u64,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[
-                    wgpu::VertexAttribute {
-                        offset: 0,
-                        shader_location: 0,
-                        format: wgpu::VertexFormat::Float32x2, // position
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 8,
-                        shader_location: 1,
-                        format: wgpu::VertexFormat::Float32x2, // uv
-                    },
-                    wgpu::VertexAttribute {
-                        offset: 16,
-                        shader_location: 2,
-                        format: wgpu::VertexFormat::Uint32, // slot
-                    },
-                ],
-            }],
+            buffers: &[anim_quad_vertex_layout()],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {
@@ -1631,7 +1702,93 @@ fn create_anim_proc_pipeline(
         cache: None,
     });
 
-    (pipeline, anim_uniform_buffer, anim_uniform_bind_group)
+    (
+        pipeline,
+        anim_uniform_buffer,
+        anim_uniform_bind_group,
+        bind_group_layout,
+    )
+}
+
+/// Build the sprite-atlas animation pipeline. Shares group 0 (the
+/// per-slot uniform buffer) with the procedural pipeline; adds group
+/// 1 = sprite atlas texture + sampler, resolved per-draw via
+/// `ImageManager::get_bind_group(image_name)`. Returns the pipeline
+/// and the texture bind-group layout (so `ImageManager` can register
+/// images under the same layout).
+fn create_anim_sprite_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    uniform_layout: &wgpu::BindGroupLayout,
+    texture_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("anim_sprite_shader"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("shaders/anim_sprite.wgsl").into()),
+    });
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("anim_sprite_pipeline_layout"),
+        bind_group_layouts: &[Some(uniform_layout), Some(texture_layout)],
+        immediate_size: 0,
+    });
+
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("anim_sprite_pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[anim_quad_vertex_layout()],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+
+    pipeline
+}
+
+/// Vertex buffer layout shared by both animated-quad pipelines.
+fn anim_quad_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+    const ATTRS: [wgpu::VertexAttribute; 3] = [
+        wgpu::VertexAttribute {
+            offset: 0,
+            shader_location: 0,
+            format: wgpu::VertexFormat::Float32x2,
+        },
+        wgpu::VertexAttribute {
+            offset: 8,
+            shader_location: 1,
+            format: wgpu::VertexFormat::Float32x2,
+        },
+        wgpu::VertexAttribute {
+            offset: 16,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Uint32,
+        },
+    ];
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<AnimQuadVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &ATTRS,
+    }
 }
 
 #[cfg(test)]
