@@ -15,6 +15,7 @@ use fern_platform::PlatformWindow;
 use fern_platform::create_title_bar_host;
 use fern_platform::event_translation::TranslationState;
 use fern_tokens::{ColorTokens, Theme};
+#[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::UserAttentionType;
 use winit::window::WindowLevel;
@@ -164,17 +165,35 @@ impl WindowManager {
 
         if config.modal {
             window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
+        }
 
-            if let Some(parent_id) = config.parent
-                && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
-                && let Some(parent_managed) = self.windows.get(&parent_winit)
-                && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
-            {
-                // Safe: the parent window is managed by the WindowManager and remains
-                // alive for the lifetime of the modal child.
-                window_attrs =
-                    unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
-            }
+        // Parent-window attachment. Independent of the modal flag so
+        // non-modal parented windows (popover-as-window, inspector
+        // palettes, floating tool panels — the coming multi-window
+        // cases) take the same path.
+        //
+        // Non-macOS: winit's builder wires the parent via
+        // `with_parent_window` (Win32 owner, X11 WM_TRANSIENT_FOR,
+        // xdg_toplevel.set_parent) — none of those make the child
+        // visible, so the AccessKit adapter can still be installed
+        // afterwards.
+        //
+        // macOS: skip here and defer to `attach_child_window` after
+        // `PlatformWindow::new_with_a11y`. AppKit's
+        // `-[NSWindow addChildWindow:ordered:]` orders the child
+        // front (making it visible), which would race with the
+        // AccessKit adapter that requires a hidden window at
+        // construction.
+        #[cfg(not(target_os = "macos"))]
+        if let Some(parent_id) = config.parent
+            && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
+            && let Some(parent_managed) = self.windows.get(&parent_winit)
+            && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
+        {
+            // SAFETY: the parent window is managed by the WindowManager
+            // and remains alive for the lifetime of the child.
+            window_attrs =
+                unsafe { window_attrs.with_parent_window(Some(parent_handle.as_raw())) };
         }
 
         let window = target.create_window(window_attrs).unwrap();
@@ -210,7 +229,22 @@ impl WindowManager {
         }
 
         // Create with AccessKit adapter (shows window after adapter is ready)
-        let pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
+        let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
+
+        // macOS-only: the parent-child attach was deferred out of the
+        // winit builder above to avoid the AppKit auto-show that races
+        // with AccessKit adapter creation. Wire it now that the child
+        // is visible.
+        #[cfg(target_os = "macos")]
+        if let Some(parent_id) = config.parent
+            && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
+            && let Some(parent_managed) = self.windows.get(&parent_winit)
+        {
+            fern_platform::attach_child_window(
+                parent_managed.platform_window.window(),
+                pw.window(),
+            );
+        }
 
         if config.modal {
             pw.window().set_window_level(WindowLevel::AlwaysOnTop);
@@ -272,6 +306,22 @@ impl WindowManager {
             if let Some(ref typesetter) = self.typesetter {
                 typesetter.set_scale_factor(scale_factor as f32);
                 tree = tree.with_text_backend(typesetter.as_text_backend());
+
+                // Prime the new window's GPU atlas from the shared
+                // typesetter. The dirty-flag path in `handle_redraw_requested`
+                // only uploads when `atlas_info()` reports pending changes;
+                // a window created after the atlas already contains every
+                // glyph it needs (e.g. reopening a modal with the same
+                // labels) would otherwise render text against an empty
+                // per-window atlas texture.
+                let (w, h, pixels) = {
+                    let bridge = typesetter.bridge().borrow();
+                    let service = bridge.service();
+                    (service.atlas_width(), service.atlas_height(), service.atlas_pixels().to_vec())
+                };
+                if w > 0 && h > 0 {
+                    pw.renderer_mut().upload_atlas(w, h, &pixels);
+                }
             }
         }
 
