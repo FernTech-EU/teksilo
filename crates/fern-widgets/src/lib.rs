@@ -43,6 +43,7 @@ pub mod split_button;
 pub mod split_view;
 pub mod status_bar;
 pub mod tab_widget;
+pub mod tool_box;
 pub mod title_bar;
 pub mod toggle;
 pub mod toolbar;
@@ -97,6 +98,7 @@ pub use split_button::SplitButton;
 pub use split_view::SplitView;
 pub use status_bar::StatusBar;
 pub use tab_widget::{TabItem, TabWidget};
+pub use tool_box::{ToolBox, ToolBoxItem};
 #[cfg(feature = "rich-text")]
 pub use text_input::{TextInput, ValidationState};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};

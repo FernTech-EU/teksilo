@@ -489,6 +489,32 @@ impl Default for AccordionStyle {
     }
 }
 
+/// ToolBox — vertically stacked collapsible sections, one expanded at a time.
+///
+/// Headers are flat (no corner radius per Int UI) and draw a 1 dp accent bar
+/// on the leading edge of the active row. The animation duration and easing
+/// are read from `theme.motion` — ToolBoxStyle only carries layout constants.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ToolBoxStyle {
+    pub header_min_height: f32,
+    pub header_padding_horizontal: f32,
+    pub icon_text_spacing: f32,
+    pub chevron_size: f32,
+    pub indicator_thickness: f32,
+}
+
+impl Default for ToolBoxStyle {
+    fn default() -> Self {
+        Self {
+            header_min_height: 28.0,
+            header_padding_horizontal: 12.0,
+            icon_text_spacing: 8.0,
+            chevron_size: 12.0,
+            indicator_thickness: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BadgeStyle {
     pub padding_horizontal: f32,
@@ -723,6 +749,7 @@ pub struct ComponentStyles {
     pub card: CardStyle,
     pub popover: PopoverStyle,
     pub accordion: AccordionStyle,
+    pub tool_box: ToolBoxStyle,
     pub group_box: GroupBoxStyle,
     pub badge: BadgeStyle,
     pub progress_bar: ProgressBarStyle,

@@ -29,6 +29,7 @@
 //! - Toolbar (compact action bar)
 //! - StatusBar (bottom info bar)
 //! - Accordion (animated expand/collapse)
+//! - ToolBox (vertical exclusive disclosure, Int UI)
 //! - Link (clickable text with underline)
 //! - ScrollArea (wrapping all content)
 //! - SplitView (twin-pane demo)
@@ -43,7 +44,8 @@ use fern_ui::widgets::{
     GroupHeader, HStack, IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem,
     MenuList, MessageBox, MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea,
     SegmentedControl, Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabItem,
-    TabWidget, TextInput, TextWidget, Toggle, Toolbar, TrackSize, VStack, Wrap,
+    TabWidget, TextInput, TextWidget, Toggle, Toolbar, ToolBox, ToolBoxItem, TrackSize, VStack,
+    Wrap,
 };
 use fern_ui::widgets::tooltip::TooltipContent;
 
@@ -80,6 +82,7 @@ struct Signals {
     toggle_disabled_state: Signal<bool>,
     slider_disabled_state: Signal<f32>,
     tabs_selected: Signal<usize>,
+    tool_box_selected: Signal<usize>,
     combo_selected: Signal<Option<String>>,
     visibility_signal: Signal<bool>,
     search_text: Signal<String>,
@@ -107,6 +110,7 @@ impl Signals {
             toggle_disabled_state: ctx.signal(false),
             slider_disabled_state: ctx.signal(30.0_f32),
             tabs_selected: ctx.signal(0_usize),
+            tool_box_selected: ctx.signal(0_usize),
             combo_selected: ctx.signal(None::<String>),
             visibility_signal: ctx.signal(false),
             search_text: ctx.signal(String::new()),
@@ -1320,6 +1324,47 @@ impl WidgetCatalog {
                 .child(
                     Accordion::new_literal("Already expanded", sigs.accordion2_expanded.clone())
                         .content_id(acc_content2),
+                )
+                .child(Divider::new())
+                .child(
+                    TextWidget::new_literal("ToolBox")
+                        .style(TextStyleRole::Small)
+                        .color(TextRole::Secondary),
+                )
+                .child(
+                    ToolBox::new(sigs.tool_box_selected.clone())
+                        .add(
+                            ToolBoxItem::new_literal(
+                                "Outline",
+                                Panel::new().padding(12.0).child(
+                                    VStack::new()
+                                        .spacing(4.0)
+                                        .child(TextWidget::new_literal("Chapter 1"))
+                                        .child(TextWidget::new_literal("Chapter 2"))
+                                        .child(TextWidget::new_literal("Chapter 3")),
+                                ),
+                            )
+                            .leading(IconWidget::chevron_down(14.0))
+                            .trailing(Badge::new_literal("3")),
+                        )
+                        .item_literal(
+                            "Properties",
+                            Panel::new().padding(12.0).child(
+                                VStack::new()
+                                    .spacing(4.0)
+                                    .child(TextWidget::new_literal("Title: Untitled"))
+                                    .child(TextWidget::new_literal("Words: 42 318")),
+                            ),
+                        )
+                        .add(
+                            ToolBoxItem::new_literal(
+                                "Build tasks (disabled)",
+                                Panel::new().padding(12.0).child(
+                                    TextWidget::new_literal("Disabled item — never activates."),
+                                ),
+                            )
+                            .enabled(false),
+                        ),
                 )
                 .child(Divider::new())
                 .child(
@@ -2566,6 +2611,38 @@ impl WidgetCatalog {
                 }
                 Accordion::new_literal("Already expanded", sigs.accordion2_expanded.clone()) {
                     content_id: acc_content2
+                }
+                Divider { }
+                TextWidget::new_literal("ToolBox") {
+                    style: TextStyleRole::Small
+                    color: TextRole::Secondary
+                }
+                let disabled_tool_box_item = ToolBoxItem::new_literal(
+                    "Build tasks (disabled)",
+                    Panel::new().padding(12.0).child(
+                        TextWidget::new_literal("Disabled item — never activates."),
+                    ),
+                )
+                .enabled(false);
+                ToolBox(sigs.tool_box_selected.clone()) {
+                    item_literal: "Outline", Panel {
+                        padding: 12.0
+                        VStack {
+                            spacing: 4.0
+                            TextWidget::new_literal("Chapter 1")
+                            TextWidget::new_literal("Chapter 2")
+                            TextWidget::new_literal("Chapter 3")
+                        }
+                    }
+                    item_literal: "Properties", Panel {
+                        padding: 12.0
+                        VStack {
+                            spacing: 4.0
+                            TextWidget::new_literal("Title: Untitled")
+                            TextWidget::new_literal("Words: 42 318")
+                        }
+                    }
+                    add: disabled_tool_box_item
                 }
                 Divider { }
                 TextWidget::new_literal("GroupBox") {

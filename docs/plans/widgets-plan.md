@@ -111,9 +111,10 @@ and Qt offers them as `QFoo`.
    [Wizard](crates/fern-widgets/src/wizard.rs) would benefit.
 
 10. **ToolBox** — `QToolBox`. Vertically stacked collapsible pages, exactly
-    one expanded at a time. Stricter cousin of Accordion (which allows
-    multiple expanded). Could be a flag on the existing Accordion rather
-    than a new widget.
+    one expanded at a time. **Shipped** as a dedicated widget at
+    [crates/fern-widgets/src/tool_box.rs](crates/fern-widgets/src/tool_box.rs)
+    (not an Accordion flag — the state-ownership and Int UI visual
+    differences ruled that out; see the tool_box plan file for the reasoning).
 
 11. **DialogButtonBox** — `QDialogButtonBox`. Not Qt-only — every mature
     desktop toolkit has the same concept under different names: GTK
