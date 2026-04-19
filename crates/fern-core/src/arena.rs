@@ -30,6 +30,20 @@ pub enum ActivationState {
     Destroyed,
 }
 
+/// Where a `HandlerSet` should land on the node: handlers the widget
+/// attaches to itself (cleared on rebuild) vs handlers attached from
+/// outside (persist across rebuilds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HandlerScope {
+    /// Handlers registered during the widget's own `build()` via
+    /// `BuildContext::apply_self_handlers`.
+    Own,
+    /// Handlers attached externally — at insertion time via
+    /// `WidgetBuilder::on_tap` et al., or by a composing parent's
+    /// `BuildContext::apply_handlers(child_id, ...)`.
+    External,
+}
+
 /// Dirty flags for a widget.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DirtyFlags {
@@ -69,8 +83,18 @@ pub struct WidgetNode {
     pub last_painted_epoch: u64,
 
     // --- V2 fields ---
-    /// Attached event handlers (V2). Checked before widget.event() during dispatch.
+    /// Event handlers the widget attached to itself during its own
+    /// `build()` via `BuildContext::apply_self_handlers`. Cleared on
+    /// rebuild so accumulating `apply_self_handlers` calls across
+    /// rebuilds don't stack N-fold handler chains.
     pub(crate) handlers: EventHandlers,
+    /// Event handlers attached *externally* — either via the
+    /// `WidgetBuilder` chain at the widget's creation site
+    /// (`SomeWidget::new().on_tap(...)`) or by a parent's
+    /// `BuildContext::apply_handlers(child_id, ...)`. These survive
+    /// rebuilds: the widget didn't register them and shouldn't decide
+    /// when they go away.
+    pub(crate) external_handlers: EventHandlers,
     /// Focusable override set via HandlerSet. Takes precedence over widget.is_focusable().
     pub(crate) node_focusable: Option<bool>,
     /// Tab index override set via HandlerSet.
@@ -118,6 +142,18 @@ impl std::fmt::Debug for WidgetNode {
     }
 }
 
+impl WidgetNode {
+    /// Does EITHER handler slot (own or external) have a handler of the
+    /// requested kind? Use this when deciding whether to build a gesture
+    /// arena, mark the node as a drop target, etc.
+    pub(crate) fn any_handler<F>(&self, f: F) -> bool
+    where
+        F: Fn(&EventHandlers) -> bool,
+    {
+        f(&self.handlers) || f(&self.external_handlers)
+    }
+}
+
 /// Flat arena storage for all widgets, using SlotMap for O(1) access.
 pub struct WidgetArena {
     nodes: SlotMap<WidgetId, WidgetNode>,
@@ -162,6 +198,7 @@ impl WidgetArena {
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
+            external_handlers: EventHandlers::new(),
             node_focusable: None,
             node_tab_index: None,
             node_is_spacer: false,
@@ -211,6 +248,7 @@ impl WidgetArena {
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
+            external_handlers: EventHandlers::new(),
             node_focusable: None,
             node_tab_index: None,
             node_is_spacer: false,
@@ -478,16 +516,24 @@ impl WidgetArena {
         }
     }
 
-    /// Apply a `HandlerSet` to an existing node, transferring handlers and metadata.
-    /// Called from `BuildContext::apply_self_handlers()` during `build()`.
+    /// Apply a `HandlerSet` to an existing node, merging handlers and
+    /// transferring node-level metadata (focusable, cursor, clips,
+    /// context menu). The `scope` argument controls whether the
+    /// handlers go into the rebuild-cleared `handlers` slot or the
+    /// persistent `external_handlers` slot.
     pub(crate) fn apply_handler_set(
         &mut self,
         id: WidgetId,
         handler_set: crate::widget_builder::HandlerSet,
+        scope: HandlerScope,
     ) {
         if let Some(node) = self.get_mut(id) {
-            let existing_handlers = std::mem::take(&mut node.handlers);
-            node.handlers = existing_handlers.merge(handler_set.handlers);
+            let target = match scope {
+                HandlerScope::Own => &mut node.handlers,
+                HandlerScope::External => &mut node.external_handlers,
+            };
+            let existing = std::mem::take(target);
+            *target = existing.merge(handler_set.handlers);
             if let Some(focusable) = handler_set.focusable {
                 node.node_focusable = Some(focusable);
             }

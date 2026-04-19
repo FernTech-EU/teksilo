@@ -196,6 +196,15 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         Vec::new()
     }
 
+    /// Downcast hook. Default implementation returns `None`; concrete
+    /// widgets override with `Some(self)` when they want to expose
+    /// their concrete type to test-level introspection or reflection.
+    /// The trait already bounds on `std::any::Any` so concrete types
+    /// satisfy the `'static` requirement.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+
     /// Whether this widget is a flexible spacer (claims remaining space in stacks).
     fn is_spacer(&self) -> bool {
         false

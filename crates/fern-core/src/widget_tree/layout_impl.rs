@@ -63,8 +63,28 @@ impl WidgetTree {
     /// widgets transitioning from dormant → active in the same
     /// layout pass get rebuilt *this* frame rather than the next.
     pub(super) fn process_pending_rebuilds(&mut self) {
+        // Defer rebuilds during the gesture-arena latch window: from
+        // `PointerDown` (which stores the press position in the captured
+        // widget's arena) until either `PointerUp` or the arena fires
+        // `DragStarted`. Rebuilding inside that window would destroy
+        // the arena and the press state with it, so the recognizer would
+        // never fire — the user clicks and nothing happens.
+        //
+        // Once `active_drag` is set, the framework routes PointerMove /
+        // PointerUp via `handle_drag_move` / `handle_drag_drop` keyed
+        // on the `DragSession`, not on the captured widget's arena —
+        // so a mid-drag rebuild (spring-loaded folders, data model
+        // mutations) is safe. Post-rebuild, `revalidate_interaction_state`
+        // clears the now-stale `pointer_captured_by`; subsequent events
+        // hit-test normally and still reach `handle_drag_move`.
+        let defer = self.pointer_captured_by.is_some() && self.active_drag.is_none();
+        if defer {
+            self.revalidate_interaction_state();
+            return;
+        }
         let to_rebuild = self.arena.collect_needs_rebuild();
         if to_rebuild.is_empty() {
+            self.revalidate_interaction_state();
             return;
         }
         for widget_id in to_rebuild {
@@ -95,6 +115,13 @@ impl WidgetTree {
         self.advance_frame_tick(now);
         self.animation_scheduler
             .tick(now, &self.arena, self.paint_epoch);
+
+        // Fire on_drag_tick on the current drop target, if any. Runs once
+        // per layout pass so widgets can implement per-frame behaviours
+        // (viewport-edge auto-scroll, spring-loaded folders) without
+        // depending on pointer events — crucial when the user holds the
+        // cursor still at the edge or over a collapsed branch.
+        self.process_drag_tick();
 
         self.process_state_changes();
         self.process_tooltips_real();

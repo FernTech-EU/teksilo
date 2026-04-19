@@ -76,15 +76,21 @@ pub struct ListView<T: 'static> {
     max_scroll_y: Signal<f32>,
     viewport_ratio_y: Signal<f32>,
 
-    /// Active drop feedback (set by on_drag_hover, read by paint).
-    drop_feedback: Rc<Cell<Option<(f32, f32)>>>, // (y, width) for insertion line
+    /// Active drop feedback (set by on_drag_hover, cleared by on_drag_leave,
+    /// read by paint). Reactive Signal — bound at `RepaintOnly` so any
+    /// `set(...)` call dirties the ListView for repaint automatically.
+    drop_feedback: Signal<Option<(f32, f32)>>, // (y, width) for insertion line
     /// Content width (updated during place_children, used by drag feedback).
     placed_content_width: Rc<Cell<f32>>,
 
     // Set during build
     item_entries: Vec<(usize, WidgetId)>, // (model_index, widget_id)
     scrollbar_id: Option<WidgetId>,
-    viewport_height: Cell<f32>,
+    /// Shared so the on_drag_tick closure sees the current viewport
+    /// height when edge-computing its auto-scroll delta. Plain `Cell<f32>`
+    /// clones by value, which would leave the tick closure reading the
+    /// 600 px default forever.
+    viewport_height: Rc<Cell<f32>>,
 
     /// Stable ID for this ListView instance (used to identify intra-widget reorder).
     model_id: usize,
@@ -130,14 +136,14 @@ impl<T: 'static> ListView<T> {
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
             on_item_drop: None,
-            drop_feedback: Rc::new(Cell::new(None)),
+            drop_feedback: Signal::new(None),
             placed_content_width: Rc::new(Cell::new(0.0)),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
             item_entries: Vec::new(),
             scrollbar_id: None,
-            viewport_height: Cell::new(600.0),
+            viewport_height: Rc::new(Cell::new(600.0)),
         }
     }
 
@@ -216,6 +222,19 @@ impl<T: 'static> ListView<T> {
             self.scroll_y.set(clamped);
         }
     }
+
+    /// Test-only accessor: the reactive drop-feedback signal. `Some((y, w))`
+    /// while a compatible drag hovers, `None` once the drag leaves or ends.
+    #[cfg(test)]
+    pub(crate) fn drop_feedback_signal(&self) -> &Signal<Option<(f32, f32)>> {
+        &self.drop_feedback
+    }
+
+    /// Test-only accessor: the current scroll offset signal.
+    #[cfg(test)]
+    pub(crate) fn scroll_y_signal(&self) -> &Signal<f32> {
+        &self.scroll_y
+    }
 }
 
 impl<T: 'static> std::fmt::Debug for ListView<T> {
@@ -241,6 +260,15 @@ impl<T: 'static> Widget for ListView<T> {
 
         // Register animated signal for smooth scrolling
         ctx.register_animated_signal(&self.scroll_y);
+
+        // Bind drop_feedback at RepaintOnly so `set(...)` calls from
+        // on_drag_hover / on_drag_leave dirty the ListView's paint cache
+        // without triggering a rebuild.
+        self.drop_feedback.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
 
         // --- Observe model changes ---
         let version_for_data = version.clone();
@@ -513,6 +541,42 @@ impl<T: 'static> Widget for ListView<T> {
 
                 false
             });
+
+            // Clear the insertion line whenever the drag leaves this
+            // widget — pointer moves to another target, drop completes,
+            // Escape cancels, or the source is destroyed.
+            let feedback_for_leave = self.drop_feedback.clone();
+            handlers = handlers.on_drag_leave(move |_ctx| {
+                feedback_for_leave.set(None);
+            });
+
+            // Per-frame auto-scroll when the pointer lingers within
+            // 32 px of the viewport top or bottom edge during a drag.
+            // Linear ramp inside the edge zone, capped at ~12 px/frame
+            // so fast-moving fingers still feel responsive but don't
+            // rocket past the content.
+            let scroll_for_tick = self.scroll_y.clone();
+            let max_scroll_for_tick = self.max_scroll_y.clone();
+            let viewport_for_tick = self.viewport_height.clone();
+            handlers = handlers.on_drag_tick(move |pos, _ctx| {
+                const EDGE: f32 = 32.0;
+                const MAX_VELOCITY: f32 = 12.0;
+                let h = viewport_for_tick.get();
+                let above = (EDGE - pos.y).max(0.0);
+                let below = (pos.y - (h - EDGE)).max(0.0);
+                let delta = if above > 0.0 {
+                    -(above / EDGE) * MAX_VELOCITY
+                } else if below > 0.0 {
+                    (below / EDGE) * MAX_VELOCITY
+                } else {
+                    0.0
+                };
+                if delta.abs() > 0.01 {
+                    let max = max_scroll_for_tick.get();
+                    let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);
+                    scroll_for_tick.set(new_y);
+                }
+            });
         }
 
         ctx.apply_self_handlers(handlers);
@@ -560,29 +624,55 @@ impl<T: 'static> Widget for ListView<T> {
                                 } else {
                                     sel_click.select(click_index);
                                 }
-                                fern_core::event::EventResponse::Handled
+                                // Ignored so the gesture arena on this
+                                // widget still sees the PointerDown and
+                                // can arm the DragRecognizer for
+                                // drag-to-reorder alongside selection.
+                                fern_core::event::EventResponse::Ignored
                             }
                             _ => fern_core::event::EventResponse::Ignored,
                         }),
                     );
                 }
 
-                // When reorderable, attach an on_drag handler to start drag
+                // When reorderable, attach an on_drag handler to start drag.
+                // The preview is a fresh copy of the delegate's widget for the
+                // dragged item, wrapped in a sized+raised `DragPreview` so the
+                // floating widget has a stable footprint and reads as "picked
+                // up" against the window surface. Uses
+                // `start_drag_with_preview` so the framework overlays the
+                // preview at the pointer.
                 if reorderable {
                     let drag_index = i;
                     let drag_model_id = model_id;
                     let drag_self_id = self_id;
+                    let delegate_for_preview = self.delegate.clone();
+                    let with_item_for_preview = self.source.with_item_fn.clone();
+                    let item_height_for_preview = self.item_height;
+                    let width_for_preview = self.placed_content_width.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_drag(move |phase, ctx| {
                             if let fern_core::gesture::DragPhase::Started { .. } = phase {
-                                ctx.start_drag(
-                                    drag_self_id,
-                                    DragPayload::typed(ListViewDragData {
-                                        source_index: drag_index,
-                                        source_model_id: drag_model_id,
-                                    }),
-                                );
+                                let payload = DragPayload::typed(ListViewDragData {
+                                    source_index: drag_index,
+                                    source_model_id: drag_model_id,
+                                });
+                                let delegate = delegate_for_preview.clone();
+                                let w = width_for_preview.get().max(120.0);
+                                let h = item_height_for_preview;
+                                let preview_opt = (with_item_for_preview)(drag_index, &|item| {
+                                    Box::new(crate::drag_preview::DragPreview::new(
+                                        w,
+                                        h,
+                                        delegate(drag_index, item, false),
+                                    )) as Box<dyn Widget>
+                                });
+                                if let Some(preview) = preview_opt {
+                                    ctx.start_drag_with_preview(drag_self_id, payload, preview);
+                                } else {
+                                    ctx.start_drag(drag_self_id, payload);
+                                }
                             }
                         }),
                     );
@@ -698,6 +788,10 @@ impl<T: 'static> Widget for ListView<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::List);
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1081,6 +1175,56 @@ mod tests {
     // --- Alt+Arrow reorder test ---
 
     #[test]
+    fn alt_arrow_moves_one_step_per_press_across_rebuilds() {
+        // Regression for the "moves several lines per press" bug: rebuilds
+        // were accumulating on_key handlers via HandlerSet merge semantics,
+        // so the Nth Alt+Arrow press fired the reorder N times. Force a few
+        // rebuilds (by mutating the selection signal) before pressing the
+        // key, then confirm the item moves exactly one position.
+        use fern_core::event::{Key, Modifiers};
+        use fern_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec(vec![10, 20, 30, 40, 50]);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+        let model_clone = model.clone();
+
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model_clone, move |_i, _item, _sel| {
+                Box::new(FixedLeaf(100.0, 30.0))
+            })
+            .item_height(30.0)
+            .selection(sel_clone)
+            .reorderable(true),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Force several rebuilds by toggling the selection a few times.
+        // Each rebuild would previously merge a fresh on_key handler onto the
+        // existing chain.
+        for i in 0..3 {
+            selection.select(i);
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+        }
+
+        selection.select(0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.focus(lv_id);
+        tree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowDown,
+            modifiers: Modifiers::ALT,
+            text: None,
+        });
+
+        // Expect a single swap: [10,20,30,40,50] → [20,10,30,40,50].
+        assert_eq!(model.with_item(0, |v| *v), Some(20));
+        assert_eq!(model.with_item(1, |v| *v), Some(10));
+        assert_eq!(model.with_item(2, |v| *v), Some(30));
+    }
+
+    #[test]
     fn alt_arrow_reorders_item() {
         use fern_core::event::{Key, Modifiers};
         use fern_data::{SelectionMode, SelectionModel};
@@ -1115,5 +1259,473 @@ mod tests {
         // Item 30 should now be at index 3
         assert_eq!(model.with_item(3, |v| *v), Some(30));
         assert_eq!(model.with_item(2, |v| *v), Some(40));
+    }
+
+    // --- Drag-and-drop integration tests ---
+
+    /// Build a reorderable ListView at the tree root with the given values.
+    /// Returns (tree, ListView id, model).
+    fn make_reorderable_list(
+        values: Vec<usize>,
+        item_height: f32,
+    ) -> (WidgetTree, WidgetId, ListModel<usize>) {
+        let model = ListModel::from_vec(values);
+        let model_clone = model.clone();
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model_clone, move |_i, _item, _sel| {
+                Box::new(FixedLeaf(100.0, item_height))
+            })
+            .item_height(item_height)
+            .reorderable(true),
+        );
+        (tree, lv_id, model)
+    }
+
+    /// Run a full drag gesture: PointerDown on source, Move to cross threshold,
+    /// Move to target, Up.
+    fn drag_item(tree: &mut WidgetTree, from: Point, to: Point) {
+        use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: from,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        // Cross drag threshold (default 5px)
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(from.x + 10.0, from.y),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove { position: to });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: to,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    #[test]
+    fn drag_reorders_item_downward() {
+        let (mut tree, lv_id, model) = make_reorderable_list(vec![10, 20, 30, 40, 50], 30.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Source: item 0 (y=0..30, center y=15). Target: between item 3 and 4
+        // (y=120; insertion index = round((120 + 15) / 30) = 4 → after index-shift = 3).
+        let children = tree.children(lv_id);
+        let from = tree.bounds(children[0]).center();
+        let to = Point::new(from.x, 120.0);
+        drag_item(&mut tree, from, to);
+
+        // After move: [20, 30, 40, 10, 50]
+        assert_eq!(model.with_item(0, |v| *v), Some(20));
+        assert_eq!(model.with_item(3, |v| *v), Some(10));
+        assert_eq!(model.with_item(4, |v| *v), Some(50));
+    }
+
+    #[test]
+    fn drag_reorders_item_upward() {
+        let (mut tree, lv_id, model) = make_reorderable_list(vec![10, 20, 30, 40, 50], 30.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Source: item 3 (value 40, y=90..120, center y=105). Target: y=15 (just
+        // below top → insertion index 1).
+        let children = tree.children(lv_id);
+        let from = tree.bounds(children[3]).center();
+        let to = Point::new(from.x, 15.0);
+        drag_item(&mut tree, from, to);
+
+        // After move: [10, 40, 20, 30, 50]
+        assert_eq!(model.with_item(1, |v| *v), Some(40));
+        assert_eq!(model.with_item(2, |v| *v), Some(20));
+        assert_eq!(model.with_item(3, |v| *v), Some(30));
+    }
+
+    #[test]
+    fn drag_emits_items_moved_change() {
+        use fern_data::DataChange;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let (mut tree, lv_id, model) = make_reorderable_list(vec![10, 20, 30, 40, 50], 30.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let moved = Rc::new(Cell::new(None::<(usize, usize)>));
+        let moved_clone = moved.clone();
+        let handle = model.observe_changes(move |change| {
+            if let DataChange::ItemsMoved { from, to, .. } = change {
+                moved_clone.set(Some((*from, *to)));
+            }
+        });
+
+        // Drag item 0 down to index 3
+        let children = tree.children(lv_id);
+        let from = tree.bounds(children[0]).center();
+        let to = Point::new(from.x, 120.0);
+        drag_item(&mut tree, from, to);
+
+        assert_eq!(moved.get(), Some((0, 3)));
+        drop(handle);
+    }
+
+    #[test]
+    fn drag_drop_accounts_for_scroll_offset() {
+        // 20 items, 30px each (total 600px). Scroll by 60px (2 items) so that
+        // item 2 sits at tree y=0.
+        let (mut tree, _lv_id, model) = make_reorderable_list((0..20).collect(), 30.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // The Scroll event only dispatches to the hovered or focused widget.
+        // Move the pointer over the ListView so it becomes hovered.
+        tree.pointer_move(Point::new(50.0, 50.0));
+        tree.dispatch_event(fern_core::event::WidgetEvent::Scroll {
+            delta: fern_core::event::ScrollDelta::Pixels { x: 0.0, y: 60.0 },
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Drag from tree y=15 (center of item 2) down to tree y=120 (middle
+        // of viewport). In the on_drop handler: content_y = 120 + 60 = 180,
+        // target_index = (180 + 15) / 30 = 6. Source index = 2, from < to, so
+        // adjusted_to = 5. move_item(2, 5) gives [0, 1, 3, 4, 5, 2, 6, ...].
+        let from = Point::new(50.0, 15.0);
+        let to = Point::new(50.0, 120.0);
+        drag_item(&mut tree, from, to);
+
+        assert_eq!(
+            model.with_item(5, |v| *v),
+            Some(2),
+            "Item 2 should land at index 5 after drag with scroll offset"
+        );
+        assert_eq!(
+            model.with_item(2, |v| *v),
+            Some(3),
+            "Item 3 should shift up to index 2"
+        );
+    }
+
+    #[test]
+    fn click_selects_item_on_reorderable_list_with_selection() {
+        // Regression — the user reports that after the recent framework
+        // round they can drag but not select. Reproduce the exact combo:
+        // a ListView that is BOTH reorderable and selectable, a simple
+        // click (PointerDown + PointerUp at the same point, no move),
+        // and assert:
+        //   1. the SelectionModel signal updates, AND
+        //   2. a subsequent rebuild re-invokes the delegate with the new
+        //      `selected` flag so the view actually reflects the change.
+        use fern_data::{SelectionMode, SelectionModel};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let model = ListModel::from_vec(vec![10, 20, 30, 40, 50]);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+        let model_clone = model.clone();
+
+        // Record which indices were delegated as `selected=true` on each
+        // build pass so we can assert post-click rebuild.
+        let selected_rebuilds: Rc<std::cell::RefCell<Vec<Vec<usize>>>> =
+            Rc::new(std::cell::RefCell::new(Vec::new()));
+        let current_pass: Rc<Cell<Vec<usize>>> = Rc::new(Cell::new(Vec::new()));
+        let sr = selected_rebuilds.clone();
+        let cp = current_pass.clone();
+
+        let mut tree = WidgetTree::new();
+        let lv_id = tree.add(
+            ListView::new(model_clone, move |index, _item, selected| {
+                if selected {
+                    let mut acc = cp.take();
+                    acc.push(index);
+                    cp.set(acc);
+                }
+                Box::new(FixedLeaf(100.0, 30.0))
+            })
+            .item_height(30.0)
+            .selection(sel_clone)
+            .reorderable(true),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        selected_rebuilds.borrow_mut().push(current_pass.take());
+
+        // Click item 2.
+        let children = tree.children(lv_id);
+        tree.click(children[2]);
+
+        // 1. Selection model updated.
+        assert_eq!(selection.selected_indices(), vec![2]);
+
+        // 2. A layout tick after the click must rebuild and deliver the
+        //    new selection state to the delegate.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        selected_rebuilds.borrow_mut().push(current_pass.take());
+
+        let passes = selected_rebuilds.borrow().clone();
+        assert_eq!(passes[0], Vec::<usize>::new(), "initial build: nothing selected");
+        assert_eq!(
+            passes[1],
+            vec![2],
+            "post-click rebuild should deliver selected=true for item 2"
+        );
+    }
+
+    #[test]
+    fn drag_survives_rebuild_triggered_by_selection() {
+        // Regression: user clicks a list row (with .selection() set), which
+        // fires the selection handler → marks the ListView for rebuild. The
+        // same PointerDown also arms the DragRecognizer on the item wrapper
+        // and installs pointer capture at that wrapper. When rebuild runs,
+        // the OLD wrapper is destroyed and NEW wrappers are created. Without
+        // revalidating `pointer_captured_by`, the next PointerMove is routed
+        // to the destroyed wrapper id and silently dropped, so the drag
+        // gesture never progresses past DragRecognizer::Pending and the user
+        // can select but not drag.
+        use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+        use fern_data::{SelectionMode, SelectionModel};
+
+        let model = ListModel::from_vec(vec![10, 20, 30, 40, 50]);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+        let model_clone = model.clone();
+
+        let mut tree = WidgetTree::new();
+        let _lv_id = tree.add(
+            ListView::new(model_clone, move |_i, _item, _sel| {
+                Box::new(FixedLeaf(100.0, 30.0))
+            })
+            .item_height(30.0)
+            .selection(sel_clone)
+            .reorderable(true),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Click-and-drag item 0 down to row 3.
+        //
+        // PointerDown: fires the selection handler on the wrapper — this
+        // trips the selection signal, which dirty-marks the ListView for
+        // rebuild. Bubble reaches the wrapper, arms the gesture arena, and
+        // captures the pointer at the old wrapper id.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 15.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        // Force the rebuild to run *before* the drag progresses — this is
+        // the ordering the real app hits because layout runs between the
+        // PointerDown and the first PointerMove. Old wrappers are destroyed
+        // here; new ones take their place with different widget ids.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Cross drag threshold.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 15.0),
+        });
+        // Move to target.
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 120.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(60.0, 120.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+
+        // Item 0 (value 10) should have moved to index 3.
+        assert_eq!(
+            model.with_item(3, |v| *v),
+            Some(10),
+            "Drag must complete even after the selection-triggered rebuild \
+             destroyed the originally-captured wrapper"
+        );
+    }
+
+    #[test]
+    fn inter_widget_on_item_drop_receives_payload() {
+        use crate::primitives::VStack;
+        use fern_core::drag_payload::DragPayload;
+        use fern_core::gesture::DragPhase;
+        use fern_core::widget_builder::WidgetBuilder;
+        use std::cell::Cell;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        // VStack root with:
+        //   - source: FixedLeaf at y=0..30 with on_drag that fires start_drag
+        //     carrying a typed String payload (NOT ListViewDragData).
+        //   - target: ListView below at y=30.., with on_item_drop that stores
+        //     the (payload_string, index) tuple.
+        //
+        // Rationale: the ListView's on_drop consumes any ListViewDragData
+        // payload via take_typed, so the inter-widget path is reachable only
+        // when the source widget is NOT another ListView — which matches the
+        // intended public contract.
+        let received = Rc::new(RefCell::new(None::<(String, usize)>));
+        let r = received.clone();
+
+        let target_model = ListModel::from_vec(vec![0_usize; 3]);
+        let target_model_clone = target_model.clone();
+
+        let source_id_holder: Rc<Cell<WidgetId>> = Rc::new(Cell::new(WidgetId::default()));
+        let sih = source_id_holder.clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(
+            VStack::new()
+                .child(FixedLeaf(100.0, 30.0).on_drag(move |phase, ctx| {
+                    if let DragPhase::Started { .. } = phase {
+                        ctx.start_drag(sih.get(), DragPayload::typed("external".to_string()));
+                    }
+                }))
+                .child(
+                    ListView::new(target_model_clone, |_i, _item, _sel| {
+                        Box::new(FixedLeaf(100.0, 30.0))
+                    })
+                    .item_height(30.0)
+                    .on_item_drop(move |mut payload, idx| {
+                        if let Some(s) = payload.take_typed::<String>() {
+                            *r.borrow_mut() = Some((s, idx));
+                            true
+                        } else {
+                            false
+                        }
+                    }),
+                ),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Resolve the source widget id — it's the FixedLeaf nested under the
+        // VStack, wrapped by WidgetWithHandlers because we attached on_drag.
+        let vstack_children = tree.children(root);
+        let source_widget = vstack_children[0];
+        source_id_holder.set(source_widget);
+
+        // Drag from the source (centered at tree y=15) into the ListView.
+        // The ListView starts at tree y=30 (after the 30 px source row),
+        // and `on_drop` receives the pointer in TARGET-LOCAL coordinates:
+        //
+        //   local_y = tree_y - 30
+        //   idx     = floor((local_y + item_height/2) / item_height)
+        //
+        // Targeting idx=2 needs local_y ∈ [45, 74]; use local_y=60
+        // (tree_y=90) — the conceptual centre of the third insertion
+        // zone.
+        let source_center = tree.bounds(source_widget).center();
+        drag_item(&mut tree, source_center, Point::new(source_center.x, 90.0));
+
+        let (text, idx) = received.borrow().clone().expect("on_item_drop must fire");
+        assert_eq!(text, "external");
+        assert_eq!(idx, 2);
+    }
+
+    /// Helper: borrow the ListView widget at `id` via the downcast hook
+    /// and run a closure against it.
+    fn with_list_view<T: 'static, R>(
+        tree: &WidgetTree,
+        id: WidgetId,
+        f: impl FnOnce(&ListView<T>) -> R,
+    ) -> R {
+        let any = tree.widget_as_any(id).expect("widget exposes as_any");
+        let lv = any
+            .downcast_ref::<ListView<T>>()
+            .expect("widget is a ListView<T>");
+        f(lv)
+    }
+
+    #[test]
+    fn drop_indicator_clears_after_drop() {
+        // Regression for the "insertion line lingers after drop" bug —
+        // the ListView's drop_feedback Signal must be None once the
+        // drag has ended, whether the drop was accepted or not.
+        let (mut tree, lv_id, _model) = make_reorderable_list(vec![1, 2, 3, 4, 5], 30.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        drag_item(&mut tree, Point::new(50.0, 15.0), Point::new(50.0, 105.0));
+
+        let feedback = with_list_view::<usize, _>(&tree, lv_id, |lv| {
+            lv.drop_feedback_signal().get()
+        });
+        assert!(
+            feedback.is_none(),
+            "drop_feedback must be cleared by on_drag_leave after drop, got {:?}",
+            feedback
+        );
+    }
+
+    #[test]
+    fn drag_spawns_preview_overlay_and_cleans_up() {
+        use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+        let (mut tree, _lv_id, _model) = make_reorderable_list(vec![1, 2, 3, 4, 5], 30.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let baseline = tree.overlay_manager().len();
+
+        // PointerDown + threshold-crossing PointerMove starts the drag.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 15.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 15.0),
+        });
+
+        assert_eq!(
+            tree.overlay_manager().len(),
+            baseline + 1,
+            "Preview overlay should be live during drag"
+        );
+
+        // Drop — preview should be dismissed.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(60.0, 15.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            tree.overlay_manager().len(),
+            baseline,
+            "Preview overlay should be dismissed after drop"
+        );
+    }
+
+    #[test]
+    fn edge_auto_scroll_advances_scroll_y_during_drag() {
+        use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+        // 50 items, 30 px each (1500 px of content) in a 300 px viewport.
+        let (mut tree, _lv_id, _model) =
+            make_reorderable_list((0..50).collect::<Vec<usize>>(), 30.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Kick off a drag and move the pointer near the BOTTOM edge so
+        // the on_drag_tick scroll delta is positive.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 15.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 15.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 290.0), // inside bottom 32 px edge zone
+        });
+
+        // Drive layout a few times to accumulate on_drag_tick fires.
+        for _ in 0..8 {
+            tree.layout(SizeProposal::exact(400.0, 300.0));
+        }
+        let scroll_y = with_list_view::<usize, _>(&tree, _lv_id, |lv| {
+            lv.scroll_y_signal().get()
+        });
+        assert!(
+            scroll_y > 5.0,
+            "Edge auto-scroll should have advanced scroll_y; got {scroll_y}"
+        );
+
+        // Clean up the drag.
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(60.0, 290.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
     }
 }

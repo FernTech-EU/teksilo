@@ -11,6 +11,14 @@ impl WidgetTree {
         self.arena.bounds(id)
     }
 
+    /// Borrow the widget at `id` as `&dyn Any` for concrete-type
+    /// introspection. Uses the `Widget::as_any` hook — widgets that
+    /// haven't opted in return `None`. Primarily for tests that need
+    /// to inspect a widget's private Signal state.
+    pub fn widget_as_any(&self, id: WidgetId) -> Option<&dyn std::any::Any> {
+        self.arena.get(id).and_then(|node| node.widget.as_any())
+    }
+
     pub fn children(&self, id: WidgetId) -> Vec<WidgetId> {
         self.arena.children(id).to_vec()
     }

@@ -52,6 +52,20 @@ pub(crate) struct EventHandlers {
     /// Returns `DropFeedback` to indicate acceptance and visual feedback.
     pub on_drag_hover:
         Option<Box<dyn FnMut(&DragPayload, Point, &mut EventContext) -> DropFeedback>>,
+    /// Called when a drag leaves this widget — either because the pointer
+    /// moved to a different drop target, the drop completed (on this or
+    /// another target), or the drag was cancelled (Escape, drop outside,
+    /// or source widget destroyed mid-drag). Widgets that set transient
+    /// feedback state in `on_drag_hover` (insertion lines, highlight
+    /// rectangles) MUST clear it here; the framework does not touch
+    /// widget-owned state.
+    pub on_drag_leave: Option<Box<dyn FnMut(&mut EventContext)>>,
+    /// Called once per frame during an active drag session, on whichever
+    /// widget is currently the drop target, with the pointer position in
+    /// widget-local coordinates. Used for per-frame behaviours that must
+    /// keep running when the pointer is stationary — viewport-edge
+    /// auto-scroll, spring-loaded folders, etc.
+    pub on_drag_tick: Option<Box<dyn FnMut(Point, &mut EventContext)>>,
     /// Called when a payload is dropped on this widget.
     /// Returns `true` if the drop was accepted.
     pub on_drop: Option<Box<dyn FnMut(DragPayload, Point, &mut EventContext) -> bool>>,
@@ -78,6 +92,8 @@ impl EventHandlers {
             on_access_action: None,
             on_access_action_request: None,
             on_drag_hover: None,
+            on_drag_leave: None,
+            on_drag_tick: None,
             on_drop: None,
             gesture_arena: None,
         }
@@ -101,6 +117,8 @@ impl EventHandlers {
             || self.on_access_action.is_some()
             || self.on_access_action_request.is_some()
             || self.on_drag_hover.is_some()
+            || self.on_drag_leave.is_some()
+            || self.on_drag_tick.is_some()
             || self.on_drop.is_some()
     }
 
@@ -123,6 +141,8 @@ impl EventHandlers {
                 .on_access_action_request
                 .or(self.on_access_action_request),
             on_drag_hover: other.on_drag_hover.or(self.on_drag_hover),
+            on_drag_leave: merge_ctx_handler(self.on_drag_leave, other.on_drag_leave),
+            on_drag_tick: merge_point_handler(self.on_drag_tick, other.on_drag_tick),
             on_drop: other.on_drop.or(self.on_drop),
             gesture_arena: other.gesture_arena.or(self.gesture_arena),
         }
@@ -137,6 +157,21 @@ fn merge_point_handler(
         (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |point, ctx| {
             existing(point, ctx);
             incoming(point, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+fn merge_ctx_handler(
+    existing: Option<Box<dyn FnMut(&mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(&mut EventContext)>>,
+) -> Option<Box<dyn FnMut(&mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |ctx| {
+            existing(ctx);
+            incoming(ctx);
         })),
         (Some(existing), None) => Some(existing),
         (None, Some(incoming)) => Some(incoming),
@@ -286,6 +321,8 @@ impl std::fmt::Debug for EventHandlers {
                 &self.on_access_action_request.is_some(),
             )
             .field("on_drag_hover", &self.on_drag_hover.is_some())
+            .field("on_drag_leave", &self.on_drag_leave.is_some())
+            .field("on_drag_tick", &self.on_drag_tick.is_some())
             .field("on_drop", &self.on_drop.is_some())
             .finish()
     }

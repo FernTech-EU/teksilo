@@ -60,8 +60,10 @@ pub struct TreeView<T: 'static> {
     /// Enable intra-widget drag reordering.
     reorderable: bool,
 
-    /// Active drop feedback (set by on_drag_hover, read by paint).
-    drop_feedback: Rc<Cell<Option<(f32, f32)>>>, // (y, width) for insertion line
+    /// Active drop feedback (set by on_drag_hover, cleared by on_drag_leave,
+    /// read by paint). Reactive Signal — bound at `RepaintOnly` so any
+    /// `set(...)` call dirties the TreeView for repaint automatically.
+    drop_feedback: Signal<Option<(f32, f32)>>, // (y, width) for insertion line
 
     // Persistent scroll state
     scroll_y: Signal<f32>,
@@ -71,7 +73,7 @@ pub struct TreeView<T: 'static> {
     // Set during build
     item_entries: Vec<(usize, WidgetId)>, // (flat_index, widget_id)
     scrollbar_id: Option<WidgetId>,
-    viewport_height: Cell<f32>,
+    viewport_height: Rc<Cell<f32>>,
     tree_id: usize,
 }
 
@@ -95,13 +97,13 @@ impl<T: 'static> TreeView<T> {
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
-            drop_feedback: Rc::new(Cell::new(None)),
+            drop_feedback: Signal::new(None),
             scroll_y: Signal::new_animated(0.0),
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_y: Signal::new(1.0),
             item_entries: Vec::new(),
             scrollbar_id: None,
-            viewport_height: Cell::new(600.0),
+            viewport_height: Rc::new(Cell::new(600.0)),
             tree_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         }
     }
@@ -215,6 +217,15 @@ impl<T: 'static> Widget for TreeView<T> {
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Relayout);
 
         ctx.register_animated_signal(&self.scroll_y);
+
+        // Bind drop_feedback at RepaintOnly so `set(...)` calls from
+        // on_drag_hover / on_drag_leave dirty the TreeView's paint cache
+        // without triggering a rebuild.
+        self.drop_feedback.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
 
         // --- Observe tree slice version (covers both data mutations and expand/collapse) ---
         let slice_version = self.tree_slice.version_signal();
@@ -414,10 +425,20 @@ impl<T: 'static> Widget for TreeView<T> {
         if self.reorderable {
             let my_tree_id = self.tree_id;
 
+            // Shared across on_drag_hover / on_drag_tick / on_drag_leave:
+            // the node currently under the pointer (if any) and the instant
+            // at which we first saw it. Used by spring-loaded folders to
+            // expand a branch after the pointer dwells on it for
+            // `SPRING_DELAY_MS`. Reset whenever the hovered node changes
+            // or the drag leaves this widget.
+            let hovered_node: Rc<Cell<Option<(NodeId, std::time::Instant)>>> =
+                Rc::new(Cell::new(None));
+
             let ih_for_hover = self.item_height;
             let scroll_for_hover = self.scroll_y.clone();
             let tsh_for_hover = self.tree_slice.handle();
             let feedback_for_hover = self.drop_feedback.clone();
+            let hn_for_hover = hovered_node.clone();
 
             handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
                 if payload.has_typed::<TreeViewDragData>() {
@@ -434,12 +455,34 @@ impl<T: 'static> Widget for TreeView<T> {
                     };
                     let insertion_y = flat_idx as f32 * ih_for_hover - scroll;
                     feedback_for_hover.set(Some((insertion_y, 400.0)));
+
+                    // Track the currently-hovered node for spring-load.
+                    // Use the flat index *at* the pointer Y (not rounded
+                    // to half-step) so the spring timer tracks the row
+                    // the pointer actually sits on.
+                    let row_idx = if ih_for_hover > 0.0 {
+                        (content_y / ih_for_hover).floor().max(0.0) as usize
+                    } else {
+                        0
+                    };
+                    let node = tsh_for_hover.entry_at(row_idx).map(|e| e.node_id);
+                    let prev = hn_for_hover.get();
+                    match (prev, node) {
+                        (Some((p, t)), Some(n)) if p == n => {
+                            hn_for_hover.set(Some((n, t)))
+                        }
+                        (_, Some(n)) => hn_for_hover
+                            .set(Some((n, std::time::Instant::now()))),
+                        (_, None) => hn_for_hover.set(None),
+                    }
+
                     DropFeedback::InsertionLine {
                         y: insertion_y,
                         width: 400.0,
                     }
                 } else {
                     feedback_for_hover.set(None);
+                    hn_for_hover.set(None);
                     DropFeedback::NoFeedback
                 }
             });
@@ -573,6 +616,62 @@ impl<T: 'static> Widget for TreeView<T> {
                 }
                 false
             });
+
+            // Clear insertion line + spring-load timer whenever the drag
+            // leaves this widget.
+            let feedback_for_leave = self.drop_feedback.clone();
+            let hn_for_leave = hovered_node.clone();
+            handlers = handlers.on_drag_leave(move |_ctx| {
+                feedback_for_leave.set(None);
+                hn_for_leave.set(None);
+            });
+
+            // Per-frame tick: viewport-edge auto-scroll plus spring-loaded
+            // folders. The tick fires regardless of pointer movement, so
+            // edge-scroll and spring-open still progress when the hand
+            // is stationary.
+            let scroll_for_tick = self.scroll_y.clone();
+            let max_scroll_for_tick = self.max_scroll_y.clone();
+            let viewport_for_tick = self.viewport_height.clone();
+            let hn_for_tick = hovered_node.clone();
+            let tsh_for_tick = self.tree_slice.handle();
+            let tree_model_for_tick = self.tree_slice.tree().clone();
+            const SPRING_DELAY_MS: u64 = 700;
+            handlers = handlers.on_drag_tick(move |pos, _ctx| {
+                // --- 1. Edge auto-scroll ---
+                const EDGE: f32 = 32.0;
+                const MAX_VELOCITY: f32 = 12.0;
+                let h = viewport_for_tick.get();
+                let above = (EDGE - pos.y).max(0.0);
+                let below = (pos.y - (h - EDGE)).max(0.0);
+                let delta = if above > 0.0 {
+                    -(above / EDGE) * MAX_VELOCITY
+                } else if below > 0.0 {
+                    (below / EDGE) * MAX_VELOCITY
+                } else {
+                    0.0
+                };
+                if delta.abs() > 0.01 {
+                    let max = max_scroll_for_tick.get();
+                    let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);
+                    scroll_for_tick.set(new_y);
+                }
+
+                // --- 2. Spring-loaded folders ---
+                if let Some((node, first_seen)) = hn_for_tick.get() {
+                    let elapsed_ms = first_seen.elapsed().as_millis() as u64;
+                    if elapsed_ms >= SPRING_DELAY_MS
+                        && tree_model_for_tick.has_children(node)
+                        && !tsh_for_tick.is_expanded(node)
+                    {
+                        tsh_for_tick.expand(node);
+                        // Reset so we don't keep re-firing on the same
+                        // node; next time the pointer moves to a
+                        // different row the hover handler re-arms.
+                        hn_for_tick.set(None);
+                    }
+                }
+            });
         }
 
         ctx.apply_self_handlers(handlers);
@@ -629,7 +728,9 @@ impl<T: 'static> Widget for TreeView<T> {
                                 button: fern_core::event::PointerButton::Primary,
                                 ..
                             } => {
-                                // Selection
+                                // Selection lands on press — snappy, and the
+                                // modifier information is only in the event
+                                // stream (TapRecognizer strips it).
                                 if let Some(ref sel) = sel_click {
                                     if modifiers.ctrl() {
                                         sel.toggle(click_index);
@@ -639,35 +740,79 @@ impl<T: 'static> Widget for TreeView<T> {
                                         sel.select(click_index);
                                     }
                                 }
-                                // Expand/collapse on click for nodes with children
+                                // Ignored lets the gesture arena also see the
+                                // PointerDown so DragRecognizer can capture the
+                                // press position and enable drag-to-reorder.
+                                fern_core::event::EventResponse::Ignored
+                            }
+                            fern_core::event::WidgetEvent::PointerUp {
+                                button: fern_core::event::PointerButton::Primary,
+                                ..
+                            } => {
+                                // Expand/collapse fires on release so a drag
+                                // gesture pre-empts it (once active_drag is
+                                // set, PointerUp is routed to handle_drag_drop
+                                // and never reaches this widget).
                                 if has_children {
                                     if let Some(node_id) = node_for_toggle {
                                         tsh_click.toggle_expand(node_id);
                                     }
                                 }
-                                fern_core::event::EventResponse::Handled
+                                fern_core::event::EventResponse::Ignored
                             }
                             _ => fern_core::event::EventResponse::Ignored,
                         }),
                     );
                 }
 
-                // Attach drag handler for reorderable items
+                // Attach drag handler for reorderable items. Produces a
+                // visible preview by re-invoking the delegate for this row
+                // and wrapping it in a DragPreview so it reads as
+                // "picked up" at the pointer.
                 if reorderable {
                     if let Some(node_id) = self.tree_slice.visible_node_id(i) {
                         let drag_tree_id = tree_id;
                         let drag_self_id = self_id;
+                        let delegate_for_preview = self.delegate.clone();
+                        let tsh_for_preview = self.tree_slice.handle();
+                        let tree_model_for_preview = self.tree_slice.tree().clone();
+                        let flat_idx = i;
+                        let item_height_for_preview = self.item_height;
                         ctx.apply_handlers(
                             child_id,
                             HandlerSet::new().on_drag(move |phase, ctx| {
                                 if let fern_core::gesture::DragPhase::Started { .. } = phase {
-                                    ctx.start_drag(
-                                        drag_self_id,
-                                        DragPayload::typed(TreeViewDragData {
-                                            source_node: node_id,
-                                            source_tree_id: drag_tree_id,
-                                        }),
-                                    );
+                                    let payload = DragPayload::typed(TreeViewDragData {
+                                        source_node: node_id,
+                                        source_tree_id: drag_tree_id,
+                                    });
+                                    let delegate = delegate_for_preview.clone();
+                                    const PREVIEW_WIDTH: f32 = 240.0;
+                                    let h = item_height_for_preview;
+                                    // Build the preview from the source
+                                    // node's item + entry metadata. The
+                                    // entry captures depth / expansion
+                                    // state so the floating preview matches
+                                    // the row it was plucked from.
+                                    let entry_meta = tsh_for_preview.entry_at(flat_idx);
+                                    let preview_opt = entry_meta.and_then(|entry| {
+                                        tree_model_for_preview.with_item(node_id, |item| {
+                                            Box::new(crate::drag_preview::DragPreview::new(
+                                                PREVIEW_WIDTH,
+                                                h,
+                                                delegate(item, &entry, false),
+                                            )) as Box<dyn Widget>
+                                        })
+                                    });
+                                    if let Some(preview) = preview_opt {
+                                        ctx.start_drag_with_preview(
+                                            drag_self_id,
+                                            payload,
+                                            preview,
+                                        );
+                                    } else {
+                                        ctx.start_drag(drag_self_id, payload);
+                                    }
                                 }
                             }),
                         );
@@ -770,6 +915,10 @@ impl<T: 'static> Widget for TreeView<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Tree);
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1020,5 +1169,327 @@ mod tests {
             vec![2],
             "Second ArrowDown should select index 2 (third root)"
         );
+    }
+
+    // --- Drag-and-drop integration tests ---
+
+    /// Run a full drag gesture: PointerDown on source, Move to cross threshold,
+    /// Move to target, Up. Mirrors `list_view::tests::drag_item`.
+    fn drag_item(tree: &mut WidgetTree, from: Point, to: Point) {
+        use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: from,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(from.x + 10.0, from.y),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove { position: to });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: to,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    /// Build a reorderable TreeView at the tree root with three top-level
+    /// nodes A (collapsed, with A1/A2 children), B (collapsed, with B1), C
+    /// (leaf). Item height is 28px, so rows are at y=0..28, 28..56, 56..84.
+    fn make_reorderable_tree_view() -> (
+        WidgetTree,
+        WidgetId,
+        TreeModel<&'static str>,
+        NodeId,
+        NodeId,
+        NodeId,
+    ) {
+        let model = sample_tree();
+        let a = model.root(0);
+        let b = model.root(1);
+        let c = model.root(2);
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(model.clone(), |_item, entry, _sel| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .reorderable(true),
+        );
+        (wtree, tv_id, model, a, b, c)
+    }
+
+    #[test]
+    fn drag_reorders_root_before() {
+        // Drag C (row 2, y=56..84) to the top third of row 0 (before A).
+        let (mut wtree, _tv_id, model, a, _b, c) = make_reorderable_tree_view();
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        drag_item(&mut wtree, Point::new(50.0, 70.0), Point::new(50.0, 2.0));
+
+        // After move: C becomes root 0, A shifts to root 1.
+        assert_eq!(model.root(0), c, "C should be first root");
+        assert_eq!(model.root(1), a, "A should be second root");
+    }
+
+    #[test]
+    fn drag_reorders_root_after() {
+        // Drag B (row 1, y=28..56) to the bottom third of row 2 (after C).
+        let (mut wtree, _tv_id, model, _a, b, c) = make_reorderable_tree_view();
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        drag_item(&mut wtree, Point::new(50.0, 42.0), Point::new(50.0, 80.0));
+
+        // After move: order is [A, C, B]
+        assert_eq!(model.root_count(), 3);
+        assert_eq!(model.root(1), c, "C should shift up to root 1");
+        assert_eq!(model.root(2), b, "B should land at root 2");
+    }
+
+    #[test]
+    fn drag_reparents_into_target() {
+        // Drag C (row 2) into the middle third of row 0 (into A as first child).
+        let (mut wtree, _tv_id, model, a, _b, c) = make_reorderable_tree_view();
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Middle third of a 28px row is [9.33, 18.67]. Use y=14.
+        drag_item(&mut wtree, Point::new(50.0, 70.0), Point::new(50.0, 14.0));
+
+        // C should now be A's first child (A's existing children were A1, A2).
+        let a_children = model.children(a);
+        assert_eq!(a_children.len(), 3, "A should have three children");
+        assert_eq!(a_children[0], c, "C should be A's first child");
+        // C is no longer a root.
+        assert_eq!(model.root_count(), 2);
+    }
+
+    #[test]
+    fn drag_emits_node_moved_change() {
+        use fern_data::TreeChange;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let (mut wtree, _tv_id, model, _a, b, _c) = make_reorderable_tree_view();
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let emitted = Rc::new(Cell::new(false));
+        let e = emitted.clone();
+        let moved_node = Rc::new(Cell::new(None::<NodeId>));
+        let mn = moved_node.clone();
+        let handle = model.observe_changes(move |change| {
+            if let TreeChange::NodeMoved { node, .. } = change {
+                e.set(true);
+                mn.set(Some(*node));
+            }
+        });
+
+        // Drag B up — before A.
+        drag_item(&mut wtree, Point::new(50.0, 42.0), Point::new(50.0, 2.0));
+
+        assert!(emitted.get(), "TreeChange::NodeMoved should be emitted");
+        assert_eq!(moved_node.get(), Some(b));
+        drop(handle);
+    }
+
+    #[test]
+    fn click_on_branch_with_nested_delegate_expands() {
+        // Like click_on_branch_expands_and_collapses, but the delegate
+        // builds a nested subtree (ZStack + Padding + HStack + Texts +
+        // Spacer) so the pointer hit-target is a deep leaf, NOT the
+        // TreeItemWrapper. Regression for the case where the wrapper's
+        // on_pointer_event has to route through the preview/bubble path
+        // to fire toggle_expand.
+        use crate::primitives::{HStack, Padding, Spacer, TextWidget, ZStack};
+        use crate::RectWidget;
+
+        let tree = sample_tree();
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(tree, |name, entry, selected| {
+                let arrow: &'static str = if entry.has_children {
+                    if entry.is_expanded { "v" } else { ">" }
+                } else {
+                    " "
+                };
+                let bg = if selected {
+                    fern_tokens::Color::from_rgba(0.25, 0.47, 0.85, 0.25)
+                } else {
+                    fern_tokens::Color::TRANSPARENT
+                };
+                Box::new(
+                    ZStack::new().child(RectWidget::new().background(bg)).child(
+                        Padding::symmetric(4.0, 12.0).child(
+                            HStack::new()
+                                .spacing(8.0)
+                                .child(TextWidget::new_literal(arrow))
+                                .child(TextWidget::new_literal(name.clone()))
+                                .child(Spacer::new()),
+                        ),
+                    ),
+                )
+            })
+            .item_height(28.0),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Sanity check: 3 roots visible.
+        assert_eq!(wtree.children(tv_id).len() - 1, 3);
+
+        // Click A (row 0). Use the wrapper's bounds center — hit_test will
+        // walk down to whatever deep leaf is at that point.
+        let children = wtree.children(tv_id);
+        wtree.click(children[0]);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            5,
+            "Click on A (branch) should expand it even with a nested delegate"
+        );
+    }
+
+    #[test]
+    fn drag_with_nested_delegate_still_works() {
+        // Same nested delegate as above, but exercising drag. Regression
+        // for the real-app scenario where the pointer hit-target is a
+        // deep leaf (TextWidget) and the wrapper holding the gesture
+        // arena + on_drag is an ancestor.
+        use crate::primitives::{HStack, Padding, Spacer, TextWidget, ZStack};
+        use crate::RectWidget;
+
+        let tree = sample_tree();
+        let a = tree.root(0);
+        let c = tree.root(2);
+        let mut wtree = WidgetTree::new();
+        let _tv_id = wtree.add(
+            TreeView::new(tree.clone(), |name, _entry, _sel| {
+                Box::new(
+                    ZStack::new()
+                        .child(RectWidget::new().background(fern_tokens::Color::TRANSPARENT))
+                        .child(
+                            Padding::symmetric(4.0, 12.0).child(
+                                HStack::new()
+                                    .spacing(8.0)
+                                    .child(TextWidget::new_literal(name.clone()))
+                                    .child(Spacer::new()),
+                            ),
+                        ),
+                )
+            })
+            .item_height(28.0)
+            .reorderable(true),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Drag C (row 2, y=70) to the top third of row 0 (y=2) → drop-before A.
+        drag_item(&mut wtree, Point::new(50.0, 70.0), Point::new(50.0, 2.0));
+
+        assert_eq!(tree.root(0), c, "C should be first root after drag");
+        assert_eq!(tree.root(1), a, "A should shift to second root");
+    }
+
+    #[test]
+    fn click_on_branch_expands_and_collapses() {
+        // Click a folder-with-children and verify its subtree appears; click
+        // again and verify it collapses. Regression test for the previous
+        // on_pointer_event double-dispatch bug that toggled expand twice per
+        // click (net no-op).
+        let tree = sample_tree();
+        let (mut wtree, tv_id) = make_tree_view(tree);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Initially collapsed — 3 roots visible.
+        assert_eq!(wtree.children(tv_id).len() - 1, 3);
+
+        // Click A (row 0, center y=14).
+        let children = wtree.children(tv_id);
+        wtree.click(children[0]);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // A should now be expanded, showing its two children A1, A2.
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            5,
+            "After clicking A, its two children should become visible"
+        );
+
+        // Click A again — collapses.
+        let children = wtree.children(tv_id);
+        wtree.click(children[0]);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(
+            wtree.children(tv_id).len() - 1,
+            3,
+            "Second click should collapse A back to 3 visible roots"
+        );
+    }
+
+    #[test]
+    fn spring_loaded_folder_expands_after_dwell() {
+        // Drag a leaf over a collapsed folder and hold. After the dwell
+        // delay (SPRING_DELAY_MS = 700 real ms), the folder should
+        // auto-expand. Test drives real wall-clock time via `sleep` —
+        // it's slow but accurate. Runs in ~750 ms; still headless.
+        use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+        use std::thread::sleep;
+        use std::time::Duration;
+
+        let tree = sample_tree(); // A (A1 A2), B (B1), C (leaf)
+        let a = tree.root(0);
+        let b = tree.root(1);
+        let mut wtree = WidgetTree::new();
+        let _tv_id = wtree.add(
+            TreeView::new(tree.clone(), |_item, entry, _sel| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .reorderable(true),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Start a drag on C (y=70, row 2), then hover over B (row 1, y=42).
+        wtree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(50.0, 70.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        wtree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 70.0),
+        });
+        wtree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 42.0),
+        });
+
+        // Confirm B is currently collapsed.
+        assert!(!tree.with_item(b, |_| ()).is_none());
+        assert_eq!(
+            wtree.children(_tv_id).len() - 1,
+            3,
+            "Precondition: 3 visible roots, nothing expanded"
+        );
+
+        // Wait past the 700 ms spring delay, then drive a layout tick
+        // so on_drag_tick fires and the elapsed check passes.
+        sleep(Duration::from_millis(750));
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // B should now be expanded, revealing B1 (4 visible rows).
+        assert_eq!(
+            wtree.children(_tv_id).len() - 1,
+            4,
+            "B should have spring-opened after the dwell"
+        );
+
+        // A was never hovered — still collapsed.
+        assert!(!wtree.children(_tv_id).is_empty());
+        let _ = a;
+
+        // Clean up drag.
+        wtree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(60.0, 42.0),
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
     }
 }

@@ -105,6 +105,8 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 | `on_swipe` | One-shot swipe with direction + velocity | `FnMut(SwipeDirection, f32, &mut EventContext)` |
 | `on_pinch` | OS trackpad magnify / rotate phases | `FnMut(PinchPhase, &mut EventContext)` |
 | `on_drag_hover` | DnD payload hovers over the widget | `FnMut(&DragPayload, Point, &mut EventContext) -> DropFeedback` |
+| `on_drag_leave` | Drag leaves the widget (target change, drop, cancel, or source destroyed) | `FnMut(&mut EventContext)` |
+| `on_drag_tick` | Per-frame tick while the widget is the current drop target | `FnMut(Point, &mut EventContext)` |
 | `on_drop` | DnD payload released on the widget | `FnMut(DragPayload, Point, &mut EventContext) -> bool` |
 | `on_access_action` | AccessKit action request targets the widget | `FnMut(accesskit::Action, &mut EventContext) -> EventResponse` |
 | `on_access_action_request` | Full AccessKit action with payload (`SetTextSelection`, `SetValue`, `SetScrollOffset`) | see source |
@@ -245,6 +247,17 @@ Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab cycles 
 Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.
 
 Focus cleanup on destroy is automatic: destroying a focused widget clears focus; the next input event that requires focus routes to the nearest focusable ancestor or root.
+
+## 6.5 Drag-and-drop lifecycle
+
+Target-side handlers fire in a strict order. A widget that accepts drops should assume this sequence and own the cleanup of any feedback state it sets:
+
+1. **`on_drag_hover(payload, pos, ctx) -> DropFeedback`** — fires on every `PointerMove` while this widget is the drop target (pointer inside its bounds and the framework picked it via `find_drop_target_at_or_above`). The widget typically stashes its own feedback state (an insertion line y, a highlight rect) and returns the matching `DropFeedback` descriptor. `pos` is in **target-local** coordinates — origin at the target widget's top-left — so drop-index math can reuse the same coordinate system as the target's own `bounds` and `paint` layout.
+2. **`on_drag_tick(local_pos, ctx)`** — fires once per layout pass while the widget is the current drop target. Use for per-frame behaviours that must keep progressing when the pointer is stationary: viewport-edge auto-scroll (linear ramp inside an edge zone), spring-loaded folder expansion after a dwell time. Receives the pointer position in widget-local coordinates.
+3. **`on_drag_leave(ctx)`** — fires exactly once when this widget stops being the drop target. The framework emits it for **all four** leave scenarios: pointer moved to a different target, drop completed (on this or another target), Escape-cancelled, or the drag source was destroyed mid-drag. Widgets MUST clear any feedback state they set in `on_drag_hover` here — the framework does not touch widget-owned state.
+4. **`on_drop(payload, pos, ctx) -> bool`** — fires on `PointerUp` only if this widget is the drop target at the release position. Already preceded by `on_drag_leave` (so feedback is cleared by the time the drop handler decides acceptance). Returns `true` if accepted.
+
+Framework guarantees the ordering: `on_drag_leave` runs before `on_drop` on the same widget for a successful drop, and before `cleanup_drag_preview` for cancels. The `DragPreview` overlay (created via `EventContext::start_drag_with_preview`) follows the pointer throughout and is dismissed by the framework in all paths — widgets don't manage it.
 
 ## 7. Synthetic events
 
