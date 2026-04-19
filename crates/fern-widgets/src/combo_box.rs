@@ -842,7 +842,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             builder.set_auto_complete(fern_core::accesskit::AutoComplete::List);
         }
 
-        if !self.enabled {
+        if self.enabled {
+            // Expose the standard combobox activation surface to AT —
+            // without these, screen-reader "press" and "focus" commands
+            // probing `actions()` on the node see an empty list even
+            // though the attached `on_access_action` handler can route
+            // Click internally.
+            builder.add_action(fern_core::accesskit::Action::Click);
+            builder.add_action(fern_core::accesskit::Action::Focus);
+        } else {
             builder.set_disabled();
         }
     }

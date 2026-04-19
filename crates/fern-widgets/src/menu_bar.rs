@@ -237,6 +237,16 @@ impl Widget for MenuBarTrigger {
 
         ctx.apply_self_handlers(handler_set);
 
+        // Re-query accessibility when this trigger's open/closed state flips so
+        // `set_expanded` stays in sync with the open menu index.
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.menu_ctx.open_index.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
+
         vec![root_id]
     }
 
@@ -267,6 +277,7 @@ impl Widget for MenuBarTrigger {
         builder.set_name(&self.label);
         // Every top-level menu bar entry opens a dropdown Menu.
         builder.set_has_popup(fern_core::accesskit::HasPopup::Menu);
+        builder.set_expanded(self.menu_ctx.open_index.get() == Some(self.index));
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -366,7 +377,13 @@ impl Widget for MenuOverlayHost {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::Menu);
+        // The inner widget (typically `MenuList`) owns the `Role::Menu`
+        // semantics. A second Menu role here would nest two Menu nodes
+        // per dropdown, confusing screen readers that look for a single
+        // Menu per popup. `GenericContainer` is the ARIA `none`/`presentation`
+        // equivalent: the host is kept in the tree for focus/key routing
+        // but is ignored by assistive tech.
+        builder.set_role(fern_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

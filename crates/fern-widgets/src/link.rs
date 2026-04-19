@@ -28,6 +28,7 @@ pub struct Link {
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     interaction: Option<Signal<InteractionState>>,
+    enabled: bool,
     root_child_id: Option<WidgetId>,
 }
 
@@ -41,6 +42,7 @@ impl Link {
             tooltip_text: None,
             rich_tooltip_source: None,
             interaction: None,
+            enabled: true,
             root_child_id: None,
         }
     }
@@ -96,6 +98,11 @@ impl Link {
     /// Get the URL, if set.
     pub fn get_url(&self) -> Option<&str> {
         self.url.as_deref()
+    }
+
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
     }
 }
 
@@ -270,8 +277,12 @@ impl Widget for Link {
                     }
                 }
             })
-            .focusable(true)
-            .cursor(CursorIcon::Pointer);
+            .focusable(self.enabled)
+            .cursor(if self.enabled {
+                CursorIcon::Pointer
+            } else {
+                CursorIcon::Default
+            });
 
         ctx.apply_self_handlers(handler_set);
 
@@ -303,8 +314,15 @@ impl Widget for Link {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Link);
         builder.set_name(&self.text);
-        builder.add_action(fern_core::accesskit::Action::Click);
-        builder.add_action(fern_core::accesskit::Action::Focus);
+        if let Some(ref url) = self.url {
+            builder.set_url(url.clone());
+        }
+        if self.enabled {
+            builder.add_action(fern_core::accesskit::Action::Click);
+            builder.add_action(fern_core::accesskit::Action::Focus);
+        } else {
+            builder.set_disabled();
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

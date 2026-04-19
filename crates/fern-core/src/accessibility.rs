@@ -194,6 +194,22 @@ impl AccessNodeBuilder {
         self.inner.set_placeholder(placeholder.into());
     }
 
+    /// Target URL for link-like widgets. Maps to `aria-url` / platform
+    /// link metadata so screen readers can announce the destination
+    /// (e.g. "link, https://example.com"). Informational only — does
+    /// not navigate when activated.
+    pub fn set_url(&mut self, url: impl Into<String>) {
+        self.inner.set_url(url.into());
+    }
+
+    /// Keyboard shortcut announcement (e.g. `"Ctrl+S"`). Maps to
+    /// `aria-keyshortcuts`. Used by menu items and buttons whose
+    /// chord is shown visually but must also be exposed to assistive
+    /// tech so shortcut users discover it.
+    pub fn set_keyboard_shortcut(&mut self, shortcut: impl Into<String>) {
+        self.inner.set_keyboard_shortcut(shortcut.into());
+    }
+
     /// Autocomplete behavior for combobox / text input widgets. Maps to
     /// ARIA `aria-autocomplete`: `Inline` completes within the field,
     /// `List` shows a popup of matching values, `Both` does both.

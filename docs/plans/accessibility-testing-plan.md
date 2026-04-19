@@ -111,20 +111,27 @@ Widgets reviewed in batches of 10. Layout primitives (no interactive semantics) 
 | ListView | `List` → `ListBox` | Role changed; `ListItemWrapper` now `ListBoxOption` + selection | ✅ Fixed |
 | TreeView | `Tree` | `TreeItemWrapper` now sets `position_in_set`, `size_of_set`, selection | ✅ Fixed |
 
-### Batch 2 — Pending
+### Batch 2 ✅ — Audited and fixed
 
-| Widget | Role | Issues | Status |
+| Widget | Role | Issues found | Status |
 |---|---|---|---|
-| Button | — | — | Pending |
-| ComboBox | — | — | Pending (partial: `push_controlled` dangling-ref fix done) |
-| ProgressBar | — | — | Pending |
-| Snackbar | — | — | Pending |
-| TabWidget | — | — | Done ✅ (see Point 3b above) |
-| SegmentedControl | — | — | Pending |
-| Link | — | — | Pending |
-| Badge | — | — | Pending |
-| Breadcrumb / BreadcrumbItem | — | — | Pending |
-| MenuItem / MenuList / MenuBar | — | — | Pending |
+| Button | `Button` | Already conventional (set_name, set_disabled, has_popup + expanded, Click/Focus actions) | ✅ No changes |
+| ComboBox | `ComboBox` | Never registered `Action::Click` / `Action::Focus` — AT press/focus commands saw empty actions list | ✅ Fixed |
+| ProgressBar | `ProgressIndicator` | No accessible name — AT announced bare "progress indicator" with no context. Added `.label()` / `.label_literal()` builders | ✅ Fixed |
+| Snackbar (outer) | `GenericContainer` | Dead wrapper node sat between ancestors and the real focusable trigger — now `set_hidden()` | ✅ Fixed |
+| TabWidget | `TabList` + `Tab` | — | Done ✅ (see Point 3b above) |
+| SegmentedControl | `RadioGroup` + `RadioButton` | Already conventional (set_value, set_selected, focus-contained child radios) | ✅ No changes |
+| Link | `Link` | Missing `set_disabled`, `set_url`, and disabled-aware `focusable` / actions. Added `.enabled()` builder | ✅ Fixed |
+| Badge | `Label` | Already conventional (set_name) — purely presentational | ✅ No changes |
+| Breadcrumb / BreadcrumbItem | `Navigation` + `Link` | Navigation landmark had no accessible name; decorative chevrons were enumerable. Added `.label()` + `set_hidden()` on separators | ✅ Fixed |
+| MenuItem / MenuList / MenuBar | `MenuItem`, `Menu`, `MenuBar` | Click action unguarded when disabled; shortcut text not exposed to AT; MenuBarTrigger missing `set_expanded`; redundant `Role::Menu` on MenuOverlayHost; unannotated `KeyboardHighlightWrapper` between Menu and MenuItem | ✅ Fixed |
+
+Fix details:
+- `AccessNodeBuilder` gained `set_url()` and `set_keyboard_shortcut()` wrappers over `accesskit::Node`.
+- `MenuBarTrigger` now registers `menu_ctx.open_index` as a `RepaintOnly` binding on self, so `set_expanded` reflects which top-level entry is currently open.
+- `MenuOverlayHost` changed from `Role::Menu` to `Role::GenericContainer` to avoid two nested Menu nodes per dropdown.
+- `KeyboardHighlightWrapper` now sets `Role::GenericContainer` — presentational, the real semantics live on the wrapped `MenuItem`.
+- `MenuItem` guards `add_action(Click)` on `enabled` and emits `set_keyboard_shortcut` from the resolved shortcut label (manual or registry-derived).
 
 ### Batch 3 — Pending
 

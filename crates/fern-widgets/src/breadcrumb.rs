@@ -375,7 +375,12 @@ impl Widget for BreadcrumbSeparator {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // Decorative chevron between crumbs. Screen readers would
+        // otherwise enumerate a generic container between every pair
+        // of links; `set_hidden()` keeps the node in the layout tree
+        // but removes it from the platform a11y tree.
         builder.set_role(fern_core::accesskit::Role::GenericContainer);
+        builder.set_hidden();
     }
 }
 
@@ -388,6 +393,7 @@ enum BreadcrumbSlot {
 pub struct Breadcrumb {
     slots: Vec<BreadcrumbSlot>,
     trailing_slot: Option<PendingChild>,
+    label: Option<String>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -396,8 +402,26 @@ impl Breadcrumb {
         Self {
             slots: Vec::new(),
             trailing_slot: None,
+            label: None,
             root_child_id: None,
         }
+    }
+
+    /// Accessible name for the `Navigation` landmark — distinguishes
+    /// this breadcrumb from other nav landmarks on the page
+    /// (e.g. "Files", "Settings"). Screen readers announce it as the
+    /// name of the landmark when it gains focus or is summoned.
+    pub fn label(mut self, text: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(mut self, text: impl Into<String>) -> Self {
+        self.label = Some(text.into());
+        self
     }
 
     pub fn item(mut self, item: BreadcrumbItem) -> Self {
@@ -499,6 +523,9 @@ impl Widget for Breadcrumb {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Navigation);
+        if let Some(ref label) = self.label {
+            builder.set_name(label.clone());
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

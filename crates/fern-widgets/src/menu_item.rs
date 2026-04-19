@@ -70,6 +70,11 @@ pub struct MenuItem {
     /// path. `accessibility()` reads this for `set_expanded`.
     /// Only meaningful when `submenu_factory.is_some()`.
     submenu_open: Signal<bool>,
+    /// Shortcut text after resolving `shortcut_label` / `shortcut_id`.
+    /// Captured during `build()` and read by `accessibility()` for
+    /// `set_keyboard_shortcut`, so screen readers announce the chord
+    /// that the visual trailing label shows.
+    resolved_shortcut: Option<String>,
     root_child_id: Option<WidgetId>,
     submenu_content_id: Option<WidgetId>,
 }
@@ -90,6 +95,7 @@ impl MenuItem {
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
+            resolved_shortcut: None,
             root_child_id: None,
             submenu_content_id: None,
         }
@@ -215,6 +221,7 @@ impl MenuItem {
             submenu_open_delay: DEFAULT_SUBMENU_OPEN_DELAY,
             interaction: Signal::new(MenuItemState::Idle),
             submenu_open: Signal::new(false),
+            resolved_shortcut: None,
             root_child_id: None,
             submenu_content_id: None,
         }
@@ -368,6 +375,7 @@ impl Widget for MenuItem {
                     .and_then(|eff| eff.primary.map(|ks| ks.to_string()))
             })
         });
+        self.resolved_shortcut = resolved_shortcut.clone();
         if self.shortcut_id.is_some() {
             // Rebuild (not Relayout) because the shortcut label is
             // read from the registry by value during build() — a
@@ -736,8 +744,12 @@ impl Widget for MenuItem {
         }
         if !self.enabled {
             builder.set_disabled();
+        } else {
+            builder.add_action(fern_core::accesskit::Action::Click);
         }
-        builder.add_action(fern_core::accesskit::Action::Click);
+        if let Some(ref shortcut) = self.resolved_shortcut {
+            builder.set_keyboard_shortcut(shortcut.clone());
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
