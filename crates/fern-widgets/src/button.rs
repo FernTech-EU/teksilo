@@ -540,6 +540,13 @@ impl fern_core::widget::Widget for Button {
                             key: Key::Space | Key::Enter,
                             ..
                         } => {
+                            // Fire only if we saw the matching KeyDown. A lone
+                            // KeyUp means the KeyDown was consumed elsewhere
+                            // (shortcut registry, focus transfer) and this
+                            // widget is not the activation target.
+                            if interaction.get() != InteractionState::Pressed {
+                                return EventResponse::Ignored;
+                            }
                             if let Some(ref action) = *action_for_key {
                                 action(ctx);
                             }
@@ -632,6 +639,59 @@ impl fern_core::widget::Widget for Button {
             Some(id) => vec![id],
             None => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fern_core::event::{Modifiers, WidgetEvent};
+    use fern_core::widget_tree::WidgetTree;
+    use fern_tokens::Theme;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[test]
+    fn keyup_without_keydown_does_not_fire() {
+        // Regression for the MessageBox reopen bug: when a shortcut
+        // consumes Enter's KeyDown (dismissing the modal and restoring
+        // focus to the trigger button), the trailing KeyUp must not
+        // re-activate the trigger.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let fired = Rc::new(Cell::new(0_u32));
+        let fired_for_btn = fired.clone();
+        let btn = tree.add(
+            Button::new_literal("T").on_activate_fn(move |_ctx| {
+                fired_for_btn.set(fired_for_btn.get() + 1);
+            }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+        tree.focus(btn);
+
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            fired.get(),
+            0,
+            "a lone KeyUp (no matching KeyDown) must not activate the button",
+        );
+
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        tree.dispatch_event(WidgetEvent::KeyUp {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            fired.get(),
+            1,
+            "a matched KeyDown + KeyUp pair must activate exactly once",
+        );
     }
 }
 
