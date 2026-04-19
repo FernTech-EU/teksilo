@@ -133,20 +133,31 @@ Fix details:
 - `KeyboardHighlightWrapper` now sets `Role::GenericContainer` — presentational, the real semantics live on the wrapped `MenuItem`.
 - `MenuItem` guards `add_action(Click)` on `enabled` and emits `set_keyboard_shortcut` from the resolved shortcut label (manual or registry-derived).
 
-### Batch 3 — Pending
+### Batch 3 ✅ — Audited and fixed
 
-| Widget | Role | Issues | Status |
+| Widget | Role | Issues found | Status |
 |---|---|---|---|
-| ScrollArea | — | — | Pending |
-| ScrollBar | — | — | Pending |
-| SplitView | — | — | Pending |
-| Wizard / WizardStep | — | — | Pending |
-| MessageBox | — | — | Pending |
-| Toolbar | — | — | Pending |
-| StatusBar | — | — | Pending |
-| TitleBar | — | — | Pending |
-| Tooltip / TooltipWidget | — | — | Pending |
-| Card | — | — | Pending |
+| ScrollArea | `ScrollView` | Already conventional (clips_children, offsets/min/max, conditional ScrollUp/Down/Left/Right actions) | ✅ No changes |
+| ScrollBar | (hidden) | Already conventional — deliberately `set_hidden()` so AT scrolls via the parent ScrollView instead | ✅ No changes |
+| SplitView | `Splitter` | `ClipPane` wrappers leaked `Role::Unknown` nodes between the splitter and real pane content | ✅ Fixed |
+| Wizard / WizardStep | `GenericContainer` + `Region` | `WizardHeader` rendered "Step 2 of 4" visually but never exposed `position_in_set` / `size_of_set`; `WizardFlow` was an untitled `GenericContainer` instead of a navigable `Region` landmark | ✅ Fixed |
+| MessageBox | `AlertDialog` | Already conventional (modal, Live::Assertive, Focus action, Enter/Escape shortcuts) | ✅ No changes |
+| Toolbar | `Toolbar` | No accessible name; inner `Panel` wrapper emitted a dead `Role::Group` between the toolbar and its items | ✅ Fixed |
+| StatusBar | `Status` + `Live::Polite` | Was a plain `GenericContainer` with no live region; dynamic status text announced incorrectly; same Panel-wrapper dead node as Toolbar | ✅ Fixed |
+| TitleBar / WindowControls | `Banner` landmark + `Group` + `Button`s | TitleBar had no `accessibility()` impl; ControlButton exposed **glyph characters** (`—`, `□`, `×`) as names — AT pronounced "em dash / white square / multiplication sign"; DragRegion leaked a blank `Role::Unknown` node | ✅ Fixed |
+| Tooltip / RichTooltip | `Tooltip` (`Dialog` when sticky) | Anchor→tooltip `described_by` wiring already existed in the a11y post-processing pass; sticky rich tooltips were not focusable and offered no keyboard-focus path to the promoted surface | ✅ Fixed |
+| Card | `Group` | Already conventional | ✅ No changes |
+
+Fix details:
+- `SplitView` — `ClipPane::accessibility` now calls `set_hidden()`; the real pane content keeps its own semantics, and no `Role::Unknown` nodes show up between the splitter and the panes.
+- `Wizard` — `WizardHeader` now emits `set_position_in_set(current+1)` / `set_size_of_set(total)` and binds `current_step` at `BindingLevel::AccessibilityOnly` so AT announces step progression reactively without rebuild/relayout. `WizardFlow` upgraded from `GenericContainer` to `Role::Region` with the localised name "Wizard content".
+- `Panel` — added `a11y_presentational()` builder that flips the wrapper to `set_hidden()`; used by both `Toolbar` and `StatusBar` to flatten their a11y trees.
+- `Toolbar` — added `.label(LocalizedString)` / `.label_literal(&str)` builders; defaults to the localised "Toolbar" string when unset. Inner `Panel` is now presentational.
+- `StatusBar` — role flipped to `Role::Status`, `set_live(Live::Polite)` so dynamic status text announces without interrupting; inner `Panel` is presentational.
+- `TitleBar` — top-level now has `accessibility()` emitting `Role::Banner` (landmark) with the localised name "Window title bar". `WindowControls` emits `Role::Group` with "Window controls". `ControlButton` now carries a `Signal<String>` a11y name (bound at `AccessibilityOnly`), populated by `WindowControls` from localised strings ("Minimize" / "Maximize" / "Restore" / "Close"); the glyph is kept for paint but hidden from AT. `DragRegion::accessibility` calls `set_hidden()` — pointer-only affordance with no AT analogue.
+- `RichTooltip` — sticky promotion now adds `Action::Focus` + `focusable(true)`; keyboard users can Tab into the promoted Dialog to reach inline links and the "more" disclosure. The sticky signal is bound at `AccessibilityOnly` so the role flip (Tooltip → Dialog) and new focus action reach AT without a repaint.
+- Tooltip focus-promotion — new `tooltip_focus_enter` / `tooltip_focus_leave_outside` wired into `focus_with_origin`. When a keyboard user focuses an anchor with a rich tooltip attached, the tooltip appears immediately and is pre-promoted to sticky (bypassing the 2 s pointer dwell). The tooltip dismisses automatically when focus moves outside both the anchor's subtree and the tooltip's content subtree, preventing sticky-tooltip accumulation as the user Tabs through a form. Plain tooltips are unaffected — their text still reaches AT via the existing `described_by` wiring, which is the W3C-recommended pattern for supplementary hints.
+- New FTL keys in fern-widgets: `a11y_toolbar_name`, `a11y_title_bar_name`, `a11y_window_controls_name`, `a11y_window_minimize_name`, `a11y_window_maximize_name`, `a11y_window_restore_name`, `a11y_window_close_name`, `a11y_wizard_progress_name`, `a11y_wizard_content_name` (en-US + fr-FR).
 
 ### Batch 4 — Pending
 

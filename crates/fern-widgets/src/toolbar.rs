@@ -14,6 +14,7 @@ pub struct Toolbar {
     pending: Vec<PendingChild>,
     child_ids: Vec<WidgetId>,
     root_child_id: Option<WidgetId>,
+    label: Option<String>,
 }
 
 impl Toolbar {
@@ -22,6 +23,7 @@ impl Toolbar {
             pending: Vec::new(),
             child_ids: Vec::new(),
             root_child_id: None,
+            label: None,
         }
     }
 
@@ -35,6 +37,22 @@ impl Toolbar {
     pub fn add_child(mut self, id: WidgetId) -> Self {
         self.pending.push(PendingChild::Id(id));
         self
+    }
+
+    /// Override the toolbar's accessible name. Default is the localised
+    /// "Toolbar" string from the framework bundle. Use this when a window
+    /// has multiple toolbars that need distinguishing ("Formatting",
+    /// "Drawing", etc.).
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
+        self
+    }
+
+    /// Shim (permanent, `#[doc(hidden)]`) for `label(...)` accepting a raw string.
+    #[doc(hidden)]
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 }
 
@@ -74,7 +92,12 @@ impl Widget for Toolbar {
         }
 
         let row_id = ctx.add(row);
-        let root = ctx.add(Panel::new().padding(padding_signal).child_id(row_id));
+        let root = ctx.add(
+            Panel::new()
+                .padding(padding_signal)
+                .a11y_presentational()
+                .child_id(row_id),
+        );
         self.root_child_id = Some(root);
         vec![root]
     }
@@ -103,6 +126,11 @@ impl Widget for Toolbar {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Toolbar);
+        let name = self
+            .label
+            .clone()
+            .unwrap_or_else(|| fern_i18n::tr_widget!(a11y_toolbar_name()).resolve_now());
+        builder.set_name(name);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -143,5 +171,35 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(tb);
         assert_eq!(info.role(), fern_core::accesskit::Role::Toolbar);
+        assert!(info.name().is_some(), "toolbar should carry a default a11y name");
+    }
+
+    #[test]
+    fn toolbar_custom_label_overrides_default() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let tb = tree.add(Toolbar::new().label_literal("Formatting"));
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let info = tree.accessibility_node(tb);
+        assert_eq!(info.name(), Some("Formatting"));
+    }
+
+    #[test]
+    fn toolbar_has_no_group_wrapper_in_a11y_tree() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let _tb = tree.add(Toolbar::new());
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let update = tree.sync_accessibility();
+        // Panel wrapper is marked presentational, so the only non-
+        // Window container in the tree should be the Toolbar itself.
+        let groups: Vec<_> = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == fern_core::accesskit::Role::Group)
+            .collect();
+        assert!(
+            groups.is_empty(),
+            "expected no Role::Group wrapper under Toolbar, got {}",
+            groups.len()
+        );
     }
 }

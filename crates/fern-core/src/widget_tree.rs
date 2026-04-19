@@ -234,6 +234,13 @@ struct TooltipEntry {
     /// to drive the dwell indicator without relying on a fragile
     /// paint-gap heuristic.
     shown_at_sink: Option<std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>>,
+    /// True when the tooltip was shown by the keyboard-focus path
+    /// rather than the pointer-hover path. Focus-promoted tooltips
+    /// dismiss when focus moves outside both the anchor and the
+    /// tooltip content subtree (preventing accumulation as the user
+    /// Tabs through a form); pointer-dwelled stickies survive
+    /// focus changes and only dismiss via Escape or click-outside.
+    promoted_by_focus: bool,
 }
 
 /// A delayed overlay request (e.g., submenu hover-open delay).

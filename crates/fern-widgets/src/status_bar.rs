@@ -78,6 +78,7 @@ impl Widget for StatusBar {
             Panel::new()
                 .background(SurfaceRole::Sunken)
                 .padding(spacing)
+                .a11y_presentational()
                 .child_id(row_id),
         );
         self.root_child_id = Some(root);
@@ -107,8 +108,9 @@ impl Widget for StatusBar {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::GenericContainer);
+        builder.set_role(fern_core::accesskit::Role::Status);
         builder.set_name(fern_i18n::tr_widget!(a11y_status_bar_name()).resolve_now());
+        builder.set_live(fern_core::accesskit::Live::Polite);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -137,6 +139,35 @@ mod tests {
         let sb = tree.add(StatusBar::new());
         tree.layout(SizeProposal::exact(400.0, 50.0));
         let info = tree.accessibility_node(sb);
+        assert_eq!(info.role(), fern_core::accesskit::Role::Status);
         assert_eq!(info.name(), Some("Status"));
+    }
+
+    #[test]
+    fn status_bar_tree_has_polite_live_region_and_no_group_wrapper() {
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let sb = tree.add(StatusBar::new());
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let update = tree.sync_accessibility();
+        let sb_nid = fern_core::accessibility::widget_id_to_node_id(sb);
+        let sb_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == sb_nid)
+            .map(|(_, n)| n)
+            .expect("status bar node in tree");
+        assert_eq!(sb_node.live(), Some(fern_core::accesskit::Live::Polite));
+        // Panel wrapper should be hidden so StatusBar → HStack directly,
+        // no intermediate Role::Group node.
+        let groups: Vec<_> = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == fern_core::accesskit::Role::Group)
+            .collect();
+        assert!(
+            groups.is_empty(),
+            "expected no Role::Group wrapper under StatusBar, got {}",
+            groups.len()
+        );
     }
 }

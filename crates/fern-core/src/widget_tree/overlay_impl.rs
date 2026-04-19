@@ -78,6 +78,7 @@ impl WidgetTree {
             shown_at_sim: None,
             shown_at_real: None,
             shown_at_sink,
+            promoted_by_focus: false,
         });
     }
 
@@ -368,6 +369,107 @@ impl WidgetTree {
         false
     }
 
+    /// Called when a widget gains keyboard focus. For any *rich*
+    /// tooltip (one with `sticky_after` set) whose anchor contains
+    /// `widget_id`, show the tooltip immediately and promote it to
+    /// sticky. This gives keyboard and screen-reader users the same
+    /// access to rich-tooltip interactive content as pointer users,
+    /// who reach it via the 2 s hover dwell.
+    ///
+    /// Plain tooltips (no `sticky_after`) are deliberately NOT
+    /// auto-shown on focus — their text reaches assistive tech via
+    /// the anchor's `aria-describedby` relationship wired in the
+    /// a11y tree pass, which is the W3C-recommended pattern for
+    /// supplementary hints.
+    pub(super) fn tooltip_focus_enter(&mut self, widget_id: WidgetId) {
+        // Composite widgets (e.g. `Button`) attach their tooltip to an
+        // *inner* subtree root, then keep focus on the outer widget
+        // itself. Accept either direction of the ancestor relationship
+        // so "focus landed anywhere inside the anchor's scope" fires
+        // correctly regardless of whether the anchor is the focusable
+        // node or one of its descendants.
+        let to_show: Vec<(WidgetId, WidgetId)> = self
+            .tooltips
+            .iter()
+            .filter(|e| {
+                e.sticky_after.is_some()
+                    && e.overlay_id.is_none()
+                    && (self.is_descendant_of(widget_id, e.anchor_id)
+                        || self.is_descendant_of(e.anchor_id, widget_id))
+            })
+            .map(|e| (e.anchor_id, e.content_id))
+            .collect();
+
+        let sim_now = self.sim_clock;
+        let real_now = std::time::Instant::now();
+        for (anchor_id, content_id) in to_show {
+            self.arena.activate(content_id);
+            let oid = self.overlay_manager.show(crate::overlay::OverlayRequest {
+                content_id,
+                anchor: anchor_id,
+                placement: crate::overlay::OverlayPlacement::NearAnchor {
+                    offset: fern_canvas::Vec2::new(0.0, 8.0),
+                },
+                dismiss: crate::overlay::DismissBehavior::EscapeOrClickOutside,
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+            });
+            if let Some(entry) = self
+                .tooltips
+                .iter_mut()
+                .find(|e| e.content_id == content_id)
+            {
+                entry.overlay_id = Some(oid);
+                entry.shown_at_sim = Some(sim_now);
+                entry.shown_at_real = Some(real_now);
+                entry.promoted_by_focus = true;
+                if let Some(sink) = entry.shown_at_sink.as_ref() {
+                    sink.set(Some(real_now));
+                }
+            }
+            self.promote_tooltip_to_sticky(content_id);
+        }
+    }
+
+    /// Called when focus moves to a new widget. Dismisses every
+    /// focus-promoted rich tooltip whose anchor- and tooltip-content
+    /// subtrees both fail to contain the new focus — so Tab'ing INTO
+    /// a sticky tooltip to click a link keeps it up, but Tab'ing
+    /// past it onto unrelated controls closes it (preventing sticky
+    /// accumulation as the user navigates through a form).
+    ///
+    /// Pointer-dwelled stickies (`promoted_by_focus == false`)
+    /// survive focus changes intact — they're dismissed only via
+    /// Escape or click-outside, matching the existing mouse UX.
+    pub(super) fn tooltip_focus_leave_outside(&mut self, new_focus: Option<WidgetId>) {
+        let to_dismiss: Vec<crate::overlay::OverlayId> = self
+            .tooltips
+            .iter()
+            .filter(|e| e.promoted_by_focus && e.overlay_id.is_some())
+            .filter(|e| {
+                let in_scope = new_focus
+                    .map(|nf| {
+                        // In scope when the new focus lands in either
+                        // the anchor's subtree or the tooltip content's
+                        // subtree — covers Tab-to-anchor, Tab-deeper-
+                        // inside-anchor, and Tab-into-tooltip.
+                        self.is_descendant_of(nf, e.anchor_id)
+                            || self.is_descendant_of(e.anchor_id, nf)
+                            || self.is_descendant_of(nf, e.content_id)
+                    })
+                    .unwrap_or(false);
+                !in_scope
+            })
+            .filter_map(|e| e.overlay_id)
+            .collect();
+
+        for oid in to_dismiss {
+            let dismissed = self.overlay_manager.dismiss(oid);
+            self.dormant_dismissed_content(&dismissed);
+        }
+    }
+
     pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
         let matching: Vec<usize> = self
             .tooltips
@@ -597,6 +699,7 @@ impl WidgetTree {
                 entry.real_hover_start = None;
                 entry.shown_at_sim = None;
                 entry.shown_at_real = None;
+                entry.promoted_by_focus = false;
                 if let Some(sink) = entry.shown_at_sink.as_ref() {
                     sink.set(None);
                 }
