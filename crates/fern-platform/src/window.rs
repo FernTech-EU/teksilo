@@ -17,6 +17,28 @@ impl std::fmt::Display for SurfaceRenderError {
     }
 }
 
+/// Outcome of [`PlatformWindow::render_frame`]. Mirrors the wgpu
+/// surface-status cases that matter to the caller so the app loop can
+/// decide how to respond (ignore, reconfigure, log) without every frame
+/// getting logged as an error.
+#[derive(Debug)]
+pub enum FrameOutcome {
+    /// Frame was rendered and presented.
+    Rendered,
+    /// wgpu reported the window as occluded or the acquire timed out.
+    /// Per wgpu guidance, skip this frame. On macOS, the initial paint
+    /// after window creation often hits `Occluded` one or more times
+    /// before Metal finishes compositing, so the caller should still
+    /// request another redraw once — unless it already knows the
+    /// window is occluded via `WindowEvent::Occluded(true)`.
+    Skipped,
+    /// Surface became outdated (resize, scale change, device switch).
+    /// Caller should reconfigure the surface and try again.
+    NeedsReconfigure,
+    /// Acquisition failed with a non-transient error.
+    Error(SurfaceRenderError),
+}
+
 /// A platform window wrapping a winit window, wgpu surface, renderer,
 /// and AccessKit adapter for screen reader support.
 pub struct PlatformWindow {
@@ -227,12 +249,17 @@ impl PlatformWindow {
         &mut self,
         frame: &fern_canvas::RenderFrame,
         clear_color: [f32; 4],
-    ) -> Result<(), SurfaceRenderError> {
+    ) -> FrameOutcome {
         let current = self.surface.get_current_texture();
         let output = match current {
             wgpu::CurrentSurfaceTexture::Success(tex)
             | wgpu::CurrentSurfaceTexture::Suboptimal(tex) => tex,
-            other => return Err(SurfaceRenderError(format!("{other:?}"))),
+            wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Timeout => return FrameOutcome::Skipped,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                return FrameOutcome::NeedsReconfigure;
+            }
+            other => return FrameOutcome::Error(SurfaceRenderError(format!("{other:?}"))),
         };
 
         let view = output
@@ -244,7 +271,7 @@ impl PlatformWindow {
             .render(frame, &view, self.scale_factor as f32, w, h, clear_color);
 
         output.present();
-        Ok(())
+        FrameOutcome::Rendered
     }
 
     pub fn request_redraw(&self) {

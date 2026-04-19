@@ -572,14 +572,35 @@ impl FernAppHandler {
             let clear = fern_render::vertex::srgb_to_linear_rgba(
                 managed.tree.theme().colors.surface_main.to_array(),
             );
-            if let Err(e) = managed.platform_window.render_frame(&frame, clear) {
-                eprintln!("fern-app: {e}, reconfiguring surface");
-                managed.platform_window.reconfigure_surface();
-                managed.platform_window.request_redraw();
-                return;
-            }
-            if let Some(trace) = &mut self.idle_trace {
-                trace.note_rendered_frame();
+            match managed.platform_window.render_frame(&frame, clear) {
+                fern_platform::FrameOutcome::Rendered => {
+                    if let Some(trace) = &mut self.idle_trace {
+                        trace.note_rendered_frame();
+                    }
+                }
+                // Occluded/Timeout: skip silently. On macOS the initial
+                // paint may hit Occluded before Metal finishes
+                // compositing, so keep pinging until we get a frame —
+                // but only while winit hasn't told us the window is
+                // actually occluded, to avoid spinning when it's
+                // buried behind another window.
+                fern_platform::FrameOutcome::Skipped => {
+                    if !managed.occluded {
+                        managed.platform_window.request_redraw();
+                    }
+                    return;
+                }
+                fern_platform::FrameOutcome::NeedsReconfigure => {
+                    managed.platform_window.reconfigure_surface();
+                    managed.platform_window.request_redraw();
+                    return;
+                }
+                fern_platform::FrameOutcome::Error(e) => {
+                    eprintln!("fern-app: {e}, reconfiguring surface");
+                    managed.platform_window.reconfigure_surface();
+                    managed.platform_window.request_redraw();
+                    return;
+                }
             }
 
             // Chain-request another redraw if the tree still wants to
@@ -755,6 +776,14 @@ impl FernAppHandler {
                     managed.occluded = occluded;
                     let active = managed.focused && !managed.occluded;
                     managed.tree.set_window_active(active);
+                    // When the window becomes visible again, drive a
+                    // fresh redraw — the render loop stopped pinging
+                    // while we were occluded, so without this nudge
+                    // the window stays frozen until the user moves
+                    // the mouse or hits a key.
+                    if !occluded {
+                        managed.platform_window.request_redraw();
+                    }
                 }
             }
             _ => {}
