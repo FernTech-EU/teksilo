@@ -66,26 +66,54 @@ impl WidgetTree {
         &mut self,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        // Defer rebuilds during the gesture-arena latch window: from
-        // `PointerDown` (which stores the press position in the captured
-        // widget's arena) until either `PointerUp` or the arena fires
-        // `DragStarted`. Rebuilding inside that window would destroy
-        // the arena and the press state with it, so the recognizer would
-        // never fire — the user clicks and nothing happens.
+        // Defer *selected* rebuilds during the gesture-arena latch
+        // window: from `PointerDown` (which stores the press position
+        // in the captured widget's arena) until either `PointerUp` or
+        // the arena fires `DragStarted`. Rebuilding the captured
+        // widget, or any of its ancestors, would destroy that arena
+        // and lose the press state — the recognizer would never fire.
+        //
+        // Rebuilds targeting widgets *outside* the captured widget's
+        // ancestor chain are safe: destroying sibling subtrees leaves
+        // the captured widget intact, so ongoing drags keep routing
+        // correctly. This matters for e.g. a virtualized `ListView`
+        // inside a ComboBox panel whose scrollbar sibling is capturing
+        // the pointer — the list must rebuild when scroll crosses its
+        // buffer, but the scrollbar itself (held elsewhere in the
+        // tree) must not be torn down mid-drag.
         //
         // Once `active_drag` is set, the framework routes PointerMove /
         // PointerUp via `handle_drag_move` / `handle_drag_drop` keyed
         // on the `DragSession`, not on the captured widget's arena —
-        // so a mid-drag rebuild (spring-loaded folders, data model
-        // mutations) is safe. Post-rebuild, `revalidate_interaction_state`
-        // clears the now-stale `pointer_captured_by`; subsequent events
-        // hit-test normally and still reach `handle_drag_move`.
-        let defer = self.pointer_captured_by.is_some() && self.active_drag.is_none();
-        if defer {
+        // so a mid-drag rebuild is safe regardless of topology. Post-
+        // rebuild, `revalidate_interaction_state` clears a now-stale
+        // `pointer_captured_by`; subsequent events hit-test normally.
+        let to_rebuild_all = self.arena.collect_needs_rebuild();
+        if to_rebuild_all.is_empty() {
             self.revalidate_interaction_state(&mut *ops);
             return;
         }
-        let to_rebuild = self.arena.collect_needs_rebuild();
+        let captured_ancestors: Option<Vec<WidgetId>> =
+            if self.active_drag.is_none() {
+                self.pointer_captured_by.map(|cap| {
+                    let mut ids = vec![cap];
+                    let mut cur = self.arena.parent(cap);
+                    while let Some(id) = cur {
+                        ids.push(id);
+                        cur = self.arena.parent(id);
+                    }
+                    ids
+                })
+            } else {
+                None
+            };
+        let to_rebuild: Vec<WidgetId> = match &captured_ancestors {
+            Some(chain) => to_rebuild_all
+                .into_iter()
+                .filter(|id| !chain.contains(id))
+                .collect(),
+            None => to_rebuild_all,
+        };
         if to_rebuild.is_empty() {
             self.revalidate_interaction_state(&mut *ops);
             return;
@@ -252,10 +280,38 @@ impl WidgetTree {
             );
         }
 
+        // Clear `needs_layout` for every active widget — layout just
+        // ran. `needs_rebuild` is NOT cleared here: `rebuild_single_widget`
+        // clears it for widgets it processes, and widgets whose rebuild
+        // was deferred (captured-pointer window) must keep the flag set
+        // so the next layout pass picks them up. Wiping it here caused
+        // a regression where a scroll-driven ListView rebuild, deferred
+        // during a scrollbar thumb drag, was silently dropped — the
+        // user saw the thumb move but the list view stayed frozen.
         for id in self.arena.active_ids() {
             if let Some(node) = self.arena.get_mut(id) {
                 node.dirty.needs_layout = false;
-                node.dirty.needs_rebuild = false;
+            }
+        }
+
+        // Post-layout hover refresh. When a rebuild destroyed the
+        // hovered widget, `revalidate_interaction_state` cleared
+        // `hovered` to `None`. Now that widgets have fresh bounds
+        // from this layout pass, re-hit-test at the cached pointer
+        // position so the next wheel/pointer event routes to the
+        // widget the cursor is actually over. Without this, a
+        // virtualized list that materializes new rows under a
+        // stationary cursor would see the next `Scroll` fall through
+        // to `focused` and bubble to an ancestor scrollable.
+        if self.hovered.is_none()
+            && let Some(pos) = self.last_pointer_position
+        {
+            let new_target = self.hit_test(pos);
+            if new_target.is_some() {
+                if let Some(new) = new_target {
+                    self.dispatch_to_widget(new, &WidgetEvent::PointerEnter, &mut *ops);
+                }
+                self.hovered = new_target;
             }
         }
     }

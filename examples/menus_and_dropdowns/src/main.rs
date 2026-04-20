@@ -48,6 +48,12 @@ impl Widget for Root {
         // alongside the selection signal.
         let country_selected = ctx.signal(None::<String>);
         let country_query = ctx.signal(String::new());
+        // Huge combo — 10 000 items to exercise the ListView-backed
+        // virtualization path. Opening this would be prohibitively slow
+        // without virtualization; with it, only the ~visible rows (plus
+        // a small buffer) are materialized.
+        let huge_selected = ctx.signal(None::<String>);
+        let huge_items: Vec<String> = (0..10_000).map(|i| format!("Item #{i:05}")).collect();
 
         let combo_section = ctx.add(
             VStack::new()
@@ -171,6 +177,20 @@ impl Widget for Root {
                                     .placeholder("Pick a country…")
                                     .search_query(country_query.clone())
                                     .max_visible_items(6),
+                                ),
+                        )
+                        .child(
+                            VStack::new()
+                                .spacing(4.0)
+                                .child(
+                                    TextWidget::new_literal("Huge (10 000 items)")
+                                        .style(TextStyleRole::Small)
+                                        .color(TextRole::Primary),
+                                )
+                                .child(
+                                    ComboBox::new(huge_items, huge_selected.clone())
+                                        .placeholder("Open me — virtualized")
+                                        .max_visible_items(10),
                                 ),
                         ),
                 ),

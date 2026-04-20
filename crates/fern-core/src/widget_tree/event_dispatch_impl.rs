@@ -403,6 +403,7 @@ impl WidgetTree {
         position: Point,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        self.last_pointer_position = Some(position);
         let target = self.hit_test(position);
 
         if target != self.hovered {

@@ -9,6 +9,7 @@
 //! child that rebuilds on query changes — the sibling `TextInput`
 //! survives each keystroke so the cursor doesn't jump.
 
+#[cfg(feature = "rich-text")]
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -22,17 +23,29 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
-use crate::primitives::{Padding, RectWidget, VStack, ZStack};
+use crate::list_view::ListView;
+use crate::primitives::{FixedSize, HStack, Padding, RectWidget, VStack, ZStack};
+use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 use super::item::DropdownItem;
 use super::state::ItemSource;
 
-/// Build the static (unfiltered) item list subtree: a padded `VStack`
-/// of `DropdownItem`s, optionally wrapped in a `ScrollArea` + `MaxSize`
-/// when the item count exceeds the visibility cap. Returns the root id
-/// for insertion into the panel's `ZStack`. Shared by the
-/// non-searchable path of `DropdownPanel` and — indirectly via
-/// `FilteredItemList` — the searchable path.
+/// Build the static (unfiltered) item list subtree.
+///
+/// Two paths:
+/// - **Small list** (`total <= max_visible_items`): a padded `VStack`
+///   of eagerly-materialized `DropdownItem`s. Simple, cheap — no
+///   reason to pay the `ListView` bookkeeping cost for a handful of
+///   rows.
+/// - **Large list**: a virtualized `ListView` sized to
+///   `max_visible_items * item_height`, wrapped in the same 4 px
+///   padding. Only the rows in the visible range (plus ListView's
+///   small buffer) are actually built, so a 10 000-item combo no
+///   longer materializes 10 000 widget subtrees on open.
+///
+/// Returns the root id for insertion into the panel's `ZStack`.
+/// Shared by the non-searchable path of `DropdownPanel` and —
+/// indirectly via `FilteredItemList` — the searchable path.
 pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: &ItemSource<T>,
@@ -43,99 +56,212 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     menu_style: &fern_tokens::MenuStyle,
 ) -> WidgetId {
     let total = source.len();
-    let mut vstack = VStack::new();
-    for i in 0..total {
-        if let Some(value) = source.get(i) {
-            let label = (item_label)(&value);
-            vstack = vstack.child(DropdownItem {
-                value,
-                label,
-                position: i + 1,
-                total,
-                selected_signal: selected.clone(),
-                render: render_item.clone(),
-                root_child_id: None,
-            });
+    if total <= max_visible_items {
+        let mut vstack = VStack::new();
+        for i in 0..total {
+            if let Some(value) = source.get(i) {
+                let label = (item_label)(&value);
+                vstack = vstack.child(DropdownItem {
+                    value,
+                    label,
+                    position: i + 1,
+                    total,
+                    selected_signal: selected.clone(),
+                    render: render_item.clone(),
+                    root_child_id: None,
+                });
+            }
         }
+        let vstack_id = ctx.add(vstack);
+        return ctx.add(Padding::uniform(4.0).child_id(vstack_id));
     }
-    let vstack_id = ctx.add(vstack);
-    let padded_id = ctx.add(Padding::uniform(4.0).child_id(vstack_id));
-    if total > max_visible_items {
-        let max_height = max_visible_items as f32 * menu_style.item_height + 8.0;
-        let scrollable = crate::scroll_area::ScrollArea::from_id(padded_id)
-            .preferred_size(0.0, max_height);
-        let scroll_y = scrollable.scroll_y_signal().clone();
-        let scrollable_id = ctx.add(scrollable);
 
-        // Keep the selected row in view during arrow navigation. Runs
-        // once up-front so a pre-selected value scrolls to on open,
-        // then fires on every subsequent `selected` change — the
-        // trigger's ArrowDown/ArrowUp handler flips the signal, this
-        // effect translates that into a scroll nudge when the new row
-        // is above or below the visible viewport. Without this, the
-        // selection can walk past the viewport's last visible item
-        // and disappear off-screen.
-        //
-        // `viewport_height` matches `max_height` (the `ScrollArea`'s
-        // `preferred_size` height): the full ScrollArea bounds
-        // include the 4 px padding on top and bottom, so the scroll
-        // coordinates are in that same outer-space. Using
-        // `max_visible_items * item_height` would under-count by 8 px
-        // and leave the focused row trimmed at the edge.
-        register_scroll_into_view(
-            ctx,
-            source.clone(),
-            selected.clone(),
-            scroll_y,
-            (0..total).collect(),
-            menu_style.item_height,
-            max_height,
-        );
-
-        ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
-    } else {
-        padded_id
-    }
+    build_virtualized_list(
+        ctx,
+        source,
+        selected,
+        item_label,
+        render_item,
+        max_visible_items,
+        menu_style,
+        None,
+    )
 }
 
-/// Register a `ctx.effect` on `selected` that scrolls the given
-/// `scroll_y` signal so the currently-selected item's row stays inside
-/// the viewport. Called once synchronously to sync the initial scroll
+/// Virtualized variant of the dropdown item list. When
+/// `filtered_indices` is `None`, the list addresses the full source
+/// directly; when `Some`, it projects each filtered position through
+/// the stored index list. In both cases `ListView` only materializes
+/// the rows in the viewport (plus its internal buffer) — the large-
+/// list regression (combos with thousands of items building a full
+/// widget subtree per row) is fixed here.
+fn build_virtualized_list<T: Clone + PartialEq + 'static>(
+    ctx: &mut BuildContext,
+    source: &ItemSource<T>,
+    selected: &Signal<Option<T>>,
+    item_label: &Rc<dyn Fn(&T) -> String>,
+    render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    max_visible_items: usize,
+    menu_style: &fern_tokens::MenuStyle,
+    filtered_indices: Option<Vec<usize>>,
+) -> WidgetId {
+    let item_height = menu_style.item_height;
+    let viewport_height = max_visible_items as f32 * item_height;
+
+    // Either address the raw source directly (unfiltered, saves an
+    // O(n) identity-mapping allocation for large lists) or project
+    // through a filter index list shared between the ListView source
+    // and the scroll-into-view effect.
+    let filtered_indices: Option<Rc<Vec<usize>>> = filtered_indices.map(Rc::new);
+    let visible_count = match &filtered_indices {
+        Some(indices) => indices.len(),
+        None => source.len(),
+    };
+
+    // Build a `ListSource<T>` that resolves rows back into the
+    // underlying `ItemSource` so the raw source keeps its reactivity
+    // and observer plumbing.
+    let list_source = match &filtered_indices {
+        None => source.to_list_source(),
+        Some(indices) => {
+            let src = source.clone();
+            let indices = indices.clone();
+            let len_fn: Rc<dyn Fn() -> usize> = Rc::new({
+                let indices = indices.clone();
+                move || indices.len()
+            });
+            let item_at: Rc<dyn Fn(usize) -> Option<T>> = Rc::new({
+                let src = src.clone();
+                let indices = indices.clone();
+                move |pos| indices.get(pos).and_then(|&i| src.get(i))
+            });
+            let observe_fn = src.observe.clone();
+            crate::list_source::ListSource::from_cloning_accessors(len_fn, item_at, observe_fn)
+        }
+    };
+
+    // Delegate: wrap each visible row in the existing `DropdownItem`
+    // so tap-to-select, highlight, and a11y keep working unchanged.
+    // `index` here is the *filtered* position — the one visible to the
+    // user — which is also what `position_in_set` / `size_of_set`
+    // should reflect.
+    let selected_for_delegate = selected.clone();
+    let item_label_for_delegate = item_label.clone();
+    let render_item_for_delegate = render_item.clone();
+    let delegate = move |index: usize, value: &T, _selected: bool| -> Box<dyn Widget> {
+        let label = (item_label_for_delegate)(value);
+        Box::new(DropdownItem {
+            value: value.clone(),
+            label,
+            position: index + 1,
+            total: visible_count,
+            selected_signal: selected_for_delegate.clone(),
+            render: render_item_for_delegate.clone(),
+            root_child_id: None,
+        })
+    };
+
+    // Build the ListView with the internal scrollbar disabled. The
+    // panel mounts its own `ScrollBar` as a sibling (see below) so
+    // that thumb drags survive the ListView's scroll-driven rebuilds:
+    // if the scrollbar lived inside the ListView, each rebuild
+    // (triggered when the visible range crosses the buffer mid-drag)
+    // would destroy the scrollbar widget and cancel its in-flight
+    // gesture, making the drag look like it does nothing.
+    let list_view = ListView::from_list_source(list_source, delegate)
+        .item_height(item_height)
+        .show_scrollbar(false);
+    let scroll_y = list_view.scroll_y_signal().clone();
+    let max_scroll_y = list_view.max_scroll_y_signal().clone();
+    let viewport_ratio_y = list_view.viewport_ratio_y_signal().clone();
+    let list_view_id = ctx.add(list_view);
+
+    // External scrollbar — lives as a sibling of the ListView inside
+    // the panel so ListView rebuilds leave it untouched. Wired to the
+    // same reactive state the list already updates during layout.
+    let external_scrollbar = ScrollBar::new(
+        ScrollBarOrientation::Vertical,
+        scroll_y.clone(),
+        max_scroll_y,
+        viewport_ratio_y,
+    );
+    let scrollbar_id = ctx.add(external_scrollbar);
+
+    // HStack { ListView | ScrollBar } — the list fills the remaining
+    // width, the scrollbar takes its fixed thickness. Both ride
+    // together under the outer `FixedSize` so the viewport height
+    // exactly equals `max_visible_items * item_height`.
+    let row_id = ctx.add(
+        HStack::new()
+            .spacing(0.0)
+            .add_child(list_view_id)
+            .add_child(scrollbar_id),
+    );
+
+    let padded_id = ctx.add(Padding::uniform(4.0).child_id(row_id));
+    let outer_height = viewport_height + 8.0;
+    let sized_id = ctx.add(
+        FixedSize::new()
+            .bind_height(outer_height)
+            .child_id(padded_id),
+    );
+
+    register_scroll_into_view(
+        ctx,
+        source.clone(),
+        selected.clone(),
+        scroll_y,
+        filtered_indices,
+        item_height,
+        viewport_height,
+    );
+
+    sized_id
+}
+
+/// Register a `ctx.effect` on `selected` that scrolls the `ListView`'s
+/// scroll signal so the currently-selected row stays inside the
+/// viewport. Called once synchronously to sync the initial scroll
 /// position, then registered as an effect for subsequent selection
 /// changes. Shared by both `build_static_item_list` and
 /// `FilteredItemList` so non-searchable and searchable paths behave
 /// identically.
 ///
-/// `visible_indices` maps the filtered-list position to the raw
-/// `source` index — for the non-searchable path it's just
-/// `(0..total).collect()`; for searchable mode it's the current
-/// filter output.
-///
-/// `viewport_height` is the full `ScrollArea` height (including the
-/// 4 px outer padding on top and bottom) so the comparison matches
-/// the scroll coordinate space.
+/// `filtered_indices` maps the filtered-list position to the raw
+/// `source` index — `None` for the non-searchable path (filtered
+/// position equals source index), `Some` for searchable mode's
+/// current filter output. The scroll coordinate space is the
+/// ListView's own content-space (row 0 starts at y=0), so no extra
+/// padding offset is applied here — the outer `Padding::uniform(4.0)`
+/// lives outside the scroll region.
 fn register_scroll_into_view<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: ItemSource<T>,
     selected: Signal<Option<T>>,
     scroll_y: Signal<f32>,
-    visible_indices: Vec<usize>,
+    filtered_indices: Option<Rc<Vec<usize>>>,
     item_height: f32,
     viewport_height: f32,
 ) {
-    let outer_padding = 4.0_f32; // matches `Padding::uniform(4.0)` on the VStack
     let scroll_into_view = {
         let source = source.clone();
         let scroll_y = scroll_y.clone();
         move |sel: &Option<T>| {
             let Some(v) = sel.as_ref() else { return };
-            let Some(pos) = visible_indices
-                .iter()
-                .position(|&i| source.get(i).as_ref() == Some(v))
-            else {
-                return;
+            let pos = match &filtered_indices {
+                None => match super::state::index_of(&source, v) {
+                    Some(i) => i,
+                    None => return,
+                },
+                Some(indices) => match indices
+                    .iter()
+                    .position(|&i| source.get(i).as_ref() == Some(v))
+                {
+                    Some(p) => p,
+                    None => return,
+                },
             };
-            let item_top = outer_padding + pos as f32 * item_height;
+            let item_top = pos as f32 * item_height;
             let item_bot = item_top + item_height;
             let cur_scroll = scroll_y.get();
             let cur_bot = cur_scroll + viewport_height;
@@ -244,47 +370,40 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
             keep
         };
         let visible_count = visible_indices.len();
-
-        let mut vstack = VStack::new();
-        for (pos, &i) in visible_indices.iter().enumerate() {
-            if let Some(value) = self.source.get(i) {
-                let label = (self.item_label)(&value);
-                vstack = vstack.child(DropdownItem {
-                    value,
-                    label,
-                    position: pos + 1,
-                    total: visible_count,
-                    selected_signal: self.selected.clone(),
-                    render: self.render_item.clone(),
-                    root_child_id: None,
-                });
-            }
-        }
-        let vstack_id = ctx.add(vstack);
-        let padded_id = ctx.add(Padding::uniform(4.0).child_id(vstack_id));
-
         let menu_style = theme.components.menu;
+
+        // Large filtered result — hand off to the shared virtualized
+        // path so only the visible rows are materialized even when the
+        // query matches thousands of items.
         let root_id = if visible_count > self.max_visible_items {
-            let max_height =
-                self.max_visible_items as f32 * menu_style.item_height + 8.0;
-            let scrollable = crate::scroll_area::ScrollArea::from_id(padded_id)
-                .preferred_size(0.0, max_height);
-            let scroll_y = scrollable.scroll_y_signal().clone();
-            let scrollable_id = ctx.add(scrollable);
-
-            register_scroll_into_view(
+            build_virtualized_list(
                 ctx,
-                self.source.clone(),
-                self.selected.clone(),
-                scroll_y,
-                visible_indices.clone(),
-                menu_style.item_height,
-                max_height,
-            );
-
-            ctx.add(crate::primitives::MaxSize::height(max_height).child_id(scrollable_id))
+                &self.source,
+                &self.selected,
+                &self.item_label,
+                &self.render_item,
+                self.max_visible_items,
+                &menu_style,
+                Some(visible_indices),
+            )
         } else {
-            padded_id
+            let mut vstack = VStack::new();
+            for (pos, &i) in visible_indices.iter().enumerate() {
+                if let Some(value) = self.source.get(i) {
+                    let label = (self.item_label)(&value);
+                    vstack = vstack.child(DropdownItem {
+                        value,
+                        label,
+                        position: pos + 1,
+                        total: visible_count,
+                        selected_signal: self.selected.clone(),
+                        render: self.render_item.clone(),
+                        root_child_id: None,
+                    });
+                }
+            }
+            let vstack_id = ctx.add(vstack);
+            ctx.add(Padding::uniform(4.0).child_id(vstack_id))
         };
         self.root_child_id = Some(root_id);
         vec![root_id]

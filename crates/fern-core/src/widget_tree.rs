@@ -63,6 +63,13 @@ pub struct WidgetTree {
     text_backend: Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
     focused: Option<WidgetId>,
     hovered: Option<WidgetId>,
+    /// Last known pointer position from `PointerMove`. Used by
+    /// `revalidate_interaction_state` to re-hit-test the hover after
+    /// a rebuild shifts content under a stationary cursor — without
+    /// this, the next `Scroll` event routes to `focused` (or falls
+    /// through to an ancestor scrollable) instead of the item the
+    /// user is actually pointing at.
+    last_pointer_position: Option<fern_canvas::Point>,
     last_proposal: SizeProposal,
     pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
     pending_modal_dismissal: bool,
@@ -270,6 +277,7 @@ impl WidgetTree {
             text_backend: None,
             focused: None,
             hovered: None,
+            last_pointer_position: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
             pending_modal_dismissal: false,

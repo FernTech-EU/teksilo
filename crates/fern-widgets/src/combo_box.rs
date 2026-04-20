@@ -592,6 +592,9 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 let item_label_for_keys = self.item_label.clone();
                 let hint = self.selected_index_hint.clone();
                 let open_overlay = open_overlay.clone();
+                // PageUp/PageDown step by one visible page (clamped to 1
+                // so a `max_visible_items(1)` combo still moves).
+                let page_size = self.max_visible_items.max(1);
                 // Type-ahead buffer: (prefix, last_keystroke_time)
                 let typeahead: Rc<RefCell<(String, Instant)>> =
                     Rc::new(RefCell::new((String::new(), Instant::now())));
@@ -721,6 +724,50 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 return EventResponse::Handled;
                             }
                             pick_at(n - 1);
+                            EventResponse::Handled
+                        }
+                        // PageDown / PageUp — advance or retreat selection
+                        // by one page, where a page is `max_visible_items`
+                        // rows. Mirrors the standard combo-box keyboard
+                        // convention and also gets the visible range to
+                        // follow via `register_scroll_into_view`.
+                        WidgetEvent::KeyDown {
+                            key: Key::PageDown,
+                            ..
+                        } => {
+                            let n = source.len();
+                            if n == 0 {
+                                return EventResponse::Handled;
+                            }
+                            if interaction.get() != ComboBoxState::Open {
+                                open_overlay(ctx);
+                            }
+                            let current_idx = selected
+                                .get()
+                                .as_ref()
+                                .and_then(|v| resolve_index(&source, v, &hint))
+                                .unwrap_or(0);
+                            let target = current_idx.saturating_add(page_size).min(n - 1);
+                            pick_at(target);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::KeyDown {
+                            key: Key::PageUp, ..
+                        } => {
+                            let n = source.len();
+                            if n == 0 {
+                                return EventResponse::Handled;
+                            }
+                            if interaction.get() != ComboBoxState::Open {
+                                open_overlay(ctx);
+                            }
+                            let current_idx = selected
+                                .get()
+                                .as_ref()
+                                .and_then(|v| resolve_index(&source, v, &hint))
+                                .unwrap_or(0);
+                            let target = current_idx.saturating_sub(page_size);
+                            pick_at(target);
                             EventResponse::Handled
                         }
                         // Type-ahead: letter/character keys jump to matching item.

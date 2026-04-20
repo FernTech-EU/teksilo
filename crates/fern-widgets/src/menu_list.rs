@@ -15,7 +15,8 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, Color, CornerRadius, SurfaceRole};
 
-use crate::primitives::{Padding, RectWidget, VStack, ZStack};
+use crate::primitives::{MaxSize, Padding, RectWidget, VStack, ZStack};
+use crate::scroll_area::ScrollArea;
 
 /// Marker for whether a pending item is a menu item or a separator.
 enum MenuEntry {
@@ -48,8 +49,14 @@ impl Widget for MenuSeparator {
     }
 }
 
-// TODO(milestone-7): Add `max_visible_items` option to MenuList. When item count exceeds
-// the limit, show a scrollable list with arrow headers/footers. Blocked on ListView.
+// Note: MenuList's `max_visible_items` caps the panel height and wraps
+// the item column in a `ScrollArea`, but does **not** yet virtualize —
+// every item widget (plus separators) is still built eagerly. True
+// virtualization requires a model-backed MenuList API (item descriptor
+// → delegate builds the row) because today's surface accepts arbitrary
+// `impl Widget` children directly. Tracked as follow-up; eager build
+// is cheap enough that ScrollArea-capped panels of 100+ items are
+// already fine in practice.
 
 /// Wrapper that adds a keyboard-focus highlight behind a menu item.
 /// The highlight is driven by a shared `focused_index` signal — when
@@ -149,6 +156,12 @@ pub struct MenuList {
     item_widget_ids: Vec<WidgetId>,
     /// Whether each item (by index into item_widget_ids) is a submenu trigger.
     submenu_flags: Vec<bool>,
+    /// When set and the item count (counting every entry — items *and*
+    /// separators — against the row count, not pixels) exceeds the
+    /// limit, the content column is wrapped in a `ScrollArea` and the
+    /// panel height is capped to `n * item_height`. `None` (default)
+    /// lets the menu grow with its content.
+    max_visible_items: Option<usize>,
 }
 
 impl MenuList {
@@ -158,6 +171,7 @@ impl MenuList {
             root_child_id: None,
             item_widget_ids: Vec::new(),
             submenu_flags: Vec::new(),
+            max_visible_items: None,
         }
     }
 
@@ -176,6 +190,18 @@ impl MenuList {
     /// Add a separator line.
     pub fn separator(mut self) -> Self {
         self.entries.push(MenuEntry::Separator);
+        self
+    }
+
+    /// Cap the panel height to roughly `n * item_height` and make the
+    /// content scrollable when that height is exceeded. Clamped to at
+    /// least 1. Useful for long menus (e.g. a "Recent files" list) —
+    /// without this, a very long menu grows to exceed the window.
+    ///
+    /// Note: items are still materialized eagerly; this is a viewport
+    /// cap, not virtualization. See the module-level note.
+    pub fn max_visible_items(mut self, n: usize) -> Self {
+        self.max_visible_items = Some(n.max(1));
         self
     }
 }
@@ -238,6 +264,24 @@ impl Widget for MenuList {
         let padding = Padding::uniform(4.0).child_id(vstack_id);
         let padding_id = ctx.add(padding);
 
+        // Viewport cap. When `max_visible_items` is set and the real
+        // item count exceeds it, wrap the padded column in a
+        // `ScrollArea` + `MaxSize` pair sized to `cap * item_height`
+        // + the 4 px outer padding on each edge. Separators don't
+        // count against the cap — they're visually small and no real
+        // menu stacks enough of them for the slight under-shoot to
+        // matter.
+        let visible_cap_id = match self.max_visible_items {
+            Some(cap) if self.item_widget_ids.len() > cap => {
+                let max_height = cap as f32 * menu_style.item_height + 8.0;
+                let scrollable = ScrollArea::from_id(padding_id)
+                    .preferred_size(0.0, max_height);
+                let scrollable_id = ctx.add(scrollable);
+                ctx.add(MaxSize::height(max_height).child_id(scrollable_id))
+            }
+            _ => padding_id,
+        };
+
         // Themed surface background — Int UI menus use the popup radius (8 dp)
         // and a 1 dp border on the raised surface.
         let bg = RectWidget::new()
@@ -247,7 +291,7 @@ impl Widget for MenuList {
             .corner_radius(CornerRadius::uniform(menu_style.popup_corner_radius));
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
+        let zstack = ZStack::new().add_child(bg_id).add_child(visible_cap_id);
         let root_id = ctx.add(zstack);
 
         self.root_child_id = Some(root_id);
@@ -372,6 +416,82 @@ impl Widget for MenuList {
             Some(id) => vec![id],
             None => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::menu_item::MenuItem;
+    use fern_core::widget_tree::WidgetTree;
+    use fern_tokens::Theme;
+
+    fn light_tree() -> WidgetTree {
+        WidgetTree::new().with_theme(Theme::light_default())
+    }
+
+    #[test]
+    fn unbounded_menu_grows_with_content() {
+        // Without `max_visible_items`, a long menu should size to its
+        // content — not be silently clipped. Use `with_width` so the
+        // root takes its natural height from `size_that_fits` rather
+        // than the proposal's exact height.
+        let mut tree = light_tree();
+        let mut menu = MenuList::new();
+        for i in 0..20 {
+            menu = menu.item(MenuItem::new_literal(format!("Entry {i}")));
+        }
+        let id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        let h = tree.bounds(id).height;
+        // 20 items × 24 px ≈ 480 px — well above a capped viewport.
+        assert!(
+            h > 400.0,
+            "uncapped menu should grow to fit all items, got height={}",
+            h
+        );
+    }
+
+    #[test]
+    fn max_visible_items_caps_height() {
+        // With `max_visible_items(5)`, a 20-entry menu must cap near
+        // `5 * item_height + outer padding` rather than growing to fit
+        // every row.
+        let mut tree = light_tree();
+        let mut menu = MenuList::new().max_visible_items(5);
+        for i in 0..20 {
+            menu = menu.item(MenuItem::new_literal(format!("Entry {i}")));
+        }
+        let id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        let h = tree.bounds(id).height;
+        // 5 rows × 24 px + 8 px padding = 128. Give a generous
+        // tolerance band (theme may tweak item_height); the key
+        // regression to catch is "grew to fit everything" (~480 px).
+        assert!(
+            h < 200.0,
+            "capped menu height should be bounded by max_visible_items, got {}",
+            h
+        );
+        assert!(h > 0.0, "capped menu should have positive height");
+    }
+
+    #[test]
+    fn max_visible_items_below_count_has_no_effect() {
+        // When item count fits under the cap, the ScrollArea wrapper
+        // must not be inserted — sanity check that we don't pay the
+        // wrapper cost (or its minor layout overhead) for small menus.
+        let mut tree = light_tree();
+        let menu = MenuList::new()
+            .max_visible_items(10)
+            .item(MenuItem::new_literal("A"))
+            .item(MenuItem::new_literal("B"));
+        let id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        let h = tree.bounds(id).height;
+        // 2 items × 24 = 48 px + padding ≈ 56 px. Much less than the
+        // cap of 10 × 24 = 240 px.
+        assert!(h < 100.0, "small menu should size to content, got {}", h);
     }
 }
 

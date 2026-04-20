@@ -48,6 +48,28 @@ impl<T: 'static> ListSource<T> {
         }
     }
 
+    /// Build from a `len / item-at / observe` closure triple where the
+    /// item getter returns an owned clone instead of borrowing. The
+    /// resulting `with_item_fn` clones the item out, then hands a
+    /// reference to the delegate. Used by `ComboBox`'s `ItemSource`,
+    /// which fronts both `ListModel<T>` and `ListDataSource<T>` behind
+    /// cloning accessors and doesn't carry a `&T` lifetime.
+    pub(crate) fn from_cloning_accessors(
+        len_fn: Rc<dyn Fn() -> usize>,
+        item_at: Rc<dyn Fn(usize) -> Option<T>>,
+        observe_fn: Rc<dyn Fn(Box<dyn Fn(&DataChange)>) -> ObserverHandle>,
+    ) -> Self
+    where
+        T: Clone,
+    {
+        Self {
+            len_fn,
+            with_item_fn: Rc::new(move |index, f| item_at(index).as_ref().map(|item| f(item))),
+            observe_fn,
+            move_item_fn: None,
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         (self.len_fn)()
     }

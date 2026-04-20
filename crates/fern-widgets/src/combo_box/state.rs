@@ -69,6 +69,18 @@ impl<T: Clone + 'static> ItemSource<T> {
     pub(super) fn get(&self, index: usize) -> Option<T> {
         (self.item_at)(index)
     }
+
+    /// Bridge this `ItemSource` into the crate-internal `ListSource`
+    /// used by `ListView`. Enables virtualized rendering for the
+    /// ComboBox dropdown panel without forcing the ListView API to
+    /// understand `ItemSource` directly.
+    pub(super) fn to_list_source(&self) -> crate::list_source::ListSource<T> {
+        crate::list_source::ListSource::from_cloning_accessors(
+            self.len.clone(),
+            self.item_at.clone(),
+            self.observe.clone(),
+        )
+    }
 }
 
 pub(super) fn resolve_bg_role(state: ComboBoxState) -> SurfaceRole {

@@ -67,6 +67,13 @@ pub struct ListView<T: 'static> {
     /// Enable intra-widget drag reordering + keyboard Alt+Arrow.
     reorderable: bool,
 
+    /// Whether to render an internal vertical scrollbar. When the
+    /// caller wants the scrollbar outside the list — e.g. so it
+    /// survives ListView rebuilds — this is disabled and the caller
+    /// mounts their own, wired through `scroll_y_signal` /
+    /// `max_scroll_y_signal` / `viewport_ratio_y_signal`.
+    show_scrollbar: bool,
+
     /// Callback for inter-widget drops from external drag sources.
     #[allow(clippy::type_complexity)]
     on_item_drop: Option<Rc<dyn Fn(DragPayload, usize) -> bool>>,
@@ -119,6 +126,17 @@ impl<T: 'static> ListView<T> {
         Self::create(ListSource::from_data_source(source), delegate)
     }
 
+    /// Create a ListView backed by a pre-built [`ListSource`]. Crate-
+    /// internal entry point for consumers that already own an erased
+    /// source (e.g. `ComboBox`'s `ItemSource` bridged through
+    /// [`ListSource::from_cloning_accessors`]).
+    pub(crate) fn from_list_source(
+        source: ListSource<T>,
+        delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self::create(source, delegate)
+    }
+
     fn create(
         source: ListSource<T>,
         delegate: impl Fn(usize, &T, bool) -> Box<dyn Widget> + 'static,
@@ -135,6 +153,7 @@ impl<T: 'static> ListView<T> {
             selection: None,
             focused_index: Rc::new(Cell::new(None)),
             reorderable: false,
+            show_scrollbar: true,
             on_item_drop: None,
             drop_feedback: Signal::new(None),
             placed_content_width: Rc::new(Cell::new(0.0)),
@@ -172,6 +191,19 @@ impl<T: 'static> ListView<T> {
     /// automatically. Keyboard equivalent: Alt+ArrowUp/Down.
     pub fn reorderable(mut self, enabled: bool) -> Self {
         self.reorderable = enabled;
+        self
+    }
+
+    /// Suppress the internal scroll bar. Use when the caller wants to
+    /// mount its own `ScrollBar` outside the ListView (keeping it alive
+    /// across rebuilds so a thumb drag isn't torn down when the visible
+    /// range shifts past the buffer). The caller is expected to wire
+    /// the external bar up to the signals returned by
+    /// [`scroll_y_signal`](Self::scroll_y_signal),
+    /// [`max_scroll_y_signal`](Self::max_scroll_y_signal) and
+    /// [`viewport_ratio_y_signal`](Self::viewport_ratio_y_signal).
+    pub fn show_scrollbar(mut self, show: bool) -> Self {
+        self.show_scrollbar = show;
         self
     }
 
@@ -230,10 +262,54 @@ impl<T: 'static> ListView<T> {
         &self.drop_feedback
     }
 
-    /// Test-only accessor: the current scroll offset signal.
-    #[cfg(test)]
-    pub(crate) fn scroll_y_signal(&self) -> &Signal<f32> {
+    /// The current vertical scroll offset, in logical pixels. Drives the
+    /// viewport position and the scroll bar thumb. Exposed so external
+    /// logic (e.g. a parent widget implementing custom scroll-into-view)
+    /// can read or drive the scroll directly — prefer
+    /// [`scroll_to_index`](Self::scroll_to_index) /
+    /// [`ensure_index_visible`](Self::ensure_index_visible) when possible.
+    pub fn scroll_y_signal(&self) -> &Signal<f32> {
         &self.scroll_y
+    }
+
+    /// The maximum scroll offset, `content_height - viewport_height`.
+    /// Updated during layout. Exposed for callers that mount their own
+    /// external scrollbar via [`show_scrollbar(false)`](Self::show_scrollbar).
+    pub fn max_scroll_y_signal(&self) -> &Signal<f32> {
+        &self.max_scroll_y
+    }
+
+    /// The vertical viewport-to-content ratio (0.0..1.0). Drives the
+    /// thumb size on any external scrollbar.
+    pub fn viewport_ratio_y_signal(&self) -> &Signal<f32> {
+        &self.viewport_ratio_y
+    }
+
+    /// Scroll so the given model index is aligned to the top of the
+    /// viewport. Clamped to the valid scroll range. Safe to call before
+    /// the ListView has been laid out — the clamp will kick in on the
+    /// first layout pass.
+    pub fn scroll_to_index(&self, index: usize) {
+        let row_step = self.item_height + self.spacing;
+        let target = index as f32 * row_step;
+        let max = self.max_scroll_y.get();
+        self.scroll_y.set(target.clamp(0.0, max));
+    }
+
+    /// Scroll the minimum distance needed to bring the given model
+    /// index fully into the viewport. No-op if already visible.
+    pub fn ensure_index_visible(&self, index: usize) {
+        let row_step = self.item_height + self.spacing;
+        let item_top = index as f32 * row_step;
+        let item_bot = item_top + self.item_height;
+        let scroll = self.scroll_y.get();
+        let viewport = self.viewport_height.get();
+        let max = self.max_scroll_y.get();
+        if item_top < scroll {
+            self.scroll_y.set(item_top.clamp(0.0, max));
+        } else if item_bot > scroll + viewport {
+            self.scroll_y.set((item_bot - viewport).clamp(0.0, max));
+        }
     }
 }
 
@@ -681,18 +757,29 @@ impl<T: 'static> Widget for ListView<T> {
         }
 
         // --- Create scrollbar ---
-        let scrollbar = ScrollBar::new(
-            ScrollBarOrientation::Vertical,
-            self.scroll_y.clone(),
-            self.max_scroll_y.clone(),
-            self.viewport_ratio_y.clone(),
-        );
-        let sb_id = ctx.add(scrollbar);
-        self.scrollbar_id = Some(sb_id);
+        // Skipped when the caller opted out via `show_scrollbar(false)`
+        // — they're expected to mount their own, wired through the
+        // exposed signal accessors, so it can outlive ListView
+        // rebuilds (e.g. a ComboBox panel keeping the scrollbar alive
+        // mid-thumb-drag so the drag isn't torn down when the visible
+        // range crosses the buffer).
+        if self.show_scrollbar {
+            let scrollbar = ScrollBar::new(
+                ScrollBarOrientation::Vertical,
+                self.scroll_y.clone(),
+                self.max_scroll_y.clone(),
+                self.viewport_ratio_y.clone(),
+            );
+            let sb_id = ctx.add(scrollbar);
+            self.scrollbar_id = Some(sb_id);
+        } else {
+            self.scrollbar_id = None;
+        }
 
-        // Return all children (items + scrollbar)
         let mut children: Vec<WidgetId> = self.item_entries.iter().map(|(_, id)| *id).collect();
-        children.push(sb_id);
+        if let Some(sb) = self.scrollbar_id {
+            children.push(sb);
+        }
         children
     }
 
@@ -734,8 +821,9 @@ impl<T: 'static> Widget for ListView<T> {
 
         let scroll_y = self.scroll_y.get();
         let row_step = self.item_height + self.spacing;
-        let needs_scrollbar = total_height > viewport_height + 0.5;
-        let content_width = if needs_scrollbar {
+        let needs_internal_scrollbar =
+            self.show_scrollbar && total_height > viewport_height + 0.5;
+        let content_width = if needs_internal_scrollbar {
             (bounds.width - SCROLLBAR_THICKNESS).max(0.0)
         } else {
             bounds.width
@@ -753,16 +841,17 @@ impl<T: 'static> Widget for ListView<T> {
             }
         }
 
-        // Place scrollbar (last child)
-        if let Some(sb_child) = children.last_mut() {
-            if needs_scrollbar {
-                sb_child.origin =
-                    Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
-                sb_child.size = Size::new(SCROLLBAR_THICKNESS, bounds.height);
-            } else {
-                // Collapse scrollbar when not needed
-                sb_child.origin = bounds.origin();
-                sb_child.size = Size::ZERO;
+        // Place scrollbar (last child) — only when the ListView owns one.
+        if self.show_scrollbar {
+            if let Some(sb_child) = children.last_mut() {
+                if needs_internal_scrollbar {
+                    sb_child.origin =
+                        Point::new(bounds.x + bounds.width - SCROLLBAR_THICKNESS, bounds.y);
+                    sb_child.size = Size::new(SCROLLBAR_THICKNESS, bounds.height);
+                } else {
+                    sb_child.origin = bounds.origin();
+                    sb_child.size = Size::ZERO;
+                }
             }
         }
     }
