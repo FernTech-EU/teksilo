@@ -195,9 +195,12 @@ fn build_color_box(color: impl Into<fern_ui::core::ColorProp>, label: &str) -> P
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Text & Layout")
-        .window_size(600, 500)
-        .root(|tree| tree.add(RootContent::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("FernUI — Text & Layout")
+            .size(600, 500)
+            .root(|tree, _state| tree.add(RootContent::new()))
+        )
         .run();
 }
 

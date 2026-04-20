@@ -14,7 +14,19 @@ impl WidgetTree {
     /// Also caches the full assembled frame — if no widget needs painting,
     /// the previous frame is returned immediately.
     pub fn render(&mut self) -> std::rc::Rc<RenderFrame> {
-        self.process_state_changes();
+        let mut noop = crate::window::NoopWindowOps;
+        self.render_with_ops(&mut noop)
+    }
+
+    /// Render a frame, threading the app's
+    /// [`WindowOps`](crate::window::WindowOps) sink through any
+    /// state-change-triggered handlers (data-driven rebuild, binding
+    /// flush). Called by `fern-app` during its paint pipeline.
+    pub fn render_with_ops(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> std::rc::Rc<RenderFrame> {
+        self.process_state_changes(&mut *ops);
 
         // Always tick the animated-quad registry — even on the cache-hit
         // early-out we still need fresh phase in the frame's

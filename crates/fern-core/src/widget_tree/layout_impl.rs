@@ -3,7 +3,7 @@ use super::*;
 impl WidgetTree {
     /// Process dirty state bindings: mark bound widgets for repaint, relayout,
     /// or rebuild. Called automatically at the start of layout().
-    pub(super) fn process_state_changes(&mut self) {
+    pub(super) fn process_state_changes(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let dirty_widgets = self.binding_registry.flush_dirty();
         for (id, level) in &dirty_widgets {
             match level {
@@ -37,7 +37,7 @@ impl WidgetTree {
         }
 
         // Rebuild data-driven widgets whose data model changed.
-        self.process_pending_rebuilds();
+        self.process_pending_rebuilds(&mut *ops);
 
         let mut to_dormant = Vec::new();
         let mut to_activate = Vec::new();
@@ -62,7 +62,10 @@ impl WidgetTree {
     /// flushed, and again after overlay / tooltip activation so that
     /// widgets transitioning from dormant → active in the same
     /// layout pass get rebuilt *this* frame rather than the next.
-    pub(super) fn process_pending_rebuilds(&mut self) {
+    pub(super) fn process_pending_rebuilds(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         // Defer rebuilds during the gesture-arena latch window: from
         // `PointerDown` (which stores the press position in the captured
         // widget's arena) until either `PointerUp` or the arena fires
@@ -79,12 +82,12 @@ impl WidgetTree {
         // hit-test normally and still reach `handle_drag_move`.
         let defer = self.pointer_captured_by.is_some() && self.active_drag.is_none();
         if defer {
-            self.revalidate_interaction_state();
+            self.revalidate_interaction_state(&mut *ops);
             return;
         }
         let to_rebuild = self.arena.collect_needs_rebuild();
         if to_rebuild.is_empty() {
-            self.revalidate_interaction_state();
+            self.revalidate_interaction_state(&mut *ops);
             return;
         }
         for widget_id in to_rebuild {
@@ -93,11 +96,29 @@ impl WidgetTree {
         // Rebuild destroys old child subtrees and allocates fresh WidgetIds;
         // drop any focus/hover state whose target is no longer valid so we
         // don't dispatch to dead widgets on the next event.
-        self.revalidate_interaction_state();
+        self.revalidate_interaction_state(&mut *ops);
     }
 
-    /// Run the layout pass with the given size proposal.
+    /// Run the layout pass with the given size proposal, using
+    /// [`NoopWindowOps`](crate::window::NoopWindowOps). Handlers
+    /// triggered from drag_tick / tooltip activation / etc cannot
+    /// call `ctx.open_window(...)` from this path.
+    ///
+    /// `fern-app` calls [`layout_with_ops`](Self::layout_with_ops)
+    /// with a real sink so those handlers can open windows.
     pub fn layout(&mut self, proposal: SizeProposal) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.layout_with_ops(proposal, &mut noop);
+    }
+
+    /// Run the layout pass with the given size proposal, threading
+    /// the app's [`WindowOps`](crate::window::WindowOps) sink
+    /// through to drag_tick / tooltip / delayed-overlay handlers.
+    pub fn layout_with_ops(
+        &mut self,
+        proposal: SizeProposal,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         self.process_pending_animations();
 
         let now = std::time::Instant::now();
@@ -121,20 +142,20 @@ impl WidgetTree {
         // (viewport-edge auto-scroll, spring-loaded folders) without
         // depending on pointer events — crucial when the user holds the
         // cursor still at the edge or over a collapsed branch.
-        self.process_drag_tick();
+        self.process_drag_tick(&mut *ops);
 
-        self.process_state_changes();
+        self.process_state_changes(&mut *ops);
         self.process_tooltips_real();
-        self.process_delayed_overlays_real();
-        self.process_pointer_leave_overlays_real();
-        self.process_auto_dismiss_overlays_real();
+        self.process_delayed_overlays_real(&mut *ops);
+        self.process_pointer_leave_overlays_real(&mut *ops);
+        self.process_auto_dismiss_overlays_real(&mut *ops);
         // Overlay / tooltip activation may have flipped widgets from
         // dormant → active; if any of those had `needs_rebuild`
         // pending (e.g. a shortcut rebind happened while the tooltip
         // was hidden), drain them now so the freshly-visible surface
         // shows fresh content in the *same* layout pass rather than
         // waiting for another paint-triggering event.
-        self.process_pending_rebuilds();
+        self.process_pending_rebuilds(&mut *ops);
 
         self.arena.refresh_roots();
 

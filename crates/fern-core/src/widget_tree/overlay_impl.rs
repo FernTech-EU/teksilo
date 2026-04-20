@@ -198,21 +198,28 @@ impl WidgetTree {
 
     pub(super) fn process_delayed_overlays(&mut self) {
         let sim_now = self.sim_clock;
-        self.process_delayed_overlays_impl(|p| {
-            sim_now.saturating_duration_since(p.sim_requested_at)
-        });
+        let mut noop = crate::window::NoopWindowOps;
+        self.process_delayed_overlays_impl(
+            |p| sim_now.saturating_duration_since(p.sim_requested_at),
+            &mut noop,
+        );
     }
 
-    pub(super) fn process_delayed_overlays_real(&mut self) {
+    pub(super) fn process_delayed_overlays_real(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let real_now = std::time::Instant::now();
-        self.process_delayed_overlays_impl(|p| {
-            real_now.saturating_duration_since(p.real_requested_at)
-        });
+        self.process_delayed_overlays_impl(
+            |p| real_now.saturating_duration_since(p.real_requested_at),
+            &mut *ops,
+        );
     }
 
     fn process_delayed_overlays_impl(
         &mut self,
         elapsed_fn: impl Fn(&PendingDelayedOverlay) -> std::time::Duration,
+        ops: &mut dyn crate::window::WindowOps,
     ) {
         let mut ready_indices = Vec::new();
         for (index, pending) in self.pending_delayed_overlays.iter().enumerate() {
@@ -238,7 +245,7 @@ impl WidgetTree {
             self.arena.mark_needs_paint(content_id);
             if let Some(focus_target) = pending.focus_target {
                 if self.arena.is_active(focus_target) {
-                    self.focus(focus_target);
+                    self.focus_ops(focus_target, &mut *ops);
                 }
             }
         }
@@ -292,6 +299,7 @@ impl WidgetTree {
         &mut self,
         source_widget: WidgetId,
         preserve_content: Option<WidgetId>,
+        ops: &mut dyn crate::window::WindowOps,
     ) {
         if let Some(parent_overlay) = self.overlay_ancestor_for_widget(source_widget) {
             let preserve_overlay = preserve_content
@@ -299,10 +307,10 @@ impl WidgetTree {
             let (dismissed, focus_restore) = self
                 .overlay_manager
                 .dismiss_descendants_of(parent_overlay, preserve_overlay);
-            self.dormant_dismissed_content(&dismissed);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
             if let Some(restore_id) = focus_restore {
                 if self.arena.is_active(restore_id) {
-                    self.focus(restore_id);
+                    self.focus_ops(restore_id, &mut *ops);
                 }
             }
             return;
@@ -331,25 +339,29 @@ impl WidgetTree {
         for overlay_id in overlay_ids {
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
-            self.dormant_dismissed_content(&dismissed);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
             if let Some(restore_id) = focus_restore {
                 if self.arena.is_active(restore_id) {
-                    self.focus(restore_id);
+                    self.focus_ops(restore_id, &mut *ops);
                 }
             }
         }
     }
 
-    pub(super) fn dismiss_modal_for_source(&mut self, source_widget: WidgetId) -> bool {
+    pub(super) fn dismiss_modal_for_source(
+        &mut self,
+        source_widget: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
         let Some(modal_overlay) = self.modal_overlay_for_widget(source_widget) else {
             return false;
         };
 
         let (dismissed, focus_restore) = self.overlay_manager.dismiss_with_focus_restore(modal_overlay);
-        self.dormant_dismissed_content(&dismissed);
+        self.dormant_dismissed_content(&dismissed, &mut *ops);
         if let Some(restore_id) = focus_restore {
             if self.arena.is_active(restore_id) {
-                self.focus(restore_id);
+                self.focus_ops(restore_id, &mut *ops);
             }
         }
         true
@@ -442,7 +454,11 @@ impl WidgetTree {
     /// Pointer-dwelled stickies (`promoted_by_focus == false`)
     /// survive focus changes intact — they're dismissed only via
     /// Escape or click-outside, matching the existing mouse UX.
-    pub(super) fn tooltip_focus_leave_outside(&mut self, new_focus: Option<WidgetId>) {
+    pub(super) fn tooltip_focus_leave_outside(
+        &mut self,
+        new_focus: Option<WidgetId>,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let to_dismiss: Vec<crate::overlay::OverlayId> = self
             .tooltips
             .iter()
@@ -466,7 +482,7 @@ impl WidgetTree {
 
         for oid in to_dismiss {
             let dismissed = self.overlay_manager.dismiss(oid);
-            self.dormant_dismissed_content(&dismissed);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
         }
     }
 
@@ -524,7 +540,11 @@ impl WidgetTree {
         }
     }
 
-    pub(super) fn tooltip_pointer_leave(&mut self, widget_id: WidgetId) {
+    pub(super) fn tooltip_pointer_leave(
+        &mut self,
+        widget_id: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let matching: Vec<usize> = self
             .tooltips
             .iter()
@@ -553,7 +573,7 @@ impl WidgetTree {
         }
         for (overlay_id, _content_id) in to_dismiss {
             let dismissed = self.overlay_manager.dismiss(overlay_id);
-            self.dormant_dismissed_content(&dismissed);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
         }
     }
 
@@ -676,12 +696,31 @@ impl WidgetTree {
         id
     }
 
+    /// Dismiss an overlay programmatically. Uses
+    /// [`NoopWindowOps`](crate::window::NoopWindowOps) for any
+    /// focus-loss handlers it triggers — user code fires these from
+    /// outside a dispatch.
     pub fn dismiss_overlay(&mut self, id: crate::overlay::OverlayId) {
-        let dismissed = self.overlay_manager.dismiss(id);
-        self.dormant_dismissed_content(&dismissed);
+        let mut noop = crate::window::NoopWindowOps;
+        self.dismiss_overlay_with_ops(id, &mut noop);
     }
 
-    pub(super) fn dormant_dismissed_content(&mut self, content_ids: &[WidgetId]) {
+    /// Dispatch-path variant that threads `ops` through to the
+    /// focus-loss handler fired during dismissal.
+    pub fn dismiss_overlay_with_ops(
+        &mut self,
+        id: crate::overlay::OverlayId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let dismissed = self.overlay_manager.dismiss(id);
+        self.dormant_dismissed_content(&dismissed, &mut *ops);
+    }
+
+    pub(super) fn dormant_dismissed_content(
+        &mut self,
+        content_ids: &[WidgetId],
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         // Reset any tooltip entries that match a dismissed content
         // id so the next hover starts fresh — without this, sticky
         // tooltips dismissed via Escape/click-outside would keep
@@ -714,7 +753,7 @@ impl WidgetTree {
                 .filter(|hovered| self.is_descendant_of(*hovered, id));
 
             if let Some(focused) = focused_in_subtree {
-                self.dispatch_to_widget(focused, &WidgetEvent::FocusLost);
+                self.dispatch_to_widget(focused, &WidgetEvent::FocusLost, &mut *ops);
                 if self
                     .focused
                     .is_some_and(|current| self.is_descendant_of(current, id))

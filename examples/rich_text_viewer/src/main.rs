@@ -75,8 +75,11 @@ fn main() {
 
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Rich Text Viewer")
-        .window_size(720, 540)
-        .root(move |tree| tree.add(RichTextEditor::read_only(doc.clone())))
+        .initial_window(
+            WindowConfig::new()
+            .title("FernUI — Rich Text Viewer")
+            .size(720, 540)
+            .root(move |tree, _state| tree.add(RichTextEditor::read_only(doc.clone())))
+        )
         .run();
 }

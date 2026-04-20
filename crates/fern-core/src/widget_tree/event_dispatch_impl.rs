@@ -34,7 +34,34 @@ impl WidgetTree {
     /// - Keyboard/IME events -> focused widget
     /// - AccessKit actions -> target widget directly
     /// - Scroll events -> hit testing (scroll target under pointer)
+    /// Dispatch an event with the caller-supplied app-level
+    /// [`WindowOps`](crate::window::WindowOps) sink. `fern-app` calls
+    /// this variant; handlers can reach the multi-window API
+    /// synchronously (`open_window` creates the winit window inside
+    /// the same call before returning).
+    pub fn dispatch_event_with_ops(
+        &mut self,
+        event: WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        self.dispatch_event_impl(event, ops)
+    }
+
+    /// Dispatch an event on a standalone tree (tests, headless
+    /// scenarios). Handler code that calls `ctx.open_window(...)`
+    /// from within this dispatch will panic — by design. See
+    /// [`dispatch_event_with_ops`](Self::dispatch_event_with_ops)
+    /// for the app-facing variant.
     pub fn dispatch_event(&mut self, event: WidgetEvent) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.dispatch_event_impl(event, &mut noop);
+    }
+
+    fn dispatch_event_impl(
+        &mut self,
+        event: WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         if let WidgetEvent::KeyDown {
             key: Key::ArrowLeft,
             ..
@@ -42,10 +69,10 @@ impl WidgetTree {
             && self.overlay_manager.len() > 1
         {
             if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
-                self.dormant_dismissed_content(&content_ids);
+                self.dormant_dismissed_content(&content_ids, &mut *ops);
                 if let Some(restore_id) = focus_restore {
                     if self.arena.is_active(restore_id) {
-                        self.focus(restore_id);
+                        self.focus_ops(restore_id, &mut *ops);
                     }
                 }
             }
@@ -60,10 +87,10 @@ impl WidgetTree {
             if let Some((_id, content_ids, focus_restore)) =
                 self.overlay_manager.try_dismiss_top_on_escape()
             {
-                self.dormant_dismissed_content(&content_ids);
+                self.dormant_dismissed_content(&content_ids, &mut *ops);
                 if let Some(restore_id) = focus_restore {
                     if self.arena.is_active(restore_id) {
-                        self.focus(restore_id);
+                        self.focus_ops(restore_id, &mut *ops);
                     }
                 }
                 return;
@@ -76,7 +103,7 @@ impl WidgetTree {
         {
             let dismissed = self.overlay_manager.handle_click_outside(*position);
             if !dismissed.is_empty() {
-                self.dormant_dismissed_content(&dismissed);
+                self.dormant_dismissed_content(&dismissed, &mut *ops);
                 if *button != PointerButton::Secondary {
                     return;
                 }
@@ -96,15 +123,14 @@ impl WidgetTree {
         if let WidgetEvent::KeyDown { key, modifiers, .. } = &event {
             if let Some(callback) = self.take_key_capture() {
                 let keystroke = crate::shortcut::KeyStroke::new(*key, *modifiers);
-                let mut cap_ctx =
-                    EventContext::new().with_app_context(self.app_context.clone());
+                let mut cap_ctx = self.make_event_context(&mut *ops);
                 callback(keystroke, self.shortcut_registry_mut(), &mut cap_ctx);
                 // Route side effects of the callback through the
                 // focused widget (or an arbitrary root if no focus).
                 let anchor = self.focused.or_else(|| self.arena.roots().first().copied());
                 if let Some(anchor_id) = anchor {
                     self.collect_from_ctx(cap_ctx, anchor_id);
-                    self.drain_pending_intents();
+                    self.drain_pending_intents(&mut *ops);
                 }
                 return;
             }
@@ -149,8 +175,7 @@ impl WidgetTree {
                         .filter(|f| self.is_descendant_of(*f, scope_id)),
                 };
                 if let Some(anchor_id) = anchor {
-                    let mut act_ctx =
-                        EventContext::new().with_app_context(self.app_context.clone());
+                    let mut act_ctx = self.make_event_context(&mut *ops);
                     if let Some(intent) = self.shortcut_registry.invoke_on_activate(
                         id,
                         keystroke,
@@ -158,7 +183,7 @@ impl WidgetTree {
                     ) {
                         self.collect_from_ctx(act_ctx, anchor_id);
                         self.enqueue_intent(anchor_id, intent, propagate_when_disabled);
-                        self.drain_pending_intents();
+                        self.drain_pending_intents(&mut *ops);
                         return;
                     }
                 }
@@ -172,17 +197,17 @@ impl WidgetTree {
         if self.active_drag.is_some() {
             match &event {
                 WidgetEvent::PointerMove { position } => {
-                    self.handle_drag_move(*position);
+                    self.handle_drag_move(*position, &mut *ops);
                     return;
                 }
                 WidgetEvent::PointerUp { position, .. } => {
-                    self.handle_drag_drop(*position);
+                    self.handle_drag_drop(*position, &mut *ops);
                     return;
                 }
                 WidgetEvent::KeyDown {
                     key: Key::Escape, ..
                 } => {
-                    self.cancel_active_drag();
+                    self.cancel_active_drag(&mut *ops);
                     return;
                 }
                 WidgetEvent::Scroll { .. } => {
@@ -195,11 +220,11 @@ impl WidgetTree {
                         d.current_target.map(|t| (t, d.current_position))
                     });
                     if let Some((target, _pos)) = target_and_pos {
-                        self.dispatch_to_widget(target, &event);
+                        self.dispatch_to_widget(target, &event, &mut *ops);
                     }
                     if let Some((_, pos)) = target_and_pos {
                         if self.active_drag.is_some() {
-                            self.handle_drag_move(pos);
+                            self.handle_drag_move(pos, &mut *ops);
                         }
                     }
                     return;
@@ -216,38 +241,43 @@ impl WidgetTree {
                         &WidgetEvent::PointerMove {
                             position: *position,
                         },
+                        &mut *ops,
                     );
                 } else {
-                    self.handle_pointer_move(*position);
+                    self.handle_pointer_move(*position, &mut *ops);
                 }
-                self.update_pointer_leave_overlays(*position);
+                self.update_pointer_leave_overlays(*position, &mut *ops);
             }
             WidgetEvent::PointerDown {
                 position, button, ..
             } => {
                 if let Some(target) = self.hit_test(*position) {
                     if *button == PointerButton::Secondary
-                        && self.show_context_menu_for(target, *position)
+                        && self.show_context_menu_for(target, *position, &mut *ops)
                     {
                         return;
                     }
                     if let Some(focusable) = self.find_focusable_at_or_above(target) {
-                        self.focus_with_origin(focusable, crate::focus::FocusOrigin::Pointer);
+                        self.focus_with_origin_ops(
+                            focusable,
+                            crate::focus::FocusOrigin::Pointer,
+                            &mut *ops,
+                        );
                     }
-                    self.dispatch_to_widget(target, &event);
+                    self.dispatch_to_widget(target, &event, &mut *ops);
                 }
             }
             WidgetEvent::PointerUp { position, .. } => {
                 if let Some(captured) = self.pointer_captured_by {
-                    self.dispatch_to_widget(captured, &event);
+                    self.dispatch_to_widget(captured, &event, &mut *ops);
                     self.pointer_captured_by = None;
                 } else if let Some(target) = self.hit_test(*position) {
-                    self.dispatch_to_widget(target, &event);
+                    self.dispatch_to_widget(target, &event, &mut *ops);
                 }
             }
             WidgetEvent::Scroll { .. } => {
                 if let Some(target) = self.hovered.or(self.focused) {
-                    self.dispatch_to_widget(target, &event);
+                    self.dispatch_to_widget(target, &event, &mut *ops);
                 }
             }
             WidgetEvent::KeyDown { key, modifiers, .. } => {
@@ -261,40 +291,44 @@ impl WidgetTree {
                     let handled = self
                         .focused
                         .map(|focused| {
-                            self.dispatch_to_widget_returning_handled(focused, &event)
+                            self.dispatch_to_widget_returning_handled(focused, &event, &mut *ops)
                         })
                         .unwrap_or(false);
                     if !handled {
-                        self.cycle_focus(modifiers.shift());
+                        self.cycle_focus(modifiers.shift(), &mut *ops);
                     }
                 } else if let Some(focused) = self.focused {
-                    self.dispatch_to_widget(focused, &event);
+                    self.dispatch_to_widget(focused, &event, &mut *ops);
                 }
             }
             WidgetEvent::KeyUp { .. }
             | WidgetEvent::ImeComposition { .. }
             | WidgetEvent::ImeCommit { .. } => {
                 if let Some(focused) = self.focused {
-                    self.dispatch_to_widget(focused, &event);
+                    self.dispatch_to_widget(focused, &event, &mut *ops);
                 }
             }
             WidgetEvent::AccessAction { target, action, .. } => {
                 if *action == accesskit::Action::Focus {
                     if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
-                        self.focus_with_origin(id, crate::focus::FocusOrigin::Programmatic);
+                        self.focus_with_origin_ops(
+                            id,
+                            crate::focus::FocusOrigin::Programmatic,
+                            &mut *ops,
+                        );
                     }
                 } else {
                     let dispatch_target = target
                         .filter(|id| self.arena.is_active(*id))
                         .or(self.focused);
                     if let Some(id) = dispatch_target {
-                        self.dispatch_to_widget(id, &event);
+                        self.dispatch_to_widget(id, &event, &mut *ops);
                     }
                 }
             }
             WidgetEvent::Gesture { .. } => {
                 if let Some(target) = self.hovered.or(self.focused) {
-                    self.dispatch_to_widget(target, &event);
+                    self.dispatch_to_widget(target, &event, &mut *ops);
                 }
             }
             WidgetEvent::ScrollIntoView { .. }
@@ -307,10 +341,15 @@ impl WidgetTree {
         // are dispatched after the raw event has been handled but
         // before commands are flushed, so commands emitted from
         // action handlers land on the same tick.
-        self.drain_pending_intents();
+        self.drain_pending_intents(&mut *ops);
     }
 
-    fn show_context_menu_for(&mut self, target: WidgetId, position: Point) -> bool {
+    fn show_context_menu_for(
+        &mut self,
+        target: WidgetId,
+        position: Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
         let mut current = Some(target);
         let factory_owner = loop {
             match current {
@@ -333,7 +372,7 @@ impl WidgetTree {
         };
 
         let dismissed = self.overlay_manager.dismiss_all();
-        self.dormant_dismissed_content(&dismissed);
+        self.dormant_dismissed_content(&dismissed, &mut *ops);
 
         let menu_widget = {
             let node = self.arena.get(owner_id).unwrap();
@@ -355,32 +394,45 @@ impl WidgetTree {
         if let Some(focus_id) = prev_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
         }
-        self.focus(content_id);
+        self.focus_ops(content_id, &mut *ops);
         true
     }
 
-    fn handle_pointer_move(&mut self, position: Point) {
+    fn handle_pointer_move(
+        &mut self,
+        position: Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let target = self.hit_test(position);
 
         if target != self.hovered {
             if let Some(old) = self.hovered {
-                self.dispatch_to_widget(old, &WidgetEvent::PointerLeave);
-                self.tooltip_pointer_leave(old);
+                self.dispatch_to_widget(old, &WidgetEvent::PointerLeave, &mut *ops);
+                self.tooltip_pointer_leave(old, &mut *ops);
             }
             if let Some(new) = target {
-                self.dispatch_to_widget(new, &WidgetEvent::PointerEnter);
+                self.dispatch_to_widget(new, &WidgetEvent::PointerEnter, &mut *ops);
                 self.tooltip_pointer_enter(new);
             }
             self.hovered = target;
         }
 
         if let Some(target) = target {
-            self.dispatch_to_widget(target, &WidgetEvent::PointerMove { position });
+            self.dispatch_to_widget(
+                target,
+                &WidgetEvent::PointerMove { position },
+                &mut *ops,
+            );
         }
     }
 
-    pub(super) fn dispatch_to_widget(&mut self, target: WidgetId, event: &WidgetEvent) {
-        self.dispatch_to_widget_returning_handled(target, event);
+    pub(super) fn dispatch_to_widget(
+        &mut self,
+        target: WidgetId,
+        event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        self.dispatch_to_widget_returning_handled(target, event, ops);
     }
 
     /// Same as [`dispatch_to_widget`] but returns `true` when any
@@ -392,6 +444,7 @@ impl WidgetTree {
         &mut self,
         target: WidgetId,
         event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
         if !self.arena.is_enabled(target) {
             return false;
@@ -406,7 +459,7 @@ impl WidgetTree {
         ancestors.reverse();
 
         for &id in &ancestors {
-            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
+            let mut ctx = self.make_event_context(&mut *ops);
             let response = if let Some(node) = self.arena.get_mut(id) {
                 Self::try_handler_preview(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
             } else {
@@ -426,7 +479,7 @@ impl WidgetTree {
         let mut current = Some(target);
         let mut is_target = true;
         while let Some(id) = current {
-            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
+            let mut ctx = self.make_event_context(&mut *ops);
             let response = if let Some(node) = self.arena.get_mut(id) {
                 Self::try_handler_bubble(node, event, &mut ctx, is_target)
                     .unwrap_or(EventResponse::Ignored)
@@ -448,12 +501,17 @@ impl WidgetTree {
         false
     }
 
-    pub(super) fn dispatch_to_widget_direct(&mut self, target: WidgetId, event: &WidgetEvent) {
+    pub(super) fn dispatch_to_widget_direct(
+        &mut self,
+        target: WidgetId,
+        event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         if !self.arena.is_enabled(target) {
             return;
         }
 
-        let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
+        let mut ctx = self.make_event_context(&mut *ops);
         let response = if let Some(node) = self.arena.get_mut(target) {
             Self::try_handler_bubble(node, event, &mut ctx, true)
                 .unwrap_or(EventResponse::Ignored)
@@ -986,7 +1044,22 @@ impl WidgetTree {
         }
     }
 
-    pub(super) fn collect_from_ctx(&mut self, ctx: EventContext, source_widget: WidgetId) {
+    pub(super) fn collect_from_ctx<'ops>(
+        &mut self,
+        mut ctx: EventContext<'ops>,
+        source_widget: WidgetId,
+    ) {
+        // Take the ops handle out of ctx up front so we can freely
+        // reborrow it inside the method without fighting the 'ops
+        // lifetime propagation when other fields of `ctx` are moved.
+        // When no ops is set (standalone trees / tests), fall back to
+        // a stack NoopWindowOps.
+        let mut local_ops = ctx.window_ops.take();
+        let mut noop = crate::window::NoopWindowOps;
+        let ops: &mut dyn crate::window::WindowOps = match local_ops.as_deref_mut() {
+            Some(o) => o,
+            None => &mut noop,
+        };
         if ctx.frame_requested {
             self.request_frame();
         }
@@ -1039,7 +1112,7 @@ impl WidgetTree {
                     request,
                 }
             }));
-        if ctx.dismiss_modal && !self.dismiss_modal_for_source(source_widget) {
+        if ctx.dismiss_modal && !self.dismiss_modal_for_source(source_widget, &mut *ops) {
             self.pending_modal_dismissal = true;
         }
         for callback in ctx.idle_callbacks {
@@ -1047,24 +1120,28 @@ impl WidgetTree {
         }
         if ctx.dismiss_all_overlays {
             let dismissed = self.overlay_manager.dismiss_all();
-            self.dormant_dismissed_content(&dismissed);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
         } else if ctx.dismiss_top {
             if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top() {
-                self.dormant_dismissed_content(&content_ids);
+                self.dormant_dismissed_content(&content_ids, &mut *ops);
                 if let Some(restore_id) = focus_restore {
                     if self.arena.is_active(restore_id) {
-                        self.focus(restore_id);
+                        self.focus_ops(restore_id, &mut *ops);
                     }
                 }
             }
         } else {
             for id in ctx.overlay_dismissals {
                 let dismissed = self.overlay_manager.dismiss(id);
-                self.dormant_dismissed_content(&dismissed);
+                self.dormant_dismissed_content(&dismissed, &mut *ops);
             }
         }
         for preserve_content in ctx.dismiss_descendant_overlays {
-            self.dismiss_child_overlays_for_source(source_widget, preserve_content);
+            self.dismiss_child_overlays_for_source(
+                source_widget,
+                preserve_content,
+                &mut *ops,
+            );
         }
         self.apply_tree_mutations(&ctx.tree_mutations);
         for mut req in ctx.overlay_requests {
@@ -1154,7 +1231,7 @@ impl WidgetTree {
             // when it's focusable, so the usual leaf-target case is
             // still a no-op lookup.
             let target = self.first_focusable_descendant(id).unwrap_or(id);
-            self.focus(target);
+            self.focus_ops(target, &mut *ops);
         }
 
         // --- Drag and drop ---
@@ -1201,7 +1278,7 @@ impl WidgetTree {
             self.current_cursor = crate::widget::CursorIcon::Grabbing;
         }
         if ctx.cancel_drag {
-            self.cancel_active_drag();
+            self.cancel_active_drag(&mut *ops);
         }
 
         // --- Environment changes (architecture §9.5) ---
@@ -1236,7 +1313,7 @@ impl WidgetTree {
     /// target (if any), dismiss the preview overlay, clear the session and
     /// release pointer capture. Used by Escape, explicit cancel requests,
     /// and the source-destroyed salvage in `revalidate_interaction_state`.
-    pub(super) fn cancel_active_drag(&mut self) {
+    pub(super) fn cancel_active_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let prev_target = self
             .active_drag
             .as_ref()
@@ -1246,7 +1323,7 @@ impl WidgetTree {
         self.pointer_captured_by = None;
         self.current_cursor = crate::widget::CursorIcon::Default;
         if let Some(prev) = prev_target {
-            self.fire_on_drag_leave(prev);
+            self.fire_on_drag_leave(prev, &mut *ops);
         }
     }
 
@@ -1254,7 +1331,7 @@ impl WidgetTree {
     /// per layout pass while a drag session is active. The handler
     /// receives the pointer position in the target's local coordinates.
     /// Fires from both external and own handler buckets.
-    pub(super) fn process_drag_tick(&mut self) {
+    pub(super) fn process_drag_tick(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let Some((target_id, position)) = self
             .active_drag
             .as_ref()
@@ -1277,8 +1354,7 @@ impl WidgetTree {
         if ext_handler.is_none() && own_handler.is_none() {
             return;
         }
-        let mut ctx =
-            crate::widget::EventContext::new().with_app_context(self.app_context.clone());
+        let mut ctx = self.make_event_context(&mut *ops);
         if let Some(h) = ext_handler.as_mut() {
             h(local, &mut ctx);
         }
@@ -1294,7 +1370,7 @@ impl WidgetTree {
         // different item — refresh the hover pipeline with the same
         // pointer position so feedback reflects the new content offset.
         if self.active_drag.is_some() {
-            self.handle_drag_move(position);
+            self.handle_drag_move(position, &mut *ops);
         }
     }
 
@@ -1303,7 +1379,11 @@ impl WidgetTree {
     /// whenever a drop target stops being the current target — whether
     /// because the pointer moved elsewhere, the drop completed, or the
     /// drag was cancelled. Fires from both external and own buckets.
-    pub(super) fn fire_on_drag_leave(&mut self, target_id: WidgetId) {
+    pub(super) fn fire_on_drag_leave(
+        &mut self,
+        target_id: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         if !self.arena.is_active(target_id) {
             return;
         }
@@ -1320,8 +1400,7 @@ impl WidgetTree {
             self.arena.mark_needs_paint(target_id);
             return;
         }
-        let mut ctx =
-            crate::widget::EventContext::new().with_app_context(self.app_context.clone());
+        let mut ctx = self.make_event_context(&mut *ops);
         if let Some(h) = ext_handler.as_mut() {
             h(&mut ctx);
         }
@@ -1338,7 +1417,11 @@ impl WidgetTree {
 
     /// Update the drag session on pointer move: find the drop target under the
     /// pointer and call its `on_drag_hover` handler.
-    fn handle_drag_move(&mut self, position: fern_canvas::Point) {
+    fn handle_drag_move(
+        &mut self,
+        position: fern_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         // Update position on the session
         if let Some(ref mut drag) = self.active_drag {
             drag.current_position = position;
@@ -1380,7 +1463,7 @@ impl WidgetTree {
                 drag.current_target = drop_target;
             }
             if let Some(prev) = prev_target {
-                self.fire_on_drag_leave(prev);
+                self.fire_on_drag_leave(prev, &mut *ops);
             }
         }
 
@@ -1408,8 +1491,7 @@ impl WidgetTree {
             if ext_handler.is_none() && own_handler.is_none() {
                 return;
             }
-            let mut ctx = crate::widget::EventContext::new()
-                .with_app_context(self.app_context.clone());
+            let mut ctx = self.make_event_context(&mut *ops);
             if let Some(ref drag) = self.active_drag {
                 let mut feedback = crate::drag_state::DropFeedback::NoFeedback;
                 if let Some(h) = ext_handler.as_mut() {
@@ -1435,7 +1517,11 @@ impl WidgetTree {
     }
 
     /// Complete the drag: fire `on_drop` on the target widget and end the session.
-    fn handle_drag_drop(&mut self, position: fern_canvas::Point) {
+    fn handle_drag_drop(
+        &mut self,
+        position: fern_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         // Clean up preview overlay
         self.cleanup_drag_preview();
 
@@ -1451,7 +1537,7 @@ impl WidgetTree {
         // runs — widgets own their feedback state and must be given a
         // chance to clear it regardless of whether the drop is accepted.
         if let Some(prev) = drag.current_target {
-            self.fire_on_drag_leave(prev);
+            self.fire_on_drag_leave(prev, &mut *ops);
         }
 
         // Hit-test to find drop target
@@ -1486,8 +1572,7 @@ impl WidgetTree {
                 taken_ext.map(|h| (h, /*is_own=*/ false))
             };
             if let Some((mut handler, is_own)) = picked {
-                let mut ctx = crate::widget::EventContext::new()
-                    .with_app_context(self.app_context.clone());
+                let mut ctx = self.make_event_context(&mut *ops);
                 let _accepted = handler(drag.payload, local, &mut ctx);
                 if let Some(node) = self.arena.get_mut(target_id) {
                     if is_own {

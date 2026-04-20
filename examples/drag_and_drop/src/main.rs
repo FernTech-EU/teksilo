@@ -24,29 +24,32 @@ use fern_ui::widgets::{
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Drag and Drop")
-        .window_size(960, 640)
-        .root(|tree| {
+        .initial_window(
+            WindowConfig::new()
+            .title("FernUI — Drag and Drop")
+            .size(960, 640)
+            .root(|tree, _state| {
             let songs = ListModel::from_vec(
-                [
-                    "Hyperballad",
-                    "Unravel",
-                    "Black Cow",
-                    "Chan Chan",
-                    "The Chauffeur",
-                    "Teardrop",
-                    "Bachelorette",
-                    "Lamento Borincano",
-                    "Space Oddity",
-                    "Paranoid Android",
-                ]
-                .into_iter()
-                .map(String::from)
-                .collect(),
+            [
+            "Hyperballad",
+            "Unravel",
+            "Black Cow",
+            "Chan Chan",
+            "The Chauffeur",
+            "Teardrop",
+            "Bachelorette",
+            "Lamento Borincano",
+            "Space Oddity",
+            "Paranoid Android",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
             );
             let folders = build_folder_tree();
             tree.add(Root::new(songs, folders))
-        })
+            })
+        )
         .run();
 }
 

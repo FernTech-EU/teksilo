@@ -523,9 +523,12 @@ impl Widget for Root {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Menus & Dropdowns (Milestone 4)")
-        .window_size(900, 700)
-        .root(|tree| tree.add(Root::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("FernUI — Menus & Dropdowns (Milestone 4)")
+            .size(900, 700)
+            .root(|tree, _state| tree.add(Root::new()))
+        )
         .run();
 }
 

@@ -298,9 +298,12 @@ fn main() {
 
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Internationalization Demo")
-        .window_size(720, 520)
         .i18n(config)
-        .root(|tree| tree.add(Root::new()))
+        .initial_window(
+            WindowConfig::new()
+                .title("FernUI — Internationalization Demo")
+                .size(720, 520)
+                .root(|tree, _state| tree.add(Root::new())),
+        )
         .run();
 }

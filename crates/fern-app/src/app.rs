@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
+#[allow(unused_imports)]
+use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowId;
 
 /// How the application resolves its theme.
@@ -37,6 +39,23 @@ use fern_text::SharedTypesetter;
 
 use crate::window_config::{FernWindowId, WindowConfig};
 use crate::window_manager::WindowManager;
+use fern_core::WindowPlacement;
+
+/// Interrogate the winit window for its current placement so an
+/// `OS-initiated` state change can be mirrored into the corresponding
+/// [`WindowState::placement`] signal without the observer pushing it
+/// back out as a `WindowCommand` (re-entrancy guard on `from_os`).
+fn query_window_placement(win: &winit::window::Window) -> WindowPlacement {
+    if win.is_minimized() == Some(true) {
+        WindowPlacement::Minimized
+    } else if win.fullscreen().is_some() {
+        WindowPlacement::Fullscreen
+    } else if win.is_maximized() {
+        WindowPlacement::Maximized
+    } else {
+        WindowPlacement::Floating
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResolvedModalPresentation {
@@ -338,7 +357,7 @@ impl FernAppHandler {
         self.wm.process_pending(event_loop);
     }
 
-    fn process_modal_requests(&mut self) -> bool {
+    fn process_modal_requests(&mut self, event_loop: &ActiveEventLoop) -> bool {
         let native_supported = fern_platform::supports_native_modal_windows();
         let requests = self.wm.drain_pending_modal_requests();
         let had_requests = !requests.is_empty();
@@ -374,17 +393,20 @@ impl FernAppHandler {
                             continue;
                         };
 
-                        let mut config = WindowConfig::new().modal(true).parent(source_window);
+                        let mut config = WindowConfig::new().modal(crate::window_config::ModalConfig {
+                            parent: source_window,
+                            focus_target,
+                        });
                         if let Some(title) = title {
                             config = config.title(title);
                         }
                         if let Some((width, height)) = size {
                             config = config.size(width, height);
                         }
-                        if let Some(id) = focus_target {
-                            config = config.focus_target(id);
-                        }
-                        self.wm.queue_create(config.root(builder));
+                        self.wm.create_window(
+                            config.root(move |tree, _state| builder(tree)),
+                            event_loop,
+                        );
                     }
                 }
             }
@@ -417,11 +439,22 @@ impl FernAppHandler {
         // unrelated pointer event. Handlers that run may emit commands
         // and mark nodes dirty — request a redraw on those windows.
         let now = Instant::now();
-        for managed in self.wm.iter_mut() {
-            let before = managed.tree.has_idle_work();
-            managed.tree.tick_gestures(now);
-            if managed.tree.has_idle_work() != before {
-                managed.platform_window.request_redraw();
+        // Collect winit ids up front so we can safely iterate without
+        // holding a borrow on `self.wm.windows` across the
+        // `tick_gestures_in_window` calls (each of which briefly
+        // takes a window out of the map).
+        let winit_ids: Vec<_> = self.wm.windows_map().keys().copied().collect();
+        for winit_id in winit_ids {
+            let before = self
+                .wm
+                .get_by_winit_mut(winit_id)
+                .map(|m| m.tree.has_idle_work())
+                .unwrap_or(false);
+            self.tick_gestures_in_window(winit_id, now, event_loop);
+            if let Some(managed) = self.wm.get_by_winit_mut(winit_id) {
+                if managed.tree.has_idle_work() != before {
+                    managed.platform_window.request_redraw();
+                }
             }
         }
 
@@ -478,9 +511,14 @@ impl FernAppHandler {
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
         self.wm.drain_pending_locale_requests();
         let had_commands = self.wm.drain_close_window_requests();
-        let had_modal_requests = self.process_modal_requests();
+        let had_modal_requests = self.process_modal_requests(event_loop);
         let had_modal_dismissals = self.process_modal_dismissals();
         self.process_pending(event_loop);
+        // Drain per-window command queues: app-side writes to
+        // WindowState signals emitted WindowCommand values that the
+        // registry routes through the per-window queue. Translate each
+        // into the appropriate winit call.
+        self.wm.drain_window_commands();
         if had_commands || had_modal_requests || had_modal_dismissals {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
@@ -491,7 +529,103 @@ impl FernAppHandler {
         self.update_control_flow(event_loop);
     }
 
-    fn handle_accessibility_actions(&mut self, window_id: WindowId, event: &WindowEvent) {
+    /// Dispatch a widget event into the named window's `WidgetTree`
+    /// with a real [`fern_core::WindowOps`] sink so handlers can
+    /// synchronously `open_window`, `focus_window`, etc.
+    ///
+    /// Re-entry pattern: the current `ManagedWindow` is temporarily
+    /// removed from `WindowManager::windows` before dispatch and put
+    /// back afterwards. The removed tree is borrowed mutably for the
+    /// handler run; the `WindowOpsImpl` holds `&mut WindowManager`
+    /// (with the tree out of the way) plus `&ActiveEventLoop`. Opening
+    /// a new window from a handler therefore goes straight into
+    /// `wm.create_window` without borrow-checker conflicts.
+    fn dispatch_in_window(
+        &mut self,
+        window_id: WindowId,
+        event: WidgetEvent,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let Some(mut current) = self.wm.take_managed(window_id) else {
+            return;
+        };
+        let current_id = current.fern_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        #[cfg(target_os = "macos")]
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                #[cfg(target_os = "macos")]
+                current_arc,
+            );
+            current.tree.dispatch_event_with_ops(event, &mut ops);
+        }
+
+        self.wm.reinsert_managed(window_id, current);
+    }
+
+    /// Tick gestures on every window with a real `WindowOps` sink so
+    /// long-press / drag-tick handlers can open windows.
+    fn tick_gestures_in_window(
+        &mut self,
+        window_id: WindowId,
+        now: Instant,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let Some(mut current) = self.wm.take_managed(window_id) else {
+            return;
+        };
+        let current_id = current.fern_id;
+
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        #[cfg(target_os = "macos")]
+        let current_arc = Some(current.platform_window.window_arc());
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                #[cfg(target_os = "macos")]
+                current_arc,
+            );
+            current.tree.tick_gestures_with_ops(now, &mut ops);
+        }
+
+        self.wm.reinsert_managed(window_id, current);
+    }
+
+    fn handle_accessibility_actions(
+        &mut self,
+        window_id: WindowId,
+        event: &WindowEvent,
+        event_loop: &ActiveEventLoop,
+    ) {
+        // Collect events while holding the `ManagedWindow` borrow;
+        // dispatch them below through `dispatch_in_window`, which
+        // needs the borrow to be released first.
+        let mut a11y_events: Vec<WidgetEvent> = Vec::new();
         if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
             managed.platform_window.process_accessibility_event(event);
 
@@ -508,114 +642,161 @@ impl FernAppHandler {
                 } else {
                     Some(fern_core::accessibility::node_id_to_widget_id(req.target_node))
                 };
-                managed.tree.dispatch_event(WidgetEvent::AccessAction {
+                let evt = WidgetEvent::AccessAction {
                     action: req.action,
                     target: target_widget,
                     target_node: req.target_node,
                     data: req.data,
-                });
+                };
+                a11y_events.push(evt);
             }
+        }
+        for evt in a11y_events {
+            self.dispatch_in_window(window_id, evt, event_loop);
         }
     }
 
-    fn handle_redraw_requested(&mut self, window_id: WindowId) {
-        if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+    fn handle_redraw_requested(&mut self, window_id: WindowId, event_loop: &ActiveEventLoop) {
+        // Pre-render: take the window out so we can construct a real
+        // WindowOpsImpl and pass it into layout + render. This lets
+        // rebuild-triggered handlers (data-driven state changes,
+        // delayed-overlay activation, drag-tick) open windows.
+        let Some(mut current) = self.wm.take_managed(window_id) else {
+            return;
+        };
+        let current_id = current.fern_id;
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        #[cfg(target_os = "macos")]
+        let current_arc = Some(current.platform_window.window_arc());
+
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_redraw_requested();
+        }
+        if current.tree.has_idle_work() {
             if let Some(trace) = &mut self.idle_trace {
-                trace.note_redraw_requested();
+                trace.note_idle_callbacks_run();
             }
-            if managed.tree.has_idle_work() {
-                if let Some(trace) = &mut self.idle_trace {
-                    trace.note_idle_callbacks_run();
-                }
-                managed.tree.run_idle_callbacks(self.idle_budget);
+            current.tree.run_idle_callbacks(self.idle_budget);
+        }
+
+        let size = current.platform_window.surface_size();
+        let sf = current.platform_window.scale_factor() as f32;
+        let proposal = SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
+
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                #[cfg(target_os = "macos")]
+                current_arc.clone(),
+            );
+            current.tree.layout_with_ops(proposal, &mut ops);
+        }
+
+        let a11y_update = current.tree.sync_accessibility();
+        current.platform_window.update_accessibility(a11y_update);
+
+        let mut frame = {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                #[cfg(target_os = "macos")]
+                current_arc.clone(),
+            );
+            current.tree.render_with_ops(&mut ops)
+        };
+        let managed = &mut current;
+
+        #[cfg(feature = "text")]
+        {
+            let atlas = self.typesetter.bridge().borrow_mut().atlas_info();
+            if atlas.dirty && atlas.width > 0 && atlas.height > 0 {
+                managed.platform_window.renderer_mut().upload_atlas(
+                    atlas.width,
+                    atlas.height,
+                    &atlas.pixels,
+                );
             }
 
-            let size = managed.platform_window.surface_size();
-            let sf = managed.platform_window.scale_factor() as f32;
-            let proposal = SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
-
-            managed.tree.layout(proposal);
-
-            let a11y_update = managed.tree.sync_accessibility();
-            managed.platform_window.update_accessibility(a11y_update);
-
-            let mut frame = managed.tree.render();
-
-            #[cfg(feature = "text")]
-            {
-                let atlas = self.typesetter.bridge().borrow_mut().atlas_info();
-                if atlas.dirty && atlas.width > 0 && atlas.height > 0 {
+            if atlas.glyphs_evicted {
+                self.typesetter.bridge().borrow_mut().invalidate_cache();
+                managed.tree.invalidate_all_paints();
+                // Re-render after atlas invalidation with a real ops
+                // sink so rebuild-triggered handlers on this recovery
+                // path can still open windows.
+                let mut ops = crate::window_manager::WindowOpsImpl::new(
+                    &mut self.wm,
+                    event_loop,
+                    current_id,
+                    #[cfg(not(target_os = "macos"))]
+                    current_handle,
+                    #[cfg(target_os = "macos")]
+                    current_arc.clone(),
+                );
+                frame = managed.tree.render_with_ops(&mut ops);
+                let atlas2 = self.typesetter.bridge().borrow_mut().atlas_info();
+                if atlas2.dirty && atlas2.width > 0 && atlas2.height > 0 {
                     managed.platform_window.renderer_mut().upload_atlas(
-                        atlas.width,
-                        atlas.height,
-                        &atlas.pixels,
+                        atlas2.width,
+                        atlas2.height,
+                        &atlas2.pixels,
                     );
                 }
-
-                if atlas.glyphs_evicted {
-                    self.typesetter.bridge().borrow_mut().invalidate_cache();
-                    managed.tree.invalidate_all_paints();
-                    frame = managed.tree.render();
-                    let atlas2 = self.typesetter.bridge().borrow_mut().atlas_info();
-                    if atlas2.dirty && atlas2.width > 0 && atlas2.height > 0 {
-                        managed.platform_window.renderer_mut().upload_atlas(
-                            atlas2.width,
-                            atlas2.height,
-                            &atlas2.pixels,
-                        );
-                    }
-                }
-            }
-
-            // The wgpu surface is Rgba8UnormSrgb: it expects linear-light color
-            // values and applies sRGB encoding on write. Our Color stores sRGB-
-            // encoded bytes (as designers specify them), so we must linearize
-            // the clear color here the same way we do for vertex colors.
-            let clear = fern_render::vertex::srgb_to_linear_rgba(
-                managed.tree.theme().colors.surface_main.to_array(),
-            );
-            match managed.platform_window.render_frame(&frame, clear) {
-                fern_platform::FrameOutcome::Rendered => {
-                    if let Some(trace) = &mut self.idle_trace {
-                        trace.note_rendered_frame();
-                    }
-                }
-                // Occluded/Timeout: skip silently. On macOS the initial
-                // paint may hit Occluded before Metal finishes
-                // compositing, so keep pinging until we get a frame —
-                // but only while winit hasn't told us the window is
-                // actually occluded, to avoid spinning when it's
-                // buried behind another window.
-                fern_platform::FrameOutcome::Skipped => {
-                    if !managed.occluded {
-                        managed.platform_window.request_redraw();
-                    }
-                    return;
-                }
-                fern_platform::FrameOutcome::NeedsReconfigure => {
-                    managed.platform_window.reconfigure_surface();
-                    managed.platform_window.request_redraw();
-                    return;
-                }
-                fern_platform::FrameOutcome::Error(e) => {
-                    eprintln!("fern-app: {e}, reconfiguring surface");
-                    managed.platform_window.reconfigure_surface();
-                    managed.platform_window.request_redraw();
-                    return;
-                }
-            }
-
-            // Chain-request another redraw if the tree still wants to
-            // pump frames (caret blink, drag auto-scroll, pending
-            // document events still draining). Without this the
-            // frame-tick effect would set `frame_tick_requested`
-            // during paint but winit would idle because no one woke
-            // the event loop — continuous animations must keep
-            // asking for the next frame here, once per real frame.
-            if managed.tree.frame_requested() {
-                managed.platform_window.request_redraw();
             }
         }
+
+        // The wgpu surface is Rgba8UnormSrgb: it expects linear-light color
+        // values and applies sRGB encoding on write. Our Color stores sRGB-
+        // encoded bytes (as designers specify them), so we must linearize
+        // the clear color here the same way we do for vertex colors.
+        let clear = fern_render::vertex::srgb_to_linear_rgba(
+            managed.tree.theme().colors.surface_main.to_array(),
+        );
+        match managed.platform_window.render_frame(&frame, clear) {
+            fern_platform::FrameOutcome::Rendered => {
+                if let Some(trace) = &mut self.idle_trace {
+                    trace.note_rendered_frame();
+                }
+            }
+            fern_platform::FrameOutcome::Skipped => {
+                if !managed.occluded {
+                    managed.platform_window.request_redraw();
+                }
+                self.wm.reinsert_managed(window_id, current);
+                return;
+            }
+            fern_platform::FrameOutcome::NeedsReconfigure => {
+                managed.platform_window.reconfigure_surface();
+                managed.platform_window.request_redraw();
+                self.wm.reinsert_managed(window_id, current);
+                return;
+            }
+            fern_platform::FrameOutcome::Error(e) => {
+                eprintln!("fern-app: {e}, reconfiguring surface");
+                managed.platform_window.reconfigure_surface();
+                managed.platform_window.request_redraw();
+                self.wm.reinsert_managed(window_id, current);
+                return;
+            }
+        }
+
+        if managed.tree.frame_requested() {
+            managed.platform_window.request_redraw();
+        }
+
+        self.wm.reinsert_managed(window_id, current);
     }
 
     fn handle_window_event_inner(
@@ -634,7 +815,7 @@ impl FernAppHandler {
             }
         }
 
-        self.handle_accessibility_actions(window_id, &event);
+        self.handle_accessibility_actions(window_id, &event, event_loop);
 
         match event {
             WindowEvent::CloseRequested => {
@@ -645,18 +826,39 @@ impl FernAppHandler {
             WindowEvent::Resized(new_size) => {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.platform_window.resize(new_size);
-                    // Sync the host's `is_maximized_signal` from the OS's
-                    // current state (macOS `isZoomed`, Wayland `is_maximized`,
-                    // …). Covers OS-initiated maximize — drag-to-top-snap on
-                    // Wayland/Windows, green-light zoom on macOS — which
-                    // never hits `toggle_maximize()` on our side.
-                    if let Some(host) = &managed.title_bar_host {
-                        host.notify_window_resized();
-                    }
+                    // Mirror OS-initiated geometry / placement changes
+                    // into WindowState so widgets bound to those signals
+                    // re-render. The `*_from_os` setters flip the
+                    // re-entrancy guard so observers on the signal do
+                    // not push the change back out as a WindowCommand.
+                    // Covers OS-initiated maximize (drag-to-top-snap on
+                    // Wayland/Windows, green-light zoom on macOS) —
+                    // query_window_placement reads the winit state and
+                    // the Switcher glyph swap on `TitleBar`'s maximize
+                    // button (bound to `WindowState::placement`) stays
+                    // in sync.
+                    let sf = managed.platform_window.scale_factor();
+                    let logical_w =
+                        (new_size.width as f64 / sf).round().max(0.0) as u32;
+                    let logical_h =
+                        (new_size.height as f64 / sf).round().max(0.0) as u32;
+                    managed
+                        .state
+                        .set_size_from_os((logical_w, logical_h));
+                    let placement = query_window_placement(managed.platform_window.window());
+                    managed.state.set_placement_from_os(placement);
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("resize");
                     }
                     managed.platform_window.request_redraw();
+                }
+            }
+            WindowEvent::Moved(pos) => {
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    let sf = managed.platform_window.scale_factor();
+                    let lx = (pos.x as f64 / sf).round() as i32;
+                    let ly = (pos.y as f64 / sf).round() as i32;
+                    managed.state.set_position_from_os((lx, ly));
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -670,14 +872,19 @@ impl FernAppHandler {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    if let Some(evt) = event_translation::translate_cursor_moved(
+                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    event_translation::translate_cursor_moved(
                         position.x,
                         position.y,
                         &mut managed.translation_state,
-                    ) {
-                        managed.tree.dispatch_event(evt);
-                    }
+                    )
+                } else {
+                    None
+                };
+                if let Some(evt) = maybe_evt {
+                    self.dispatch_in_window(window_id, evt, event_loop);
+                }
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     apply_cursor_to_window(&managed.platform_window, managed.tree.current_cursor());
                     if managed.tree.needs_redraw() {
                         if let Some(trace) = &mut self.idle_trace {
@@ -688,14 +895,19 @@ impl FernAppHandler {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    if let Some(evt) = event_translation::translate_mouse_input(
+                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    event_translation::translate_mouse_input(
                         state,
                         button,
                         &managed.translation_state,
-                    ) {
-                        managed.tree.dispatch_event(evt);
-                    }
+                    )
+                } else {
+                    None
+                };
+                if let Some(evt) = maybe_evt {
+                    self.dispatch_in_window(window_id, evt, event_loop);
+                }
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     apply_cursor_to_window(&managed.platform_window, managed.tree.current_cursor());
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("mouse_input");
@@ -704,14 +916,19 @@ impl FernAppHandler {
                 }
             }
             WindowEvent::MouseWheel { delta, phase, .. } => {
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    if let Some(evt) = event_translation::translate_mouse_wheel(
+                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    event_translation::translate_mouse_wheel(
                         delta,
                         phase,
                         &managed.translation_state,
-                    ) {
-                        managed.tree.dispatch_event(evt);
-                    }
+                    )
+                } else {
+                    None
+                };
+                if let Some(evt) = maybe_evt {
+                    self.dispatch_in_window(window_id, evt, event_loop);
+                }
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("mouse_wheel");
                     }
@@ -726,26 +943,31 @@ impl FernAppHandler {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    if let Some(key) = event_translation::translate_key(&key_event.logical_key) {
+                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                    event_translation::translate_key(&key_event.logical_key).map(|key| {
                         let modifiers =
                             event_translation::translate_modifiers(managed.current_modifiers);
                         let text = key_event.text.as_ref().map(|t| t.to_string());
                         match key_event.state {
                             winit::event::ElementState::Pressed => {
-                                managed.tree.dispatch_event(WidgetEvent::KeyDown {
+                                WidgetEvent::KeyDown {
                                     key,
                                     modifiers,
                                     text,
-                                });
+                                }
                             }
                             winit::event::ElementState::Released => {
-                                managed
-                                    .tree
-                                    .dispatch_event(WidgetEvent::KeyUp { key, modifiers });
+                                WidgetEvent::KeyUp { key, modifiers }
                             }
                         }
-                    }
+                    })
+                } else {
+                    None
+                };
+                if let Some(evt) = maybe_evt {
+                    self.dispatch_in_window(window_id, evt, event_loop);
+                }
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("keyboard");
                     }
@@ -753,7 +975,7 @@ impl FernAppHandler {
                 }
             }
             WindowEvent::RedrawRequested => {
-                self.handle_redraw_requested(window_id);
+                self.handle_redraw_requested(window_id, event_loop);
             }
             WindowEvent::ThemeChanged(winit_theme) => {
                 self.handle_theme_changed(winit_theme);
@@ -775,6 +997,7 @@ impl FernAppHandler {
                     managed.focused = focused;
                     let active = managed.focused && !managed.occluded;
                     managed.tree.set_window_active(active);
+                    managed.state.set_focused_from_os(focused);
                 }
             }
             // macOS-only in winit 0.30 (X11/Wayland/Windows never emit
@@ -1015,11 +1238,6 @@ pub struct FernAppBuilder {
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     on_ready: Option<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
-    window_title: String,
-    window_width: u32,
-    window_height: u32,
-    root_builder: Option<Box<dyn FnOnce(&mut WidgetTree) -> WidgetId>>,
-    custom_chrome: bool,
     /// Type-erased adapter for the application's backend event source
     /// (architecture §9.4). Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
@@ -1049,11 +1267,6 @@ impl FernAppBuilder {
             app_event_handler: None,
             on_ready: None,
             initial_window: None,
-            window_title: "FernUI".to_string(),
-            window_width: 800,
-            window_height: 600,
-            root_builder: None,
-            custom_chrome: false,
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -1163,38 +1376,23 @@ impl FernAppBuilder {
         self
     }
 
-    /// Set the root widget builder for the initial window (convenience API).
-    /// For multi-window apps, use `initial_window()` with a `WindowConfig`.
-    pub fn root(mut self, builder: impl FnOnce(&mut WidgetTree) -> WidgetId + 'static) -> Self {
-        self.root_builder = Some(Box::new(builder));
-        self
-    }
-
-    /// Configure the initial window explicitly (for multi-window apps).
+    /// Configure the initial window. Required — every app must open at
+    /// least one window at startup. The single canonical entry point:
+    /// build a [`WindowConfig`] and pass it here.
+    ///
+    /// ```ignore
+    /// FernAppBuilder::new()
+    ///     .theme(Theme::light_default())
+    ///     .initial_window(
+    ///         WindowConfig::new()
+    ///             .title("My App")
+    ///             .size(800, 600)
+    ///             .root(|tree, _state| tree.add(MyRoot::new())),
+    ///     )
+    ///     .run();
+    /// ```
     pub fn initial_window(mut self, config: WindowConfig) -> Self {
         self.initial_window = Some(config);
-        self
-    }
-
-    pub fn window_title(mut self, title: impl Into<String>) -> Self {
-        self.window_title = title.into();
-        self
-    }
-
-    pub fn window_size(mut self, width: u32, height: u32) -> Self {
-        self.window_width = width;
-        self.window_height = height;
-        self
-    }
-
-    /// Opt the initial window into custom window chrome (no native title
-    /// bar). The widget tree will be given a `PlatformTitleBarHost` that
-    /// can be retrieved from inside the `root` closure via
-    /// `tree.title_bar_host()`. Has no effect when using
-    /// `initial_window(WindowConfig)` — set `WindowConfig::custom_chrome`
-    /// directly in that case.
-    pub fn custom_chrome(mut self, enabled: bool) -> Self {
-        self.custom_chrome = enabled;
         self
     }
 
@@ -1245,8 +1443,28 @@ impl FernAppBuilder {
         #[cfg(feature = "text")]
         let _ = &typesetter;
 
-        if let Some(root_builder) = self.root_builder {
-            root_builder(&mut tree);
+        // Build the root from the `initial_window`'s builder if one was
+        // provided. Headless apps without an `initial_window` run with an
+        // empty tree — tests add widgets via `tree.add(...)` directly.
+        if let Some(mut config) = self.initial_window.take() {
+            if let Some(root_builder) = config.take_root_builder() {
+                // Headless has no real WindowState; construct a stub so
+                // widgets that bind against their own window signals
+                // still get a valid handle.
+                let stub_state = fern_core::WindowState::new(fern_core::WindowStateInit {
+                    id: crate::FernWindowId::new(0),
+                    string_id: config.string_id.clone(),
+                    placement: config.initial_placement,
+                    title: config.title.clone(),
+                    size: config.size,
+                    position: config.position.unwrap_or((0, 0)),
+                    focused: true,
+                    resizable: config.resizable,
+                    always_on_top: config.always_on_top,
+                });
+                tree.set_window_state(stub_state.clone());
+                root_builder(&mut tree, stub_state);
+            }
         }
 
         HeadlessApp {
@@ -1390,19 +1608,9 @@ impl FernAppBuilder {
             on_ready(proxy.clone());
         }
 
-        // Build the initial window config
-        let initial_config = if let Some(config) = self.initial_window {
-            config
-        } else {
-            let mut config = WindowConfig::new()
-                .title(self.window_title)
-                .size(self.window_width, self.window_height)
-                .custom_chrome(self.custom_chrome);
-            if let Some(root_builder) = self.root_builder {
-                config = config.root(root_builder);
-            }
-            config
-        };
+        let initial_config = self
+            .initial_window
+            .expect("FernAppBuilder::initial_window(WindowConfig) is required");
 
         let mut app = FernAppHandler::new(
             self.theme,
@@ -1507,7 +1715,10 @@ mod tests {
     fn builder_with_root() {
         use fern_widgets::RectWidget;
         let app = FernAppBuilder::new()
-            .root(|tree| tree.add(RectWidget::new().background(Color::RED)))
+            .initial_window(
+                WindowConfig::new()
+                    .root(|tree, _state| tree.add(RectWidget::new().background(Color::RED))),
+            )
             .build_headless();
         let mut tree = app.tree;
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1555,11 +1766,11 @@ mod tests {
 
         let _app = FernAppBuilder::new()
             .app_state(globals.clone())
-            .root(move |tree| {
+            .initial_window(WindowConfig::new().root(move |tree, _state| {
                 tree.add(GlobalsReader {
                     observed: observed_for_root.clone(),
                 })
-            })
+            }))
             .build_headless();
 
         assert_eq!(observed.get(), "headless works");

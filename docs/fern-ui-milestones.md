@@ -338,26 +338,36 @@ Clipboard: already implemented in Milestone 8 — TextInput reuses it directly.
 
 **Goal:** Multiple windows with shared state, modal/modeless dialogs using platform windows, and native menu bar integration.
 
-**Partially delivered during earlier milestones.** The multi-window infrastructure exists in fern-app's WindowManager and was validated during Milestone 5's modal work — per-window WidgetTree, shared application state (theme, locale, shortcuts, app_state), command routing by source window, and native modal windows all work today. What remains for this milestone is the platform-native surface area: the macOS menu bar, the file dialogs, and the cross-platform declarative menu abstraction.
+**Multi-window API delivered.** The public surface is shipped: `WindowConfig` (single creation entry point for both `FernAppBuilder::initial_window` and runtime `ctx.open_window`), reactive per-window [`WindowState`](../crates/fern-core/src/window/state.rs) with two-way OS↔signal sync guarded against re-entrancy (Compose Multiplatform #1489 cautionary tale), synchronous `EventContext::open_window` / `focus_window` / `close_window_by_id` / `find_window` / `window_state` routed through the `WindowOps` trait, the dispatch-re-entry pattern (`dispatch_in_window` temporarily removes the dispatching window from the map so `open_window` from a handler can call `WindowManager::create_window` on the same loop), and `EventContext::open_modal` as a thin wrapper that unifies native-modal creation with the rest of the open_window path. `PlatformTitleBarHost` trimmed — state operations (`minimize` / `toggle_maximize` / `close` / `is_maximized`) moved to `WindowState`; the `TitleBar` widget binds the maximize glyph to `ctx.window().placement()` and now works with `DecorationsMode::Native` too. Full reference: [docs/multi-window.md](multi-window.md). End-to-end demo: [examples/multi_window](../examples/multi_window/src/main.rs).
 
-**Remaining deliverables:**
+**`WindowConfig`** replaces the previous `.window_title` / `.window_size` / `.root` / `.custom_chrome` shim methods on `FernAppBuilder` (deleted — no back-compat). `WindowPlacement` (4-variant `Floating` / `Maximized` / `Fullscreen` / `Minimized`) replaces boolean soup. `DecorationsMode` (3-variant `Native` / `CustomChrome` / `None`) replaces `custom_chrome: bool`. `ModalConfig` (always-paired parent + focus_target) replaces the previous `modal: bool` + `parent: Option<FernWindowId>` two-field pattern. `WindowIcon` adds the icon-at-creation capability. `FernAppBuilder::initial_window(WindowConfig)` is the only window entry point; every example in `examples/*` now uses it.
+
+**Remaining deliverables for Milestone 10:**
 
 Native menu bar: NSMenu on macOS, widget-based MenuBar (from Milestone 4) inside the window on Windows and Linux. Declarative MenuBar description through FernApp builder. Abstraction over the platform difference: the application declares its menu structure once, and FernUI routes to native on macOS and to the in-window MenuBar elsewhere.
 
 File dialog: native open/save via `rfd` crate or OS APIs. Async result via EventLoopProxy.
 
-Multi-window application tests: the infrastructure exists, but a real multi-window example application (second editor window, detached inspector panel, etc.) has not been built. Adding one would exercise the shared-state path end-to-end.
-
 **Blocked by:** Platform-specific Cocoa/AppKit code for macOS menu bar (goes beyond winit).
 
-**Tests:**
-- Modal dialog blocks parent window input (done for M5)
+**Tests (done):**
+
+- WindowState OS-side write does not enqueue an OS command (re-entrancy guard)
+- OS-side write still notifies derived signals (observer still fires for bound widgets)
+- App-side write enqueues the matching `WindowCommand`
+- Modal dialog blocks parent window input
 - Modeless dialog operates independently
-- Theme change propagates to all windows (done)
+- Theme change propagates to all windows
 - Locale change propagates to all windows
-- Command from secondary window reaches handler with correct `source_window`
-- Closing window cleans up resources
-- Focus returns to parent after modal dismissal (done for M5)
+- `EventContext::open_window` / `find_window` / `focus_window` / `close_window_by_id` route through the `WindowOps` trait
+- `EventContext::open_modal` builds a `WindowConfig` and returns synchronously
+- `EventContext::open_window` on a standalone tree (no app context) panics by design
+- `EventContext::find_window` / `window_state` / `windows` return `None` / empty on standalone trees
+- TitleBar's minimize / maximize / close buttons write through `WindowState::placement` (not the chrome host)
+- Focus returns to parent after modal dismissal
+
+**Tests (remaining):**
+
 - Native menu bar on macOS mirrors the declared MenuBar structure
 - File dialog returns selected path asynchronously without blocking the event loop
 
@@ -386,4 +396,4 @@ Beyond the Milestone 6 / 7 / 8 / 10 tails tracked above, five areas are the obvi
 | 7 | Internationalization | ✅ Largely done | fern-i18n + fern-i18n-macros, `tr!`/`tr_widget!` with compile-time validation and Levenshtein suggestions, compile-time fallback, dual-bundle with explicit framework registration, hot-reload, RTL with Arabic/Hebrew fonts. ShortcutFormatter remaining. |
 | 8 | Rich Text Editor | ✅ Largely done | Both presets delivered: `RichTextEditor::read_only` (M8a) + `RichTextEditor::editor` (M8b). Shared core with per-preset PolicyBundle. Rich-format clipboard + a few command filter entries remain. |
 | 9 | Text Input | ✅ Done | TextInput (single-line, opt-in multiline) + generic SpinBox<T> with SpinValue trait. IME composition / CJK deferred to platform work — TextInput API unchanged when that lands. |
-| 10 | Multi-Window and Platform | Partial | Multi-window infrastructure done (M5); native menu bar, file dialogs, multi-window example remaining |
+| 10 | Multi-Window and Platform | Largely done | Full multi-window API shipped — `WindowConfig`, reactive `WindowState` with OS↔signal re-entrancy guard, synchronous `ctx.open_window` via `WindowOps` trait, `ctx.open_modal`, `DecorationsMode`, `WindowIcon`, trimmed `PlatformTitleBarHost`, `multi_window` example. Native menu bar + file dialogs remaining. |

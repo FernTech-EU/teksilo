@@ -2425,79 +2425,179 @@ Dormant subtrees produce no AccessKit nodes (screen readers only see active cont
 
 ## 22. Window Management
 
+Full reference: [`docs/multi-window.md`](multi-window.md). Canonical end-to-end example: [`examples/multi_window`](../examples/multi_window/src/main.rs).
+
 ### 22.1 Architecture: Per-Window Trees with Shared Application State
 
-Each window owns its own independent `WidgetTree`, its own layout pass, its own paint pass, its own `RenderFrame`, and its own wgpu surface. What windows share is application-level context: the theme, the locale, the `ShortcutRegistry`, the data-model handles (`ListModel` / `TreeModel` clones are cheap `Rc` handles), the root widget's registered `Action`s, and any app-scoped backend wiring. This is the same model used by Qt, SwiftUI, and WPF.
+Each window owns its own independent `WidgetTree`, its own layout pass, its own paint pass, its own `RenderFrame`, and its own wgpu surface. What windows share is application-level context: the theme, the locale, the `ShortcutRegistry`, the data-model handles (`ListModel` / `TreeModel` clones are cheap `Rc` handles), the root widget's registered `Action`s, and any app-scoped backend wiring. Same model as Qt, SwiftUI, WPF.
 
-This approach requires no changes to `fern-core`'s tree, layout, event dispatch, or rendering logic. A `WidgetTree` remains a single-rooted tree with all existing behavior intact. Multi-window management lives entirely in `fern-app` (window manager, environment broadcast) and `fern-platform` (multi-window event routing, per-window surface management).
+Multi-window management lives in `fern-app` (`WindowManager` + `WindowOpsImpl`). `fern-core` owns the abstractions: `WindowConfig`, reactive `WindowState`, the `WindowOps` trait consumed by `EventContext`, and `DecorationsMode` / `WindowPlacement` / `WindowIcon`. `fern-platform` routes events by winit `WindowId` and hosts custom-chrome backends. `WidgetTree` stores the hosting window's `WindowState` on itself (`Option<WindowState>`), reachable via `BuildContext::window()` / `EventContext::window()`; beyond that, tree / layout / dispatch / rendering are unchanged from the single-window case.
 
-### 22.2 Window Lifecycle
+### 22.2 `WindowConfig` — the single creation entry point
 
-The `FernApp` owns a window manager that maintains a collection of active `Window` instances. The application creates windows through the `FernApp` API, providing a configuration (title, size, position, decorations) and a root widget builder. Each window's `WidgetTree` receives a clone of the shared environment (theme, locale, shortcuts) at creation time. When the application changes the theme or locale, the change propagates to all active windows.
-
-Window closure is initiated either by the user (clicking the OS close button) or by the application (calling `ctx.close_window(id)` from a command handler). When a window closes, its `WidgetTree` is destroyed, its wgpu surface is released, and its AccessKit adapter is torn down.
-
-### 22.3 Event Routing
-
-Winit tags every event with a window ID. The `fern-platform` event loop routes each event to the correct window's `WidgetTree`. Keyboard events go to the active window (the one with OS-level focus). When the user clicks on a different window, the previously active window receives a deactivation event and the newly active window receives an activation event.
-
-Keyboard shortcuts are handled per-window: each window's tree consults the shared `ShortcutRegistry` during dispatch. A shortcut fires in whichever window has focus, emits an intent, and the intent walks source-widget → root inside that window's tree. Cross-window effects go through the intent's handler (which can close a window, open another, or mutate shared data).
-
-### 22.4 Focus Across Windows
-
-Each window's `WidgetTree` has its own independent `FocusManager`. OS-level focus determines which window receives keyboard events; widget-level focus within that window operates as designed. When a window is deactivated, its focused widget retains its focus state but does not receive keyboard events. When the window is reactivated, the previously focused widget resumes receiving input.
-
-### 22.5 EventContext and Window Identity
-
-Intents dispatched by widgets carry a `source_window` identifier through the `EventContext`. The `Action` handler can use this to distinguish window-specific intents (close window, zoom in) from window-agnostic intents (save document, toggle bold):
+A `WindowConfig` describes any window. One uniform surface for both the initial window (passed to `FernAppBuilder::initial_window`) and every secondary window (passed to `EventContext::open_window`). No `.window_title` / `.window_size` / `.root` shims on `FernAppBuilder`:
 
 ```rust
-ctx.register_action(Action::new("app.close_window").on_invoke(|_i, ctx| {
-    ctx.close_window();
-}));
-ctx.register_action(Action::new("app.zoom_in").on_invoke(|_i, ctx| {
-    ctx.window(ctx.source_window()).set_zoom(current + 0.1);
-}));
-ctx.register_action(Action::new("app.document_save").on_invoke(|_i, _ctx| {
-    // Window-agnostic — operates on the domain model.
-    document_controller::save(&db, &hub, &mut undo).ok();
-}));
+WindowConfig::new()
+    .title("Inspector")
+    .id("inspector")                             // find_window key
+    .size(420, 640)
+    .min_size(320, 400)
+    .initial_placement(WindowPlacement::Floating)
+    .decorations(DecorationsMode::CustomChrome)  // Native | CustomChrome | None
+    .resizable(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .icon(WindowIcon::from_rgba(rgba, w, h))
+    .modal(ModalConfig { parent, focus_target }) // Option<ModalConfig>
+    .root(|tree, state| tree.add(Inspector::new(state)))
 ```
 
-### 22.6 Data Source Sharing
+`WindowPlacement` is a 4-variant enum (`Floating` / `Maximized` / `Fullscreen` / `Minimized`) — **not** three booleans. Size and position are independent signals on `WindowState` holding the last-known *restored* values, mirroring macOS `frameAutosaveName` and Windows `WINDOWPLACEMENT` so un-maximize / un-fullscreen return the window to the right rect.
 
-Data models are application-level objects, not window-level. Multiple windows can observe the same `ListModel<T>` or `TreeModel<T>`. When the domain model changes, the data model emits change notifications to all observers across all windows, and each window updates independently. No structural change to the data model types is needed.
+Modal is `Option<ModalConfig>` carrying `parent: FernWindowId` and `focus_target: Option<WidgetId>` — the type system enforces that a modal names its parent.
 
-### 22.7 Modal Dialogs
+### 22.3 `WindowState` — per-window reactive state
 
-A modal dialog is a window that blocks interaction with its parent window until dismissed. The `WindowConfig` accepts a `modal` flag and a `parent` window reference. When a modal is active, `fern-platform` sets the OS-level parent relationship via winit's window builder (so the OS handles input blocking and correct Z-ordering) and ignores events for the parent window.
-
-Modal dialogs participate in the overlay stack conceptually — dismissing a modal by pressing Escape or clicking a "Cancel" button follows the same dismissal pattern as overlay menus. The modal window's `WidgetTree` dispatches intents that ancestor `Action` handlers consume, and results are communicated back to the parent window through application state (data sources, `Signal<T>` handles shared between the two trees, or direct Action logic).
+Per-window state is a cloneable `Rc<WindowStateInner>` handle holding a `Signal<T>` per field:
 
 ```rust
-ctx.register_action(Action::new("app.show_preferences").on_invoke(|_i, ctx| {
-    ctx.create_window(
+state.placement()    // Signal<WindowPlacement>
+state.title()        // Signal<String>
+state.size()         // Signal<(u32, u32)>
+state.position()     // Signal<(i32, i32)>
+state.focused()      // Signal<bool>
+state.resizable()    // Signal<bool>
+state.always_on_top()// Signal<bool>
+```
+
+Widgets bind against these signals through `ctx.window()` at build time (or capture a clone at `WindowConfig::root`). One canonical example: a toolbar fullscreen-toggle label that re-renders automatically whether the change came from the button, the F11 shortcut, or the green traffic light on macOS:
+
+```rust
+let fs = ctx.window().unwrap().placement().map(|p| p.is_fullscreen());
+Button::new().bind_label(fs.map(|f| if f { "Exit fullscreen" } else { "Fullscreen" }))
+```
+
+### 22.4 Two-way OS↔state sync with a re-entrancy guard
+
+Every `WindowState` signal has two writers:
+
+- **App-side** — `state.placement().set(Fullscreen)` fires the signal's observer which queues a `WindowCommand::SetPlacement(Fullscreen)` on `pending_os_commands`.
+- **OS-side** — winit fires `Resized` / `Moved` / `Focused`; the app-level manager translates to `state.set_*_from_os(new)` which flips `applying_from_os: true` before updating the signal. The observer sees the guard set and skips enqueuing — the OS already knows.
+
+Each event-loop tick, `WindowManager::drain_window_commands` drains every window's queue and translates commands into the appropriate winit call. Without the guard, OS-initiated state changes would loop back through the observer as redundant OS calls — at best wasteful, at worst a mid-animation state-drift bug ([Compose Multiplatform #1489](https://github.com/JetBrains/compose-multiplatform/issues/1489) is the cautionary tale). The guard is the single concrete mechanism that makes `WindowState` safe as a shared source of truth across the app/OS boundary.
+
+### 22.5 Window lifecycle
+
+`FernAppBuilder::run()` consumes a `WindowConfig` via `.initial_window(...)` and delegates to `WindowManager::create_window(config, event_loop)` on `resumed()`. Creation is synchronous — the winit window is built, the `WidgetTree` is built via `config.root`, `WindowState` observers are wired, and `ManagedWindow` is registered before returning.
+
+Every other window opens the same way. From a handler, `ctx.open_window(config)` routes through `WindowOpsImpl` (see §22.8) into the same `create_window` call; the returned `FernWindowId` is immediately usable for `focus_window` / `window_state(id)` / subsequent `open_window` calls referencing it as a modal parent.
+
+Closure is initiated by the user (OS close button → `WindowEvent::CloseRequested`), by the application (`ctx.close_window()` for the current window, `ctx.close_window_by_id(id)` for any, `state.close()` via the command queue), or by a custom-chrome title bar (`TitleBarHostCallbacks::request_close` → user event → `CloseWindowRequest` → `queue_close`). All paths funnel into `pending_closes`, drained once per tick in `process_pending`.
+
+### 22.6 Event routing
+
+Winit tags every event with a window ID. `FernAppHandler` translates the event and dispatches via `dispatch_in_window(window_id, event, event_loop)` (see §22.8 for re-entry mechanics). Keyboard events go to the active window (OS focus), pointer events to the window they occurred in. Focus/blur/occluded/resize/move all route to their window.
+
+Keyboard shortcuts are per-window: each tree consults the shared `ShortcutRegistry`, and a shortcut fires in whichever window holds OS focus.
+
+### 22.7 `EventContext` multi-window API
+
+Every handler receives an `EventContext<'_>` carrying `&'_ mut dyn WindowOps` for the duration of dispatch:
+
+```rust
+impl EventContext<'_> {
+    pub fn window(&self) -> Option<&WindowState>;               // source window
+    pub fn open_window(&mut self, config: WindowConfig) -> FernWindowId;
+    pub fn open_modal(&mut self, req: ModalRequest) -> Option<FernWindowId>;
+    pub fn find_window(&self, string_id: &str) -> Option<FernWindowId>;
+    pub fn focus_window(&mut self, id: FernWindowId);
+    pub fn close_window(&mut self);                             // current window
+    pub fn close_window_by_id(&mut self, id: FernWindowId);
+    pub fn window_state(&self, id: FernWindowId) -> Option<WindowState>;
+    pub fn windows(&self) -> Vec<WindowState>;
+}
+```
+
+Idiomatic idempotent open (single-instance preferences, inspector, help):
+
+```rust
+ctx.register_action(Action::new("app.help").on_invoke(|_i, ctx| {
+    if let Some(id) = ctx.find_window("help") {
+        ctx.focus_window(id);
+        return;
+    }
+    ctx.open_window(
         WindowConfig::new()
-            .title(tr!("window-preferences"))
-            .size(600, 400)
-            .modal(true)
-            .parent(ctx.source_window())
-            .root(|| build_preferences_ui()),
+            .title("Help")
+            .id("help")
+            .size(720, 480)
+            .root(|tree, _state| tree.add(HelpRoot::new())),
     );
 }));
-ctx.register_action(Action::new("app.close_preferences").on_invoke(|_i, ctx| {
-    ctx.close_window();
-}));
-});
 ```
 
-### 22.8 Modeless Dialogs
+Cross-window read (dim inspector when main is fullscreen):
 
-Modeless dialogs (find/replace, inspector panels) are regular windows with no parent blocking. They float alongside the main window and can be interacted with simultaneously. They are created with `WindowConfig` without the `modal` flag. Their `WidgetTree` shares data sources and application state with the main window but operates independently for layout, events, and rendering.
+```rust
+if let Some(main_id) = ctx.find_window("main") {
+    if let Some(main_state) = ctx.window_state(main_id) {
+        let dim = main_state.placement().map(|p| p.is_fullscreen());
+        // …
+    }
+}
+```
 
-### 22.9 Impact on Crate Structure
+### 22.8 `WindowOps` trait + dispatch re-entry
 
-Multi-window support requires additions to `fern-app` (window manager, environment broadcast to multiple trees, window-aware command context) and to `fern-platform` (multi-window event routing, modal window support, per-window wgpu surface management). It requires no changes to `fern-core`, `fern-canvas`, `fern-tokens`, `fern-widgets`, `fern-text`, `fern-i18n`, or `fern-render`. The initial single-window implementation needs only one discipline: using winit's window ID consistently rather than assuming a global window reference.
+`WindowOps` is a trait in `fern-core` implemented by `WindowOpsImpl` in `fern-app`. This inverts the crate dependency: `EventContext` in `fern-core` references the trait, and the impl in `fern-app` carries `&mut WindowManager` + `&ActiveEventLoop` + the current window's raw platform handle — everything `open_window` needs to reach winit synchronously.
+
+Re-entry pattern — `FernAppHandler::dispatch_in_window`:
+
+1. `self.wm.take_managed(winit_id)` temporarily removes the dispatching window from the map.
+2. Constructs `WindowOpsImpl::new(&mut self.wm, event_loop, current_id, current_handle)`. The `&mut self.wm` borrow excludes the current window, which is now held locally as `current`.
+3. `current.tree.dispatch_event_with_ops(event, &mut ops)` runs handlers. Any `ctx.open_window(...)` call reaches `self.wm.create_window(...)` directly — no borrow conflict because the map entry for the current window isn't live.
+4. Reinsert the current window.
+
+Modal parent self-reference works because the current window's raw handle is stashed on the ops object before removal; `create_window`'s parent-attach path uses it when `modal_parent == current_id`.
+
+The same threading applies to `tick_gestures_with_ops`, `layout_with_ops`, and `render_with_ops` — every frame-scope handler (drag-tick, delayed-overlay activation, state-driven rebuild of a composite) can open windows too. Standalone test paths use `NoopWindowOps`, which panics on `open_window` by design.
+
+### 22.9 Modal dialogs
+
+A modal `WindowConfig` sets `modal: Some(ModalConfig { parent, focus_target })`. `WindowManager::create_window` then:
+
+- sets `WindowLevel::AlwaysOnTop`
+- wires OS-level parent attachment: `with_parent_window` on non-macOS (Win32 owner, X11 `WM_TRANSIENT_FOR`, `xdg_toplevel.set_parent`); `attach_child_window` (AppKit `addChildWindow:ordered:`) on macOS after the AccessKit adapter is installed
+- records the parent in `modal_blocked` so events for the parent are routed to refocusing the modal child
+
+`EventContext::open_modal(request)` is a thin wrapper: it builds a `WindowConfig` from the `ModalRequest`'s title / size / focus_target and calls `open_window`. There is no separate modal drain — one create path, zero special-casing.
+
+### 22.10 Modeless dialogs
+
+Regular secondary windows. Construct a `WindowConfig` with no `.modal(...)` and call `ctx.open_window(...)`. They share app-level state (theme, locale, data models, shortcut registry) with their creator but own their own tree, focus, and rendering.
+
+### 22.11 Custom chrome
+
+`DecorationsMode::CustomChrome` constructs a `PlatformTitleBarHost` alongside the window and attaches it to the tree. The `TitleBar` widget retrieves the host via `WidgetTree::title_bar_host()` for chrome-specific operations (drag region, resize borders, platform-specific insets, system window menu on Wayland).
+
+The host's interface is intentionally minimal — `reserved_leading_inset`, `reserved_trailing_inset`, `renders_custom_controls`, `needs_custom_resize_handles`, `begin_drag`, `begin_resize`, `show_window_menu`, `update_hit_regions`. State operations (`minimize`, `toggle_maximize`, `close`, `is_maximized`) live on `WindowState` instead; the `TitleBar` widget's maximize button binds directly to `ctx.window().placement()`. One consequence: the maximize glyph swap now works with `DecorationsMode::Native` too — previously custom-chrome-only.
+
+### 22.12 Data source sharing
+
+Unchanged from the single-window model. Data models are app-level `Rc` handles; multiple windows observe the same `ListModel<T>` / `TreeModel<T>` and update independently when the domain model changes.
+
+### 22.13 Focus across windows
+
+Each tree has its own `FocusManager`. OS-level focus (`WindowEvent::Focused`) determines which window receives keyboard events; the widget-level focus inside that window is preserved across deactivation and restored on reactivation. Focus changes inside a window — including ones triggered by handlers that opened new windows — thread the ops sink through so focus-lost / focus-gained handlers can themselves open windows if they want to.
+
+### 22.14 Impact on crate structure
+
+- `fern-core` owns the window abstractions: `WindowConfig`, `WindowState`, `WindowOps` trait, `WindowPlacement`, `DecorationsMode`, `WindowIcon`, `FernWindowId`, `WindowCommand`, `NoopWindowOps`, plus `EventContext`/`BuildContext` integration.
+- `fern-app` owns `WindowManager`, `WindowOpsImpl`, the `dispatch_in_window` re-entry pattern, the OS→state writeback in `handle_window_event_inner`, and the per-tick drains (`drain_window_commands`, `process_pending`).
+- `fern-platform` owns `PlatformTitleBarHost` backends (macOS / Windows / Wayland; X11 falls back to native decorations), parent-child attachment, and the OS-placement query used when `WindowEvent::Resized` fires.
+- `fern-widgets`' `TitleBar` widget consumes `WindowState::placement` and the (trimmed) `PlatformTitleBarHost` interface.
+- Every other crate (`fern-canvas`, `fern-tokens`, `fern-data`, `fern-i18n`, `fern-text`, `fern-render`) is untouched by the multi-window machinery.
 
 ---
 

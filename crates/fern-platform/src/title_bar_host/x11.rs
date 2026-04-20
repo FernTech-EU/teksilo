@@ -54,14 +54,5 @@ impl PlatformTitleBarHost for X11Host {
     fn show_window_menu(&self, _at: Point) -> Result<(), PlatformError> {
         Err(PlatformError::Unsupported)
     }
-    fn minimize(&self) {}
-    fn toggle_maximize(&self) {}
-    fn close(&self) {}
-    fn is_maximized(&self) -> bool {
-        false
-    }
-    fn is_maximized_signal(&self) -> Signal<bool> {
-        self.is_max.clone()
-    }
     fn update_hit_regions(&self, _regions: &HitRegions) {}
 }

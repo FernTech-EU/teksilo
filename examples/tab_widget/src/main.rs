@@ -202,8 +202,11 @@ impl Widget for Root {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("TabWidget")
-        .window_size(960, 640)
-        .root(|tree| tree.add(Root::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("TabWidget")
+            .size(960, 640)
+            .root(|tree, _state| tree.add(Root::new()))
+        )
         .run();
 }

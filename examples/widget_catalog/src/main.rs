@@ -3089,8 +3089,6 @@ impl WidgetCatalog {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI -- Widget Catalog (Milestone 3)")
-        .window_size(1600, 900)
         .register_tooltips(vec![
             TooltipContent::new(
                 "save-as",
@@ -3142,7 +3140,12 @@ fn main() {
             ))
             .with_shortcut_label("F9"),
         ])
-        .root(|tree| tree.add(WidgetCatalog::new()))
+        .initial_window(
+            WindowConfig::new()
+                .title("FernUI -- Widget Catalog (Milestone 3)")
+                .size(1600, 900)
+                .root(|tree, _state| tree.add(WidgetCatalog::new())),
+        )
         .run();
 }
 

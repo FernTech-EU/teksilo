@@ -76,16 +76,8 @@ pub struct TitleBar {
     background: Color,
     border_color: Color,
     border_width: f32,
-    /// Reactive flag tracking whether the window is currently maximized,
-    /// driving the maximize/restore button glyph swap. Updated optimistically
-    /// from the maximize button's tap handler; M3+ will also wire it from
-    /// `WindowEvent::Resized` so OS-edge drags stay in sync.
-    is_maximized: Signal<bool>,
-    /// Optional override for the close button. When set, the close button
-    /// invokes this closure instead of `host.close()`. Use this on Wayland
-    /// where `host.close()` is currently a no-op — the application can
-    /// call `EventContext::close_window` directly from the closure, or
-    /// send a typed `Intent` whose root-level `Action` handler calls it.
+    /// Optional override for the close button. When set, the close
+    /// button invokes this closure instead of `ctx.close_window()`.
     close_action: Option<CloseAction>,
     root_child_id: Option<WidgetId>,
 }
@@ -103,13 +95,11 @@ impl std::fmt::Debug for TitleBar {
 
 impl TitleBar {
     /// Construct a `TitleBar` bound to the given platform host.
+    ///
+    /// The maximize/restore glyph follows `WindowState::placement` via
+    /// `ctx.window()` at build time — the host no longer owns the
+    /// maximize signal.
     pub fn new(host: Rc<dyn PlatformTitleBarHost>) -> Self {
-        // Share the host's own `is_maximized` signal rather than minting a
-        // new one: the host updates this signal from `notify_window_resized`
-        // when the OS initiates a maximize (drag-to-top snap, green-light
-        // zoom), so the Switcher glyph and any app-level subscribers stay
-        // in sync without extra plumbing.
-        let is_maximized = host.is_maximized_signal();
         Self {
             host,
             leading: None,
@@ -119,7 +109,6 @@ impl TitleBar {
             background: Color::TRANSPARENT,
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
-            is_maximized,
             close_action: None,
             root_child_id: None,
         }
@@ -197,14 +186,6 @@ impl TitleBar {
         self
     }
 
-    /// Read-only view of the platform host's maximize state. The host
-    /// drives this itself: `toggle_maximize` flips the OS state, and the
-    /// subsequent `WindowEvent::Resized` runs `host.notify_window_resized()`
-    /// which pushes the new value. Applications can observe it (e.g. to
-    /// swap their own iconography), but shouldn't write to it.
-    pub fn is_maximized_signal(&self) -> Signal<bool> {
-        self.is_maximized.clone()
-    }
 }
 
 impl Widget for TitleBar {
@@ -226,10 +207,17 @@ impl Widget for TitleBar {
             None => DragRegion::new(self.host.clone()),
         };
 
+        // Derive the maximize signal from the hosting window's
+        // `WindowState::placement`. When no state is attached (standalone
+        // / tests) fall back to a static `false`.
+        let is_maximized_signal = ctx
+            .window()
+            .map(|w| w.placement().map(|p| p.is_maximized()))
+            .unwrap_or_else(|| Signal::new(false));
         let controls: Option<WindowControls> = if renders_controls {
             Some(WindowControls::new(
                 self.host.clone(),
-                self.is_maximized.clone(),
+                is_maximized_signal,
                 self.close_action.clone(),
             ))
         } else {
@@ -384,21 +372,6 @@ mod tests {
         fn show_window_menu(&self, _at: Point) -> Result<(), PlatformError> {
             Ok(())
         }
-        fn minimize(&self) {
-            self.minimized.set(self.minimized.get() + 1);
-        }
-        fn toggle_maximize(&self) {
-            self.maximize_toggled.set(self.maximize_toggled.get() + 1);
-        }
-        fn close(&self) {
-            self.closed.set(self.closed.get() + 1);
-        }
-        fn is_maximized(&self) -> bool {
-            self.is_max.get()
-        }
-        fn is_maximized_signal(&self) -> Signal<bool> {
-            self.is_max.clone()
-        }
         fn update_hit_regions(&self, _regions: &HitRegions) {}
     }
 
@@ -537,30 +510,53 @@ mod tests {
         );
     }
 
+    /// Attach a fresh `WindowState` to the tree so the title bar's
+    /// maximize/minimize actions have a target. Returns the state so
+    /// the test can assert against `placement().get()` after an action.
+    fn attach_window_state(tree: &mut WidgetTree) -> fern_core::WindowState {
+        let state = fern_core::WindowState::new(fern_core::WindowStateInit {
+            id: fern_core::FernWindowId::new(1),
+            string_id: None,
+            placement: fern_core::WindowPlacement::Floating,
+            title: "Test".to_string(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        });
+        tree.set_window_state(state.clone());
+        state
+    }
+
     #[test]
-    fn minimize_button_calls_host_minimize() {
+    fn minimize_button_sets_placement_to_minimized() {
         let host = Rc::new(TestHost::default());
         let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        let state = attach_window_state(&mut tree);
 
         let [minimize, _max, _close] = locate_control_buttons(&tree, bar);
         tree.click(minimize);
 
-        assert_eq!(host.minimized.get(), 1, "host.minimize() should fire once");
+        assert_eq!(
+            state.placement().get(),
+            fern_core::WindowPlacement::Minimized,
+            "minimize button should flip WindowState::placement to Minimized"
+        );
     }
 
     #[test]
-    fn maximize_button_toggles_host_and_signal() {
+    fn maximize_button_toggles_placement() {
         let host = Rc::new(TestHost::default());
         let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        let state = attach_window_state(&mut tree);
 
         let [_min, maximize, _close] = locate_control_buttons(&tree, bar);
         tree.click(maximize);
+        assert_eq!(state.placement().get(), fern_core::WindowPlacement::Maximized);
 
-        assert_eq!(
-            host.maximize_toggled.get(),
-            1,
-            "host.toggle_maximize() should fire once"
-        );
+        tree.click(maximize);
+        assert_eq!(state.placement().get(), fern_core::WindowPlacement::Floating);
     }
 
     /// Locate the `DragRegion` widget id by walking the title-bar subtree.
@@ -644,25 +640,22 @@ mod tests {
     }
 
     #[test]
-    fn double_clicking_drag_region_toggles_maximize() {
+    fn double_clicking_drag_region_toggles_placement() {
         // Regression for: same auto-wiring gap. on_double_tap was wired in
         // HandlerSet but the dispatch never installed a DoubleTapRecognizer
         // unless on_tap was also set, so the handler was unreachable.
         let host = Rc::new(TestHost::default());
         let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);
+        let state = attach_window_state(&mut tree);
 
         let drag = locate_drag_region(&tree, bar);
-        // Click twice quickly at the same position. tree.click() runs the
-        // full Down + Up sequence at the widget's center; calling it twice
-        // produces a recognizable double-tap because both clicks land on
-        // the same spot well within the recognizer's distance threshold.
         tree.click(drag);
         tree.click(drag);
 
-        assert!(
-            host.maximize_toggled.get() >= 1,
-            "host.toggle_maximize() should fire on double-tap, got {}",
-            host.maximize_toggled.get()
+        assert_eq!(
+            state.placement().get(),
+            fern_core::WindowPlacement::Maximized,
+            "double-tap on drag region should flip WindowState::placement to Maximized"
         );
     }
 }

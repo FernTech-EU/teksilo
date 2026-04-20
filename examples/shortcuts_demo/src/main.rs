@@ -404,9 +404,12 @@ impl Widget for Root {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Shortcuts Demo")
-        .window_size(1100, 720)
-        .root(|tree| tree.add(Root::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("FernUI — Shortcuts Demo")
+            .size(1100, 720)
+            .root(|tree, _state| tree.add(Root::new()))
+        )
         .run();
 }
 

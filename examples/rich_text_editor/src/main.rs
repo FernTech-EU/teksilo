@@ -78,20 +78,23 @@ fn main() {
 
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Rich Text Editor")
-        .window_size(1100, 640)
-        .root(move |tree| {
+        .initial_window(
+            WindowConfig::new()
+            .title("FernUI — Rich Text Editor")
+            .size(1100, 640)
+            .root(move |tree, _state| {
             let doc_editor = doc.clone();
             let doc_preview = doc.clone();
             let split = Signal::new(0.55);
             tree.add(
-                SplitView::new(split)
-                    .first(RichTextEditor::editor(doc_editor))
-                    .second(
-                        RichTextEditor::read_only(doc_preview)
-                            .v_scroll_policy(ScrollPolicy::Auto),
-                    ),
+            SplitView::new(split)
+            .first(RichTextEditor::editor(doc_editor))
+            .second(
+            RichTextEditor::read_only(doc_preview)
+            .v_scroll_policy(ScrollPolicy::Auto),
+            ),
             )
-        })
+            })
+        )
         .run();
 }

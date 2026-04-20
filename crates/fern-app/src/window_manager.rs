@@ -9,7 +9,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use fern_core::event_source::TreeAppContext;
-use fern_core::{PlatformTitleBarHost, TitleBarHostCallbacks, WidgetTree};
+use fern_core::{
+    DecorationsMode, PlatformTitleBarHost, TitleBarHostCallbacks, UserAttentionKind, WidgetTree,
+    WindowCommand, WindowPlacement, WindowState, WindowStateInit,
+};
 use fern_platform::AccessibilityPreferences;
 use fern_platform::PlatformWindow;
 use fern_platform::create_title_bar_host;
@@ -29,6 +32,10 @@ pub(crate) struct ManagedWindow {
     pub fern_id: FernWindowId,
     pub string_id: Option<String>,
     pub tree: WidgetTree,
+    /// Reactive per-window state shared with the `WidgetTree` and
+    /// accessible from handlers via
+    /// [`EventContext::window`](fern_core::widget::EventContext::window).
+    pub state: WindowState,
     pub platform_window: PlatformWindow,
     pub translation_state: TranslationState,
     pub current_modifiers: winit::keyboard::ModifiersState,
@@ -61,16 +68,21 @@ pub(crate) struct ManagedWindow {
 pub struct WindowManager {
     windows: HashMap<winit::window::WindowId, ManagedWindow>,
     fern_to_winit: HashMap<FernWindowId, winit::window::WindowId>,
+    /// Stable string-id → id lookup, populated whenever a config carries
+    /// `id(...)`. Used by `WindowOps::find_window`.
+    string_to_id: HashMap<String, FernWindowId>,
+    /// Next allocatable `FernWindowId`. Bumped by `alloc_id`; never
+    /// reused after a window closes.
     next_id: u64,
+    /// Pending close requests collected from handler code (via
+    /// `EventContext::close_window` / `close_window_by_id`). Drained
+    /// once per tick in [`process_pending`](Self::process_pending).
+    pending_closes: Vec<FernWindowId>,
     theme: Theme,
     #[cfg(feature = "text")]
     typesetter: Option<fern_text::SharedTypesetter>,
     /// Windows that are blocked by a modal child.
     modal_blocked: HashMap<FernWindowId, FernWindowId>,
-    /// Windows pending creation (deferred to event loop).
-    pending_creates: Vec<WindowConfig>,
-    /// Windows pending closure.
-    pending_closes: Vec<FernWindowId>,
     /// OS-level accessibility preferences, queried once at startup.
     a11y_prefs: AccessibilityPreferences,
     /// How the app resolves its theme (Manual, FollowSystem, Native).
@@ -94,13 +106,13 @@ impl WindowManager {
         Self {
             windows: HashMap::new(),
             fern_to_winit: HashMap::new(),
+            string_to_id: HashMap::new(),
             next_id: 1,
+            pending_closes: Vec::new(),
             theme,
             #[cfg(feature = "text")]
             typesetter: None,
             modal_blocked: HashMap::new(),
-            pending_creates: Vec::new(),
-            pending_closes: Vec::new(),
             a11y_prefs,
             theme_mode: ThemeMode::Manual,
             app_context_template: None,
@@ -150,18 +162,86 @@ impl WindowManager {
         id
     }
 
-    /// Create a window immediately (called from the event loop with access to `target`).
+    /// Create a new window synchronously. Allocates an id, constructs
+    /// the winit surface, builds the widget tree, and registers
+    /// everything in the windows map before returning.
+    ///
+    /// The returned id is immediately usable — it can be passed to
+    /// `find_window`, `focus_window`, or `close_window_by_id`, and
+    /// state writes through `WindowState` are applied at the next
+    /// `drain_window_commands` tick.
     pub fn create_window(
         &mut self,
-        config: WindowConfig,
+        mut config: WindowConfig,
         target: &winit::event_loop::ActiveEventLoop,
     ) -> FernWindowId {
         let fern_id = self.alloc_id();
+        let state = WindowState::new(WindowStateInit {
+            id: fern_id,
+            string_id: config.string_id.clone(),
+            placement: config.initial_placement,
+            title: config.title.clone(),
+            size: config.size,
+            position: config.position.unwrap_or((0, 0)),
+            focused: true,
+            resizable: config.resizable,
+            always_on_top: config.always_on_top,
+        });
+        if let Some(sid) = &config.string_id {
+            self.string_to_id.insert(sid.clone(), fern_id);
+        }
+        let wants_custom_chrome = config.decorations.wants_custom_chrome_host();
+        let is_modal = config.is_modal();
+        let modal_parent = config.modal_parent();
+        let modal_focus_target = config.modal_focus_target();
 
         let mut window_attrs = winit::window::Window::default_attributes()
             .with_title(&config.title)
-            .with_inner_size(winit::dpi::LogicalSize::new(config.width, config.height))
+            .with_inner_size(winit::dpi::LogicalSize::new(config.size.0, config.size.1))
+            .with_resizable(config.resizable)
             .with_visible(false); // Must be invisible for AccessKit adapter creation
+
+        if let Some((min_w, min_h)) = config.min_size {
+            window_attrs = window_attrs
+                .with_min_inner_size(winit::dpi::LogicalSize::new(min_w, min_h));
+        }
+        if let Some((max_w, max_h)) = config.max_size {
+            window_attrs = window_attrs
+                .with_max_inner_size(winit::dpi::LogicalSize::new(max_w, max_h));
+        }
+        if let Some((x, y)) = config.position {
+            window_attrs =
+                window_attrs.with_position(winit::dpi::LogicalPosition::new(x, y));
+        }
+        if matches!(config.decorations, DecorationsMode::None) {
+            window_attrs = window_attrs.with_decorations(false);
+        }
+        if let Some(icon) = &config.icon {
+            if icon.is_valid() {
+                match winit::window::Icon::from_rgba(
+                    icon.rgba.clone(),
+                    icon.width,
+                    icon.height,
+                ) {
+                    Ok(platform_icon) => {
+                        window_attrs = window_attrs.with_window_icon(Some(platform_icon));
+                    }
+                    Err(e) => eprintln!(
+                        "fern-app: failed to build window icon ({}×{}): {e}",
+                        icon.width, icon.height
+                    ),
+                }
+            } else {
+                eprintln!(
+                    "fern-app: window icon buffer size ({}) does not match {}×{}×4 ({}); \
+                     dropping icon, window will open with platform default",
+                    icon.rgba.len(),
+                    icon.width,
+                    icon.height,
+                    icon.expected_len()
+                );
+            }
+        }
 
         // When the application opts into custom chrome, suppress the
         // server-side decorations on platforms where they're entirely
@@ -171,7 +251,7 @@ impl WindowManager {
         // M3 recipe sets the relevant attributes via `WindowAttributesExtMacOS`
         // — neither needs the toggle here.
         #[cfg(all(unix, not(target_os = "macos")))]
-        if config.custom_chrome
+        if wants_custom_chrome
             && fern_platform::active_window_system() == fern_platform::WindowSystem::Wayland
         {
             window_attrs = window_attrs.with_decorations(false);
@@ -182,7 +262,7 @@ impl WindowManager {
         // `title_bar_host/macos.rs` for how the traffic-light inset is
         // measured and exposed through `reserved_leading_inset`.
         #[cfg(target_os = "macos")]
-        if config.custom_chrome {
+        if wants_custom_chrome {
             use winit::platform::macos::WindowAttributesExtMacOS;
             window_attrs = window_attrs
                 .with_titlebar_transparent(true)
@@ -190,7 +270,7 @@ impl WindowManager {
                 .with_title_hidden(true);
         }
 
-        if config.modal {
+        if is_modal || config.always_on_top {
             window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
         }
 
@@ -212,7 +292,7 @@ impl WindowManager {
         // AccessKit adapter that requires a hidden window at
         // construction.
         #[cfg(not(target_os = "macos"))]
-        if let Some(parent_id) = config.parent
+        if let Some(parent_id) = modal_parent
             && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
             && let Some(parent_managed) = self.windows.get(&parent_winit)
             && let Ok(parent_handle) = parent_managed.platform_window.window().window_handle()
@@ -263,7 +343,7 @@ impl WindowManager {
         // with AccessKit adapter creation. Wire it now that the child
         // is visible.
         #[cfg(target_os = "macos")]
-        if let Some(parent_id) = config.parent
+        if let Some(parent_id) = modal_parent
             && let Some(parent_winit) = self.winit_id_for_fern(parent_id)
             && let Some(parent_managed) = self.windows.get(&parent_winit)
         {
@@ -273,7 +353,7 @@ impl WindowManager {
             );
         }
 
-        if config.modal {
+        if is_modal {
             pw.window().set_window_level(WindowLevel::AlwaysOnTop);
             pw.window().focus_window();
         }
@@ -282,7 +362,7 @@ impl WindowManager {
         // requested. On unsupported platforms (X11, no host backend) the
         // factory logs a warning and returns `Unsupported`; we silently
         // continue with native decorations and leave the host slot empty.
-        let title_bar_host: Option<Rc<dyn PlatformTitleBarHost>> = if config.custom_chrome {
+        let title_bar_host: Option<Rc<dyn PlatformTitleBarHost>> = if wants_custom_chrome {
             let callbacks = match self.event_proxy.clone() {
                 Some(proxy) => TitleBarHostCallbacks {
                     request_close: Rc::new(move || {
@@ -363,11 +443,14 @@ impl WindowManager {
             }
         }
 
-        if let Some(root_builder) = config.root_builder {
-            let root_id = root_builder(&mut tree);
-            if config.modal {
-                let focus_target = config
-                    .focus_target
+        // Attach this window's state to the tree so widgets can bind
+        // against its own window signals via `ctx.window()`.
+        tree.set_window_state(state.clone());
+
+        if let Some(root_builder) = config.take_root_builder() {
+            let root_id = root_builder(&mut tree, state.clone());
+            if is_modal {
+                let focus_target = modal_focus_target
                     .filter(|id| tree.is_active(*id))
                     .or_else(|| tree.widget_initial_focus_hint(root_id))
                     .or_else(|| tree.first_focusable_descendant(root_id));
@@ -377,22 +460,34 @@ impl WindowManager {
             }
         }
 
+        // Apply non-placement post-creation tweaks that winit can't
+        // express at builder time.
+        if config.initial_placement.is_maximized() {
+            pw.window().set_maximized(true);
+        }
+        if config.initial_placement.is_fullscreen() {
+            pw.window()
+                .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+        }
+        if config.initial_placement.is_minimized() {
+            pw.window().set_minimized(true);
+        }
+
         // Handle modal blocking
-        if config.modal {
-            if let Some(parent_id) = config.parent {
-                self.modal_blocked.insert(parent_id, fern_id);
-            }
+        if let Some(parent_id) = modal_parent {
+            self.modal_blocked.insert(parent_id, fern_id);
         }
 
         let managed = ManagedWindow {
             fern_id,
             string_id: config.string_id,
             tree,
+            state,
             platform_window: pw,
             translation_state,
             current_modifiers: winit::keyboard::ModifiersState::empty(),
-            modal: config.modal,
-            parent: config.parent,
+            modal: is_modal,
+            parent: modal_parent,
             title_bar_host,
             focused: true,
             occluded: false,
@@ -408,6 +503,9 @@ impl WindowManager {
     pub fn close_window(&mut self, fern_id: FernWindowId) {
         if let Some(winit_id) = self.fern_to_winit.remove(&fern_id) {
             if let Some(managed) = self.windows.remove(&winit_id) {
+                if let Some(sid) = managed.string_id.as_deref() {
+                    self.string_to_id.remove(sid);
+                }
                 // Unblock parent if this was a modal
                 if managed.modal {
                     if let Some(parent_id) = managed.parent {
@@ -420,22 +518,50 @@ impl WindowManager {
         self.modal_blocked.remove(&fern_id);
     }
 
-    /// Queue a window creation (processed in the next event loop tick).
-    pub fn queue_create(&mut self, config: WindowConfig) {
-        self.pending_creates.push(config);
-    }
-
     /// Queue a window closure (processed in the next event loop tick).
     pub fn queue_close(&mut self, fern_id: FernWindowId) {
         self.pending_closes.push(fern_id);
     }
 
-    /// Process pending creates and closes. Called from the event loop.
-    pub fn process_pending(&mut self, target: &winit::event_loop::ActiveEventLoop) {
-        let creates: Vec<_> = self.pending_creates.drain(..).collect();
-        for config in creates {
-            self.create_window(config, target);
+    /// Drain the app→OS command queue on every window and translate
+    /// each [`WindowCommand`] into the appropriate winit call. Called
+    /// once per event-loop tick after event dispatch.
+    ///
+    /// Observers on [`WindowState`] signals emit commands when app
+    /// code writes through them. OS-originated writes go through the
+    /// `*_from_os` setters on the state, which flip the re-entrancy
+    /// guard so the same observers do not fire an echo back out — so
+    /// the queue only contains genuine app→OS directives.
+    pub fn drain_window_commands(&mut self) {
+        // Collect (winit_id, cmd) pairs first so the borrow on
+        // `self.windows` is released before we touch platform_window.
+        let mut batch: Vec<(winit::window::WindowId, FernWindowId, WindowCommand)> = Vec::new();
+        for (winit_id, managed) in self.windows.iter() {
+            for cmd in managed.state.drain_os_commands() {
+                batch.push((*winit_id, managed.fern_id, cmd));
+            }
         }
+        for (winit_id, fern_id, cmd) in batch {
+            // `Close` is the one command that needs to mutate
+            // `self.windows` — queue it for the tick-end close drain
+            // instead of running it inline.
+            if matches!(cmd, WindowCommand::Close) {
+                self.pending_closes.push(fern_id);
+                continue;
+            }
+            let Some(managed) = self.windows.get(&winit_id) else {
+                continue;
+            };
+            apply_window_command(managed.platform_window.window(), cmd);
+        }
+    }
+
+    /// Process pending window closures. Called from the event loop
+    /// each tick. Creation does not need a drain path — `open_window`
+    /// from handler code goes through [`WindowOpsImpl`] and calls
+    /// [`create_window`](Self::create_window) synchronously inside the
+    /// same dispatch.
+    pub fn process_pending(&mut self, _target: &winit::event_loop::ActiveEventLoop) {
         let closes: Vec<_> = self.pending_closes.drain(..).collect();
         for fern_id in closes {
             self.close_window(fern_id);
@@ -450,6 +576,39 @@ impl WindowManager {
         self.windows.get_mut(&id)
     }
 
+    /// Temporarily remove a managed window from the map. Used by
+    /// [`FernAppHandler::dispatch_in_window`] so the handler's
+    /// `&mut tree` borrow does not collide with
+    /// [`WindowOpsImpl`](WindowOpsImpl)'s `&mut WindowManager` borrow.
+    /// The caller must pair this with
+    /// [`reinsert_managed`](Self::reinsert_managed) before the
+    /// enclosing winit event returns.
+    pub(crate) fn take_managed(&mut self, id: winit::window::WindowId) -> Option<ManagedWindow> {
+        self.windows.remove(&id)
+    }
+
+    /// Re-insert a `ManagedWindow` previously extracted via
+    /// [`take_managed`](Self::take_managed).
+    pub(crate) fn reinsert_managed(
+        &mut self,
+        id: winit::window::WindowId,
+        managed: ManagedWindow,
+    ) {
+        self.windows.insert(id, managed);
+    }
+
+    /// `pub(crate)` access to the windows map used by
+    /// [`WindowOpsImpl`](WindowOpsImpl).
+    pub(crate) fn windows_map(&self) -> &HashMap<winit::window::WindowId, ManagedWindow> {
+        &self.windows
+    }
+
+    /// `pub(crate)` access to the fern→winit id map used by
+    /// [`WindowOpsImpl`](WindowOpsImpl).
+    pub(crate) fn fern_to_winit_map(&self) -> &HashMap<FernWindowId, winit::window::WindowId> {
+        &self.fern_to_winit
+    }
+
     pub(crate) fn get_by_fern_mut(&mut self, id: FernWindowId) -> Option<&mut ManagedWindow> {
         let winit_id = self.fern_to_winit.get(&id).copied()?;
         self.windows.get_mut(&winit_id)
@@ -462,10 +621,7 @@ impl WindowManager {
 
     /// Find a window by its string ID.
     pub fn find_window(&self, string_id: &str) -> Option<FernWindowId> {
-        self.windows
-            .values()
-            .find(|w| w.string_id.as_deref() == Some(string_id))
-            .map(|w| w.fern_id)
+        self.string_to_id.get(string_id).copied()
     }
 
     /// Whether a window is blocked by a modal child.
@@ -658,3 +814,150 @@ impl WindowManager {
         }
     }
 }
+
+/// Translate a [`WindowCommand`] into the appropriate winit call.
+///
+/// `Close` is handled elsewhere (see [`WindowManager::drain_window_commands`]).
+fn apply_window_command(win: &winit::window::Window, cmd: WindowCommand) {
+    use winit::window::{Fullscreen, UserAttentionType, WindowLevel};
+    match cmd {
+        WindowCommand::SetPlacement(p) => match p {
+            WindowPlacement::Floating => {
+                win.set_minimized(false);
+                win.set_fullscreen(None);
+                win.set_maximized(false);
+            }
+            WindowPlacement::Maximized => {
+                win.set_minimized(false);
+                win.set_fullscreen(None);
+                win.set_maximized(true);
+            }
+            WindowPlacement::Fullscreen => {
+                win.set_minimized(false);
+                win.set_fullscreen(Some(Fullscreen::Borderless(None)));
+            }
+            WindowPlacement::Minimized => {
+                win.set_minimized(true);
+            }
+        },
+        WindowCommand::SetTitle(title) => win.set_title(&title),
+        WindowCommand::SetSize(w, h) => {
+            let _ = win.request_inner_size(winit::dpi::LogicalSize::new(w, h));
+        }
+        WindowCommand::SetPosition(x, y) => {
+            win.set_outer_position(winit::dpi::LogicalPosition::new(x, y));
+        }
+        WindowCommand::SetResizable(r) => win.set_resizable(r),
+        WindowCommand::SetAlwaysOnTop(on) => {
+            win.set_window_level(if on {
+                WindowLevel::AlwaysOnTop
+            } else {
+                WindowLevel::Normal
+            });
+        }
+        WindowCommand::RequestAttention(kind) => {
+            let winit_kind = match kind {
+                UserAttentionKind::Critical => UserAttentionType::Critical,
+                UserAttentionKind::Informational => UserAttentionType::Informational,
+            };
+            win.request_user_attention(Some(winit_kind));
+        }
+        WindowCommand::Focus => win.focus_window(),
+        WindowCommand::Close => {
+            // Handled in drain_window_commands; unreachable here.
+        }
+    }
+}
+
+/// App-level implementation of [`fern_core::WindowOps`] handed into
+/// every `dispatch_event_with_ops` call.
+///
+/// Holds `&mut WindowManager` plus `&ActiveEventLoop` so
+/// [`open_window`](fern_core::WindowOps::open_window) can create the
+/// winit-level window synchronously before returning. Constructed by
+/// [`FernAppHandler::dispatch_in_window`] after temporarily removing
+/// the dispatching window from `WindowManager::windows`; the removed
+/// tree is borrowed mutably for the handler run.
+pub struct WindowOpsImpl<'a> {
+    wm: &'a mut WindowManager,
+    event_loop: &'a winit::event_loop::ActiveEventLoop,
+    /// Current (dispatching) window's id. Kept for diagnostics and
+    /// future modal-parent self-reference logic.
+    current_id: FernWindowId,
+    /// Current window's raw handle, captured before removal so a
+    /// modal whose parent is the current window can still attach.
+    #[cfg(not(target_os = "macos"))]
+    current_handle: Option<winit::raw_window_handle::RawWindowHandle>,
+    /// macOS equivalent — the `Arc<Window>` of the current window
+    /// (needed for `addChildWindow:ordered:`).
+    #[cfg(target_os = "macos")]
+    current_window_arc: Option<std::sync::Arc<winit::window::Window>>,
+}
+
+impl<'a> WindowOpsImpl<'a> {
+    pub fn new(
+        wm: &'a mut WindowManager,
+        event_loop: &'a winit::event_loop::ActiveEventLoop,
+        current_id: FernWindowId,
+        #[cfg(not(target_os = "macos"))] current_handle: Option<
+            winit::raw_window_handle::RawWindowHandle,
+        >,
+        #[cfg(target_os = "macos")] current_window_arc: Option<
+            std::sync::Arc<winit::window::Window>,
+        >,
+    ) -> Self {
+        Self {
+            wm,
+            event_loop,
+            current_id,
+            #[cfg(not(target_os = "macos"))]
+            current_handle,
+            #[cfg(target_os = "macos")]
+            current_window_arc,
+        }
+    }
+}
+
+impl fern_core::WindowOps for WindowOpsImpl<'_> {
+    fn open_window(&mut self, config: fern_core::WindowConfig) -> FernWindowId {
+        let _ = self.current_id;
+        #[cfg(not(target_os = "macos"))]
+        let _ = self.current_handle;
+        #[cfg(target_os = "macos")]
+        let _ = &self.current_window_arc;
+        self.wm.create_window(config, self.event_loop)
+    }
+
+    fn find_window(&self, string_id: &str) -> Option<FernWindowId> {
+        self.wm.find_window(string_id)
+    }
+
+    fn window_state(&self, id: FernWindowId) -> Option<fern_core::WindowState> {
+        let winit_id = self.wm.fern_to_winit_map().get(&id).copied()?;
+        self.wm
+            .windows_map()
+            .get(&winit_id)
+            .map(|m| m.state.clone())
+    }
+
+    fn windows(&self) -> Vec<fern_core::WindowState> {
+        self.wm
+            .windows_map()
+            .values()
+            .map(|m| m.state.clone())
+            .collect()
+    }
+
+    fn focus_window(&mut self, id: FernWindowId) {
+        if let Some(winit_id) = self.wm.fern_to_winit_map().get(&id).copied() {
+            if let Some(managed) = self.wm.windows_map().get(&winit_id) {
+                managed.platform_window.window().focus_window();
+            }
+        }
+    }
+
+    fn close_window_by_id(&mut self, id: FernWindowId) {
+        self.wm.queue_close(id);
+    }
+}
+

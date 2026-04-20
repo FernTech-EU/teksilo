@@ -255,20 +255,33 @@ impl Widget for WindowControls {
         let cell_w = 46.0;
         let cell_h = 32.0;
 
-        let host_min = self.host.clone();
-        let host_max = self.host.clone();
-        let host_close = self.host.clone();
         let close_override = self.close_action.clone();
 
-        let minimize_action: ControlAction = Rc::new(move |_ctx| host_min.minimize());
-        // The host drives the `is_maximized` signal now: `toggle_maximize`
-        // flips the OS state, and the subsequent `WindowEvent::Resized`
-        // dispatches `host.notify_window_resized()` which pushes the new
-        // value onto the signal. Don't speculatively mutate it here.
-        let maximize_action: ControlAction = Rc::new(move |_ctx| host_max.toggle_maximize());
+        // All three controls write through `WindowState::placement` and
+        // `WindowState::close` now. The signal flip fires the state's
+        // observer which queues a `WindowCommand`; the app-level manager
+        // translates that into the appropriate winit call on the next
+        // tick. OS-initiated state changes (green-light zoom, drag-to-
+        // top-snap) come back through `set_placement_from_os`, keeping
+        // the button glyph in sync without echoing back out.
+        let minimize_action: ControlAction = Rc::new(move |ctx| {
+            if let Some(w) = ctx.window() {
+                w.placement().set(fern_core::WindowPlacement::Minimized);
+            }
+        });
+        let maximize_action: ControlAction = Rc::new(move |ctx| {
+            if let Some(w) = ctx.window() {
+                let next = if w.placement().get().is_maximized() {
+                    fern_core::WindowPlacement::Floating
+                } else {
+                    fern_core::WindowPlacement::Maximized
+                };
+                w.placement().set(next);
+            }
+        });
         let close_action: ControlAction = match close_override {
             Some(user_action) => user_action,
-            None => Rc::new(move |_ctx| host_close.close()),
+            None => Rc::new(move |ctx| ctx.close_window()),
         };
 
         // `to_signal()` observes the i18n manager so the name updates

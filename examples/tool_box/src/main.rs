@@ -169,8 +169,11 @@ impl Widget for Root {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("ToolBox")
-        .window_size(840, 560)
-        .root(|tree| tree.add(Root::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("ToolBox")
+            .size(840, 560)
+            .root(|tree, _state| tree.add(Root::new()))
+        )
         .run();
 }

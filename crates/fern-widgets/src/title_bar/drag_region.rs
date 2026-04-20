@@ -76,7 +76,6 @@ impl Widget for DragRegion {
         // without movement still flows to the double-tap recognizer, which
         // is how we get double-click-to-maximize.
         let host_drag = self.host.clone();
-        let host_dbl = self.host.clone();
         let host_pointer = self.host.clone();
 
         let handlers = HandlerSet::new()
@@ -89,8 +88,15 @@ impl Widget for DragRegion {
                     let _ = host_drag.begin_drag();
                 }
             })
-            .on_double_tap(move |_pos, _ctx| {
-                host_dbl.toggle_maximize();
+            .on_double_tap(move |_pos, ctx| {
+                if let Some(w) = ctx.window() {
+                    let next = if w.placement().get().is_maximized() {
+                        fern_core::WindowPlacement::Floating
+                    } else {
+                        fern_core::WindowPlacement::Maximized
+                    };
+                    w.placement().set(next);
+                }
             })
             .on_pointer_event(move |evt, _ctx| {
                 if let WidgetEvent::PointerDown {

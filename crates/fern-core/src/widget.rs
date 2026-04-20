@@ -224,7 +224,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 }
 
 /// Context available during event handling.
-pub struct EventContext {
+pub struct EventContext<'ops> {
     pub(crate) cursor_request: Option<CursorIcon>,
     pub(crate) tree_mutations: Vec<TreeMutation>,
     pub(crate) idle_callbacks: Vec<crate::idle::IdleCallback>,
@@ -280,6 +280,17 @@ pub struct EventContext {
     /// Populated by the dispatcher before running each handler; `None`
     /// for hand-constructed contexts in tests.
     pub(crate) app_context: Option<std::rc::Rc<crate::event_source::TreeAppContext>>,
+    /// App-level window-ops sink. Injected by the dispatcher so
+    /// handlers can reach the multi-window API (`open_window`,
+    /// `focus_window`, …) synchronously. For `EventContext`
+    /// instances constructed outside a dispatch (standalone trees,
+    /// tests) this is `None` and the multi-window methods no-op /
+    /// return `None`.
+    pub(crate) window_ops: Option<&'ops mut dyn crate::window::WindowOps>,
+    /// [`WindowState`](crate::window::WindowState) for the window
+    /// this tree belongs to. Cloned from the tree at construction.
+    /// `None` for standalone trees.
+    pub(crate) current_window: Option<crate::window::WindowState>,
     /// Intents queued by handlers via `send_intent`. Drained by the
     /// tree after event dispatch and routed source-widget → root.
     pub(crate) pending_intents: Vec<crate::intent::Intent>,
@@ -325,7 +336,7 @@ pub(crate) enum TreeMutation {
     Destroy(WidgetId),
 }
 
-impl EventContext {
+impl<'ops> EventContext<'ops> {
     pub(crate) fn new() -> Self {
         Self {
             cursor_request: None,
@@ -356,8 +367,25 @@ impl EventContext {
             cancel_key_capture: false,
             pending_shortcut_mutations: Vec::new(),
             close_window_requested: false,
+            window_ops: None,
+            current_window: None,
         }
     }
+
+    /// Attach the app-level window-ops sink and the hosting tree's
+    /// [`WindowState`](crate::window::WindowState). Called by the
+    /// dispatcher once per event batch so handlers can reach the
+    /// multi-window API synchronously.
+    pub(crate) fn with_window_context(
+        mut self,
+        ops: &'ops mut dyn crate::window::WindowOps,
+        current_window: Option<crate::window::WindowState>,
+    ) -> Self {
+        self.window_ops = Some(ops);
+        self.current_window = current_window;
+        self
+    }
+
 
     /// Attach the tree's app-state registry so handlers can look up
     /// application-scoped values (`ClipboardHandle`, `SharedTypesetter`,
@@ -475,6 +503,73 @@ impl EventContext {
         self.close_window_requested = true;
     }
 
+    // -------------------- Multi-window API --------------------
+
+    /// The [`WindowState`](crate::window::WindowState) for the window
+    /// hosting this handler. `None` only for handlers run outside
+    /// of an app (hand-constructed `EventContext` in tests).
+    pub fn window(&self) -> Option<&crate::window::WindowState> {
+        self.current_window.as_ref()
+    }
+
+    /// Open a new window, creating the winit-level surface
+    /// synchronously. The returned id is immediately valid for
+    /// [`focus_window`](Self::focus_window),
+    /// [`window_state`](Self::window_state), and
+    /// [`find_window`](Self::find_window).
+    ///
+    /// Panics when called from a handler on a standalone `WidgetTree`
+    /// (no app context) — tests should not invoke this method.
+    pub fn open_window(
+        &mut self,
+        config: crate::window::WindowConfig,
+    ) -> crate::window::FernWindowId {
+        self.window_ops
+            .as_deref_mut()
+            .expect("open_window called outside of a dispatch")
+            .open_window(config)
+    }
+
+    /// Find a window by the string id assigned via
+    /// [`WindowConfig::id`](crate::window::WindowConfig::id). Returns
+    /// `None` if no open window carries that id.
+    pub fn find_window(&self, string_id: &str) -> Option<crate::window::FernWindowId> {
+        self.window_ops.as_deref()?.find_window(string_id)
+    }
+
+    /// Read the [`WindowState`](crate::window::WindowState) for a
+    /// specific window.
+    pub fn window_state(
+        &self,
+        id: crate::window::FernWindowId,
+    ) -> Option<crate::window::WindowState> {
+        self.window_ops.as_deref()?.window_state(id)
+    }
+
+    /// Snapshot of every live window's state.
+    pub fn windows(&self) -> Vec<crate::window::WindowState> {
+        self.window_ops
+            .as_deref()
+            .map(|o| o.windows())
+            .unwrap_or_default()
+    }
+
+    /// Raise a window to the front and give it keyboard focus.
+    pub fn focus_window(&mut self, id: crate::window::FernWindowId) {
+        if let Some(ops) = self.window_ops.as_deref_mut() {
+            ops.focus_window(id);
+        }
+    }
+
+    /// Close a specific window by id. Equivalent to
+    /// [`close_window`](Self::close_window) when `id` is the current
+    /// window's id.
+    pub fn close_window_by_id(&mut self, id: crate::window::FernWindowId) {
+        if let Some(ops) = self.window_ops.as_deref_mut() {
+            ops.close_window_by_id(id);
+        }
+    }
+
     /// Request a cursor icon change.
     pub fn set_cursor(&mut self, cursor: CursorIcon) {
         self.cursor_request = Some(cursor);
@@ -555,6 +650,42 @@ impl EventContext {
     /// concrete presentation backend.
     pub fn present_modal(&mut self, request: crate::modal::ModalRequest) {
         self.modal_requests.push(request);
+    }
+
+    /// Synchronously open a modal as a native window — the single
+    /// unified path for native-window modals. Callers that don't
+    /// care whether the modal lands in-tree or in a native window
+    /// use [`present_modal`](Self::present_modal), which routes
+    /// `ModalPresentation::Auto` through the framework's picker.
+    ///
+    /// Returns the new window's id, or `None` when called outside a
+    /// dispatch context (standalone trees). The window's parent is
+    /// the current window; focus target and title / size from the
+    /// request are honored.
+    ///
+    /// Only `ModalContent::Deferred` is supported here — an
+    /// `ExistingWidget` id wouldn't make sense in a fresh tree.
+    pub fn open_modal(
+        &mut self,
+        request: crate::modal::ModalRequest,
+    ) -> Option<crate::window::FernWindowId> {
+        let parent = self.current_window.as_ref()?.id();
+        let crate::modal::ModalContent::Deferred(builder) = request.content else {
+            return None;
+        };
+        let mut config =
+            crate::window::WindowConfig::new().modal(crate::window::ModalConfig {
+                parent,
+                focus_target: request.focus_target,
+            });
+        if let Some(title) = request.title {
+            config = config.title(title);
+        }
+        if let Some((w, h)) = request.size {
+            config = config.size(w, h);
+        }
+        let config = config.root(move |tree, _state| builder(tree));
+        Some(self.open_window(config))
     }
 
     /// Dismiss the current framework-owned modal presentation.
@@ -668,5 +799,249 @@ impl EventContext {
     /// against the new locale.
     pub fn set_locale(&mut self, locale: impl Into<String>) {
         self.locale_request = Some(locale.into());
+    }
+}
+
+#[cfg(test)]
+mod multi_window_tests {
+    use super::*;
+    use crate::window::state::WindowStateInit;
+    use crate::window::{FernWindowId, NoopWindowOps, WindowConfig, WindowOps, WindowState,
+        WindowPlacement};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Recording implementation of `WindowOps` so tests can assert
+    /// that `EventContext` routes each method through the trait.
+    #[derive(Default)]
+    struct RecordingOps {
+        open_calls: RefCell<Vec<WindowConfig>>,
+        focus_calls: RefCell<Vec<FernWindowId>>,
+        close_calls: RefCell<Vec<FernWindowId>>,
+        next_id: RefCell<u64>,
+        // A fake registry so `find_window` / `window_state` / `windows`
+        // can return values.
+        states: RefCell<Vec<WindowState>>,
+    }
+
+    impl RecordingOps {
+        fn alloc_id(&self) -> FernWindowId {
+            let mut n = self.next_id.borrow_mut();
+            *n += 1;
+            FernWindowId::new(*n)
+        }
+    }
+
+    impl WindowOps for RecordingOps {
+        fn open_window(&mut self, config: WindowConfig) -> FernWindowId {
+            let id = self.alloc_id();
+            let state = WindowState::new(WindowStateInit {
+                id,
+                string_id: config.string_id.clone(),
+                placement: config.initial_placement,
+                title: config.title.clone(),
+                size: config.size,
+                position: config.position.unwrap_or((0, 0)),
+                focused: true,
+                resizable: config.resizable,
+                always_on_top: config.always_on_top,
+            });
+            self.states.borrow_mut().push(state);
+            self.open_calls.borrow_mut().push(config);
+            id
+        }
+
+        fn find_window(&self, string_id: &str) -> Option<FernWindowId> {
+            self.states
+                .borrow()
+                .iter()
+                .find(|s| s.string_id() == Some(string_id))
+                .map(|s| s.id())
+        }
+
+        fn window_state(&self, id: FernWindowId) -> Option<WindowState> {
+            self.states
+                .borrow()
+                .iter()
+                .find(|s| s.id() == id)
+                .cloned()
+        }
+
+        fn windows(&self) -> Vec<WindowState> {
+            self.states.borrow().clone()
+        }
+
+        fn focus_window(&mut self, id: FernWindowId) {
+            self.focus_calls.borrow_mut().push(id);
+        }
+
+        fn close_window_by_id(&mut self, id: FernWindowId) {
+            self.close_calls.borrow_mut().push(id);
+        }
+    }
+
+    fn make_state(id: u64, string_id: Option<&str>) -> WindowState {
+        WindowState::new(WindowStateInit {
+            id: FernWindowId::new(id),
+            string_id: string_id.map(String::from),
+            placement: WindowPlacement::Floating,
+            title: "Test".into(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        })
+    }
+
+    #[test]
+    fn window_returns_current_window_state() {
+        let state = make_state(1, Some("main"));
+        let mut noop = NoopWindowOps;
+        let mut ctx = EventContext::new().with_window_context(&mut noop, Some(state.clone()));
+        assert_eq!(ctx.window().unwrap().id(), FernWindowId::new(1));
+        assert_eq!(ctx.window().unwrap().string_id(), Some("main"));
+    }
+
+    #[test]
+    fn window_is_none_without_context() {
+        let ctx = EventContext::new();
+        assert!(ctx.window().is_none());
+    }
+
+    #[test]
+    fn open_window_routes_through_ops() {
+        let mut ops = RecordingOps::default();
+        let main_state = make_state(1, Some("main"));
+        let returned_id = {
+            let mut ctx = EventContext::new()
+                .with_window_context(&mut ops, Some(main_state));
+            ctx.open_window(WindowConfig::new().id("help").title("Help"))
+        };
+        assert_eq!(ops.open_calls.borrow().len(), 1);
+        assert_eq!(ops.open_calls.borrow()[0].string_id.as_deref(), Some("help"));
+        // Recording ops allocates ids 2+; 1 was reserved for `main`
+        // only in this test — Recording's counter starts from 0, so the
+        // first alloc yields 1.
+        assert_eq!(returned_id, FernWindowId::new(1));
+    }
+
+    #[test]
+    fn find_window_routes_through_ops() {
+        let mut ops = RecordingOps::default();
+        ops.states.borrow_mut().push(make_state(7, Some("foo")));
+        let main_state = make_state(1, Some("main"));
+        let ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
+        assert_eq!(ctx.find_window("foo"), Some(FernWindowId::new(7)));
+        assert!(ctx.find_window("missing").is_none());
+    }
+
+    #[test]
+    fn focus_window_records_via_ops() {
+        let mut ops = RecordingOps::default();
+        let main_state = make_state(1, None);
+        {
+            let mut ctx = EventContext::new()
+                .with_window_context(&mut ops, Some(main_state));
+            ctx.focus_window(FernWindowId::new(42));
+        }
+        assert_eq!(ops.focus_calls.borrow().as_slice(), &[FernWindowId::new(42)]);
+    }
+
+    #[test]
+    fn close_window_by_id_records_via_ops() {
+        let mut ops = RecordingOps::default();
+        let main_state = make_state(1, None);
+        {
+            let mut ctx = EventContext::new()
+                .with_window_context(&mut ops, Some(main_state));
+            ctx.close_window_by_id(FernWindowId::new(9));
+        }
+        assert_eq!(ops.close_calls.borrow().as_slice(), &[FernWindowId::new(9)]);
+    }
+
+    #[test]
+    fn windows_enumerates_via_ops() {
+        let mut ops = RecordingOps::default();
+        ops.states.borrow_mut().push(make_state(1, Some("a")));
+        ops.states.borrow_mut().push(make_state(2, Some("b")));
+        let main_state = make_state(1, Some("a"));
+        let ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
+        let ids: Vec<_> = ctx.windows().iter().map(|s| s.id()).collect();
+        assert_eq!(ids, vec![FernWindowId::new(1), FernWindowId::new(2)]);
+    }
+
+    #[test]
+    fn standalone_context_returns_empty_windows_and_none_lookups() {
+        let ctx = EventContext::new();
+        assert!(ctx.find_window("anything").is_none());
+        assert!(ctx.window_state(FernWindowId::new(1)).is_none());
+        assert!(ctx.windows().is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "open_window called outside of a dispatch")]
+    fn open_window_on_standalone_context_panics() {
+        let mut ctx = EventContext::new();
+        let _ = ctx.open_window(WindowConfig::new());
+    }
+
+    #[test]
+    fn open_modal_builds_window_config_from_request() {
+        use crate::modal::{ModalContent, ModalRequest};
+        let mut ops = RecordingOps::default();
+        let main_state = make_state(1, Some("main"));
+        let built_widget = Rc::new(RefCell::new(false));
+        let built_widget_flag = built_widget.clone();
+        let request = ModalRequest {
+            content: ModalContent::Deferred(Box::new(move |_tree| {
+                *built_widget_flag.borrow_mut() = true;
+                // Return a dummy WidgetId — not used in this test since
+                // the RecordingOps doesn't actually build the tree.
+                crate::widget_id::WidgetId::default()
+            })),
+            presentation: crate::modal::ModalPresentation::NativeWindow,
+            close_behavior: crate::modal::ModalCloseBehavior::default(),
+            title: Some("Confirm".to_string()),
+            size: Some((420, 180)),
+            focus_target: None,
+            on_dismiss: None,
+        };
+        {
+            let mut ctx = EventContext::new()
+                .with_window_context(&mut ops, Some(main_state));
+            let id = ctx.open_modal(request);
+            assert!(id.is_some());
+        }
+        // open_modal is a thin wrapper over open_window — the config
+        // it built must reach RecordingOps::open_window.
+        let calls = ops.open_calls.borrow();
+        assert_eq!(calls.len(), 1);
+        let cfg = &calls[0];
+        assert_eq!(cfg.title, "Confirm");
+        assert_eq!(cfg.size, (420, 180));
+        assert!(cfg.is_modal());
+        assert_eq!(cfg.modal_parent(), Some(FernWindowId::new(1)));
+        // Cell is just to let us observe something reachable via cfg.root_builder;
+        // the builder hasn't been called yet (RecordingOps records the config
+        // but doesn't build the tree).
+        let _ = built_widget;
+    }
+
+    #[test]
+    fn open_modal_requires_current_window() {
+        use crate::modal::{ModalContent, ModalRequest};
+        let mut ops = RecordingOps::default();
+        let mut ctx = EventContext::new().with_window_context(&mut ops, None);
+        let request = ModalRequest {
+            content: ModalContent::Deferred(Box::new(|_tree| crate::widget_id::WidgetId::default())),
+            presentation: crate::modal::ModalPresentation::NativeWindow,
+            close_behavior: crate::modal::ModalCloseBehavior::default(),
+            title: None,
+            size: None,
+            focus_target: None,
+            on_dismiss: None,
+        };
+        assert!(ctx.open_modal(request).is_none());
     }
 }

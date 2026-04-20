@@ -68,6 +68,12 @@ pub mod prelude {
     // App
     pub use fern_app::{FernAppBuilder, ThemeMode};
 
+    // Multi-window API
+    pub use fern_core::{
+        DecorationsMode, FernWindowId, ModalConfig, UserAttentionKind, WindowCommand,
+        WindowConfig, WindowPlacement, WindowState,
+    };
+
     // i18n (architecture §12)
     #[cfg(feature = "i18n")]
     pub use fern_i18n::{

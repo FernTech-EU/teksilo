@@ -43,9 +43,12 @@ fn main() {
 
     let mut builder = FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Animations Drain Test")
-        .window_size(640, 420)
-        .root(move |tree| tree.add(AnimationsRoot::new(selected_for_root)));
+        .initial_window(
+            WindowConfig::new()
+                .title("FernUI — Animations Drain Test")
+                .size(640, 420)
+                .root(move |tree, _state| tree.add(AnimationsRoot::new(selected_for_root))),
+        );
 
     if switch_after_5s {
         let selected_for_handler = selected;

@@ -1,8 +1,22 @@
 use super::*;
 
 impl WidgetTree {
-    /// Set focus to a specific widget with the given origin.
-    pub fn focus_with_origin(&mut self, id: WidgetId, origin: crate::focus::FocusOrigin) {
+    /// Set focus to a specific widget with the given origin, invoking
+    /// `on_focus_lost` / `on_focus_gained` handlers through the
+    /// caller-supplied [`WindowOps`](crate::window::WindowOps) sink.
+    ///
+    /// `fern-app` drives in-dispatch focus changes through this method
+    /// so that focus-triggered handlers can synchronously call
+    /// `ctx.open_window(...)`. Standalone callers (programmatic
+    /// focus from framework code paths, tests) use
+    /// [`focus_with_origin`](Self::focus_with_origin) which wraps with
+    /// [`NoopWindowOps`](crate::window::NoopWindowOps).
+    pub fn focus_with_origin_ops(
+        &mut self,
+        id: WidgetId,
+        origin: crate::focus::FocusOrigin,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         if self.focused == Some(id) {
             return;
         }
@@ -17,29 +31,41 @@ impl WidgetTree {
             };
 
             if moving_into_descendant_overlay {
-                self.dispatch_to_widget_direct(old, &WidgetEvent::FocusLost);
+                self.dispatch_to_widget_direct(old, &WidgetEvent::FocusLost, &mut *ops);
             } else {
-                self.dispatch_to_widget(old, &WidgetEvent::FocusLost);
+                self.dispatch_to_widget(old, &WidgetEvent::FocusLost, &mut *ops);
             }
         }
         self.focused = Some(id);
         self.focus_origin = Some(origin);
         self.a11y_dirty = true;
-        self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin });
+        self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin }, &mut *ops);
         // Focus-driven tooltip machinery: close any previously-shown
         // focus-promoted rich tooltip whose scope no longer contains
         // the focus target, then immediately surface+sticky the rich
         // tooltip (if any) attached to the new focus target. See
         // `tooltip_focus_enter` / `tooltip_focus_leave_outside` for
         // the full rationale.
-        self.tooltip_focus_leave_outside(Some(id));
+        self.tooltip_focus_leave_outside(Some(id), &mut *ops);
         self.tooltip_focus_enter(id);
-        self.scroll_focused_into_view(id);
+        self.scroll_focused_into_view(id, &mut *ops);
+    }
+
+    /// Set focus using [`NoopWindowOps`](crate::window::NoopWindowOps).
+    /// Programmatic / framework-internal callers. Handlers triggered
+    /// from this path cannot `ctx.open_window(...)`.
+    pub fn focus_with_origin(&mut self, id: WidgetId, origin: crate::focus::FocusOrigin) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.focus_with_origin_ops(id, origin, &mut noop);
     }
 
     /// After setting focus, ensure the focused widget is visible inside
     /// all ancestor scroll areas (clips_children containers).
-    fn scroll_focused_into_view(&mut self, focused_id: WidgetId) {
+    fn scroll_focused_into_view(
+        &mut self,
+        focused_id: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let focused_bounds = self.arena.bounds(focused_id);
 
         let mut current = self.arena.parent(focused_id);
@@ -60,6 +86,7 @@ impl WidgetTree {
                             target_bounds: focused_bounds,
                             margin: 0.0,
                         },
+                        &mut *ops,
                     );
                 }
             }
@@ -67,10 +94,21 @@ impl WidgetTree {
         }
     }
 
-    /// Set focus to a specific widget (programmatic origin).
+    /// Set focus to a specific widget (programmatic origin, no ops).
     pub fn focus(&mut self, id: WidgetId) {
         self.focus_with_origin(id, crate::focus::FocusOrigin::Programmatic);
     }
+
+    /// Set focus — the dispatch-path variant that threads `ops` through
+    /// to any on_focus_lost / on_focus_gained handlers.
+    pub fn focus_ops(
+        &mut self,
+        id: WidgetId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        self.focus_with_origin_ops(id, crate::focus::FocusOrigin::Programmatic, ops);
+    }
+
 
     /// Get the currently focused widget.
     pub fn focused(&self) -> Option<WidgetId> {
@@ -138,7 +176,11 @@ impl WidgetTree {
 
     /// Cycle focus to the next/previous focusable widget (Tab/Shift-Tab).
     /// Traverses in document order (depth-first tree traversal).
-    pub(super) fn cycle_focus(&mut self, reverse: bool) {
+    pub(super) fn cycle_focus(
+        &mut self,
+        reverse: bool,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let mut focusable = Vec::new();
         if let Some(modal_overlay) = self.overlay_manager.topmost_centered() {
             self.collect_focusable_tree_order(modal_overlay.content_id, &mut focusable);
@@ -183,7 +225,11 @@ impl WidgetTree {
             None => 0,
         };
 
-        self.focus_with_origin(focusable[next_idx], crate::focus::FocusOrigin::Keyboard);
+        self.focus_with_origin_ops(
+            focusable[next_idx],
+            crate::focus::FocusOrigin::Keyboard,
+            &mut *ops,
+        );
     }
 
     /// Check if a node is focusable (set via HandlerSet `.focusable(true)` in build).

@@ -140,8 +140,11 @@ fn build_preview_pane(title: &str, text: &str, theme: &Theme) -> impl Widget {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("SplitView")
-        .window_size(980, 760)
-        .root(|tree| tree.add(SplitViewDemo::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("SplitView")
+            .size(980, 760)
+            .root(|tree, _state| tree.add(SplitViewDemo::new()))
+        )
         .run();
 }

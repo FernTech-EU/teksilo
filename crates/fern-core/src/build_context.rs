@@ -180,6 +180,14 @@ impl<'a> BuildContext<'a> {
         self.tree.locale_signal().clone()
     }
 
+    /// The [`WindowState`](crate::window::WindowState) for the window
+    /// hosting this tree. `None` only for trees built outside of an
+    /// app (tests, headless scenarios). Use this to bind widgets to
+    /// window-level signals like `placement`, `size`, `focused`.
+    pub fn window(&self) -> Option<&crate::window::WindowState> {
+        self.tree.window_state()
+    }
+
     /// Retrieve an application-scoped value of type `T` registered via
     /// `FernAppBuilder::app_state` (architecture §9.5). Returns `None` if
     /// no value of that type was registered. The returned reference

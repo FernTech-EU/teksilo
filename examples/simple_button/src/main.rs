@@ -8,18 +8,21 @@ use fern_ui::widgets::{Button, ButtonVariant};
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — Simple Button")
-        .window_size(400, 300)
-        .root(|tree| {
-            tree.add(
-                Button::new_literal("Click Me")
-                    .style(ButtonVariant::Default)
-                    .on_activate_fn(|_ctx| {
-                        println!("Button clicked!");
-                    })
-                    .tooltip_literal("This is a simple button. Click it to see a message in the console."),
-            )
-        })
+        .initial_window(
+            WindowConfig::new()
+                .title("FernUI — Simple Button")
+                .size(400, 300)
+                .root(|tree, _state| {
+                    tree.add(
+                        Button::new_literal("Click Me")
+                            .style(ButtonVariant::Default)
+                            .on_activate_fn(|_ctx| {
+                                println!("Button clicked!");
+                            })
+                            .tooltip_literal("This is a simple button. Click it to see a message in the console."),
+                    )
+                }),
+        )
         .run();
 }
 

@@ -13,14 +13,22 @@ use std::sync::Arc;
 use fern_core::{PlatformError, PlatformTitleBarHost, TitleBarHostCallbacks};
 use winit::window::Window;
 
+#[cfg(target_os = "macos")]
 mod macos;
+#[cfg(all(unix, not(target_os = "macos")))]
 mod wayland;
+#[cfg(target_os = "windows")]
 mod windows;
+#[cfg(all(unix, not(target_os = "macos")))]
 mod x11;
 
+#[cfg(target_os = "macos")]
 pub use macos::MacOsHost;
+#[cfg(all(unix, not(target_os = "macos")))]
 pub use wayland::WaylandHost;
+#[cfg(target_os = "windows")]
 pub use windows::WindowsHost;
+#[cfg(all(unix, not(target_os = "macos")))]
 pub use x11::X11Host;
 
 /// Construct a title bar host for the given winit window. Returns

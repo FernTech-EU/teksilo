@@ -200,6 +200,12 @@ pub struct WidgetTree {
     /// tree's local locale signal — the i18n thread-local would stay put
     /// and `tr!` lookups would not re-resolve.
     pub(crate) pending_locale_request: Option<String>,
+    /// The [`WindowState`] for this tree's hosting window. Populated
+    /// by the app-level window manager when the tree is registered;
+    /// `None` for standalone trees. Cloned into every `EventContext`
+    /// and `BuildContext` so widgets can bind to the current window's
+    /// signals via `ctx.window()`.
+    pub(crate) window_state: Option<crate::window::WindowState>,
 }
 
 /// A tooltip attachment managed by the WidgetTree.
@@ -302,7 +308,32 @@ impl WidgetTree {
             last_frame_time: None,
             close_window_requested: false,
             pending_locale_request: None,
+            window_state: None,
         }
+    }
+
+    /// Construct an [`EventContext`](crate::widget::EventContext)
+    /// pre-populated with the tree's app-state registry, hosting
+    /// [`WindowState`], and a `&mut dyn WindowOps` handle so handlers
+    /// can synchronously reach the multi-window API. Used by every
+    /// dispatch site.
+    pub(crate) fn make_event_context<'ops>(
+        &self,
+        ops: &'ops mut dyn crate::window::WindowOps,
+    ) -> crate::widget::EventContext<'ops> {
+        crate::widget::EventContext::new()
+            .with_app_context(self.app_context.clone())
+            .with_window_context(ops, self.window_state.clone())
+    }
+
+    /// Attach the [`WindowState`](crate::window::WindowState) for this
+    /// tree's hosting window. Called by `WindowManager::create_window`.
+    pub fn set_window_state(&mut self, state: crate::window::WindowState) {
+        self.window_state = Some(state);
+    }
+
+    pub fn window_state(&self) -> Option<&crate::window::WindowState> {
+        self.window_state.as_ref()
     }
 
     /// Clone the shared "frame requested" flag. Widgets stash this
@@ -461,7 +492,11 @@ impl WidgetTree {
         })
     }
 
-    fn update_pointer_leave_overlays(&mut self, position: Point) {
+    fn update_pointer_leave_overlays(
+        &mut self,
+        position: Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let overlay_ids: Vec<crate::overlay::OverlayId> = self
             .overlay_manager
             .stack
@@ -497,48 +532,69 @@ impl WidgetTree {
             }
         }
 
-        self.process_pointer_leave_overlays_real();
+        self.process_pointer_leave_overlays_real(&mut *ops);
     }
 
     fn process_pointer_leave_overlays(&mut self) {
         let sim_now = self.sim_clock;
-        self.process_pointer_leave_overlays_impl(|overlay| {
-            overlay
-                .pointer_leave_started_sim
-                .map(|started| sim_now.saturating_duration_since(started))
-        });
+        let mut noop = crate::window::NoopWindowOps;
+        self.process_pointer_leave_overlays_impl(
+            |overlay| {
+                overlay
+                    .pointer_leave_started_sim
+                    .map(|started| sim_now.saturating_duration_since(started))
+            },
+            &mut noop,
+        );
     }
 
-    fn process_pointer_leave_overlays_real(&mut self) {
+    fn process_pointer_leave_overlays_real(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let real_now = std::time::Instant::now();
-        self.process_pointer_leave_overlays_impl(|overlay| {
-            overlay
-                .pointer_leave_started_real
-                .map(|started| real_now.saturating_duration_since(started))
-        });
+        self.process_pointer_leave_overlays_impl(
+            |overlay| {
+                overlay
+                    .pointer_leave_started_real
+                    .map(|started| real_now.saturating_duration_since(started))
+            },
+            &mut *ops,
+        );
     }
 
     fn process_auto_dismiss_overlays(&mut self) {
         let sim_now = self.sim_clock;
-        self.process_auto_dismiss_overlays_impl(|overlay| {
-            overlay
-                .auto_dismiss_after
-                .map(|_| sim_now.saturating_duration_since(overlay.shown_at_sim))
-        });
+        let mut noop = crate::window::NoopWindowOps;
+        self.process_auto_dismiss_overlays_impl(
+            |overlay| {
+                overlay
+                    .auto_dismiss_after
+                    .map(|_| sim_now.saturating_duration_since(overlay.shown_at_sim))
+            },
+            &mut noop,
+        );
     }
 
-    fn process_auto_dismiss_overlays_real(&mut self) {
+    fn process_auto_dismiss_overlays_real(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let real_now = std::time::Instant::now();
-        self.process_auto_dismiss_overlays_impl(|overlay| {
-            overlay
-                .auto_dismiss_after
-                .map(|_| real_now.saturating_duration_since(overlay.shown_at_real))
-        });
+        self.process_auto_dismiss_overlays_impl(
+            |overlay| {
+                overlay
+                    .auto_dismiss_after
+                    .map(|_| real_now.saturating_duration_since(overlay.shown_at_real))
+            },
+            &mut *ops,
+        );
     }
 
     fn process_auto_dismiss_overlays_impl(
         &mut self,
         elapsed_fn: impl Fn(&crate::overlay::ActiveOverlay) -> Option<std::time::Duration>,
+        ops: &mut dyn crate::window::WindowOps,
     ) {
         let mut to_dismiss = Vec::new();
 
@@ -564,10 +620,10 @@ impl WidgetTree {
         for overlay_id in to_dismiss {
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
-            self.dormant_dismissed_content(&dismissed);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
             if let Some(restore_id) = focus_restore {
                 if self.arena.is_active(restore_id) {
-                    self.focus(restore_id);
+                    self.focus_ops(restore_id, &mut *ops);
                 }
             }
         }
@@ -576,6 +632,7 @@ impl WidgetTree {
     fn process_pointer_leave_overlays_impl(
         &mut self,
         elapsed_fn: impl Fn(&crate::overlay::ActiveOverlay) -> Option<std::time::Duration>,
+        ops: &mut dyn crate::window::WindowOps,
     ) {
         let mut to_dismiss = Vec::new();
 
@@ -601,10 +658,10 @@ impl WidgetTree {
         for overlay_id in to_dismiss {
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
-            self.dormant_dismissed_content(&dismissed);
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
             if let Some(restore_id) = focus_restore {
                 if self.arena.is_active(restore_id) {
-                    self.focus(restore_id);
+                    self.focus_ops(restore_id, &mut *ops);
                 }
             }
         }
@@ -805,6 +862,19 @@ impl WidgetTree {
     /// [`EventContext`], and any commands / overlay requests it emits are
     /// collected through the normal post-event path.
     pub fn tick_gestures(&mut self, now: std::time::Instant) {
+        let mut noop = crate::window::NoopWindowOps;
+        self.tick_gestures_with_ops(now, &mut noop);
+    }
+
+    /// App-facing variant of [`tick_gestures`](Self::tick_gestures)
+    /// that accepts a real [`WindowOps`](crate::window::WindowOps)
+    /// sink so gesture-recognized handlers can call the multi-window
+    /// API synchronously.
+    pub fn tick_gestures_with_ops(
+        &mut self,
+        now: std::time::Instant,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let ids = self.arena.active_ids();
         for id in ids {
             let gesture = match self.arena.get_mut(id) {
@@ -817,7 +887,7 @@ impl WidgetTree {
             };
             let Some(gesture) = gesture else { continue };
 
-            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
+            let mut ctx = self.make_event_context(&mut *ops);
             if let Some(node) = self.arena.get_mut(id) {
                 Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
             }
@@ -856,7 +926,11 @@ impl WidgetTree {
         self.animation_scheduler
             .tick(self.sim_clock, &self.arena, self.paint_epoch);
 
-        self.process_state_changes();
+        // Simulated-time test helper — use NoopWindowOps; tests that
+        // need a real sink call layout_with_ops / dispatch_event_with_ops
+        // themselves.
+        let mut noop = crate::window::NoopWindowOps;
+        self.process_state_changes(&mut noop);
     }
 
     /// Switch the tree-level theme at runtime.
@@ -879,7 +953,10 @@ impl WidgetTree {
     /// state when the target still exists in the arena. Called from
     /// data-driven rebuild paths (`process_state_changes`); theme and locale
     /// switches no longer rebuild.
-    pub(crate) fn revalidate_interaction_state(&mut self) {
+    pub(crate) fn revalidate_interaction_state(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         if let Some(id) = self.focused
             && !self.arena.is_active(id)
         {
@@ -911,7 +988,7 @@ impl WidgetTree {
         if source_gone {
             // `cancel_active_drag` fires on_drag_leave on the current
             // target before cleanup — the same contract as Escape.
-            self.cancel_active_drag();
+            self.cancel_active_drag(&mut *ops);
         }
     }
 
@@ -1268,10 +1345,10 @@ impl WidgetTree {
     /// those too until the queue drains. No ordering guarantee
     /// beyond "first-enqueued is first-dispatched"; the `pop` path
     /// uses `remove(0)` to keep that FIFO behavior.
-    pub(crate) fn drain_pending_intents(&mut self) {
+    pub(crate) fn drain_pending_intents(&mut self, ops: &mut dyn crate::window::WindowOps) {
         while !self.pending_intents.is_empty() {
             let (source, intent, propagate) = self.pending_intents.remove(0);
-            self.dispatch_intent(source, intent, propagate);
+            self.dispatch_intent(source, intent, propagate, &mut *ops);
         }
     }
 
@@ -1287,6 +1364,7 @@ impl WidgetTree {
         source: WidgetId,
         intent: crate::intent::Intent,
         propagate_when_disabled: bool,
+        ops: &mut dyn crate::window::WindowOps,
     ) {
         // Pre-compute the source → root chain so the walk doesn't
         // need to hold any arena borrow while invoking handlers.
@@ -1334,7 +1412,7 @@ impl WidgetTree {
                 return;
             }
 
-            let mut ctx = EventContext::new().with_app_context(self.app_context.clone());
+            let mut ctx = self.make_event_context(&mut *ops);
             let response = (action.handler)(&intent, &mut ctx);
             if let Some(node) = self.arena.get_mut(id) {
                 node.actions.insert(idx, action);

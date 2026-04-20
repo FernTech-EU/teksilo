@@ -407,8 +407,11 @@ impl Widget for OverlayDemo {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("Dialogs and Popovers")
-        .window_size(980, 720)
-        .root(|tree| tree.add(OverlayDemo::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("Dialogs and Popovers")
+            .size(980, 720)
+            .root(|tree, _state| tree.add(OverlayDemo::new()))
+        )
         .run();
 }

@@ -11,8 +11,6 @@ use std::rc::Rc;
 
 use fern_canvas::{Point, Rect, Size};
 
-use crate::Signal;
-
 /// Capabilities the title bar widget needs from the windowing layer.
 pub trait PlatformTitleBarHost {
     /// Logical-pixel area on the leading edge that the widget must leave
@@ -46,31 +44,6 @@ pub trait PlatformTitleBarHost {
     /// Show the system window menu at the given client-area position. Wayland
     /// only; other platforms return `Ok(())` and do nothing.
     fn show_window_menu(&self, at: Point) -> Result<(), PlatformError>;
-
-    fn minimize(&self);
-    fn toggle_maximize(&self);
-    fn close(&self);
-    fn is_maximized(&self) -> bool;
-
-    /// Reactive view of the OS's current maximize state. Created by the host
-    /// at construction and refreshed from [`notify_window_resized`]. Consumed
-    /// by `TitleBar` / `WindowControls` for the maximize-vs-restore glyph
-    /// swap, so OS-initiated maximize (green-light zoom, drag-to-top-snap)
-    /// stays in sync with button rendering.
-    fn is_maximized_signal(&self) -> Signal<bool>;
-
-    /// Called from `WindowManager` on every `WindowEvent::Resized`. Default
-    /// implementation refreshes [`is_maximized_signal`] from
-    /// [`is_maximized`]. Platform hosts may override to reposition native
-    /// chrome (e.g. macOS traffic lights when the title bar height differs
-    /// from the OS default).
-    fn notify_window_resized(&self) {
-        let signal = self.is_maximized_signal();
-        let current = self.is_maximized();
-        if signal.get() != current {
-            signal.set(current);
-        }
-    }
 
     /// Publish the current physical-pixel rectangles of the title bar's
     /// interactive sub-regions. The Windows backend reads these from its

@@ -5,29 +5,26 @@
 use std::sync::Arc;
 
 use fern_canvas::{Point, Size};
-use fern_core::{
-    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, Signal, TitleBarHostCallbacks,
-};
+use fern_core::{HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks};
 use winit::dpi::LogicalPosition;
 use winit::window::{ResizeDirection, Window};
 
 pub struct WaylandHost {
     window: Arc<Window>,
-    is_max: Signal<bool>,
-    callbacks: TitleBarHostCallbacks,
 }
 
 impl WaylandHost {
     pub fn new(
         window: Arc<Window>,
-        callbacks: TitleBarHostCallbacks,
+        _callbacks: TitleBarHostCallbacks,
     ) -> Result<Self, PlatformError> {
-        let is_max = Signal::new(window.is_maximized());
-        Ok(Self {
-            window,
-            is_max,
-            callbacks,
-        })
+        // `callbacks` used to carry a `request_close` closure before
+        // the trait trim — close now flows through
+        // `WindowState::close` on the widget-tree side, so the
+        // Wayland backend no longer needs it. Parameter kept in the
+        // signature so the factory in `title_bar_host.rs` can keep
+        // its uniform construction form.
+        Ok(Self { window })
     }
 }
 
@@ -66,30 +63,6 @@ impl PlatformTitleBarHost for WaylandHost {
         self.window
             .show_window_menu(LogicalPosition::new(at.x as f64, at.y as f64));
         Ok(())
-    }
-
-    fn minimize(&self) {
-        self.window.set_minimized(true);
-    }
-
-    fn toggle_maximize(&self) {
-        self.window.set_maximized(!self.window.is_maximized());
-    }
-
-    fn close(&self) {
-        // winit 0.30 has no synchronous `Window::request_close`, so we
-        // hop through the application event loop: the callback posts a
-        // `CloseWindowRequest` that `FernAppHandler::user_event` routes
-        // to `WindowManager::queue_close`.
-        (self.callbacks.request_close)();
-    }
-
-    fn is_maximized(&self) -> bool {
-        self.window.is_maximized()
-    }
-
-    fn is_maximized_signal(&self) -> Signal<bool> {
-        self.is_max.clone()
     }
 
     fn update_hit_regions(&self, _regions: &HitRegions) {

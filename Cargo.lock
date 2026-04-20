@@ -2007,6 +2007,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "multi-window"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
+]
+
+[[package]]
 name = "naga"
 version = "29.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

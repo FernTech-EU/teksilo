@@ -369,8 +369,11 @@ impl Widget for MinSizeForLabel {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("FernUI — SpinBox gallery")
-        .window_size(720, 560)
-        .root(|tree| tree.add(Root::new()))
+        .initial_window(
+            WindowConfig::new()
+            .title("FernUI — SpinBox gallery")
+            .size(720, 560)
+            .root(|tree, _state| tree.add(Root::new()))
+        )
         .run();
 }

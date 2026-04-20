@@ -411,14 +411,17 @@ fn main() {
 
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("Data Collections — Milestone 6")
-        .window_size(960, 680)
-        .root(move |tree| {
+        .initial_window(
+            WindowConfig::new()
+            .title("Data Collections — Milestone 6")
+            .size(960, 680)
+            .root(move |tree, _state| {
             tree.add(Root::new(
-                tags.clone(),
-                list_items.clone(),
-                tree_model.clone(),
+            tags.clone(),
+            list_items.clone(),
+            tree_model.clone(),
             ))
-        })
+            })
+        )
         .run();
 }

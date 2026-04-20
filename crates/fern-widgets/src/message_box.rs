@@ -943,7 +943,7 @@ pub trait EventContextMessageBoxExt {
     fn present_message_box(&mut self, mb: MessageBox);
 }
 
-impl EventContextMessageBoxExt for EventContext {
+impl EventContextMessageBoxExt for EventContext<'_> {
     fn present_message_box(&mut self, mb: MessageBox) {
         mb.present(self);
     }
