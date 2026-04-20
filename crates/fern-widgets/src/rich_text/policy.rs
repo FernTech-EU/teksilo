@@ -54,6 +54,13 @@ pub enum EditCommandKind {
     Copy,
     Cut,
     Paste,
+    /// Paste as plain text — strips any rich fragment or HTML payload
+    /// and inserts only the plain-text portion. Bound to Ctrl+Shift+V
+    /// (⌘⇧V on macOS). Distinct from [`Paste`](Self::Paste) so the
+    /// command filter and `ClipboardPolicy` can gate it independently
+    /// (e.g. a future "no-paste" preset could still allow explicit
+    /// plain-text pasting).
+    PasteUnformatted,
 }
 
 impl EditCommandKind {
@@ -77,6 +84,7 @@ impl EditCommandKind {
                 | Self::Redo
                 | Self::Cut
                 | Self::Paste
+                | Self::PasteUnformatted
         )
     }
 }
@@ -148,6 +156,13 @@ impl ClipboardPolicy {
     pub fn allows_paste(&self) -> bool {
         matches!(self, Self::Full)
     }
+    /// `PasteUnformatted` mirrors `Paste` today: both are gated by the
+    /// same policy bit. Kept as a separate accessor so a future preset
+    /// that admits plain-only paste while rejecting rich paste can
+    /// diverge without changing call sites.
+    pub fn allows_paste_unformatted(&self) -> bool {
+        matches!(self, Self::Full)
+    }
     pub fn allows_copy(&self) -> bool {
         true
     }
@@ -202,7 +217,21 @@ mod tests {
         assert!(!f.accepts(EditCommandKind::ToggleBold));
         assert!(!f.accepts(EditCommandKind::Cut));
         assert!(!f.accepts(EditCommandKind::Paste));
+        assert!(
+            !f.accepts(EditCommandKind::PasteUnformatted),
+            "read-only must reject PasteUnformatted — it mutates the document"
+        );
         assert!(!f.accepts(EditCommandKind::Undo));
+    }
+
+    #[test]
+    fn paste_unformatted_policy_mirrors_paste() {
+        let full = ClipboardPolicy::Full;
+        let ro = ClipboardPolicy::CopyAndSelectAllOnly;
+        assert!(full.allows_paste());
+        assert!(full.allows_paste_unformatted());
+        assert!(!ro.allows_paste());
+        assert!(!ro.allows_paste_unformatted());
     }
 
     #[test]

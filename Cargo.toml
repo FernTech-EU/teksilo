@@ -25,7 +25,7 @@ unic-langid = "0.9"
 sys-locale = "0.3"
 notify = "8.2.0"
 serde = { version = "1", features = ["derive"] }
-arboard = "3.4"
+arboard = { version = "3.4", features = ["wayland-data-control"] }
 open = "5"
 roxmltree = "0.20"
 png = "0.17"

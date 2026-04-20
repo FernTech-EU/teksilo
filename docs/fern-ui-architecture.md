@@ -3355,11 +3355,23 @@ All editing happens through the `TextCursor`. The editor's keyboard handler disp
 
 #### 27.10.13 Clipboard Integration
 
-The editor supports both plain-text and rich (format-preserving) clipboard operations. Cut and copy place the selected content on the system clipboard as plain text via `fern-platform`'s clipboard backend, and additionally store a `DocumentFragment` (the typed rich representation) in the editor's internal `rich_clipboard_fragment` field along with the plain-text version.
+The editor supports plain-text, HTML, and in-process rich (format-preserving) clipboard operations. `fern-platform`'s `ClipboardBackend` trait exposes four named payload methods — `get_text` / `set_text` / `get_html` / `set_html` — plus `has_text` / `has_html` probes. The `ClipboardHandle` threads these through to widgets without binding them to `arboard`; headless tests swap in a `MemoryClipboard` that supports both payloads.
 
-On paste, the editor reads the system clipboard. If the system clipboard text matches the editor's stored plain-text (indicating the copy came from this same editor instance and the system clipboard has not been overwritten by another application), it pastes the stored `DocumentFragment` via `cursor.insert_fragment(&fragment)`, preserving formatting. Otherwise it pastes plain text via `cursor.insert_text(&system_text)`.
+**Copy / cut.** Cut and copy place the selected content on the system clipboard via `set_html(html, plain_fallback)`, which on every real backend writes both payloads in one transaction — Linux `text/html` + `UTF8_STRING`, macOS `NSPasteboardTypeHTML` + `NSPasteboardTypeString`, Windows `CF_HTML` + `CF_UNICODETEXT`. The HTML serialisation comes from `DocumentFragment::to_html`. The editor additionally stores the `DocumentFragment` (typed rich representation) in its internal `rich_clipboard_fragment` field along with the plain-text version for self-round-trip detection.
 
-This is a tradeoff: rich format preservation works within a single editor instance, but inter-application paste is plain-text only. Full rich-format inter-application clipboard would require platform-specific MIME types (RTF on Windows, NSAttributedString on macOS, text/html on Linux) and is deferred to a post-Milestone-8 refinement. The plain-text fallback is correct and unsurprising.
+**Paste** reads the clipboard in a three-step preference order:
+
+1. **Self-round-trip fragment.** If the plain text matches what this editor last copied, reinsert the stashed `DocumentFragment` via `cursor.insert_fragment(&fragment)`. Guarantees bit-exact intra-editor round-trip (preserves exotic format flags that HTML serialisation might drop).
+2. **External HTML payload.** If the clipboard carries HTML (checked via `has_html`), parse it via `TextCursor::insert_html(&html)` — text-document's importer turns the HTML into a `DocumentFragment` and inserts at the caret. This path is what makes rich paste *from another app* work: Firefox, Word, Google Docs, Apple Notes, anything Chromium, anything Gecko.
+3. **Plain-text fallback.** When neither rich path applies, insert the clipboard's plain text via `cursor.insert_text(&text)`.
+
+**Paste Unformatted** (Ctrl+Shift+V / ⌘⇧V) bypasses both rich branches and inserts only plain text — the user explicitly asked to strip formatting, so even when the clipboard has an HTML payload we use `get_text()` verbatim.
+
+`NSAttributedString` is not a separate payload — it is a Cocoa *type* that serialises to RTF on the pasteboard; we rely on HTML, which every modern macOS app also writes.
+
+**RTF** (Rich Text Format) remains a post-Milestone-8 refinement. It is the last-mile payload for applications that don't emit HTML on copy — Pages, TextEdit, some legacy Windows apps. Adding RTF is a pure-additive change: `ClipboardBackend` gains `get_rtf` / `set_rtf` with the same default-body fallback convention, text-document gains an RTF importer, and the paste path grows a branch between HTML and plain text.
+
+**Default right-click context menu** is intentionally deferred. The widget exposes [`context_target_at(point)`](../crates/fern-widgets/src/rich_text.rs) for host applications to build their own menu; a built-in `Cut / Copy / Paste / Paste Unformatted / Select All` surface is tracked as a follow-up, pending a fern-core reorder so that `drain_pending_intents` runs *before* `dismiss_all_overlays` in `collect_from_ctx` — otherwise a menu-item tap sends the intent while the overlay subtree is mid-dormant-cascade and every walked Action is skipped.
 
 #### 27.10.14 IME and Composition
 

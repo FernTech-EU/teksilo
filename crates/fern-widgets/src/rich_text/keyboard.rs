@@ -160,7 +160,18 @@ pub(super) fn handle_key(
                 clipboard::cut(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
-            Key::V if ctrl && filter.accepts(EditCommandKind::Paste) => {
+            Key::V
+                if ctrl
+                    && shift
+                    && filter.accepts(EditCommandKind::PasteUnformatted) =>
+            {
+                // Ctrl+Shift+V (⌘⇧V on macOS) — paste as plain text.
+                // Matched before the plain Ctrl+V arm so the shift
+                // modifier isn't absorbed by the regular paste.
+                clipboard::paste_unformatted(&mut st, ctx);
+                KeyAction::ClearPreferredX
+            }
+            Key::V if ctrl && !shift && filter.accepts(EditCommandKind::Paste) => {
                 clipboard::paste(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }

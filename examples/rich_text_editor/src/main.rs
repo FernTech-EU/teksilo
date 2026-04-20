@@ -17,8 +17,11 @@
 //!   * Ctrl+Z / Ctrl+Y for undo / redo.
 //!   * Ctrl+A once to select the block, again to escalate (inside a
 //!     table: cell → table → document; outside: single-shot document).
-//!   * Ctrl+C / Ctrl+X / Ctrl+V round-trip rich content in-process;
-//!     external paste lands as plain text.
+//!   * Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+Shift+V for copy / cut / paste /
+//!     paste as plain text. The editor writes both HTML and plain
+//!     payloads on copy so rich paste into Firefox, Word, or Google
+//!     Docs keeps the formatting; paste from those apps parses their
+//!     HTML back into the document.
 //!   * Double-click a word → selects it. Triple-click → selects the
 //!     paragraph. Both via cooperative double/triple tap recognizers.
 //!   * Drag from inside text to near the top or bottom edge → selection
@@ -54,8 +57,13 @@ manual state shuffling, no `poll_events()` starvation problem.
   top or bottom of the viewport; the widget keeps scrolling while the
   button is held.
 - Copy / cut / paste through the system clipboard. In-process paste
-  preserves rich formatting (bold runs, headings) via a stored
-  `DocumentFragment`; external paste lands as plain text.
+  preserves rich formatting via a stored `DocumentFragment`;
+  inter-application paste round-trips through HTML on Linux
+  (`text/html`), macOS (`public.html`), and Windows (`CF_HTML`), so
+  copy from Firefox / Word / Google Docs keeps headings, bold,
+  italic, lists, tables — anything text-document's HTML importer
+  recognises.
+- Ctrl+Shift+V pastes as plain text (`EditCommandKind::PasteUnformatted`).
 - Ctrl+A single-shot select-all (the 4-level ladder is inside a table
   cell only — try this document's paragraphs and you'll see the
   single-shot behaviour).
@@ -63,10 +71,14 @@ manual state shuffling, no `poll_events()` starvation problem.
 ## Not here yet
 
 - IME composition (M10).
-- Platform-native rich clipboard MIME types (RTF / text/html).
-- Menu bars and context menus — the editor exposes
-  `context_target_at(point)` for the host application to build its
-  own menus.
+- Built-in right-click context menu — the editor exposes
+  `context_target_at(point)` so the host application builds its own
+  menu. A default menu is tracked as a post-M8 follow-up, pending a
+  fern-core reorder of `collect_from_ctx` so intents drain before
+  overlay dismissal.
+- RTF clipboard payload — the long-tail rich fallback for Pages /
+  TextEdit / older Windows apps that don't emit HTML. HTML covers
+  Firefox, Word, Google Docs, Apple Notes.
 
 Type below, watch the preview update in real time.
 "#;

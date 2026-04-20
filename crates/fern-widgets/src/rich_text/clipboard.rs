@@ -30,14 +30,31 @@ use super::state::EditorState;
 /// there is no selection — matches editor convention (the menu item
 /// and the Ctrl+C shortcut both stay silent rather than capturing an
 /// empty fragment).
+///
+/// Writes both HTML and plain-text payloads so rich paste works in
+/// any other application that understands `text/html` (Firefox,
+/// Word, Google Docs, Apple Notes, …). `DocumentFragment::to_html`
+/// is a lossless-enough serialisation to survive the round-trip
+/// through arboard's platform backends. Backends without HTML
+/// support degrade gracefully — the `set_html` default body writes
+/// just the plain-text alternative.
+///
+/// The rich fragment + plain text are also stashed on editor state
+/// for self-round-trip detection during paste: an intra-editor
+/// copy/paste pair re-inserts the original [`DocumentFragment`]
+/// rather than round-tripping through HTML (cheaper and bit-exact).
 pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
     if !state.cursor.has_selection() {
         return;
     }
     let fragment = state.cursor.selection();
     let plain = fragment.to_plain_text().to_string();
+    let html = fragment.to_html();
     if let Some(cb) = ctx.app_state::<ClipboardHandle>() {
-        let _ = cb.set_text(&plain);
+        // `set_html` writes both payloads in one transaction. Backends
+        // without native HTML support see the default trait body and
+        // fall back to `set_text(plain)`.
+        let _ = cb.set_html(&html, &plain);
     }
     state.rich_clipboard_fragment = Some(fragment);
     state.rich_clipboard_plain = Some(plain);
@@ -55,31 +72,89 @@ pub(crate) fn cut(state: &mut EditorState, ctx: &EventContext) {
     state.pending_text_changed = true;
 }
 
-/// Paste from the system clipboard. If the stored fragment's plain
-/// text matches what the system clipboard reports, reinsert the rich
-/// fragment (preserves formatting). Otherwise fall back to plain-text
-/// insertion of whatever the system clipboard has. Clears any
-/// existing selection after insertion so the caret sits at the end of
-/// the pasted content rather than keeping the newly inserted range
-/// selected — matches godot behaviour.
+/// Paste from the system clipboard. Prefers richer payloads, in order:
+///
+/// 1. **Self-round-trip rich fragment** — if the system clipboard's
+///    plain text matches what this editor last copied, reinsert the
+///    stored [`DocumentFragment`] so intra-editor formatting round-trips
+///    losslessly (retains table cells, heading levels, spans that don't
+///    serialise into HTML losslessly).
+/// 2. **External HTML payload** — if the clipboard carries `text/html`
+///    / `CF_HTML` / `public.html`, parse it into a `DocumentFragment`
+///    via text-document and insert. This is the path that makes
+///    rich paste *from another app* work (Firefox, Word, Google Docs,
+///    etc.).
+/// 3. **Plain-text fallback** — when neither rich path applies, insert
+///    whatever the clipboard's plain text says.
+///
+/// Clears any existing selection after insertion so the caret sits at
+/// the end of the pasted content rather than keeping the newly inserted
+/// range selected — matches godot behaviour.
 pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
     let Some(cb) = ctx.app_state::<ClipboardHandle>() else {
         return;
     };
-    let Ok(system) = cb.get_text() else {
+
+    // 1. Self-round-trip rich fragment. Check plain text first because
+    //    the comparison is cheap; only commit to the fragment insert
+    //    when we know it matches.
+    if let Ok(system) = cb.get_text() {
+        if !system.is_empty()
+            && state.rich_clipboard_plain.as_deref() == Some(system.as_str())
+            && let Some(frag) = state.rich_clipboard_fragment.as_ref()
+        {
+            let _ = state.cursor.insert_fragment(&frag.clone());
+            state.cursor.clear_selection();
+            state.pending_text_changed = true;
+            return;
+        }
+    }
+
+    // 2. External HTML payload. `has_html` probes the clipboard once
+    //    per paste — on X11 this is a round-trip to the selection
+    //    owner, acceptable because paste is a rare user-initiated
+    //    action. `TextCursor::insert_html` is a single call that
+    //    parses the HTML into a `DocumentFragment` (via text-document's
+    //    `DocumentFragment::from_html`) and inserts it at the caret.
+    if cb.has_html()
+        && let Ok(html) = cb.get_html()
+        && !html.is_empty()
+        && state.cursor.insert_html(&html).is_ok()
+    {
+        state.cursor.clear_selection();
+        state.pending_text_changed = true;
+        return;
+    }
+
+    // 3. Plain-text fallback.
+    let Ok(text) = cb.get_text() else {
         return;
     };
-    if system.is_empty() {
+    if text.is_empty() {
         return;
     }
-    let use_rich = state.rich_clipboard_plain.as_deref() == Some(system.as_str())
-        && state.rich_clipboard_fragment.is_some();
-    if use_rich {
-        let fragment = state.rich_clipboard_fragment.as_ref().unwrap().clone();
-        let _ = state.cursor.insert_fragment(&fragment);
-    } else {
-        let _ = state.cursor.insert_text(&system);
+    let _ = state.cursor.insert_text(&text);
+    state.cursor.clear_selection();
+    state.pending_text_changed = true;
+}
+
+/// Paste plain text only, bypassing any rich payload. Bound to
+/// Ctrl+Shift+V / ⌘⇧V and exposed from the default context menu as
+/// "Paste Unformatted". Skips both the self-round-trip fragment
+/// reinsertion and the HTML parse path — the user explicitly asked
+/// for plain text, so even if the clipboard has a richer payload
+/// we insert `get_text()` verbatim.
+pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
+    let Some(cb) = ctx.app_state::<ClipboardHandle>() else {
+        return;
+    };
+    let Ok(text) = cb.get_text() else {
+        return;
+    };
+    if text.is_empty() {
+        return;
     }
+    let _ = state.cursor.insert_text(&text);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }

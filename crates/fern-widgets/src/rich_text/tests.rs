@@ -1294,6 +1294,327 @@ fn editor_exposes_context_target_plain_for_non_link_click() {
 }
 
 // ---------------------------------------------------------------------------
+// HTML rich-clipboard round-trip tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn editor_copy_writes_both_plain_text_and_html() {
+    // After Ctrl+C on a selection the system clipboard carries both
+    // payloads so external apps that prefer HTML can get rich content
+    // while plain-text surfaces (Notepad, terminal) still see text.
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::A,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::C,
+        fern_core::event::Modifiers::CTRL,
+    );
+
+    assert_eq!(
+        clipboard.get_text().unwrap_or_default(),
+        "Hello world",
+        "plain-text payload must be present"
+    );
+    assert!(
+        clipboard.has_html(),
+        "copy must also write an HTML payload via DocumentFragment::to_html"
+    );
+    let html = clipboard
+        .get_html()
+        .expect("HTML payload must be readable after copy");
+    assert!(
+        html.contains("Hello world"),
+        "serialised HTML must carry the copied text, got {:?}",
+        html
+    );
+}
+
+#[test]
+fn editor_paste_prefers_self_round_trip_over_html() {
+    // The paste path checks the stashed rich fragment *before* the
+    // HTML branch. This guarantees lossless intra-editor round-trip:
+    // even if the HTML serialisation is lossy for some element (say,
+    // an obscure format flag), copy+paste in the same editor reuses
+    // the original fragment bit-exact.
+    let doc = TextDocument::new();
+    doc.set_plain_text("one two three").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Select "one" at the start and copy — this stashes the rich
+    // fragment on state and writes HTML+plain to the clipboard.
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Home,
+        fern_core::event::Modifiers::CTRL,
+    );
+    for _ in 0..3 {
+        press_key(
+            &mut tree,
+            fern_core::event::Key::ArrowRight,
+            fern_core::event::Modifiers::SHIFT,
+        );
+    }
+    press_key(
+        &mut tree,
+        fern_core::event::Key::C,
+        fern_core::event::Modifiers::CTRL,
+    );
+
+    // State now holds the fragment.
+    assert!(
+        state.borrow().rich_clipboard_fragment.is_some(),
+        "copy stashes the fragment"
+    );
+
+    // Paste at end — plain-text match kicks in the self-round-trip
+    // arm before the HTML arm even gets a chance.
+    press_key(
+        &mut tree,
+        fern_core::event::Key::End,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "one two threeone",
+        "self-round-trip fragment must land intact after Ctrl+C / Ctrl+V"
+    );
+}
+
+#[test]
+fn editor_paste_from_external_html_inserts_rich_content() {
+    // Simulates pasting from another application: the clipboard
+    // carries HTML + plain text with no matching stashed fragment
+    // (the `rich_clipboard_fragment` stash is empty). The paste path
+    // falls through to the HTML branch, parses the payload via
+    // text-document's `TextCursor::insert_html`, and applies the
+    // formatting to the document.
+    let doc = TextDocument::new();
+    doc.set_plain_text("before ").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    // Seed the clipboard as if another app had copied a bold word.
+    // Plain text and HTML both present — the paste path prefers HTML
+    // because the stashed fragment is None (no self-round-trip).
+    clipboard
+        .set_html("<p><b>BOLD</b></p>", "BOLD")
+        .unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::End,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        plain.contains("BOLD"),
+        "HTML paste must insert the content's text ({:?})",
+        plain
+    );
+
+    // Confirm the bold format landed on the inserted text by reading
+    // `char_format` at the BOLD word. Use `find` on plain text to
+    // locate the first B, then position a probe cursor there.
+    let b_pos = plain.find("BOLD").expect("BOLD substring");
+    let probe = doc.cursor();
+    probe.set_position(
+        b_pos,
+        fern_text::text_document::MoveMode::MoveAnchor,
+    );
+    let fmt = probe.char_format().unwrap_or_default();
+    assert_eq!(
+        fmt.font_bold,
+        Some(true),
+        "HTML <b> tag must translate to TextFormat.font_bold = true, got {:?}",
+        fmt.font_bold
+    );
+}
+
+#[test]
+fn editor_paste_falls_back_to_plain_when_html_unsupported() {
+    // A backend that does not override set_html / get_html must still
+    // round-trip a plain-text paste. Regression guard for the
+    // default-trait-body contract.
+    use fern_core::event_source::TreeAppContext;
+    use fern_platform::clipboard::{ClipboardBackend, ClipboardHandle};
+    use std::any::TypeId;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    struct PlainOnly(Rc<RefCell<String>>);
+    impl ClipboardBackend for PlainOnly {
+        fn get_text(&mut self) -> Result<String, String> {
+            Ok(self.0.borrow().clone())
+        }
+        fn set_text(&mut self, text: &str) -> Result<(), String> {
+            *self.0.borrow_mut() = text.to_string();
+            Ok(())
+        }
+    }
+    let text = Rc::new(RefCell::new("pasted".to_string()));
+    let handle = ClipboardHandle::new(PlainOnly(text.clone()));
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("start ").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let mut registry: HashMap<TypeId, Box<dyn std::any::Any>> = HashMap::new();
+    registry.insert(
+        TypeId::of::<ClipboardHandle>(),
+        Box::new(handle.clone()),
+    );
+    let ctx = TreeAppContext::empty().with_app_state(registry);
+    tree.set_app_context(std::rc::Rc::new(ctx));
+
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_key(
+        &mut tree,
+        fern_core::event::Key::End,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "start pasted",
+        "paste must still work when the backend lacks HTML support"
+    );
+    assert!(!handle.has_html(), "plain-only backend never reports HTML");
+}
+
+#[test]
+fn editor_paste_unformatted_strips_html_to_plain() {
+    // Ctrl+Shift+V must bypass both the rich-fragment stash and the
+    // HTML branch and insert only the plain text. External apps that
+    // generate rich HTML (Firefox's "Copy" of a formatted paragraph)
+    // should still paste as plain text when the user explicitly
+    // requests it.
+    let doc = TextDocument::new();
+    doc.set_plain_text("before ").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    clipboard
+        .set_html("<p><b>BOLD</b></p>", "BOLD")
+        .unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::End,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL | fern_core::event::Modifiers::SHIFT,
+    );
+    tick_past_debounce(&mut tree);
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        plain.contains("BOLD"),
+        "plain text must be inserted verbatim, got {:?}",
+        plain
+    );
+
+    // Confirm no bold format was applied — Ctrl+Shift+V is
+    // explicitly plain-only.
+    let b_pos = plain.find("BOLD").expect("BOLD substring");
+    let probe = doc.cursor();
+    probe.set_position(
+        b_pos,
+        fern_text::text_document::MoveMode::MoveAnchor,
+    );
+    let fmt = probe.char_format().unwrap_or_default();
+    assert!(
+        !matches!(fmt.font_bold, Some(true)),
+        "Paste Unformatted must not apply bold formatting — got font_bold = {:?}",
+        fmt.font_bold
+    );
+}
+
+#[test]
+fn read_only_editor_paste_unformatted_rejected_by_command_filter() {
+    // The CommandFilter rejects PasteUnformatted (it mutates the
+    // document) on the read-only preset. Pressing Ctrl+Shift+V must
+    // not modify the document.
+    let doc = TextDocument::new();
+    doc.set_plain_text("immutable").unwrap();
+    let editor = RichTextEditor::read_only(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    clipboard.set_text("new content").unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL | fern_core::event::Modifiers::SHIFT,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "immutable",
+        "read-only editor must reject Ctrl+Shift+V"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // AccessKit TextRun emission tests
 // ---------------------------------------------------------------------------
 
