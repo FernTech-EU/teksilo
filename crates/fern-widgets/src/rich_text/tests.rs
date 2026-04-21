@@ -1584,6 +1584,463 @@ fn editor_paste_unformatted_strips_html_to_plain() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Default right-click context menu
+// ---------------------------------------------------------------------------
+
+#[test]
+fn editor_right_click_opens_default_context_menu() {
+    // `RichTextEditor::editor(...)` installs the default menu
+    // factory. Framework intercepts Secondary PointerDown and calls
+    // the factory via `show_context_menu_for`, which shows the
+    // returned MenuList as an overlay.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("alpha bravo").unwrap();
+    let editor = RichTextEditor::editor(doc);
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    let before = tree.active_overlays().len();
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(50.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(
+        tree.active_overlays().len() > before,
+        "right-click on an editor with default_context_menu enabled must open an overlay \
+         (before: {}, after: {})",
+        before,
+        tree.active_overlays().len()
+    );
+}
+
+#[test]
+fn editor_right_click_suppressed_when_default_context_menu_disabled() {
+    // `default_context_menu(false)` opts out. Right-click bubbles
+    // past the widget unhandled; the framework's
+    // `show_context_menu_for` walks up the parent chain and — with
+    // no ancestor claiming a factory — returns false. No overlay.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("alpha bravo").unwrap();
+    let editor = RichTextEditor::editor(doc).default_context_menu(false);
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    let before = tree.active_overlays().len();
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(50.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        tree.active_overlays().len(),
+        before,
+        "default_context_menu(false) must not show any overlay on right-click"
+    );
+}
+
+#[test]
+fn editor_context_menu_copy_item_copies_selection_to_clipboard() {
+    // End-to-end: Ctrl+A to select, right-click to open the menu,
+    // synthetic-click on Copy → clipboard ends up with the plain
+    // text. Because menu items call `rt_clipboard::copy` directly
+    // via their on_activate_fn closure, there is no dependency on
+    // the Action/Intent dispatch ordering.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Select everything so Copy has non-empty content. Also sync
+    // cursor signals so the menu factory sees `has_selection=true`
+    // when it runs at the right-click.
+    press_key(
+        &mut tree,
+        fern_core::event::Key::A,
+        fern_core::event::Modifiers::CTRL,
+    );
+
+    // Open the context menu via right-click. Two layout passes so
+    // the overlay's widgets get real bounds — `tree.click` reads
+    // `arena.bounds` to compute click center.
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(30.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Locate the Copy MenuItem via the a11y tree — nothing else
+    // exposes labels, and the menu's internal widget ids aren't
+    // public.
+    let update = tree.sync_accessibility();
+    let copy_node_id = update
+        .nodes
+        .iter()
+        .find(|(_, n)| {
+            n.role() == fern_core::accesskit::Role::MenuItem
+                && n.label() == Some("Copy")
+        })
+        .map(|(id, _)| *id)
+        .expect("Copy menu item must appear in the a11y tree after right-click");
+    let copy_widget_id = fern_core::accessibility::node_id_to_widget_id_maybe(copy_node_id)
+        .expect("MenuItem NodeId maps back to a concrete WidgetId");
+
+    // Sanity-check bounds so a failure here says "overlay didn't
+    // lay out" rather than the downstream clipboard assertion.
+    let bounds = tree.bounds(copy_widget_id);
+    assert!(
+        bounds.width > 0.0 && bounds.height > 0.0,
+        "Copy menu item must have non-zero bounds after overlay layout — got {:?}",
+        bounds
+    );
+
+    tree.click(copy_widget_id);
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        clipboard.get_text().unwrap_or_default(),
+        "Hello world",
+        "clicking Copy in the context menu must write the selected plain text to the clipboard"
+    );
+    assert!(
+        clipboard.has_html(),
+        "clicking Copy must also write the HTML payload via DocumentFragment::to_html"
+    );
+}
+
+#[test]
+fn editor_context_menu_paste_unformatted_item_strips_formatting() {
+    // The Paste Unformatted item's closure calls
+    // `rt_clipboard::paste_unformatted` directly, which inserts
+    // plain text verbatim regardless of any HTML payload on the
+    // clipboard.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("before ").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    clipboard.set_html("<b>BOLD</b>", "BOLD").unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    // Move caret to end so the insert appends.
+    press_key(
+        &mut tree,
+        fern_core::event::Key::End,
+        fern_core::event::Modifiers::CTRL,
+    );
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(30.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let update = tree.sync_accessibility();
+    let pu_node_id = update
+        .nodes
+        .iter()
+        .find(|(_, n)| {
+            n.role() == fern_core::accesskit::Role::MenuItem
+                && n.label() == Some("Paste Unformatted")
+        })
+        .map(|(id, _)| *id)
+        .expect("Paste Unformatted menu item must appear");
+    let pu_widget_id = fern_core::accessibility::node_id_to_widget_id_maybe(pu_node_id)
+        .expect("MenuItem NodeId maps back to WidgetId");
+
+    tree.click(pu_widget_id);
+    tick_past_debounce(&mut tree);
+
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        plain.contains("BOLD"),
+        "plain text must be inserted verbatim, got {:?}",
+        plain
+    );
+    // No bold formatting because this is the plain-text path.
+    let b_pos = plain.find("BOLD").expect("BOLD substring");
+    let probe = doc.cursor();
+    probe.set_position(
+        b_pos,
+        fern_text::text_document::MoveMode::MoveAnchor,
+    );
+    let fmt = probe.char_format().unwrap_or_default();
+    assert!(
+        !matches!(fmt.font_bold, Some(true)),
+        "Paste Unformatted must not apply bold; got font_bold = {:?}",
+        fmt.font_bold
+    );
+}
+
+#[test]
+fn editor_context_menu_copy_item_disabled_without_selection() {
+    // The factory reads `cursor.has_selection()` at right-click
+    // time. Without a selection, the Copy MenuItem is built with
+    // `.enabled(false)` — the a11y node reports disabled, and its
+    // tap handler short-circuits.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(30.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let update = tree.sync_accessibility();
+    let copy_node = update
+        .nodes
+        .iter()
+        .find(|(_, n)| {
+            n.role() == fern_core::accesskit::Role::MenuItem
+                && n.label() == Some("Copy")
+        })
+        .expect("Copy menu item must appear in the a11y tree");
+    assert!(
+        copy_node.1.is_disabled(),
+        "Copy must be disabled when there is no selection"
+    );
+}
+
+#[test]
+fn read_only_editor_context_menu_shape_hides_cut_and_paste() {
+    // The read-only preset's `ClipboardPolicy::CopyAndSelectAllOnly`
+    // filters out Cut, Paste, and Paste Unformatted entirely — the
+    // rendered menu has only Copy + Select All.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("quiet").unwrap();
+    let editor = RichTextEditor::read_only(doc);
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(20.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let update = tree.sync_accessibility();
+    let labels: Vec<Option<&str>> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == fern_core::accesskit::Role::MenuItem)
+        .map(|(_, n)| n.label())
+        .collect();
+    assert!(
+        labels.contains(&Some("Copy")),
+        "read-only menu must include Copy, got labels {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&Some("Select All")),
+        "read-only menu must include Select All, got labels {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&Some("Cut")),
+        "read-only menu must NOT include Cut, got labels {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&Some("Paste")),
+        "read-only menu must NOT include Paste, got labels {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&Some("Paste Unformatted")),
+        "read-only menu must NOT include Paste Unformatted, got labels {:?}",
+        labels
+    );
+}
+
+#[test]
+fn editor_context_menu_slot_replaces_default_entirely() {
+    // A user-supplied factory takes precedence. The default's
+    // Cut/Copy/Paste/… items must not appear; only the user's
+    // items are visible.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("content").unwrap();
+    let editor = RichTextEditor::editor(doc).context_menu(|| {
+        Box::new(
+            crate::menu_list::MenuList::new()
+                .item(
+                    crate::menu_item::MenuItem::new_literal("Custom Action A")
+                        .on_activate_fn(|_| ()),
+                )
+                .item(
+                    crate::menu_item::MenuItem::new_literal("Custom Action B")
+                        .on_activate_fn(|_| ()),
+                ),
+        )
+    });
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(20.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let update = tree.sync_accessibility();
+    let labels: Vec<Option<&str>> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == fern_core::accesskit::Role::MenuItem)
+        .map(|(_, n)| n.label())
+        .collect();
+
+    assert!(
+        labels.contains(&Some("Custom Action A")),
+        "custom factory's items must appear, got {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&Some("Copy")),
+        "default Copy item must NOT appear when a custom factory is installed, got {:?}",
+        labels
+    );
+}
+
+#[test]
+fn editor_right_click_does_not_collapse_selection() {
+    // Right-click on an editor with a live selection must leave
+    // the selection intact so that the menu's Cut/Copy can act on
+    // it. The framework's `show_context_menu_for` intercepts
+    // Secondary PointerDown BEFORE bubbling to the editor's
+    // on_pointer_event, so the editor never sees it — no caret
+    // collapse.
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    let has_sel = editor.has_selection();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::A,
+        fern_core::event::Modifiers::CTRL,
+    );
+    assert!(has_sel.get(), "Ctrl+A must flip has_selection");
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(30.0, 10.0),
+        button: PointerButton::Secondary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    assert!(
+        has_sel.get(),
+        "right-click must preserve the existing selection"
+    );
+}
+
+#[test]
+fn read_only_editor_arrow_keys_survive_default_context_menu() {
+    // Regression guard: installing the default context menu factory
+    // must not disturb the read-only editor's navigation behaviour.
+    // This is the test that broke the earlier arena-parenting
+    // approach — we keep it to catch similar regressions if the
+    // context-menu wiring changes again.
+    use fern_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Hello world").unwrap();
+    // Default context menu is ENABLED by default for read_only too
+    // (it shows Copy + Select All). Crucially, the End key must
+    // still move to block end.
+    let editor = RichTextEditor::read_only(doc);
+    let caret = editor.cursor_position_signal();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: Point::new(1.0, 8.0),
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    assert_eq!(tree.focused(), Some(id));
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::End,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    assert_eq!(
+        caret.get(),
+        "Hello world".chars().count(),
+        "End must move caret to block end even with default context menu installed"
+    );
+}
+
 #[test]
 fn read_only_editor_paste_unformatted_rejected_by_command_filter() {
     // The CommandFilter rejects PasteUnformatted (it mutates the
@@ -1780,3 +2237,458 @@ fn accessibility_signal_driven_rebuild_on_text_edit() {
         "a11y rebuild after text edit must surface new content"
     );
 }
+
+// ---------------------------------------------------------------------------
+// godot-parity ports: Tab, list indent/dedent, Ctrl+Enter, link/image clicks,
+// horizontal caret visibility, widget formatting + query API, cell selection
+// ---------------------------------------------------------------------------
+
+#[test]
+fn caret_char_format_uses_selection_start_when_selection_spans_formatted_runs() {
+    // godot's query_char_format uses selection_start when a selection
+    // is active — `cursor.position()` lands at the end of the
+    // selection and may fall on a different run.
+    // Build a document with plain "A" then bold "B". Select "AB".
+    // caret_char_format() should report the START (plain "A"), which
+    // is what a toolbar showing the selection's format should see.
+    use fern_text::text_document::TextFormat;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("AB").unwrap();
+    // Bold only the second char.
+    let probe = doc.cursor();
+    probe.set_position(1, fern_text::text_document::MoveMode::MoveAnchor);
+    probe.move_position(
+        fern_text::text_document::MoveOperation::Right,
+        fern_text::text_document::MoveMode::KeepAnchor,
+        1,
+    );
+    let bold_fmt = TextFormat {
+        font_bold: Some(true),
+        ..Default::default()
+    };
+    probe.merge_char_format(&bold_fmt).unwrap();
+
+    let editor = RichTextEditor::editor(doc);
+    // Select the whole document from position 0 → 2 (so position() is
+    // at end, on bold; selection_start() is at 0, on plain).
+    editor.select_all();
+
+    let fmt = editor.caret_char_format();
+    assert!(
+        fmt.font_bold != Some(true),
+        "caret_char_format must read from selection_start (plain start) \
+         not selection_end (bold run); got font_bold = {:?}",
+        fmt.font_bold
+    );
+}
+
+#[test]
+fn widget_formatting_api_set_bold_applies_to_selection() {
+    // Calls `editor.set_bold(true)` through the widget's public API
+    // and verifies the underlying document run ended up bold. Uses
+    // `select_all()` so there's a selection for `merge_char_format`
+    // to act on (the underlying cursor method no-ops on an empty
+    // range).
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    // Baseline: char 0 is not bold.
+    let probe = doc.cursor();
+    probe.set_position(0, fern_text::text_document::MoveMode::MoveAnchor);
+    assert!(
+        probe.char_format().unwrap_or_default().font_bold != Some(true),
+        "baseline: text must not start bold"
+    );
+
+    editor.select_all();
+    editor.set_bold(true);
+
+    // Re-probe char 0 — must now be bold.
+    let probe = doc.cursor();
+    probe.set_position(0, fern_text::text_document::MoveMode::MoveAnchor);
+    assert_eq!(
+        probe.char_format().unwrap_or_default().font_bold,
+        Some(true),
+        "set_bold(true) must flip font_bold on the underlying run"
+    );
+}
+
+#[test]
+fn widget_is_bold_reports_selection_start_format() {
+    // `is_bold()` goes through `caret_char_format()` which reads at
+    // `selection_start` when a selection exists. Build a doc with the
+    // first char bold, select from 0 to 2, and confirm `is_bold()`
+    // is true.
+    let doc = TextDocument::new();
+    doc.set_plain_text("AB").unwrap();
+    let probe = doc.cursor();
+    probe.set_position(0, fern_text::text_document::MoveMode::MoveAnchor);
+    probe.move_position(
+        fern_text::text_document::MoveOperation::Right,
+        fern_text::text_document::MoveMode::KeepAnchor,
+        1,
+    );
+    probe
+        .merge_char_format(&fern_text::text_document::TextFormat {
+            font_bold: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let editor = RichTextEditor::editor(doc);
+    editor.select_all();
+    assert!(
+        editor.is_bold(),
+        "is_bold must return true when the selection starts on a bold run"
+    );
+}
+
+#[test]
+fn widget_toggle_bold_flips_current_state() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("text").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    editor.select_all();
+    assert!(!editor.is_bold(), "baseline");
+    editor.toggle_bold();
+    assert!(editor.is_bold(), "toggle_bold flips on");
+    editor.toggle_bold();
+    // Re-select because the toggle cleared preferred_x (not selection,
+    // but be explicit).
+    editor.select_all();
+    assert!(!editor.is_bold(), "second toggle flips off");
+}
+
+#[test]
+fn widget_set_heading_level_updates_block_format() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("heading").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.set_caret_position(0);
+    editor.set_heading_level(2);
+    assert_eq!(
+        editor.get_heading_level(),
+        2,
+        "heading_level getter must reflect the setter"
+    );
+}
+
+#[test]
+fn widget_set_alignment_updates_block_format() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("aligned").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    editor.set_caret_position(0);
+    editor.set_alignment(fern_text::text_document::Alignment::Center);
+    assert_eq!(
+        editor.get_alignment(),
+        fern_text::text_document::Alignment::Center
+    );
+}
+
+#[test]
+fn widget_is_in_table_round_trip_with_navigation() {
+    // `insert_table` via text-document positions the cursor after the
+    // newly inserted table (the block following it). Use
+    // `set_caret_position(0)` to move back into the first cell. The
+    // test then verifies `is_in_table()` reports correctly.
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    editor.insert_table(2, 3);
+    // Place caret at position 0 — should land in the first cell of
+    // the table (the table is the first flow element).
+    editor.set_caret_position(0);
+    assert!(
+        editor.is_in_table(),
+        "caret at position 0 with a table as the first flow element \
+         must be inside the table"
+    );
+}
+
+#[test]
+fn widget_insert_list_creates_list_block() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.set_caret_position(0);
+    editor.insert_list(false);
+    // The caret block should now belong to a list.
+    let block = doc.block_at_position(0).unwrap();
+    assert!(
+        block.list().is_some(),
+        "insert_list(false) must convert the current block into a list item"
+    );
+}
+
+#[test]
+fn widget_runtime_zoom_setter_roundtrips() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("zoom me").unwrap();
+    let editor = RichTextEditor::editor(doc);
+    editor.set_zoom_level(2.5);
+    assert!((editor.get_zoom_level() - 2.5).abs() < 1e-4);
+    // Clamp to allowed range.
+    editor.set_zoom_level(100.0);
+    assert!(
+        editor.get_zoom_level() <= 10.0,
+        "zoom must clamp to the 0.1..=10.0 range"
+    );
+}
+
+#[test]
+fn editor_ctrl_enter_always_inserts_block_in_table() {
+    // Ctrl+Enter inside a table cell inserts a new block (same cell)
+    // — bypasses the Enter-navigates-to-next-cell-row behaviour.
+    // Godot parity: rich_text_edit.rs:559-563.
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    editor.insert_table(2, 2);
+    // Put the caret inside the first cell.
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    let block_count_before = doc.block_count();
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Enter,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert!(
+        doc.block_count() > block_count_before,
+        "Ctrl+Enter in a table cell must insert a new block (count before={}, after={})",
+        block_count_before,
+        doc.block_count()
+    );
+}
+
+#[test]
+fn editor_tab_in_list_increments_indent() {
+    // At block start inside a list, Tab increases indent. Godot:
+    // 604-622.
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.insert_list(false);
+    editor.set_caret_position(0);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Tab,
+        fern_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    let indent = state
+        .borrow()
+        .cursor
+        .block_format()
+        .ok()
+        .and_then(|f| f.indent)
+        .unwrap_or(0);
+    assert!(
+        indent >= 1,
+        "Tab at list-item start must increase indent (got {})",
+        indent
+    );
+}
+
+#[test]
+fn editor_shift_tab_in_list_decrements_indent() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.insert_list(false);
+    editor.set_caret_position(0);
+    // Pre-indent so Shift+Tab has something to decrement.
+    editor.apply_block_format(fern_text::text_document::BlockFormat {
+        indent: Some(2),
+        ..Default::default()
+    });
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Tab,
+        fern_core::event::Modifiers::SHIFT,
+    );
+    tick_past_debounce(&mut tree);
+
+    let indent = state
+        .borrow()
+        .cursor
+        .block_format()
+        .ok()
+        .and_then(|f| f.indent)
+        .unwrap_or(0);
+    assert_eq!(
+        indent, 1,
+        "Shift+Tab must decrement indent from 2 to 1 (got {})",
+        indent
+    );
+}
+
+#[test]
+fn editor_backspace_at_list_start_dedents_or_exits() {
+    // Backspace at block start with indent > 0: dedent.
+    // Backspace at block start with indent 0: remove from list.
+    // Godot: 564-586.
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.insert_list(false);
+    editor.set_caret_position(0);
+    editor.apply_block_format(fern_text::text_document::BlockFormat {
+        indent: Some(1),
+        ..Default::default()
+    });
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Backspace,
+        fern_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    let indent = state
+        .borrow()
+        .cursor
+        .block_format()
+        .ok()
+        .and_then(|f| f.indent)
+        .unwrap_or(0);
+    assert_eq!(
+        indent, 0,
+        "first Backspace dedents from 1 to 0 (got {})",
+        indent
+    );
+
+    // Second Backspace: indent is 0, so remove from list.
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Backspace,
+        fern_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    let in_list = doc
+        .block_at_position(0)
+        .and_then(|b| b.list())
+        .is_some();
+    assert!(
+        !in_list,
+        "second Backspace at indent 0 must remove block from list"
+    );
+}
+
+#[test]
+fn link_click_callback_installs_without_panicking() {
+    // We can't reliably hit-test a link in a headless tree (no real
+    // typesetter layout means `HitRegion::Link` placement is
+    // non-deterministic under the mock backend). A behavioural test
+    // that actually clicks the link text would need integration-
+    // level infrastructure.
+    //
+    // What we CAN lock in: installing the builder callback compiles,
+    // stores the closure on state, and dispatching a PointerDown on
+    // the widget doesn't panic even when the hit lands outside any
+    // link region. Regression guards the type signature + callback
+    // storage, not the dispatch itself.
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let doc = TextDocument::new();
+    doc.set_html(r#"<p><a href="https://example.com/x">link</a></p>"#)
+        .unwrap();
+
+    let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+    let seen_clone = seen.clone();
+    let editor = RichTextEditor::editor(doc).on_link_activated(
+        move |href, _ctx| {
+            seen_clone.borrow_mut().push(href.to_string());
+        },
+    );
+
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+
+    tree.dispatch_event(fern_core::event::WidgetEvent::PointerDown {
+        position: Point::new(5.0, 10.0),
+        button: fern_core::event::PointerButton::Primary,
+        modifiers: fern_core::event::Modifiers::NONE,
+    });
+    // No assertion on `seen` — the callback firing depends on the
+    // mock engine's layout producing a Link hit at (5, 10), which
+    // isn't guaranteed. The test's job here is to guard the
+    // compile-time wiring.
+    let _ = seen;
+}
+
+#[test]
+fn format_version_bumps_on_format_only_edits() {
+    // Applying bold to a selection fires DocumentEvent::FormatChanged;
+    // state::drain_events bumps `format_version` once per batch.
+    let doc = TextDocument::new();
+    doc.set_plain_text("abc").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let fmt_ver = editor.format_version();
+    let baseline = fmt_ver.get();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_key(
+        &mut tree,
+        fern_core::event::Key::A,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::B,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert!(
+        fmt_ver.get() > baseline,
+        "format_version must bump after a format-only edit (baseline={}, now={})",
+        baseline,
+        fmt_ver.get()
+    );
+}
+
+// Horizontal caret-visibility (ensure_caret_h_visible_locked): no
+// dedicated test here. The behaviour is fully exercised under a
+// real typesetter in apps that run `wrap_mode(WrapMode::None)`; a
+// headless mock backend produces `max_scroll_x == 0` regardless of
+// content, which makes the early-return short-circuit trigger and
+// hides the real logic from unit tests. Left documented here so a
+// future integration test harness can pick it up.
+

@@ -3371,7 +3371,29 @@ The editor supports plain-text, HTML, and in-process rich (format-preserving) cl
 
 **RTF** (Rich Text Format) remains a post-Milestone-8 refinement. It is the last-mile payload for applications that don't emit HTML on copy — Pages, TextEdit, some legacy Windows apps. Adding RTF is a pure-additive change: `ClipboardBackend` gains `get_rtf` / `set_rtf` with the same default-body fallback convention, text-document gains an RTF importer, and the paste path grows a branch between HTML and plain text.
 
-**Default right-click context menu** is intentionally deferred. The widget exposes [`context_target_at(point)`](../crates/fern-widgets/src/rich_text.rs) for host applications to build their own menu; a built-in `Cut / Copy / Paste / Paste Unformatted / Select All` surface is tracked as a follow-up, pending a fern-core reorder so that `drain_pending_intents` runs *before* `dismiss_all_overlays` in `collect_from_ctx` — otherwise a menu-item tap sends the intent while the overlay subtree is mid-dormant-cascade and every walked Action is skipped.
+#### 27.10.16 Default Context Menu
+
+`RichTextEditor` installs a default right-click menu via the framework's built-in `HandlerSet::context_menu(factory)` plumbing. The framework's `show_context_menu_for` — a `fern-core` hook that intercepts Secondary `PointerDown` on any arena node — walks up from the hit widget to find the nearest ancestor whose `context_menu_factory` is set, calls that factory to produce a **fresh** menu widget each right-click, and shows it at the pointer position (`OverlayPlacement::AtPointer`). No widget-level overlay wiring, no manual selection-preservation guards, no `context_menu_open` flag — the framework handles it.
+
+The factory returns a `MenuList` whose item set is filtered by `ClipboardPolicy`:
+
+- `editor()` preset (`ClipboardPolicy::Full`): Cut / Copy / Paste / Paste Unformatted / — / Select All.
+- `read_only()` preset (`ClipboardPolicy::CopyAndSelectAllOnly`): Copy / Select All.
+
+Each `MenuItem`'s `on_activate_fn` captures a clone of the editor's `SharedState` and calls the corresponding `rt_clipboard::*` function **directly** — no Action/Intent indirection. The reason: the framework's `show_context_menu_for` adds the menu widget at the top of the arena (via `add_boxed`), so the menu's parent chain doesn't reach the editor; an `Intent` fired from a menu item can't walk up to an `Action` registered on the editor. Direct closure invocation sidesteps the whole question.
+
+After doing the work, each closure fires a reserved `fern.rich_text.*` intent (`fern.rich_text.cut`, `…copy`, `…paste`, `…paste_unformatted`, `…select_all`) for observational handlers — the framework's current intent dispatch won't reach the editor from inside a top-level menu widget either, but the contract is stable for a future reworked dispatch.
+
+Item enabled-state is computed at factory-call time from live state: `cursor.has_selection()` gates Cut and Copy; `document.to_plain_text()` gates Select All. Because the factory runs on every right-click, greyed entries reflect the moment the user opened the menu.
+
+Host applications customise by passing their own factory:
+
+```rust
+RichTextEditor::editor(doc)
+    .context_menu(|| Box::new(MyCustomMenu::new(...)))
+```
+
+The custom factory completely replaces the default. The inherent `RichTextEditor::context_menu` method shadows the blanket [`WidgetBuilder::context_menu`](../crates/fern-core/src/widget_builder.rs) trait method so users can chain it directly on the editor. Opt out entirely with `.default_context_menu(false)` — right-click then bubbles past the widget and [`context_target_at(point)`](../crates/fern-widgets/src/rich_text.rs) remains available for applications that want to render a menu from outside.
 
 #### 27.10.14 IME and Composition
 

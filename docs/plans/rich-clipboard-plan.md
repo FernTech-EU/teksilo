@@ -1,5 +1,32 @@
 # Rich Clipboard & Default Context Menu — Plan (fern-ui only)
 
+> **Status:** Shipped. Both the clipboard round-trip and the default
+> context menu landed, but the context-menu implementation diverges
+> from what this document originally proposed. The final shape is:
+>
+> - Framework's built-in `HandlerSet::context_menu(factory)` handles
+>   right-click interception and overlay lifecycle (no manual
+>   `context_menu_open` flag, no arena-parenting under the editor,
+>   no custom `ContextMenuRoot` wrapper, no `Action`s registered on
+>   the editor).
+> - Default `MenuItem` closures call `rt_clipboard::*` **directly** —
+>   the `Action`/`Intent` indirection proposed here turned out to be
+>   incompatible with fern-core's ordering of overlay dismissal vs.
+>   `drain_pending_intents`. Reserved `fern.rich_text.*` intent names
+>   are still fired for observational purposes.
+> - Slot-based replacement via `RichTextEditor::context_menu(factory)`
+>   (inherent method shadowing the blanket
+>   [`WidgetBuilder::context_menu`](../../crates/fern-core/src/widget_builder.rs)
+>   trait method). Opt out with `.default_context_menu(false)`.
+>
+> The architectural analysis in this document is still accurate for
+> the clipboard pieces (phases 1, 1a, 2a, 2b, 2c). The context-menu
+> section (phase 3) describes a path that was tried, found to
+> regress the read-only navigation tests via arena-parenting, and
+> superseded by the design above. See
+> [`docs/fern-ui-architecture.md §27.10.16`](../fern-ui-architecture.md)
+> for the shipped design.
+
 ## Context
 
 Today `RichTextEditor` has **plain-text clipboard only** ([crates/fern-widgets/src/rich_text/clipboard.rs](../../crates/fern-widgets/src/rich_text/clipboard.rs)). Rich format is preserved *within one editor instance* via `rich_clipboard_fragment` + plain-text equality check; paste from any other application lands as plain text. This is why `RichTextEditor` ships **no default context menu** — the widget exposes

@@ -13,7 +13,9 @@
 
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::widget::EventContext;
-use fern_text::text_document::{MoveMode, MoveOperation, SelectionType, TextFormat};
+use fern_text::text_document::{
+    BlockFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
+};
 
 use super::clipboard;
 use super::policy::EditCommandKind;
@@ -85,30 +87,51 @@ pub(super) fn handle_key(
         let filter = st.policy.command_filter;
         match key {
             Key::ArrowLeft if filter.accepts(EditCommandKind::MoveLeft) => {
-                let op = if ctrl {
-                    MoveOperation::WordLeft
+                // Shift+Arrow at a cell boundary activates / extends a
+                // rectangular cell selection (godot parity). Only
+                // claims the event when we're actually at a cell
+                // boundary; otherwise fall through to text-range
+                // selection.
+                if shift && try_extend_cell_selection(&mut st, -1, 0) {
+                    KeyAction::ClearPreferredX
                 } else {
-                    MoveOperation::Left
-                };
-                st.cursor.move_position(op, mode, 1);
-                KeyAction::ClearPreferredX
+                    let op = if ctrl {
+                        MoveOperation::WordLeft
+                    } else {
+                        MoveOperation::Left
+                    };
+                    st.cursor.move_position(op, mode, 1);
+                    KeyAction::ClearPreferredX
+                }
             }
             Key::ArrowRight if filter.accepts(EditCommandKind::MoveRight) => {
-                let op = if ctrl {
-                    MoveOperation::WordRight
+                if shift && try_extend_cell_selection(&mut st, 1, 0) {
+                    KeyAction::ClearPreferredX
                 } else {
-                    MoveOperation::Right
-                };
-                st.cursor.move_position(op, mode, 1);
-                KeyAction::ClearPreferredX
+                    let op = if ctrl {
+                        MoveOperation::WordRight
+                    } else {
+                        MoveOperation::Right
+                    };
+                    st.cursor.move_position(op, mode, 1);
+                    KeyAction::ClearPreferredX
+                }
             }
             Key::ArrowUp if filter.accepts(EditCommandKind::MoveUp) => {
-                move_cursor_vertical(&mut st, -1, mode);
-                KeyAction::KeepPreferredX
+                if shift && try_extend_cell_selection(&mut st, 0, -1) {
+                    KeyAction::ClearPreferredX
+                } else {
+                    move_cursor_vertical(&mut st, -1, mode);
+                    KeyAction::KeepPreferredX
+                }
             }
             Key::ArrowDown if filter.accepts(EditCommandKind::MoveDown) => {
-                move_cursor_vertical(&mut st, 1, mode);
-                KeyAction::KeepPreferredX
+                if shift && try_extend_cell_selection(&mut st, 0, 1) {
+                    KeyAction::ClearPreferredX
+                } else {
+                    move_cursor_vertical(&mut st, 1, mode);
+                    KeyAction::KeepPreferredX
+                }
             }
             Key::PageUp if filter.accepts(EditCommandKind::PageUp) => {
                 move_cursor_page(&mut st, -1, mode);
@@ -189,6 +212,31 @@ pub(super) fn handle_key(
                     let _ = st.cursor.remove_selected_text();
                 } else if st.cursor.has_selection() {
                     let _ = st.cursor.remove_selected_text();
+                } else if st.cursor.at_block_start()
+                    && is_cursor_in_list(&st)
+                    && filter.accepts(EditCommandKind::ExitList)
+                {
+                    // Backspace at start of a list item:
+                    //  * Indented → decrement the block's indent level
+                    //    (visually pulls the item leftward; standard
+                    //    word-processor behaviour for Backspace-at-
+                    //    indent).
+                    //  * Indent 0 → remove the block from the list
+                    //    entirely (converts it back to a regular
+                    //    paragraph). Matches godot rich_text_edit.rs:
+                    //    566-584.
+                    if let Ok(fmt) = st.cursor.block_format() {
+                        let level = fmt.indent.unwrap_or(0);
+                        if level > 0 {
+                            let new_fmt = BlockFormat {
+                                indent: Some(level - 1),
+                                ..Default::default()
+                            };
+                            let _ = st.cursor.set_block_format(&new_fmt);
+                        } else {
+                            let _ = st.cursor.remove_current_block_from_list();
+                        }
+                    }
                 } else {
                     let _ = st.cursor.delete_previous_char();
                 }
@@ -208,8 +256,91 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Enter if filter.accepts(EditCommandKind::InsertBlock) => {
+            Key::Enter
+                if ctrl
+                    && filter.accepts(EditCommandKind::InsertBlockForced) =>
+            {
+                // Ctrl+Enter: always insert a new block, bypassing
+                // table-cell navigation. Matches godot
+                // rich_text_edit.rs:559-563.
                 let _ = st.cursor.insert_block();
+                KeyAction::ClearPreferredX
+            }
+            Key::Enter if !ctrl && filter.accepts(EditCommandKind::InsertBlock) => {
+                // Enter (without Ctrl) inside a table cell: move to
+                // the cell in the same column one row down, or (on
+                // the last row) step out of the table to the block
+                // that follows. Outside a table, fall through to
+                // `insert_block`. Shift+Enter falls through to the
+                // normal insert_block path — matches godot's
+                // behaviour where Shift+Enter is treated like Enter.
+                let cell_info = st
+                    .cursor
+                    .current_table_cell()
+                    .map(|c| (c.table.id(), c.row, c.column, c.table.rows()));
+                if let Some((table_id, row, col, rows)) = cell_info
+                    && filter.accepts(EditCommandKind::NavigateTableCellDown)
+                {
+                    navigate_table_cell_down(&mut st, table_id, row, col, rows);
+                } else {
+                    let _ = st.cursor.insert_block();
+                }
+                KeyAction::ClearPreferredX
+            }
+            Key::Tab
+                if !ctrl
+                    && shift
+                    && filter.accepts(EditCommandKind::NavigateTableCell) =>
+            {
+                // Shift+Tab (no Ctrl): previous table cell when
+                // inside a table; dedent the current list item when
+                // at block start. Otherwise swallow (prevents
+                // focus-navigation bleed). Ctrl+Shift+Tab is left
+                // unhandled so the OS / app-level focus navigation
+                // can claim it.
+                let cell_info = st.cursor.current_table_cell().map(|c| {
+                    (
+                        c.table.id(),
+                        c.row,
+                        c.column,
+                        c.table.rows(),
+                        c.table.columns(),
+                    )
+                });
+                if let Some((table_id, row, col, rows, cols)) = cell_info {
+                    navigate_table_cell(&mut st, table_id, row, col, rows, cols, -1);
+                } else if st.cursor.at_block_start() && is_cursor_in_list(&st) {
+                    dedent_current_block(&mut st);
+                }
+                KeyAction::ClearPreferredX
+            }
+            Key::Tab
+                if !ctrl
+                    && !shift
+                    && filter.accepts(EditCommandKind::NavigateTableCell) =>
+            {
+                // Tab (no Ctrl, no Shift):
+                //  * Inside a table cell → next cell (wraps to next row;
+                //    at last cell, insert a new row below).
+                //  * At block start inside a list → increase indent.
+                //  * Otherwise → insert a literal `\t`.
+                // Ctrl+Tab is left unhandled (OS focus navigation).
+                let cell_info = st.cursor.current_table_cell().map(|c| {
+                    (
+                        c.table.id(),
+                        c.row,
+                        c.column,
+                        c.table.rows(),
+                        c.table.columns(),
+                    )
+                });
+                if let Some((table_id, row, col, rows, cols)) = cell_info {
+                    navigate_table_cell(&mut st, table_id, row, col, rows, cols, 1);
+                } else if st.cursor.at_block_start() && is_cursor_in_list(&st) {
+                    indent_current_block(&mut st);
+                } else if filter.accepts(EditCommandKind::InsertTab) {
+                    let _ = st.cursor.insert_text("\t");
+                }
                 KeyAction::ClearPreferredX
             }
             Key::B if ctrl && filter.accepts(EditCommandKind::ToggleBold) => {
@@ -461,6 +592,53 @@ fn ensure_caret_visible(state: &SharedState) {
     if let Some(new_off) = st.engine.ensure_caret_visible() {
         st.scroll_y.set(new_off);
     }
+    // Horizontal caret visibility — matches godot's
+    // `ensure_caret_h_visible` (rich_text_edit.rs:1935-1959). Margin
+    // is 20 logical pixels on each side so the caret doesn't sit
+    // flush against the viewport edge.
+    ensure_caret_h_visible_locked(&mut st);
+}
+
+/// Horizontal caret-visibility. Factored out so code paths that
+/// need it without the vertical adjustment (e.g. after `Home` on a
+/// very long wrapped block) can call it directly.
+///
+/// Takes `&mut EditorState` (caller holds the borrow) rather than
+/// `&SharedState` because the current call sites are inside the
+/// `ensure_caret_visible` borrow.
+fn ensure_caret_h_visible_locked(st: &mut EditorState) {
+    if !st.engine.has_full_layout() {
+        return;
+    }
+    // When wrap mode is Word, there is no horizontal overflow: the
+    // engine wraps content to the viewport width and `max_scroll_x`
+    // is pinned at 0. Nothing to adjust.
+    let max_x = st.max_scroll_x.get();
+    if max_x <= 0.0 {
+        return;
+    }
+    let viewport_w = st.viewport_width;
+    if viewport_w <= 0.0 {
+        return;
+    }
+
+    let pos = st.cursor.position();
+    let caret = st.engine.caret_rect(pos);
+    let caret_x = caret[0]; // engine returns screen-space x
+    let current_x = st.scroll_x.get();
+    // Margin: 20 px on each side, matching godot's
+    // `ensure_caret_h_visible`.
+    let margin = 20.0_f32;
+    let screen_x = caret_x - current_x;
+
+    let new_x = if screen_x < margin {
+        (caret_x - margin).max(0.0)
+    } else if screen_x > viewport_w - margin {
+        (caret_x - viewport_w + margin).clamp(0.0, max_x)
+    } else {
+        return;
+    };
+    st.scroll_x.set(new_x.clamp(0.0, max_x));
 }
 
 #[derive(Copy, Clone)]
@@ -568,5 +746,268 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
     let new_scroll =
         (st.scroll_y.get() + (direction as f32) * page_step).clamp(0.0, st.max_scroll_y.get());
     st.scroll_y.set(new_scroll);
+}
+
+// ---------------------------------------------------------------------------
+// Table / list helpers
+// ---------------------------------------------------------------------------
+
+/// Whether the caret's current block belongs to a list.
+fn is_cursor_in_list(st: &EditorState) -> bool {
+    let pos = st.cursor.position();
+    st.document
+        .block_at_position(pos)
+        .and_then(|b| b.list())
+        .is_some()
+}
+
+/// Increase the current block's `BlockFormat::indent` by 1. Used by
+/// Tab inside a list item.
+fn indent_current_block(st: &mut EditorState) {
+    let Ok(fmt) = st.cursor.block_format() else {
+        return;
+    };
+    let level = fmt.indent.unwrap_or(0);
+    let new_fmt = BlockFormat {
+        indent: Some(level.saturating_add(1)),
+        ..Default::default()
+    };
+    let _ = st.cursor.set_block_format(&new_fmt);
+}
+
+/// Decrease the current block's `BlockFormat::indent` by 1 (saturates
+/// at 0). Used by Shift+Tab inside a list item.
+fn dedent_current_block(st: &mut EditorState) {
+    let Ok(fmt) = st.cursor.block_format() else {
+        return;
+    };
+    let level = fmt.indent.unwrap_or(0);
+    if level == 0 {
+        return;
+    }
+    let new_fmt = BlockFormat {
+        indent: Some(level - 1),
+        ..Default::default()
+    };
+    let _ = st.cursor.set_block_format(&new_fmt);
+}
+
+/// Navigate to the next / previous table cell by `direction` (+1 or
+/// -1). Wraps from end-of-row to start-of-next-row; at the last cell
+/// of the last row with `direction = +1`, inserts a new row below
+/// and moves into its first cell. Matches godot rich_text_edit.rs:
+/// 1471-1512.
+fn navigate_table_cell(
+    st: &mut EditorState,
+    table_id: usize,
+    row: usize,
+    col: usize,
+    rows: usize,
+    cols: usize,
+    direction: i32,
+) {
+    let (target_row, target_col) = if direction > 0 {
+        if col + 1 < cols {
+            (row, col + 1)
+        } else if row + 1 < rows {
+            (row + 1, 0)
+        } else {
+            // Last cell of last row → insert a new row and move
+            // into its first cell.
+            let _ = st.cursor.insert_row_below();
+            (row + 1, 0)
+        }
+    } else if col > 0 {
+        (row, col - 1)
+    } else if row > 0 {
+        (row - 1, cols.saturating_sub(1))
+    } else {
+        return; // already at the first cell
+    };
+
+    move_cursor_to_cell_first_block(st, table_id, target_row, target_col);
+}
+
+/// Enter inside a table cell: move to the cell in the same column one
+/// row down; on the last row, step out of the table to the first
+/// block that follows. Matches godot rich_text_edit.rs:1515-1535.
+fn navigate_table_cell_down(
+    st: &mut EditorState,
+    table_id: usize,
+    row: usize,
+    col: usize,
+    rows: usize,
+) {
+    if row + 1 < rows {
+        move_cursor_to_cell_first_block(st, table_id, row + 1, col);
+    } else {
+        move_cursor_after_table(st, table_id);
+    }
+}
+
+/// Move the caret to the first block of `(table_id, row, col)`. Uses
+/// `table_cell_blocks_first_position` via the table handle obtained
+/// through the current cursor's snapshot. No-op if the cell doesn't
+/// exist.
+fn move_cursor_to_cell_first_block(
+    st: &mut EditorState,
+    table_id: usize,
+    row: usize,
+    col: usize,
+) {
+    // Re-resolve the table via `current_table_cell` is insufficient
+    // because after `insert_row_below` the cursor may still be in
+    // the old cell. Walk the document's flow to find the table by
+    // id, then ask the table for (row, col). This keeps the helper
+    // free of assumptions about where the cursor currently sits.
+    if let Some(table) = find_table_by_id(st, table_id)
+        && let Some(cell) = table.cell(row, col)
+        && let Some(block) = cell.blocks().first()
+    {
+        st.cursor
+            .set_position(block.position(), MoveMode::MoveAnchor);
+    }
+}
+
+/// Step the caret to the first block immediately following the given
+/// table. If the table is the last element in the document, no-op.
+fn move_cursor_after_table(st: &mut EditorState, table_id: usize) {
+    use fern_text::text_document::FlowElement;
+    let flow = st.document.flow();
+    let mut found = false;
+    for element in &flow {
+        if found {
+            match element {
+                FlowElement::Block(block) => {
+                    st.cursor
+                        .set_position(block.position(), MoveMode::MoveAnchor);
+                    return;
+                }
+                FlowElement::Table(t) => {
+                    if let Some(cell) = t.cell(0, 0)
+                        && let Some(block) = cell.blocks().first()
+                    {
+                        st.cursor
+                            .set_position(block.position(), MoveMode::MoveAnchor);
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let FlowElement::Table(t) = element
+            && t.id() == table_id
+        {
+            found = true;
+        }
+    }
+}
+
+/// Look up a table by id via the document's flow. Returns `None` if
+/// the id isn't in the current flow.
+fn find_table_by_id(
+    st: &EditorState,
+    table_id: usize,
+) -> Option<fern_text::text_document::TextTable> {
+    use fern_text::text_document::FlowElement;
+    for element in st.document.flow() {
+        if let FlowElement::Table(t) = element
+            && t.id() == table_id
+        {
+            return Some(t);
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Cell-range selection (Shift+Arrow when at a cell boundary)
+// ---------------------------------------------------------------------------
+
+/// Try to extend (or start) a rectangular cell selection in the
+/// direction `(dcol, drow)`. Returns `true` when the event was
+/// consumed (the caller must skip the normal text-range selection
+/// path); returns `false` when the caret isn't at a cell boundary
+/// eligible to start/extend a cell selection.
+///
+/// Mirrors godot rich_text_edit.rs:1755-1824. The widget's
+/// `selected_cell_range` state survives across calls so repeated
+/// Shift+Arrow presses keep extending the rectangle.
+pub(super) fn try_extend_cell_selection(
+    st: &mut EditorState,
+    dcol: i32,
+    drow: i32,
+) -> bool {
+    use fern_text::text_document::SelectionKind;
+
+    // If already in cell-selection mode, extend the existing range.
+    if let SelectionKind::Cells(range)
+    | SelectionKind::Mixed {
+        cell_range: range, ..
+    } = st.cursor.selection_kind()
+    {
+        // Use the cached table dimensions from the first selected
+        // cell. If the range is degenerate we can't know the table
+        // bounds reliably, so bail.
+        let cells = st.cursor.selected_cells();
+        let Some(first) = cells.first() else {
+            return false;
+        };
+        let rows = first.table.rows();
+        let cols = first.table.columns();
+        if rows == 0 || cols == 0 {
+            return false;
+        }
+
+        let new_end_row =
+            (range.end_row as i32 + drow).clamp(0, rows as i32 - 1) as usize;
+        let new_end_col =
+            (range.end_col as i32 + dcol).clamp(0, cols as i32 - 1) as usize;
+
+        st.cursor.select_cell_range(
+            range.table_id,
+            range.start_row,
+            range.start_col,
+            new_end_row,
+            new_end_col,
+        );
+        return true;
+    }
+
+    // Not yet in cell-selection mode: check if the caret is at a cell
+    // boundary that an arrow press would cross.
+    let Some(cell_ref) = st.cursor.current_table_cell() else {
+        return false;
+    };
+    let TableCellRef {
+        table,
+        row,
+        column,
+    } = cell_ref;
+    let at_start = st.cursor.at_block_start();
+    let at_end = st.cursor.at_block_end();
+
+    let should_activate = match (dcol, drow) {
+        (-1, 0) => at_start && column > 0,
+        (1, 0) => at_end && column + 1 < table.columns(),
+        (0, -1) => at_start && row > 0,
+        (0, 1) => at_end && row + 1 < table.rows(),
+        _ => false,
+    };
+    if !should_activate {
+        return false;
+    }
+
+    let table_id = table.id();
+    let target_row = (row as i32 + drow).max(0) as usize;
+    let target_col = (column as i32 + dcol).max(0) as usize;
+    st.cursor.select_cell_range(
+        table_id,
+        row.min(target_row),
+        column.min(target_col),
+        row.max(target_row),
+        column.max(target_col),
+    );
+    true
 }
 

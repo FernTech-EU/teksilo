@@ -61,14 +61,25 @@ pub(super) fn handle_pointer_event(
                 return EventResponse::Ignored;
             };
             match &hit.region {
-                fern_text::HitRegion::Link { href: _ }
-                | fern_text::HitRegion::Image { name: _ } => {
-                    // Link / image click: do not move the caret. The
-                    // typed-command emission is deferred. Return
-                    // Ignored so the arena still processes the event
-                    // (TapRecognizer won't be installed when
-                    // on_double_tap is wired, but the double/triple
-                    // machines need to see this press).
+                fern_text::HitRegion::Link { href } => {
+                    // Link click: do not move the caret. Dispatch to
+                    // the widget's installed `on_link_activated`
+                    // callback (if any) so applications can open the
+                    // link / route to their router. Clone the `Rc`
+                    // out of the state borrow before invoking so the
+                    // handler can mutate widget state if it wants.
+                    let callback = state.borrow().on_link_activated.clone();
+                    if let Some(cb) = callback {
+                        cb(href.as_str(), ctx);
+                    }
+                    ctx.request_frame();
+                    return EventResponse::Ignored;
+                }
+                fern_text::HitRegion::Image { name } => {
+                    let callback = state.borrow().on_image_activated.clone();
+                    if let Some(cb) = callback {
+                        cb(name.as_str(), ctx);
+                    }
                     ctx.request_frame();
                     return EventResponse::Ignored;
                 }

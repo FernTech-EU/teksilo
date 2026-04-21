@@ -30,6 +30,7 @@
 //! [`frame_loop`]; clipboard actions in [`clipboard`].
 
 mod clipboard;
+mod context_menu;
 mod frame_loop;
 mod hit_test;
 pub(crate) mod image_cache;
@@ -42,6 +43,9 @@ mod state;
 #[cfg(test)]
 mod tests;
 
+pub use context_menu::{
+    INTENT_COPY, INTENT_CUT, INTENT_PASTE, INTENT_PASTE_UNFORMATTED, INTENT_SELECT_ALL,
+};
 pub use hit_test::ContextTarget;
 pub use policy::{
     AccessibilityRole, CaretPolicy, ClipboardPolicy, CommandFilter, EditCommandKind,
@@ -57,7 +61,9 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_text::text_document::{SelectionType, TextDocument, TextFormat};
+use fern_text::text_document::{
+    Alignment, BlockFormat, ListStyle, MoveMode, SelectionType, TextDocument, TextFormat,
+};
 use fern_text::{FontRegistrar, RichTextEngine, SharedTypesetter, WrapMode};
 use fern_tokens::Color;
 
@@ -89,6 +95,19 @@ pub struct RichTextEditor {
     state: SharedState,
     v_scroll_policy: ScrollPolicy,
     h_scroll_policy: ScrollPolicy,
+    /// Whether to install the built-in context-menu factory during
+    /// `build()`. Defaults to `true`. Set `false` via
+    /// [`default_context_menu`](Self::default_context_menu) to suppress
+    /// the default entirely (right-click then bubbles past the widget;
+    /// `context_target_at` stays available for apps that render their
+    /// own menu).
+    default_context_menu_enabled: bool,
+    /// User-supplied context-menu factory (see
+    /// [`context_menu`](Self::context_menu)). When set, it takes
+    /// precedence over the default factory regardless of
+    /// `default_context_menu_enabled`. Taken out (via `Option::take`)
+    /// during `build()` because `Box<dyn Fn>` is not `Clone`.
+    custom_context_menu: Option<Box<dyn Fn() -> Box<dyn fern_core::widget::Widget>>>,
 }
 
 impl std::fmt::Debug for RichTextEditor {
@@ -132,6 +151,8 @@ impl RichTextEditor {
             state,
             v_scroll_policy: ScrollPolicy::Auto,
             h_scroll_policy: ScrollPolicy::Auto,
+            default_context_menu_enabled: true,
+            custom_context_menu: None,
         }
     }
 
@@ -193,6 +214,49 @@ impl RichTextEditor {
     pub fn scroll_policy(mut self, policy: ScrollPolicy) -> Self {
         self.v_scroll_policy = policy;
         self.h_scroll_policy = policy;
+        self
+    }
+
+    /// Replace the built-in right-click context menu with a
+    /// user-provided factory. The factory is invoked on each
+    /// right-click inside the widget; it returns whatever `Widget`
+    /// should appear as the menu (typically a
+    /// [`MenuList`](crate::menu_list::MenuList), but any widget
+    /// works).
+    ///
+    /// Taking this branch disables the default menu unconditionally.
+    /// The framework's
+    /// [`show_context_menu_for`](fern_core::widget_tree) handles
+    /// the overlay lifecycle (open at pointer, dismiss on
+    /// click-outside / Escape), so the user's factory only needs to
+    /// build the menu content.
+    ///
+    /// This is an **inherent method**: it shadows the blanket
+    /// [`WidgetBuilder::context_menu`](fern_core::widget_builder::WidgetBuilder::context_menu)
+    /// trait method so the user can chain it directly on the editor.
+    /// Internally, the factory is installed on the editor's arena
+    /// node via the same `HandlerSet::context_menu` plumbing.
+    pub fn context_menu(
+        mut self,
+        factory: impl Fn() -> Box<dyn fern_core::widget::Widget> + 'static,
+    ) -> Self {
+        self.custom_context_menu = Some(Box::new(factory));
+        self
+    }
+
+    /// Enable (default) or disable the widget's built-in right-click
+    /// context menu (Cut / Copy / Paste / Paste Unformatted / Select
+    /// All). When disabled, right-click bubbles past the widget
+    /// unhandled and
+    /// [`context_target_at`](Self::context_target_at) stays
+    /// available for applications that render their own menu.
+    ///
+    /// Note: if a user factory is installed via
+    /// [`context_menu`](Self::context_menu), that factory wins
+    /// regardless of this flag — this setter only governs the
+    /// *default* menu.
+    pub fn default_context_menu(mut self, enabled: bool) -> Self {
+        self.default_context_menu_enabled = enabled;
         self
     }
 
@@ -259,17 +323,34 @@ impl RichTextEditor {
         self.state.borrow().can_redo.clone()
     }
 
-    /// Read the current character format at the widget's caret.
-    /// Used by toolbars that mirror bold/italic/underline state, and
-    /// by tests — `TextDocument::cursor()` creates a fresh cursor
-    /// each call, so reading format through the document would miss
-    /// the widget's internal caret position.
+    /// Read the current character format at the widget's caret —
+    /// the right source for toolbars that mirror bold/italic/underline
+    /// state.
+    ///
+    /// When a selection is active, the format is read from
+    /// [`selection_start()`](fern_text::text_document::TextCursor::selection_start)
+    /// rather than [`position()`](fern_text::text_document::TextCursor::position).
+    /// Rationale (matches godot-rich-text's `query_char_format`):
+    /// `position()` lands at the **end** of the selection and may fall
+    /// on a run with different formatting (or past the last character,
+    /// on an empty virtual element) — a toolbar observing that value
+    /// would flicker or lie. `selection_start()` always points at the
+    /// first character of the selected range, so the reading is
+    /// stable and matches what a user would expect from "tell me the
+    /// format of what I have selected."
     pub fn caret_char_format(&self) -> TextFormat {
-        self.state
-            .borrow()
-            .cursor
-            .char_format()
-            .unwrap_or_default()
+        let st = self.state.borrow();
+        let probe_pos = if st.cursor.has_selection() {
+            st.cursor.selection_start()
+        } else {
+            st.cursor.position()
+        };
+        // Read through a fresh cursor so we don't disturb the widget's
+        // own cursor (the widget's own cursor has its own position /
+        // anchor state that we must not move).
+        let probe = st.document.cursor();
+        probe.set_position(probe_pos, fern_text::text_document::MoveMode::MoveAnchor);
+        probe.char_format().unwrap_or_default()
     }
 
     /// Clone the internal shared state handle for test observation.
@@ -339,6 +420,507 @@ impl RichTextEditor {
             st.select_all_anchor_cell = None;
         }
         sync_cursor_signals(&self.state);
+    }
+
+    // --- Cursor mirror API -------------------------------------------------
+    //
+    // These mirror the corresponding `TextCursor` methods but act on the
+    // widget's **internal** cursor (the one tied to caret rendering /
+    // blink / focus) rather than a fresh `doc.cursor()`. An application
+    // that reaches through `TextDocument::cursor()` gets an independent
+    // cursor whose position is decoupled from the widget's caret — any
+    // mutation would be invisible to the paint pass. Use these methods
+    // when you want programmatic effects to feel like user-typed edits.
+
+    /// Insert plain text at the widget's caret. Replaces any selection.
+    pub fn insert_text(&self, text: &str) {
+        let st = self.state.borrow();
+        let _ = st.cursor.insert_text(text);
+        drop(st);
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a fragment parsed from HTML at the widget's caret.
+    /// Replaces any selection. Uses text-document's
+    /// [`TextCursor::insert_html`](fern_text::text_document::TextCursor::insert_html),
+    /// which parses the HTML into a `DocumentFragment` and inserts it.
+    pub fn insert_html(&self, html: &str) {
+        let st = self.state.borrow();
+        let _ = st.cursor.insert_html(html);
+        drop(st);
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert an inline image by logical resource name. `width` and
+    /// `height` are in logical pixels.
+    pub fn insert_image(&self, name: &str, width: u32, height: u32) {
+        let st = self.state.borrow();
+        let _ = st.cursor.insert_image(name, width, height);
+        drop(st);
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Delete the current selection. No-op when nothing is selected.
+    pub fn delete_selection(&self) {
+        let st = self.state.borrow();
+        if st.cursor.has_selection() {
+            let _ = st.cursor.remove_selected_text();
+        }
+        drop(st);
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Select the word under the widget's caret.
+    pub fn select_word(&self) {
+        {
+            let st = self.state.borrow();
+            st.cursor.select(SelectionType::WordUnderCursor);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Select the paragraph / block under the widget's caret.
+    pub fn select_line(&self) {
+        {
+            let st = self.state.borrow();
+            st.cursor.select(SelectionType::LineUnderCursor);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Move the caret to an absolute character position. Collapses any
+    /// existing selection (passes [`MoveMode::MoveAnchor`]).
+    pub fn set_caret_position(&self, position: usize) {
+        {
+            let st = self.state.borrow();
+            st.cursor.set_position(position, MoveMode::MoveAnchor);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- Character-format commands ----------------------------------------
+    //
+    // Each setter writes to `TextCursor::merge_char_format`, which
+    // applies to the current selection (or acts as a typing format when
+    // there is no selection — see text-document's semantics). Toggle
+    // variants (`toggle_bold`, `toggle_italic`, `toggle_underline`,
+    // `toggle_strikethrough`) read the current state via
+    // [`caret_char_format`](Self::caret_char_format) first and flip,
+    // which matches the Ctrl+B / Ctrl+I / Ctrl+U keyboard shortcuts.
+
+    fn apply_char_format(&self, fmt: TextFormat) {
+        let st = self.state.borrow();
+        let _ = st.cursor.merge_char_format(&fmt);
+        // `pending_format_changed` gets set by `drain_events` when the
+        // document emits its `FormatChanged` event in response to the
+        // cursor mutation, so no manual bookkeeping is needed here.
+    }
+
+    /// Apply **bold** to the current selection (or set the typing bold
+    /// state when no selection is active). Pairs with
+    /// [`is_bold`](Self::is_bold) and [`toggle_bold`](Self::toggle_bold).
+    pub fn set_bold(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_bold: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Apply *italic* to the current selection.
+    pub fn set_italic(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_italic: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Apply underline to the current selection.
+    pub fn set_underline(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_underline: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Apply strikethrough to the current selection.
+    pub fn set_strikethrough(&self, enabled: bool) {
+        self.apply_char_format(TextFormat {
+            font_strikeout: Some(enabled),
+            ..Default::default()
+        });
+    }
+
+    /// Set the font size (in points) for the current selection.
+    pub fn set_font_size(&self, size: u32) {
+        self.apply_char_format(TextFormat {
+            font_point_size: Some(size),
+            ..Default::default()
+        });
+    }
+
+    /// Set the font family for the current selection. `family` must be
+    /// a name resolvable by the shared typesetter's font registrar.
+    pub fn set_font_family(&self, family: impl Into<String>) {
+        self.apply_char_format(TextFormat {
+            font_family: Some(family.into()),
+            ..Default::default()
+        });
+    }
+
+    /// Toggle bold on the current selection, reading the current state
+    /// via [`caret_char_format`](Self::caret_char_format). Matches the
+    /// Ctrl+B keyboard shortcut's behaviour.
+    pub fn toggle_bold(&self) {
+        let current = self.caret_char_format().font_bold.unwrap_or(false);
+        self.set_bold(!current);
+    }
+
+    /// Toggle italic; see [`toggle_bold`](Self::toggle_bold).
+    pub fn toggle_italic(&self) {
+        let current = self.caret_char_format().font_italic.unwrap_or(false);
+        self.set_italic(!current);
+    }
+
+    /// Toggle underline; see [`toggle_bold`](Self::toggle_bold).
+    pub fn toggle_underline(&self) {
+        let current = self.caret_char_format().font_underline.unwrap_or(false);
+        self.set_underline(!current);
+    }
+
+    /// Toggle strikethrough; see [`toggle_bold`](Self::toggle_bold).
+    pub fn toggle_strikethrough(&self) {
+        let current = self.caret_char_format().font_strikeout.unwrap_or(false);
+        self.set_strikethrough(!current);
+    }
+
+    // --- Block-format commands --------------------------------------------
+
+    /// Set an arbitrary [`BlockFormat`] on the caret's current block.
+    /// The higher-level helpers [`set_alignment`](Self::set_alignment)
+    /// and [`set_heading_level`](Self::set_heading_level) go through
+    /// this method. Exposed so apps that need less common fields
+    /// (`indent`, `left_margin`, `line_height`, …) don't have to
+    /// reach through `TextDocument::cursor()` and lose the widget's
+    /// caret continuity.
+    pub fn apply_block_format(&self, fmt: BlockFormat) {
+        let st = self.state.borrow();
+        let _ = st.cursor.set_block_format(&fmt);
+        // See `apply_char_format` — `FormatChanged` propagates
+        // through `drain_events` and updates `pending_format_changed`
+        // + `format_version` there.
+    }
+
+    /// Set an arbitrary [`TextFormat`] on the current selection.
+    /// Public counterpart of the private `apply_char_format` helper,
+    /// for apps that need fields beyond the dedicated
+    /// `set_bold` / `set_italic` / … setters (e.g. `letter_spacing`,
+    /// `foreground_color`).
+    pub fn apply_text_format(&self, fmt: TextFormat) {
+        self.apply_char_format(fmt);
+    }
+
+    /// Set the paragraph alignment for the current block (or the block
+    /// containing the selection anchor).
+    pub fn set_alignment(&self, alignment: Alignment) {
+        self.apply_block_format(BlockFormat {
+            alignment: Some(alignment),
+            ..Default::default()
+        });
+    }
+
+    /// Set the heading level of the current block. `0` = plain
+    /// paragraph; `1..=6` follow the HTML `<h1>..<h6>` convention.
+    pub fn set_heading_level(&self, level: u8) {
+        self.apply_block_format(BlockFormat {
+            heading_level: Some(level),
+            ..Default::default()
+        });
+    }
+
+    // --- List commands ----------------------------------------------------
+
+    /// Create a list at the current selection. `ordered = true` uses
+    /// decimal numbering; `ordered = false` uses a bullet disc.
+    /// Choose a specific style with [`create_list`](Self::create_list).
+    pub fn insert_list(&self, ordered: bool) {
+        let style = if ordered {
+            ListStyle::Decimal
+        } else {
+            ListStyle::Disc
+        };
+        self.create_list(style);
+    }
+
+    /// Create a list with an explicit [`ListStyle`]. Exposed for
+    /// applications that want e.g. lowercase Roman numerals or circle
+    /// bullets.
+    pub fn create_list(&self, style: ListStyle) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.create_list(style);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- Table commands ---------------------------------------------------
+    //
+    // Each table command drops through `sync_cursor_signals` because
+    // the underlying `cursor.*` calls move the caret (insert_table
+    // lands past the new table; row/column ops may shift the caret's
+    // logical position). Callers observing `cursor_position_signal`
+    // see the post-operation position without waiting for the next
+    // frame tick.
+
+    /// Insert a fresh `rows × columns` table at the caret. Any
+    /// existing selection is replaced.
+    pub fn insert_table(&self, rows: usize, columns: usize) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_table(rows, columns);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Remove the table containing the caret (if any). No-op when the
+    /// caret is not inside a table.
+    pub fn remove_current_table(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.remove_current_table();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a row above the caret's current table row. No-op when
+    /// outside a table.
+    pub fn insert_row_above(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_row_above();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a row below the caret's current table row.
+    pub fn insert_row_below(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_row_below();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a column before the caret's current table column.
+    pub fn insert_column_before(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_column_before();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Insert a column after the caret's current table column.
+    pub fn insert_column_after(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.insert_column_after();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Remove the caret's current table row.
+    pub fn remove_current_row(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.remove_current_row();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Remove the caret's current table column.
+    pub fn remove_current_column(&self) {
+        {
+            let st = self.state.borrow();
+            let _ = st.cursor.remove_current_column();
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Whether the caret is currently inside a table cell.
+    pub fn is_in_table(&self) -> bool {
+        self.state.borrow().cursor.current_table().is_some()
+    }
+
+    // --- Format query methods (toolbar state) -----------------------------
+    //
+    // Every query goes through [`caret_char_format`](Self::caret_char_format)
+    // which honours the selection-start rule — toolbar buttons reflect
+    // "the format of what's selected," not "the format after the
+    // selection ends."
+
+    /// Whether the current selection / typing position is bold.
+    pub fn is_bold(&self) -> bool {
+        self.caret_char_format().font_bold.unwrap_or(false)
+    }
+
+    /// Whether italic.
+    pub fn is_italic(&self) -> bool {
+        self.caret_char_format().font_italic.unwrap_or(false)
+    }
+
+    /// Whether underline.
+    pub fn is_underline(&self) -> bool {
+        self.caret_char_format().font_underline.unwrap_or(false)
+    }
+
+    /// Whether strikethrough.
+    pub fn is_strikethrough(&self) -> bool {
+        self.caret_char_format().font_strikeout.unwrap_or(false)
+    }
+
+    /// Current heading level (0 = plain paragraph). Reads the caret's
+    /// current block format.
+    pub fn get_heading_level(&self) -> u8 {
+        self.state
+            .borrow()
+            .cursor
+            .block_format()
+            .ok()
+            .and_then(|f| f.heading_level)
+            .unwrap_or(0)
+    }
+
+    /// Current block alignment.
+    pub fn get_alignment(&self) -> Alignment {
+        self.state
+            .borrow()
+            .cursor
+            .block_format()
+            .ok()
+            .and_then(|f| f.alignment)
+            .unwrap_or(Alignment::Left)
+    }
+
+    // --- Clipboard (programmatic) -----------------------------------------
+    //
+    // Direct programmatic counterparts of Ctrl+C / Ctrl+X / Ctrl+V /
+    // Ctrl+Shift+V. The `ctx` argument is the active
+    // [`EventContext`](fern_core::widget::EventContext) — the clipboard
+    // lookup flows through `ctx.app_state::<ClipboardHandle>()` which
+    // only has a value during event dispatch. Callers outside that
+    // scope (e.g. ambient "restore from file" flows) should operate on
+    // the `TextDocument` and the app-level clipboard directly.
+
+    /// Copy the current selection to the system clipboard (plain +
+    /// HTML payloads). No-op when there is no selection.
+    ///
+    /// All clipboard methods take `&EventContext` because they only
+    /// need read access — the clipboard handle is looked up via
+    /// `ctx.app_state::<ClipboardHandle>()`. A call site that holds
+    /// `&mut EventContext` can pass `&ctx` directly; Rust reborrows
+    /// automatically.
+    pub fn copy(&self, ctx: &fern_core::widget::EventContext) {
+        let mut st = self.state.borrow_mut();
+        clipboard::copy(&mut st, ctx);
+    }
+
+    /// Cut the current selection: copy first, then remove.
+    pub fn cut(&self, ctx: &fern_core::widget::EventContext) {
+        {
+            let mut st = self.state.borrow_mut();
+            clipboard::cut(&mut st, ctx);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Paste from the system clipboard. Prefers an in-process fragment
+    /// over HTML over plain text — see
+    /// [`rich_text/clipboard.rs`](crate::rich_text::clipboard).
+    pub fn paste(&self, ctx: &fern_core::widget::EventContext) {
+        {
+            let mut st = self.state.borrow_mut();
+            clipboard::paste(&mut st, ctx);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    /// Paste plain text only, stripping any rich payload.
+    pub fn paste_unformatted(&self, ctx: &fern_core::widget::EventContext) {
+        {
+            let mut st = self.state.borrow_mut();
+            clipboard::paste_unformatted(&mut st, ctx);
+        }
+        sync_cursor_signals(&self.state);
+    }
+
+    // --- Runtime zoom -----------------------------------------------------
+
+    /// Set the editor's zoom level. Re-lays out immediately; triggers
+    /// a repaint via the engine's dirty tracking on the next frame.
+    pub fn set_zoom_level(&self, zoom: f32) {
+        let mut st = self.state.borrow_mut();
+        st.engine.set_zoom(zoom.clamp(0.1, 10.0));
+        st.needs_full_layout = true;
+        st.content_dirty = true;
+    }
+
+    /// Current zoom level.
+    pub fn get_zoom_level(&self) -> f32 {
+        self.state.borrow().engine.zoom()
+    }
+
+    // --- Observability: reactive version counters -------------------------
+
+    /// Signal that bumps on every format-only document event (bold /
+    /// italic / heading / alignment / list style changes …).
+    /// Distinct from [`document_version`](Self::document_version),
+    /// which also bumps on content changes. Useful for toolbar
+    /// observers that want to refresh button state on format changes
+    /// without flickering during plain typing.
+    pub fn format_version(&self) -> Signal<u64> {
+        self.state.borrow().format_version.clone()
+    }
+
+    /// Signal that bumps once per document-loaded event (fires when
+    /// an async `set_html` / `set_markdown` import completes). Starts
+    /// at 0; observers see a new value each time a long import
+    /// finishes.
+    pub fn document_loaded_count(&self) -> Signal<u64> {
+        self.state.borrow().document_loaded_count.clone()
+    }
+
+    // --- Link / image click callbacks -------------------------------------
+    //
+    // Installed via builder methods (below). The widget fires these
+    // on a Primary PointerDown whose hit lands on a `HitRegion::Link`
+    // or `HitRegion::Image`, before any caret placement.
+
+    /// Install a callback fired when the user Primary-clicks a link
+    /// (an element with an anchor `href`). The callback receives the
+    /// href string and the active [`EventContext`].
+    ///
+    /// The callback replaces any prior link-click callback on this
+    /// builder chain. To stop observing, reconstruct the editor
+    /// without the setter.
+    pub fn on_link_activated(
+        self,
+        handler: impl Fn(&str, &mut fern_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.state.borrow_mut().on_link_activated =
+            Some(std::rc::Rc::new(handler));
+        self
+    }
+
+    /// Install a callback fired when the user Primary-clicks an inline
+    /// image. The callback receives the image's resource name and the
+    /// active [`EventContext`].
+    pub fn on_image_activated(
+        self,
+        handler: impl Fn(&str, &mut fern_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.state.borrow_mut().on_image_activated =
+            Some(std::rc::Rc::new(handler));
+        self
     }
 }
 
@@ -506,6 +1088,26 @@ impl Widget for RichTextEditor {
                     handle_access_action_request(&state, action, target_node, data, ctx)
                 }
             });
+
+        // Context-menu factory. Installed via the framework's
+        // `HandlerSet::context_menu` plumbing so the right-click
+        // interception, overlay placement (AtPointer), and dismiss
+        // behaviour all come for free from
+        // `show_context_menu_for` — no manual overlay wiring, no
+        // arena-parenting of the menu under the editor.
+        //
+        // Precedence: user-supplied factory wins over the default;
+        // `default_context_menu(false)` with no user factory means
+        // no factory at all, and right-click bubbles.
+        let policy_snapshot = self.state.borrow().policy;
+        if let Some(factory) = context_menu::resolve_factory(
+            self.custom_context_menu.take(),
+            self.default_context_menu_enabled,
+            self.state.clone(),
+            policy_snapshot,
+        ) {
+            handlers = handlers.context_menu(move || factory());
+        }
 
         ctx.apply_self_handlers(handlers);
         Vec::new()

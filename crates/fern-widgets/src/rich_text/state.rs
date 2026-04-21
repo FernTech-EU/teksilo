@@ -30,6 +30,16 @@ pub(crate) struct EditorState {
 
     // Reactive bridge — cloned into children (scroll bars, selection badges, etc.)
     pub document_version: Signal<u64>,
+    /// Bumps **only** on format-only document events
+    /// ([`DocumentEvent::FormatChanged`]). Distinct from
+    /// `document_version`, which bumps on both content and format
+    /// changes — toolbars that want to react to just format changes
+    /// (e.g. refresh Bold / Italic button state) observe this signal.
+    pub format_version: Signal<u64>,
+    /// Bumps once per [`DocumentEvent::LongOperationFinished`]. Starts
+    /// at 0; observers see a strictly increasing count as async
+    /// `set_html` / `set_markdown` imports complete.
+    pub document_loaded_count: Signal<u64>,
     pub has_selection: Signal<bool>,
     pub caret_visible: Signal<bool>,
     pub cursor_position: Signal<usize>,
@@ -180,6 +190,21 @@ pub(crate) struct EditorState {
         std::collections::HashMap<fern_core::accesskit::NodeId, SyntheticElementRef>,
     >,
 
+    /// Callback invoked on a Primary-click whose hit lands on a
+    /// `HitRegion::Link`. Installed via
+    /// [`RichTextEditor::on_link_activated`](super::RichTextEditor::on_link_activated).
+    /// `Rc` rather than `Box` so the mouse handler can clone it out
+    /// of the state borrow to invoke — running the callback itself
+    /// with `state.borrow()` held would deadlock if the handler calls
+    /// back into the widget's API.
+    pub on_link_activated:
+        Option<std::rc::Rc<dyn Fn(&str, &mut fern_core::widget::EventContext)>>,
+    /// Callback invoked on a Primary-click whose hit lands on a
+    /// `HitRegion::Image`. Same Rc / borrow-release convention as
+    /// [`on_link_activated`](Self::on_link_activated).
+    pub on_image_activated:
+        Option<std::rc::Rc<dyn Fn(&str, &mut fern_core::widget::EventContext)>>,
+
     /// `(table_id, row, column, rows, columns)` remembered from the
     /// Ctrl+A ladder's level-1 call. After `select(BlockUnderCursor)`
     /// the cursor's position lands on the boundary between the
@@ -274,6 +299,8 @@ impl EditorState {
             cursor,
             policy,
             document_version: Signal::new(0),
+            format_version: Signal::new(0),
+            document_loaded_count: Signal::new(0),
             has_selection: Signal::new(false),
             caret_visible,
             cursor_position: Signal::new(0),
@@ -313,6 +340,8 @@ impl EditorState {
             drag_state: DragState::Idle,
             rich_clipboard_fragment: None,
             rich_clipboard_plain: None,
+            on_link_activated: None,
+            on_image_activated: None,
             select_all_level: 0,
             select_all_anchor_cell: None,
             accessibility_flow_snapshot: RefCell::new(None),
@@ -345,6 +374,8 @@ impl EditorState {
         // propagation, so the widget tree's a11y_dirty flag will
         // flip during process_state_changes in the same frame.
         let mut a11y_snapshot_dirty = false;
+        let mut saw_format_change = false;
+        let mut document_loaded_pulses = 0_u64;
         for event in drained {
             had_events = true;
             match event {
@@ -364,6 +395,7 @@ impl EditorState {
                 }
                 DocumentEvent::FormatChanged { .. } => {
                     self.pending_format_changed = true;
+                    saw_format_change = true;
                     a11y_snapshot_dirty = true;
                     self.needs_full_layout = true;
                     single_pos = None;
@@ -384,10 +416,33 @@ impl EditorState {
                     // not per keystroke.
                     self.pending_undo_redo = Some((can_undo, can_redo));
                 }
+                DocumentEvent::LongOperationFinished { .. } => {
+                    document_loaded_pulses += 1;
+                }
                 DocumentEvent::ModificationChanged(_)
-                | DocumentEvent::LongOperationProgress { .. }
-                | DocumentEvent::LongOperationFinished { .. } => {}
+                | DocumentEvent::LongOperationProgress { .. } => {}
             }
+        }
+
+        // Bump format_version once per batch if any event in the batch
+        // was a FormatChanged. Multiple FormatChanged events in the
+        // same frame collapse into a single pulse — observers see the
+        // batched count, not per-event fires, which matches how the
+        // paint pass already batches work.
+        if saw_format_change {
+            self.format_version
+                .set(self.format_version.get().wrapping_add(1));
+        }
+        // Document-loaded pulses accumulate: a batch with two
+        // LongOperationFinished events bumps by 2 so observers can
+        // count imports correctly (rare but possible if two async
+        // loads finish in the same tick).
+        if document_loaded_pulses > 0 {
+            self.document_loaded_count.set(
+                self.document_loaded_count
+                    .get()
+                    .wrapping_add(document_loaded_pulses),
+            );
         }
 
         if had_events {

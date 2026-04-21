@@ -13,6 +13,21 @@ pub enum EditCommandKind {
     // Editing
     InsertChar,
     InsertBlock,
+    /// Explicit block-insert, bypassing any Enter-in-table-cell
+    /// navigation (Ctrl+Enter). Separate from `InsertBlock` so an
+    /// app that wants only one of the two behaviours can gate them
+    /// independently through the `CommandFilter`.
+    InsertBlockForced,
+    /// Literal tab insertion (Tab key outside tables and lists).
+    InsertTab,
+    /// Navigate to an adjacent table cell (Tab / Shift+Tab when the
+    /// caret is inside a table).
+    NavigateTableCell,
+    /// Enter inside a table cell: navigate to the cell below (or
+    /// step out of the table on the last row).
+    NavigateTableCellDown,
+    /// Exit a list item (Backspace at block-start, indent 0).
+    ExitList,
     DeletePrev,
     DeleteNext,
     DeleteWordLeft,
@@ -71,6 +86,11 @@ impl EditCommandKind {
             self,
             Self::InsertChar
                 | Self::InsertBlock
+                | Self::InsertBlockForced
+                | Self::InsertTab
+                | Self::ExitList
+                | Self::NavigateTableCell
+                | Self::NavigateTableCellDown
                 | Self::DeletePrev
                 | Self::DeleteNext
                 | Self::DeleteWordLeft

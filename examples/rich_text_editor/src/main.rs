@@ -22,6 +22,11 @@
 //!     payloads on copy so rich paste into Firefox, Word, or Google
 //!     Docs keeps the formatting; paste from those apps parses their
 //!     HTML back into the document.
+//!   * Right-click opens the built-in Cut / Copy / Paste / Paste
+//!     Unformatted / Select All menu. Items reflect the live
+//!     selection / policy state — Cut and Copy are greyed when there
+//!     is no selection; the read-only preset shows only Copy +
+//!     Select All.
 //!   * Double-click a word → selects it. Triple-click → selects the
 //!     paragraph. Both via cooperative double/triple tap recognizers.
 //!   * Drag from inside text to near the top or bottom edge → selection
@@ -64,6 +69,22 @@ manual state shuffling, no `poll_events()` starvation problem.
   italic, lists, tables — anything text-document's HTML importer
   recognises.
 - Ctrl+Shift+V pastes as plain text (`EditCommandKind::PasteUnformatted`).
+- Tab: inside a table, moves to the next cell (auto-inserts a row at
+  the last cell); at the start of a list item, increases indent;
+  otherwise inserts a literal tab. Shift+Tab is the inverse.
+- Ctrl+Enter always inserts a block, bypassing the "Enter-in-table
+  navigates to the cell below" behaviour.
+- Backspace at the start of an indented list item dedents; at indent
+  zero it exits the list.
+- Shift+Arrow at a cell boundary activates rectangular cell selection;
+  further Shift+Arrows extend the rectangle.
+- Links and images are clickable — install callbacks via
+  `.on_link_activated(...)` / `.on_image_activated(...)` on the editor.
+- Right-click for Cut / Copy / Paste / Paste Unformatted / Select All.
+  Item availability (Cut/Copy require a selection, Select All requires
+  a non-empty document) refreshes on every open. Read-only preset ships
+  a trimmed Copy + Select All variant. Apps that want to override
+  pass their own factory via `RichTextEditor::context_menu(...)`.
 - Ctrl+A single-shot select-all (the 4-level ladder is inside a table
   cell only — try this document's paragraphs and you'll see the
   single-shot behaviour).
@@ -71,11 +92,6 @@ manual state shuffling, no `poll_events()` starvation problem.
 ## Not here yet
 
 - IME composition (M10).
-- Built-in right-click context menu — the editor exposes
-  `context_target_at(point)` so the host application builds its own
-  menu. A default menu is tracked as a post-M8 follow-up, pending a
-  fern-core reorder of `collect_from_ctx` so intents drain before
-  overlay dismissal.
 - RTF clipboard payload — the long-tail rich fallback for Pages /
   TextEdit / older Windows apps that don't emit HTML. HTML covers
   Firefox, Word, Google Docs, Apple Notes.
