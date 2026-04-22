@@ -12,19 +12,26 @@
 //! error propagation — the user sees nothing happen and the command
 //! filter's UI affordance drives the expectation.
 //!
-//! Self-round-trip detection uses plain-text equality between the
-//! stored fragment's plain text and the system clipboard text. This is
-//! a known limitation from the reference: two copies of identical
-//! plain text with different formatting lose their distinction. A
-//! post-M8 fix would embed an internal marker header in the system
-//! clipboard to disambiguate. Until then, paste-into-the-same-editor
-//! is rich, paste-from-another-app is plain, and that's the
-//! intentional tradeoff.
+//! Self-round-trip detection embeds an opaque marker as an HTML
+//! comment at the head of the clipboard HTML payload and re-reads it
+//! on paste. Plain-text equality alone is ambiguous — two different
+//! apps can publish identical plain text with different formatting —
+//! so the marker is the reliable signal that *this* editor wrote the
+//! clipboard. The marker is regenerated on every copy/cut so a stale
+//! state from an earlier session can never accidentally match a later
+//! external copy whose plain text happens to coincide.
+
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use fern_core::widget::EventContext;
 use fern_platform::clipboard::ClipboardHandle;
 
 use super::state::EditorState;
+
+/// HTML comment prefix embedded in the clipboard payload to flag a
+/// self-copy. The trailing hex token is regenerated per copy.
+const MARKER_PREFIX: &str = "<!--fern-rtc:";
+const MARKER_SUFFIX: &str = "-->";
 
 /// Copy the current selection to the system clipboard. No-op when
 /// there is no selection — matches editor convention (the menu item
@@ -49,7 +56,8 @@ pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
     }
     let fragment = state.cursor.selection();
     let plain = fragment.to_plain_text().to_string();
-    let html = fragment.to_html();
+    let marker = new_marker();
+    let html = format!("{MARKER_PREFIX}{marker}{MARKER_SUFFIX}{}", fragment.to_html());
     if let Some(cb) = ctx.app_state::<ClipboardHandle>() {
         // `set_html` writes both payloads in one transaction. Backends
         // without native HTML support see the default trait body and
@@ -58,6 +66,30 @@ pub(crate) fn copy(state: &mut EditorState, ctx: &EventContext) {
     }
     state.rich_clipboard_fragment = Some(fragment);
     state.rich_clipboard_plain = Some(plain);
+    state.rich_clipboard_marker = Some(marker);
+}
+
+/// Generate a unique per-copy marker. Mixes a monotonic nanosecond
+/// timestamp with the fragment's memory identity so back-to-back
+/// copies in the same millisecond still differ. Not a cryptographic
+/// identifier — the only requirement is that an unrelated app can't
+/// plausibly emit the same string.
+fn new_marker() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:032x}")
+}
+
+/// Extract the marker token from a clipboard HTML payload written by
+/// `copy`. Returns `None` for any payload that doesn't start with
+/// `<!--fern-rtc:...-->` — which covers every payload emitted by any
+/// other app.
+fn payload_marker(html: &str) -> Option<&str> {
+    let rest = html.strip_prefix(MARKER_PREFIX)?;
+    let end = rest.find(MARKER_SUFFIX)?;
+    Some(&rest[..end])
 }
 
 /// Cut the current selection: copy first, then remove. `pending_text_changed`
@@ -99,31 +131,32 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
         return;
     };
 
-    // 1. Self-round-trip rich fragment. Check plain text first because
-    //    the comparison is cheap; only commit to the fragment insert
-    //    when we know it matches.
-    if let Ok(system) = cb.get_text() {
-        if !system.is_empty()
-            && state.rich_clipboard_plain.as_deref() == Some(system.as_str())
-            && let Some(frag) = state.rich_clipboard_fragment.as_ref()
-        {
-            let _ = state.cursor.insert_fragment(&frag.clone());
-            state.cursor.clear_selection();
-            state.pending_text_changed = true;
-            return;
-        }
+    // 1. Self-round-trip rich fragment. Inspect the HTML payload for
+    //    our marker rather than comparing plain text, which is
+    //    ambiguous across apps.
+    let html_payload: Option<String> = if cb.has_html() {
+        cb.get_html().ok().filter(|h| !h.is_empty())
+    } else {
+        None
+    };
+    if let (Some(html), Some(stored_marker)) =
+        (html_payload.as_deref(), state.rich_clipboard_marker.as_deref())
+        && payload_marker(html).is_some_and(|m| m == stored_marker)
+        && let Some(frag) = state.rich_clipboard_fragment.as_ref()
+    {
+        let _ = state.cursor.insert_fragment(&frag.clone());
+        state.cursor.clear_selection();
+        state.pending_text_changed = true;
+        return;
     }
 
-    // 2. External HTML payload. `has_html` probes the clipboard once
-    //    per paste — on X11 this is a round-trip to the selection
-    //    owner, acceptable because paste is a rare user-initiated
-    //    action. `TextCursor::insert_html` is a single call that
-    //    parses the HTML into a `DocumentFragment` (via text-document's
+    // 2. External HTML payload. Re-uses the payload we already fetched
+    //    above when present; the marker check proved it's not ours.
+    //    `TextCursor::insert_html` parses the HTML into a
+    //    `DocumentFragment` (via text-document's
     //    `DocumentFragment::from_html`) and inserts it at the caret.
-    if cb.has_html()
-        && let Ok(html) = cb.get_html()
-        && !html.is_empty()
-        && state.cursor.insert_html(&html).is_ok()
+    if let Some(html) = html_payload.as_deref()
+        && state.cursor.insert_html(html).is_ok()
     {
         state.cursor.clear_selection();
         state.pending_text_changed = true;

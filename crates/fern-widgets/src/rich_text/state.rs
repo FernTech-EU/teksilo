@@ -153,11 +153,19 @@ pub(crate) struct EditorState {
     pub drag_state: DragState,
 
     /// In-process rich clipboard fragment captured by the last Ctrl+C /
-    /// Ctrl+X. Compared against the system clipboard plain text on
-    /// paste — if they match, the fragment is reinserted to preserve
-    /// formatting; otherwise the system text lands as plain text.
+    /// Ctrl+X. On paste the HTML payload is inspected for
+    /// `rich_clipboard_marker`; on a match the fragment is reinserted
+    /// to preserve formatting, otherwise the system text lands as plain
+    /// text. Plain-text equality alone is not sufficient because two
+    /// different apps can publish identical plain text with different
+    /// formatting; the embedded marker disambiguates.
     pub rich_clipboard_fragment: Option<DocumentFragment>,
     pub rich_clipboard_plain: Option<String>,
+    /// Opaque token embedded as an HTML comment in the clipboard HTML
+    /// payload of the most recent copy/cut. Regenerated on every copy,
+    /// so stale markers from a previous session or a cleared state
+    /// never match.
+    pub rich_clipboard_marker: Option<String>,
 
     /// Ctrl+A escalation ladder position. See `keyboard.rs`: when the
     /// caret is inside a table cell the ladder climbs through 4 levels
@@ -340,6 +348,7 @@ impl EditorState {
             drag_state: DragState::Idle,
             rich_clipboard_fragment: None,
             rich_clipboard_plain: None,
+            rich_clipboard_marker: None,
             on_link_activated: None,
             on_image_activated: None,
             select_all_level: 0,

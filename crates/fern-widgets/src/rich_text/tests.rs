@@ -1585,6 +1585,81 @@ fn editor_paste_unformatted_strips_html_to_plain() {
 }
 
 #[test]
+fn editor_paste_external_identical_plain_does_not_reuse_stale_fragment() {
+    // Regression: previously the self-round-trip check compared plain
+    // text only, so after an internal copy of "foo" (bold), an external
+    // copy of "foo" (plain) with identical text would re-insert the
+    // bold fragment. The marker-based check must distinguish them.
+    let doc = TextDocument::new();
+    doc.set_plain_text("foo").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    // Step 1: select "foo" and make it bold, then copy internally.
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Home,
+        fern_core::event::Modifiers::CTRL,
+    );
+    for _ in 0..3 {
+        press_key(
+            &mut tree,
+            fern_core::event::Key::ArrowRight,
+            fern_core::event::Modifiers::SHIFT,
+        );
+    }
+    press_key(
+        &mut tree,
+        fern_core::event::Key::B,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::C,
+        fern_core::event::Modifiers::CTRL,
+    );
+
+    // Step 2: simulate another app overwriting the clipboard with the
+    // same plain text but **no HTML** — the marker check should miss.
+    clipboard.set_text("foo").unwrap();
+
+    // Reset document so we can verify what gets pasted afresh.
+    doc.set_plain_text("").unwrap();
+    press_key(
+        &mut tree,
+        fern_core::event::Key::End,
+        fern_core::event::Modifiers::CTRL,
+    );
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    // Paste must land as plain text (no bold) because the clipboard
+    // no longer carries our marker.
+    let plain = doc.to_plain_text().unwrap_or_default();
+    assert!(plain.contains("foo"), "plain paste must succeed, got {plain:?}");
+    let probe = doc.cursor();
+    probe.set_position(
+        plain.find("foo").unwrap(),
+        fern_text::text_document::MoveMode::MoveAnchor,
+    );
+    let fmt = probe.char_format().unwrap_or_default();
+    assert!(
+        !matches!(fmt.font_bold, Some(true)),
+        "external plain paste must NOT reuse stale bold fragment — got {:?}",
+        fmt.font_bold
+    );
+}
+
+#[test]
 fn editor_paste_plain_text_with_newlines_splits_into_blocks() {
     // A multi-line plain clipboard payload (e.g. copied from a
     // terminal or a text file) must produce separate blocks per
