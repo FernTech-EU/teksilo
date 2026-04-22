@@ -127,6 +127,20 @@ pub(crate) struct EditorState {
     /// O(keystrokes).
     pub pending_chars: String,
 
+    /// Active IME preedit text — the unfinalised string the input
+    /// method renders while the user is composing (CJK, Korean,
+    /// dead-key accents on Linux). `Some(text)` means there is a
+    /// tentative insert at `ime_preedit_range`; empty text + `Some`
+    /// means the composition was cancelled but the old range still
+    /// needs clearing. `None` means no active composition.
+    pub ime_preedit: Option<String>,
+    /// Character range (scalar-indexed, matching
+    /// `TextCursor::position`) of the tentative preedit insert. The
+    /// composition handler removes this range before inserting the
+    /// next preedit string so the document always reflects the
+    /// current IME state.
+    pub ime_preedit_range: Option<std::ops::Range<usize>>,
+
     /// Seconds since the last debounce drain. Starts at `1.0`
     /// (already expired) so the very first frame after construction
     /// publishes `can_undo`/`can_redo` immediately without having to
@@ -337,6 +351,8 @@ impl EditorState {
             frame_request: None,
             frame_wake_at: None,
             pending_chars: String::new(),
+            ime_preedit: None,
+            ime_preedit_range: None,
             // Godot reference starts `debounce_timer` at 1.0 (already
             // expired, > 0.15 s window) so the first tick flushes the
             // initial state immediately instead of waiting 150 ms for

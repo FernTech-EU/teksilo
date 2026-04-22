@@ -532,7 +532,10 @@ impl WidgetTree {
         ctx: &mut EventContext,
     ) -> Option<EventResponse> {
         match event {
-            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => None,
+            WidgetEvent::KeyDown { .. }
+            | WidgetEvent::KeyUp { .. }
+            | WidgetEvent::ImeComposition { .. }
+            | WidgetEvent::ImeCommit { .. } => None,
             _ => {
                 let has = node.external_handlers.on_pointer_event.is_some()
                     || node.handlers.on_pointer_event.is_some();
@@ -626,7 +629,10 @@ impl WidgetTree {
                 }
                 fired.then_some(EventResponse::Handled)
             }
-            WidgetEvent::KeyDown { .. } | WidgetEvent::KeyUp { .. } => {
+            WidgetEvent::KeyDown { .. }
+            | WidgetEvent::KeyUp { .. }
+            | WidgetEvent::ImeComposition { .. }
+            | WidgetEvent::ImeCommit { .. } => {
                 if node.external_handlers.on_key.is_some() || node.handlers.on_key.is_some() {
                     Some(fire_event_handler_both(
                         &mut node.external_handlers.on_key,

@@ -1,6 +1,6 @@
 //! Keyboard dispatch for the rich text editor.
 //!
-//! This module owns the full `KeyDown` / `ImeCommit` dispatch: navigation
+//! This module owns the full `KeyDown` / `ImeComposition` / `ImeCommit` dispatch: navigation
 //! (arrows, Home/End, PageUp/Down), editing (Backspace, Delete, Enter,
 //! `Ctrl+Backspace` / `Ctrl+Delete` for word‑level deletion), format
 //! toggles (`Ctrl+B` / `Ctrl+I` / `Ctrl+U`), undo/redo
@@ -42,10 +42,20 @@ pub(super) fn handle_key(
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    // IME commit — one string per composition, already a finalized
-    // grapheme cluster. Treated identically to a KeyDown with printable
-    // text: batched into `pending_chars`, flushed next frame.
+    // IME composition — ongoing preedit (squiggly-underline preview
+    // while the user is still choosing a candidate). Render the
+    // preedit as a tentative insert so the caret position and visible
+    // text match what the input method is showing. Replaced by the
+    // next composition event, or finalised by the matching `ImeCommit`.
+    if let WidgetEvent::ImeComposition { text, .. } = event {
+        return handle_ime_composition(state, ctx, text);
+    }
+
+    // IME commit — the user picked a candidate or typed a printable
+    // key that finalises the sequence. Clear any active preedit and
+    // insert the committed text via the normal `pending_chars` batch.
     if let WidgetEvent::ImeCommit { text } = event {
+        clear_ime_preedit(state);
         return push_pending_chars(state, ctx, text);
     }
 
@@ -543,6 +553,79 @@ fn toggle_char_format(st: &mut EditorState, bit: FormatBit) {
     };
     let _ = st.cursor.merge_char_format(&fmt);
     st.pending_format_changed = true;
+}
+
+/// Apply an `ImeComposition` event. Removes the previous preedit
+/// range from the document (if any), inserts the new preedit text,
+/// and records the resulting range so the next composition event can
+/// replace it. An empty composition string cancels the preedit and
+/// clears the range without inserting anything.
+fn handle_ime_composition(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+) -> EventResponse {
+    let filter = state.borrow().policy.command_filter;
+    if !filter.accepts(EditCommandKind::InsertChar) {
+        return EventResponse::Ignored;
+    }
+    let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+    {
+        let mut st = state.borrow_mut();
+        // Group the remove+reinsert as a single undo step so a user
+        // undo after composition pops the entire preedit, not each
+        // intermediate candidate.
+        st.cursor.begin_edit_block();
+        if let Some(range) = st.ime_preedit_range.take() {
+            let doc_end = st.document.character_count();
+            let start = range.start.min(doc_end);
+            let end = range.end.min(doc_end);
+            if start < end {
+                st.cursor.set_position(start, MoveMode::MoveAnchor);
+                st.cursor.set_position(end, MoveMode::KeepAnchor);
+                let _ = st.cursor.remove_selected_text();
+            }
+        }
+        if !clean.is_empty() {
+            let start = st.cursor.position();
+            let _ = st.cursor.insert_text(&clean);
+            let end = st.cursor.position();
+            st.ime_preedit = Some(clean);
+            st.ime_preedit_range = Some(start..end);
+        } else {
+            st.ime_preedit = None;
+        }
+        st.cursor.end_edit_block();
+        st.preferred_x = None;
+        st.pending_text_changed = true;
+    }
+    ctx.request_frame();
+    EventResponse::Handled
+}
+
+/// Drop any active preedit bookkeeping without mutating the document.
+/// Called on commit and on focus loss — the commit path then inserts
+/// the finalised text via the normal `pending_chars` route, and the
+/// document already contains the tentative preedit from the last
+/// composition event, so commit just leaves that text in place.
+fn clear_ime_preedit(state: &SharedState) {
+    let mut st = state.borrow_mut();
+    // On commit, the input method typically sends one final
+    // composition with empty text followed by a commit with the final
+    // string — but some backends skip the empty composition. If the
+    // preedit range is still live, remove it so the commit insert
+    // doesn't duplicate content.
+    if let Some(range) = st.ime_preedit_range.take() {
+        let doc_end = st.document.character_count();
+        let start = range.start.min(doc_end);
+        let end = range.end.min(doc_end);
+        if start < end {
+            st.cursor.set_position(start, MoveMode::MoveAnchor);
+            st.cursor.set_position(end, MoveMode::KeepAnchor);
+            let _ = st.cursor.remove_selected_text();
+        }
+    }
+    st.ime_preedit = None;
 }
 
 /// Shared helper for printable-character ingestion: push the text

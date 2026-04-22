@@ -1585,6 +1585,91 @@ fn editor_paste_unformatted_strips_html_to_plain() {
 }
 
 #[test]
+fn editor_ime_composition_then_commit_inserts_finalised_text() {
+    // A CJK-style composition: two intermediate compositions before
+    // the final commit. The document must reflect the current preedit
+    // at each step, and the final state must contain only the committed
+    // string (no duplicate preedit fragments).
+    use fern_core::event::WidgetEvent;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "n".to_string(),
+        cursor: None,
+    });
+    tree.tick_animations(std::time::Duration::from_millis(16));
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "n");
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "ni".to_string(),
+        cursor: None,
+    });
+    tree.tick_animations(std::time::Duration::from_millis(16));
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "ni");
+
+    tree.dispatch_event(WidgetEvent::ImeCommit {
+        text: "你".to_string(),
+    });
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "你",
+        "commit must replace the preedit with the final character"
+    );
+}
+
+#[test]
+fn editor_ime_composition_cancelled_leaves_document_clean() {
+    // Composition cancelled mid-sequence (empty composition event).
+    // The tentative preedit must be removed entirely.
+    use fern_core::event::WidgetEvent;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("before ").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let _ = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::End,
+        fern_core::event::Modifiers::CTRL,
+    );
+
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "abc".to_string(),
+        cursor: None,
+    });
+    tree.tick_animations(std::time::Duration::from_millis(16));
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "before abc");
+
+    // Cancel: empty composition.
+    tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: String::new(),
+        cursor: None,
+    });
+    tick_past_debounce(&mut tree);
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "before ",
+        "cancelled composition must leave no residue"
+    );
+}
+
+#[test]
 fn editor_paste_external_identical_plain_does_not_reuse_stale_fragment() {
     // Regression: previously the self-round-trip check compared plain
     // text only, so after an internal copy of "foo" (bold), an external
