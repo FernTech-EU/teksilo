@@ -1584,6 +1584,64 @@ fn editor_paste_unformatted_strips_html_to_plain() {
     );
 }
 
+#[test]
+fn editor_paste_plain_text_with_newlines_splits_into_blocks() {
+    // A multi-line plain clipboard payload (e.g. copied from a
+    // terminal or a text file) must produce separate blocks per
+    // line — text-document's `insert_text` stores `\n` as a
+    // literal scalar, so the clipboard path has to split.
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    clipboard.set_text("line one\nline two\nline three").unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(
+        doc.block_count(),
+        3,
+        "multi-line paste must split into 3 blocks, got {} with plain {:?}",
+        doc.block_count(),
+        doc.to_plain_text().unwrap_or_default()
+    );
+}
+
+#[test]
+fn editor_paste_plain_normalises_crlf() {
+    // Windows clipboards deliver `\r\n`; classic Mac apps deliver
+    // `\r`. Both must collapse to a single block boundary.
+    let doc = TextDocument::new();
+    doc.set_plain_text("").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    clipboard.set_text("a\r\nb\rc").unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::V,
+        fern_core::event::Modifiers::CTRL,
+    );
+    tick_past_debounce(&mut tree);
+
+    assert_eq!(doc.block_count(), 3, "CRLF and CR must split like LF");
+}
+
 // ---------------------------------------------------------------------------
 // Default right-click context menu
 // ---------------------------------------------------------------------------

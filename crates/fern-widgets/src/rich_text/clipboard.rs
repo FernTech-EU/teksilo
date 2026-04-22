@@ -84,8 +84,12 @@ pub(crate) fn cut(state: &mut EditorState, ctx: &EventContext) {
 ///    via text-document and insert. This is the path that makes
 ///    rich paste *from another app* work (Firefox, Word, Google Docs,
 ///    etc.).
-/// 3. **Plain-text fallback** — when neither rich path applies, insert
-///    whatever the clipboard's plain text says.
+/// 3. **Plain-text fallback** — when neither rich path applies, split
+///    the clipboard text on `\n` / `\r\n` / `\r` and insert as separate
+///    blocks. Without the split, a multi-line clipboard payload would
+///    collapse into one block with literal newline scalars —
+///    `text-document::TextCursor::insert_text` never splits blocks on
+///    its own.
 ///
 /// Clears any existing selection after insertion so the caret sits at
 /// the end of the pasted content rather than keeping the newly inserted
@@ -133,7 +137,7 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
     if text.is_empty() {
         return;
     }
-    let _ = state.cursor.insert_text(&text);
+    insert_multiline_plain(state, &text);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }
@@ -154,7 +158,27 @@ pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
     if text.is_empty() {
         return;
     }
-    let _ = state.cursor.insert_text(&text);
+    insert_multiline_plain(state, &text);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
+}
+
+/// Insert plain text that may contain line breaks, splitting on
+/// `\n` into separate blocks. `text-document::TextCursor::insert_text`
+/// treats `\n` as a literal scalar inside one block, so pasting a
+/// multi-line clipboard payload without this split leaves every line
+/// fused into one paragraph. Normalises `\r\n` and bare `\r` first so
+/// Windows- and classic-Mac clipboards round-trip cleanly.
+fn insert_multiline_plain(state: &mut EditorState, text: &str) {
+    let normalised = text.replace("\r\n", "\n").replace('\r', "\n");
+    let mut lines = normalised.split('\n');
+    if let Some(first) = lines.next() {
+        let _ = state.cursor.insert_text(first);
+    }
+    for line in lines {
+        let _ = state.cursor.insert_block();
+        if !line.is_empty() {
+            let _ = state.cursor.insert_text(line);
+        }
+    }
 }
