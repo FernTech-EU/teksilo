@@ -14,7 +14,7 @@
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::widget::EventContext;
 use fern_text::text_document::{
-    BlockFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
+    BlockFormat, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef, TextFormat,
 };
 
 use super::clipboard;
@@ -304,10 +304,12 @@ pub(super) fn handle_key(
             {
                 // Shift+Tab (no Ctrl): previous table cell when
                 // inside a table; dedent the current list item when
-                // at block start. Otherwise swallow (prevents
-                // focus-navigation bleed). Ctrl+Shift+Tab is left
-                // unhandled so the OS / app-level focus navigation
-                // can claim it.
+                // the caret sits anywhere inside it (matches standard
+                // word-processor behaviour — the user doesn't need to
+                // move to the exact block start first). Otherwise
+                // swallow (prevents focus-navigation bleed).
+                // Ctrl+Shift+Tab is left unhandled so the OS /
+                // app-level focus navigation can claim it.
                 let cell_info = st.cursor.current_table_cell().map(|c| {
                     (
                         c.table.id(),
@@ -319,7 +321,7 @@ pub(super) fn handle_key(
                 });
                 if let Some((table_id, row, col, rows, cols)) = cell_info {
                     navigate_table_cell(&mut st, table_id, row, col, rows, cols, -1);
-                } else if st.cursor.at_block_start() && is_cursor_in_list(&st) {
+                } else if is_cursor_in_list(&st) {
                     dedent_current_block(&mut st);
                 }
                 KeyAction::ClearPreferredX
@@ -332,7 +334,9 @@ pub(super) fn handle_key(
                 // Tab (no Ctrl, no Shift):
                 //  * Inside a table cell → next cell (wraps to next row;
                 //    at last cell, insert a new row below).
-                //  * At block start inside a list → increase indent.
+                //  * Inside a list item → increase indent. Works from
+                //    any caret position within the block so the user
+                //    doesn't have to Home first.
                 //  * Otherwise → insert a literal `\t`.
                 // Ctrl+Tab is left unhandled (OS focus navigation).
                 let cell_info = st.cursor.current_table_cell().map(|c| {
@@ -346,7 +350,7 @@ pub(super) fn handle_key(
                 });
                 if let Some((table_id, row, col, rows, cols)) = cell_info {
                     navigate_table_cell(&mut st, table_id, row, col, rows, cols, 1);
-                } else if st.cursor.at_block_start() && is_cursor_in_list(&st) {
+                } else if is_cursor_in_list(&st) {
                     indent_current_block(&mut st);
                 } else if filter.accepts(EditCommandKind::InsertTab) {
                     let _ = st.cursor.insert_text("\t");
@@ -844,35 +848,69 @@ fn is_cursor_in_list(st: &EditorState) -> bool {
         .is_some()
 }
 
-/// Increase the current block's `BlockFormat::indent` by 1. Used by
-/// Tab inside a list item.
-fn indent_current_block(st: &mut EditorState) {
-    let Ok(fmt) = st.cursor.block_format() else {
+/// Move the current list item into its own list at `target_indent`,
+/// preserving the parent list's style. Returns silently if the cursor
+/// isn't in a list.
+///
+/// Why split instead of just updating the current list's indent:
+/// `ListFormat::indent` applies to the whole list (all items share
+/// one indent), so bumping it would shift every sibling. To indent
+/// just the current item — the Tab/Shift-Tab behaviour users expect
+/// from Word / Google Docs / Notion — we take the item out of its
+/// current list and put it in a fresh list at the target depth.
+///
+/// Why `ListFormat::indent` and not `BlockFormat::indent`: the
+/// typesetter reads list-item indentation from the **list's** format
+/// (`text-typeset/src/bridge.rs`: `block.list_info.indent`), so
+/// writing `BlockFormat::indent` on a list block has no visual effect.
+///
+/// Caveat: consecutive items Tabbed to the same depth each land in
+/// their own list rather than sharing one. For bullet styles this is
+/// visually indistinguishable; for ordered styles numbering restarts
+/// per sublist. A future pass could merge with an adjacent sibling
+/// list at the same `(style, indent)`.
+fn nest_current_list_item(st: &mut EditorState, target_indent: u8) {
+    let Some(list) = st.cursor.current_list() else {
         return;
     };
-    let level = fmt.indent.unwrap_or(0);
-    let new_fmt = BlockFormat {
-        indent: Some(level.saturating_add(1)),
+    let style = list.style();
+    st.cursor.begin_edit_block();
+    let _ = st.cursor.remove_current_block_from_list();
+    let _ = st.cursor.create_list(style);
+    let _ = st.cursor.set_current_list_format(&ListFormat {
+        indent: Some(target_indent),
         ..Default::default()
-    };
-    let _ = st.cursor.set_block_format(&new_fmt);
+    });
+    st.cursor.end_edit_block();
 }
 
-/// Decrease the current block's `BlockFormat::indent` by 1 (saturates
-/// at 0). Used by Shift+Tab inside a list item.
-fn dedent_current_block(st: &mut EditorState) {
-    let Ok(fmt) = st.cursor.block_format() else {
+/// Increase the current item's nesting depth by 1. Used by Tab
+/// inside a list item. See [`nest_current_list_item`] for the split
+/// rationale.
+fn indent_current_block(st: &mut EditorState) {
+    let Some(list) = st.cursor.current_list() else {
         return;
     };
-    let level = fmt.indent.unwrap_or(0);
+    let level = list.indent();
+    let target = level.saturating_add(1);
+    if target == level {
+        return;
+    }
+    nest_current_list_item(st, target);
+}
+
+/// Decrease the current item's nesting depth by 1. Used by Shift+Tab
+/// inside a list item. At depth 0 this is a no-op (the user can press
+/// Backspace at block-start to exit the list entirely).
+fn dedent_current_block(st: &mut EditorState) {
+    let Some(list) = st.cursor.current_list() else {
+        return;
+    };
+    let level = list.indent();
     if level == 0 {
         return;
     }
-    let new_fmt = BlockFormat {
-        indent: Some(level - 1),
-        ..Default::default()
-    };
-    let _ = st.cursor.set_block_format(&new_fmt);
+    nest_current_list_item(st, level - 1);
 }
 
 /// Navigate to the next / previous table cell by `direction` (+1 or

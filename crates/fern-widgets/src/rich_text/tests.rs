@@ -2689,7 +2689,8 @@ fn editor_ctrl_enter_always_inserts_block_in_table() {
 
 #[test]
 fn editor_tab_in_list_increments_indent() {
-    // At block start inside a list, Tab increases indent. Godot:
+    // Tab inside a list item increases the list's indent (the value
+    // the typesetter reads via `block.list_info.indent`). Godot:
     // 604-622.
     let doc = TextDocument::new();
     doc.set_plain_text("item").unwrap();
@@ -2713,27 +2714,29 @@ fn editor_tab_in_list_increments_indent() {
     let indent = state
         .borrow()
         .cursor
-        .block_format()
-        .ok()
-        .and_then(|f| f.indent)
+        .current_list()
+        .map(|l| l.indent())
         .unwrap_or(0);
     assert!(
         indent >= 1,
-        "Tab at list-item start must increase indent (got {})",
+        "Tab at list-item start must increase list indent (got {})",
         indent
     );
 }
 
 #[test]
 fn editor_shift_tab_in_list_decrements_indent() {
+    use fern_text::text_document::ListFormat;
+
     let doc = TextDocument::new();
     doc.set_plain_text("item").unwrap();
     let editor = RichTextEditor::editor(doc.clone());
     let state = editor.state_handle();
     editor.insert_list(false);
     editor.set_caret_position(0);
-    // Pre-indent so Shift+Tab has something to decrement.
-    editor.apply_block_format(fern_text::text_document::BlockFormat {
+    // Pre-indent the list so Shift+Tab has something to decrement.
+    // Uses the list format because that's what the renderer reads.
+    let _ = state.borrow().cursor.set_current_list_format(&ListFormat {
         indent: Some(2),
         ..Default::default()
     });
@@ -2753,15 +2756,193 @@ fn editor_shift_tab_in_list_decrements_indent() {
     let indent = state
         .borrow()
         .cursor
-        .block_format()
-        .ok()
-        .and_then(|f| f.indent)
+        .current_list()
+        .map(|l| l.indent())
         .unwrap_or(0);
     assert_eq!(
         indent, 1,
-        "Shift+Tab must decrement indent from 2 to 1 (got {})",
+        "Shift+Tab must decrement list indent from 2 to 1 (got {})",
         indent
     );
+}
+
+#[test]
+fn editor_tab_in_list_indents_from_mid_block_caret() {
+    // Tab inside a list item must indent regardless of caret
+    // position within the block — the user shouldn't have to Home
+    // first. Matches standard word-processor behaviour.
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.insert_list(false);
+    // Caret in the middle of the word — NOT at block start.
+    editor.set_caret_position(2);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Tab,
+        fern_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    let indent = state
+        .borrow()
+        .cursor
+        .current_list()
+        .map(|l| l.indent())
+        .unwrap_or(0);
+    assert!(
+        indent >= 1,
+        "Tab mid-block inside a list must still indent (got {})",
+        indent
+    );
+    // Also verify no literal tab character was inserted.
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "item",
+        "Tab in a list must not insert a literal \\t"
+    );
+}
+
+#[test]
+fn editor_shift_tab_in_list_dedents_from_mid_block_caret() {
+    use fern_text::text_document::ListFormat;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("item").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.insert_list(false);
+    editor.set_caret_position(0);
+    let _ = state.borrow().cursor.set_current_list_format(&ListFormat {
+        indent: Some(2),
+        ..Default::default()
+    });
+    // Now move caret into the middle of the word.
+    editor.set_caret_position(2);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Tab,
+        fern_core::event::Modifiers::SHIFT,
+    );
+    tick_past_debounce(&mut tree);
+
+    let indent = state
+        .borrow()
+        .cursor
+        .current_list()
+        .map(|l| l.indent())
+        .unwrap_or(0);
+    assert_eq!(
+        indent, 1,
+        "Shift+Tab mid-block must decrement list indent from 2 to 1 (got {})",
+        indent
+    );
+}
+
+#[test]
+fn editor_tab_in_multi_item_list_indents_only_current_item() {
+    // Regression: Tab on one item of a multi-item list must indent
+    // ONLY the current item, not all siblings. Earlier versions
+    // updated `ListFormat::indent` on the shared list, which shifted
+    // every item together. Fix splits the current item into its own
+    // list at the deeper nesting level.
+    let doc = TextDocument::new();
+    doc.set_plain_text("a\nb\nc").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    // Wrap all three blocks in one bullet list.
+    editor.select_all();
+    editor.insert_list(false);
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    // focus_editor clicks to set focus, moving the caret — so set
+    // the caret position AFTER focusing. Position 2 lands inside
+    // block "b": in a text-document the layout for "a\nb\nc" is
+    // block 0 = "a" (pos 0..1), block 1 = "b" (pos 2..3), block 2
+    // = "c" (pos 4..5). We place the caret at position 2.
+    state.borrow().cursor.set_position(2, fern_text::text_document::MoveMode::MoveAnchor);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Tab,
+        fern_core::event::Modifiers::NONE,
+    );
+    tick_past_debounce(&mut tree);
+
+    // After Tab: block "b" is now in a new list at indent 1; blocks
+    // "a" and "c" still sit in the original list at indent 0.
+    let a_list_id = doc.block_at_position(0).and_then(|b| b.list()).map(|l| l.id());
+    let b_list_id = doc.block_at_position(2).and_then(|b| b.list()).map(|l| l.id());
+    let c_list_id = doc.block_at_position(4).and_then(|b| b.list()).map(|l| l.id());
+    let a_indent = doc.block_at_position(0).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(255);
+    let b_indent = doc.block_at_position(2).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(255);
+    let c_indent = doc.block_at_position(4).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(255);
+
+    assert_eq!(a_indent, 0, "sibling 'a' must stay at indent 0");
+    assert_eq!(b_indent, 1, "current item 'b' must move to indent 1");
+    assert_eq!(c_indent, 0, "sibling 'c' must stay at indent 0");
+
+    // And 'a' and 'c' should still be in the SAME list (the original),
+    // distinct from 'b's new nested list.
+    assert!(a_list_id.is_some() && b_list_id.is_some() && c_list_id.is_some());
+    assert_eq!(a_list_id, c_list_id, "'a' and 'c' must share the parent list");
+    assert_ne!(a_list_id, b_list_id, "'b' must be in its own nested list");
+}
+
+#[test]
+fn editor_shift_tab_in_multi_item_list_dedents_only_current_item() {
+    use fern_text::text_document::ListFormat;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("a\nb\nc").unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    editor.select_all();
+    editor.insert_list(false);
+    // Pre-indent the whole list to depth 2 so there's room to dedent.
+    let _ = state.borrow().cursor.set_current_list_format(&ListFormat {
+        indent: Some(2),
+        ..Default::default()
+    });
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    // focus_editor moves the caret via a synthetic click, so set
+    // position AFTER focusing (see the matching Tab test).
+    state.borrow().cursor.set_position(2, fern_text::text_document::MoveMode::MoveAnchor);
+
+    press_key(
+        &mut tree,
+        fern_core::event::Key::Tab,
+        fern_core::event::Modifiers::SHIFT,
+    );
+    tick_past_debounce(&mut tree);
+
+    let a_indent = doc.block_at_position(0).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(99);
+    let b_indent = doc.block_at_position(2).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(99);
+    let c_indent = doc.block_at_position(4).and_then(|b| b.list()).map(|l| l.indent()).unwrap_or(99);
+
+    assert_eq!(a_indent, 2, "sibling 'a' must stay at indent 2");
+    assert_eq!(b_indent, 1, "current item 'b' must dedent to indent 1");
+    assert_eq!(c_indent, 2, "sibling 'c' must stay at indent 2");
 }
 
 #[test]
