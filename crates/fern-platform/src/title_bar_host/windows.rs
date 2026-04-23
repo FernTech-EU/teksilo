@@ -8,15 +8,13 @@ use std::sync::Arc;
 
 use fern_canvas::{Point, Size};
 use fern_core::{
-    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, Signal, TitleBarHostCallbacks,
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks,
 };
 use winit::window::Window;
 
 #[allow(dead_code)]
 pub struct WindowsHost {
     window: Arc<Window>,
-    is_max: Signal<bool>,
-    callbacks: TitleBarHostCallbacks,
 }
 
 impl WindowsHost {
@@ -50,17 +48,6 @@ impl PlatformTitleBarHost for WindowsHost {
     }
     fn show_window_menu(&self, _at: Point) -> Result<(), PlatformError> {
         Ok(())
-    }
-    fn minimize(&self) {}
-    fn toggle_maximize(&self) {}
-    fn close(&self) {
-        (self.callbacks.request_close)();
-    }
-    fn is_maximized(&self) -> bool {
-        false
-    }
-    fn is_maximized_signal(&self) -> Signal<bool> {
-        self.is_max.clone()
     }
     fn update_hit_regions(&self, _regions: &HitRegions) {}
 }

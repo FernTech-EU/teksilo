@@ -1,17 +1,15 @@
-//! macOS title bar host. Uses `objc2-app-kit` to inspect / manipulate the
-//! `NSWindow` behind the winit window: we measure the standard traffic-light
-//! cluster at construction time to reserve the correct leading inset, and
-//! we drive maximize via `-[NSWindow performZoom:]` so the OS animates the
-//! transition. Drag and minimize stay on winit's own surface; edge resize
-//! is handled natively by the `NSWindow` frame (we return `false` from
-//! [`needs_custom_resize_handles`], so the application skips installing a
-//! `WindowFrame` overlay).
+//! macOS title bar host. Uses `objc2-app-kit` to inspect the `NSWindow`
+//! behind the winit window: we measure the standard traffic-light cluster
+//! at construction time to reserve the correct leading inset. Drag stays on
+//! winit's own surface; edge resize is handled natively by the `NSWindow`
+//! frame (we return `false` from [`needs_custom_resize_handles`], so the
+//! application skips installing a `WindowFrame` overlay).
 
 use std::sync::Arc;
 
 use fern_canvas::{Point, Size};
 use fern_core::{
-    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, Signal, TitleBarHostCallbacks,
+    HitRegions, PlatformError, PlatformTitleBarHost, ResizeEdge, TitleBarHostCallbacks,
 };
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -21,37 +19,27 @@ use winit::window::Window;
 
 pub struct MacOsHost {
     window: Arc<Window>,
-    /// Retained reference to the underlying `NSWindow`. Kept for the
-    /// lifetime of the host so `isZoomed` / `performZoom:` can run without
-    /// re-extracting the view chain on every call.
-    ns_window: Retained<NSWindow>,
     leading_inset: Size,
-    is_max: Signal<bool>,
-    callbacks: TitleBarHostCallbacks,
 }
 
 impl MacOsHost {
     pub fn new(
         window: Arc<Window>,
-        callbacks: TitleBarHostCallbacks,
+        _callbacks: TitleBarHostCallbacks,
     ) -> Result<Self, PlatformError> {
         let _mtm = MainThreadMarker::new()
             .ok_or_else(|| PlatformError::Os("MacOsHost::new must run on main thread".into()))?;
 
         // SAFETY: the winit window is alive as long as our `Arc<Window>`
         // holds a clone, which outlives this block; its NSView owns the
-        // NSWindow. We `retain` so the NSWindow survives if winit were to
-        // drop it out from under us later.
+        // NSWindow. The retained NSWindow lives only long enough to measure
+        // the traffic-light cluster; after that we drop it.
         let ns_window = unsafe { ns_window_from_winit(&window)? };
         let leading_inset = measure_traffic_light_inset(&ns_window);
-        let initial_max = ns_window.isZoomed();
 
         Ok(Self {
             window,
-            ns_window,
             leading_inset,
-            is_max: Signal::new(initial_max),
-            callbacks,
         })
     }
 }
@@ -142,50 +130,9 @@ impl PlatformTitleBarHost for MacOsHost {
         Ok(())
     }
 
-    fn minimize(&self) {
-        self.window.set_minimized(true);
-    }
-
-    fn toggle_maximize(&self) {
-        // `performZoom:` mirrors clicking the green traffic light — it
-        // honours the app delegate's `windowWillUseStandardFrame:` and
-        // animates the transition. `nil` sender is the standard call form.
-        self.ns_window.performZoom(None);
-    }
-
-    fn close(&self) {
-        (self.callbacks.request_close)();
-    }
-
-    fn is_maximized(&self) -> bool {
-        // `isZoomed` reflects the green-traffic-light zoom state only.
-        // Native fullscreen (green-light + Option, or `toggleFullScreen:`)
-        // puts the window on its own Space and leaves `isZoomed` false —
-        // we intentionally don't track that here; the title bar is hidden
-        // in fullscreen anyway.
-        self.ns_window.isZoomed()
-    }
-
-    fn is_maximized_signal(&self) -> Signal<bool> {
-        self.is_max.clone()
-    }
-
     fn update_hit_regions(&self, _regions: &HitRegions) {
         // Unused on macOS: we don't intercept the hit-test flow, the
         // native NSWindow frame dispatches resize and the OS handles
         // traffic-light clicks directly.
-    }
-
-    fn notify_window_resized(&self) {
-        let current = self.ns_window.isZoomed();
-        if self.is_max.get() != current {
-            self.is_max.set(current);
-        }
-        // NOTE: when a future follow-up lets applications pick a custom
-        // title-bar height ≠ the 22-pt OS default, reposition the
-        // traffic lights here via `-[NSView setFrameOrigin:]` on each
-        // `standardWindowButton`. Must defer by one frame or run inside
-        // NSWindow's own layout callback (see §3.3 / risk #2 of
-        // docs/plans/title-bar-plan.md).
     }
 }

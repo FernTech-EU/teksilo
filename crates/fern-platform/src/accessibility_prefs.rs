@@ -112,18 +112,13 @@ mod platform {
     pub(super) fn query() -> AccessibilityPreferences {
         let mut prefs = AccessibilityPreferences::default();
 
-        // Safety: NSWorkspace.sharedWorkspace is always available on the main
-        // thread. These accessibilityDisplay* methods are simple property reads
-        // that do not mutate state.
-        unsafe {
-            let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
+        let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
 
-            // Available since macOS 10.10
-            prefs.high_contrast = workspace.accessibilityDisplayShouldIncreaseContrast();
+        // Available since macOS 10.10
+        prefs.high_contrast = workspace.accessibilityDisplayShouldIncreaseContrast();
 
-            // Available since macOS 10.12
-            prefs.reduced_motion = workspace.accessibilityDisplayShouldReduceMotion();
-        }
+        // Available since macOS 10.12
+        prefs.reduced_motion = workspace.accessibilityDisplayShouldReduceMotion();
 
         // macOS has no text-scaling API separate from DPI scaling.
         // text_scale_factor stays at 1.0 — winit's scale_factor handles DPI.
