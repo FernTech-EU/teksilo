@@ -1,0 +1,52 @@
+//! GUI for FernUI's widget previewer.
+//!
+//! This crate is a *library*. Per-application binaries
+//! (`fern-widgets-previewer`, `<app>-previewer`) call
+//! [`run_previewer`] from their `main`, linking against this crate
+//! plus `fern-preview` plus their own widget set with the `preview`
+//! feature enabled. Each binary's `inventory` link graph determines
+//! which widgets the previewer surfaces.
+//!
+//! See [`docs/plans/previewer-plan.md`](../../../docs/plans/previewer-plan.md)
+//! for the architecture and phasing.
+
+mod app_state;
+mod canvas;
+mod cli;
+mod inspector;
+mod knob_form;
+mod navigator;
+mod png_export;
+mod toolbar;
+
+pub use cli::PreviewerOptions;
+
+use fern_app::{FernAppBuilder, ThemeMode};
+use fern_core::WindowConfig;
+use fern_tokens::Theme;
+
+/// Launch the previewer window with the given options. Blocks until
+/// the window is closed.
+pub fn run_previewer(opts: PreviewerOptions) {
+    let title = opts.window_title.clone();
+    let initial_size = opts.window_size;
+    let initial_widget = opts.initial_widget.clone();
+    let initial_variant = opts.initial_variant.clone();
+
+    FernAppBuilder::new()
+        .theme(Theme::dark_default())
+        .theme_mode(ThemeMode::Manual)
+        .initial_window(
+            WindowConfig::new()
+                .title(title)
+                .size(initial_size.0, initial_size.1)
+                .root(move |tree, _state| {
+                    let root = crate::app_state::PreviewerRoot::new(
+                        initial_widget.clone(),
+                        initial_variant.clone(),
+                    );
+                    tree.add(root)
+                }),
+        )
+        .run();
+}

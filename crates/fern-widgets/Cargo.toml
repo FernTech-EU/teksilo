@@ -14,6 +14,12 @@ repository.workspace = true
 # (headless tests, builds without the `fern-app/clipboard` feature).
 # `arboard` is NOT pulled in by this feature; only the handle surface.
 rich-text = ["dep:fern-text", "dep:fern-platform"]
+# Preview catalog impls — opt-in `WidgetCatalog` implementations
+# alongside each widget, registered with the `inventory` crate so the
+# `fern-preview-ui` previewer GUI discovers them at link time. Off by
+# default — pulls in no runtime cost and adds no symbols when not
+# enabled. Standard production builds and headless tests ignore it.
+preview = ["dep:fern-preview"]
 
 [dependencies]
 fern-core = { workspace = true }
@@ -21,6 +27,7 @@ fern-data = { workspace = true }
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-i18n = { workspace = true }
+fern-preview = { workspace = true, optional = true }
 # `open` powers rich-tooltip links that point at real URLs
 # (http, https, mailto, file paths, …). Small, pure-Rust, no deps
 # on GUI toolkits — just spawns the OS default handler.

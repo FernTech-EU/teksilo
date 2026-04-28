@@ -52,6 +52,9 @@ pub mod tooltip;
 pub mod tree_view;
 pub mod wizard;
 
+#[cfg(feature = "preview")]
+mod preview_catalog;
+
 pub use tooltip::TooltipWidget;
 
 pub use accordion::Accordion;

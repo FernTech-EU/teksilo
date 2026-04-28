@@ -676,7 +676,16 @@ impl WidgetTree {
     }
 
     pub fn with_theme(mut self, theme: Theme) -> Self {
-        self.theme = theme;
+        // Update both the cached `Theme` AND the reactive
+        // `theme_signal` — widgets that observe the signal (e.g.
+        // `TextInputField` resetting the rich-text engine's default
+        // text colour) would otherwise see the constructor's
+        // `light_default()` initial value forever, even when
+        // `FernAppBuilder.theme(Theme::dark_default())` was used.
+        // `set_theme` already does this; `with_theme` was the
+        // builder-time analogue that forgot to keep them aligned.
+        self.theme = theme.clone();
+        self.theme_signal.set(theme);
         self
     }
 

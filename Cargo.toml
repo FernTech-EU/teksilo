@@ -30,6 +30,7 @@ open = "5"
 roxmltree = "0.20"
 png = "0.17"
 image-webp = "0.2"
+inventory = "0.3"
 text-document = { path = "../text-document/crates/public_api" }
 text-typeset = { path = "../text-typeset" }
 
@@ -48,6 +49,8 @@ fern-platform = { path = "crates/fern-platform", version = "0.1.0" }
 fern-app = { path = "crates/fern-app", version = "0.1.0" }
 fern-resources = { path = "crates/fern-resources", version = "0.1.0" }
 fern-ui = { path = "crates/fern-ui", version = "0.1.0" }
+fern-preview = { path = "crates/fern-preview", version = "0.1.0" }
+fern-preview-ui = { path = "crates/fern-preview-ui", version = "0.1.0" }
 
 
 [profile.release]
