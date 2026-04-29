@@ -1453,9 +1453,11 @@ impl WidgetTree {
         }
 
         // Hit-test to find the widget under the pointer, excluding the drag
-        // preview overlay so it doesn't block hit-testing of actual drop targets.
+        // preview overlay and its content widget so they don't block hit-testing
+        // of actual drop targets.
         let exclude_overlay = self.active_drag.as_ref().and_then(|d| d.preview_overlay_id);
-        let target = self.hit_test_excluding_overlay(position, exclude_overlay);
+        let exclude_widget = self.active_drag.as_ref().and_then(|d| d.preview_content_id);
+        let target = self.hit_test_excluding_overlay_and_widget(position, exclude_overlay, exclude_widget);
 
         // Walk up from hit target to find a widget with on_drag_hover
         let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
@@ -1626,22 +1628,23 @@ impl WidgetTree {
     }
 
     pub fn hit_test(&self, point: Point) -> Option<WidgetId> {
-        self.hit_test_excluding_overlay(point, None)
+        self.hit_test_excluding_overlay_and_widget(point, None, None)
     }
 
-    /// Hit-test at a point, excluding a specific overlay from consideration.
-    /// Used during drag-and-drop to exclude the preview overlay, so it doesn't
-    /// block hit-testing of the actual drop targets underneath.
-    pub fn hit_test_excluding_overlay(
+    /// Hit-test at a point, excluding a specific overlay and widget from consideration.
+    /// Used during drag-and-drop to exclude the preview overlay and its content widget,
+    /// so they don't block hit-testing of the actual drop targets underneath.
+    pub fn hit_test_excluding_overlay_and_widget(
         &self,
         point: Point,
         exclude_overlay: Option<crate::overlay::OverlayId>,
+        exclude_widget: Option<WidgetId>,
     ) -> Option<WidgetId> {
         if let Some(overlay_id) = self.overlay_manager.hit_test(point) {
             if Some(overlay_id) == exclude_overlay {
                 // Skip this excluded overlay, fall through to widget tree
             } else if let Some(overlay) = self.overlay_manager.overlay(overlay_id) {
-                return self.hit_test_recursive(overlay.content_id, point);
+                return self.hit_test_recursive_excluding(overlay.content_id, point, exclude_widget);
             }
         }
 
@@ -1651,15 +1654,18 @@ impl WidgetTree {
 
         let roots = self.arena.roots();
         for &root in roots.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(root, point) {
+            if Some(root) == exclude_widget {
+                continue;
+            }
+            if let Some(hit) = self.hit_test_recursive_excluding(root, point, exclude_widget) {
                 return Some(hit);
             }
         }
         None
     }
 
-    fn hit_test_recursive(&self, id: WidgetId, point: Point) -> Option<WidgetId> {
-        if !self.arena.is_active(id) {
+    fn hit_test_recursive_excluding(&self, id: WidgetId, point: Point, exclude: Option<WidgetId>) -> Option<WidgetId> {
+        if !self.arena.is_active(id) || Some(id) == exclude {
             return None;
         }
         let bounds = self.arena.bounds(id);
@@ -1668,11 +1674,16 @@ impl WidgetTree {
         }
         let children = self.arena.children(id).to_vec();
         for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(child, point) {
+            if let Some(hit) = self.hit_test_recursive_excluding(child, point, exclude) {
                 return Some(hit);
             }
         }
         Some(id)
+    }
+
+    /// Legacy recursive hit-test without exclusion.
+    fn hit_test_recursive(&self, id: WidgetId, point: Point) -> Option<WidgetId> {
+        self.hit_test_recursive_excluding(id, point, None)
     }
 }
 
