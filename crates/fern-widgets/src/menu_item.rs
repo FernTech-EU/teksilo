@@ -17,6 +17,7 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
+use crate::keystroke_format::format_keystroke;
 use crate::primitives::{HStack, IconWidget, Padding, RectWidget, Spacer, TextWidget, ZStack};
 
 /// Type-erased command factory. Stored as `Rc` (not `Box`) so the closure
@@ -372,7 +373,7 @@ impl Widget for MenuItem {
         let resolved_shortcut = self.shortcut_label.clone().or_else(|| {
             self.shortcut_id.and_then(|id| {
                 ctx.effective_shortcut(id)
-                    .and_then(|eff| eff.primary.map(|ks| ks.to_string()))
+                    .and_then(|eff| eff.primary.map(|ks| format_keystroke(ks)))
             })
         });
         self.resolved_shortcut = resolved_shortcut.clone();

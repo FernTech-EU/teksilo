@@ -63,9 +63,11 @@ impl KeyStroke {
 }
 
 impl fmt::Display for KeyStroke {
-    // TODO: replace with a locale/platform-aware formatter that can
-    // depend on fern-i18n (see architecture §11.2). Current impl is
-    // the plain "Ctrl+S" form.
+    // Plain "Ctrl+S" form. Widgets that display shortcuts to users should
+    // use `fern_widgets::keystroke_format::format_keystroke()` instead,
+    // which handles platform-specific symbols (⌘ on macOS) and locale-
+    // aware modifier names ("Strg" in German) via fern-i18n.
+    // See architecture §11.2.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.modifiers, self.key)
     }

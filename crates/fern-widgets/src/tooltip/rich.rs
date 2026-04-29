@@ -44,6 +44,7 @@ use fern_i18n::LocalizedString;
 use fern_tokens::{CornerRadius, TextRole, TextStyleRole};
 
 use crate::accordion::Accordion;
+use crate::keystroke_format::format_keystroke;
 use crate::primitives::{Grid, Padding, Spacer, TextWidget, TrackSize, VStack};
 use crate::tooltip::dwell_indicator::DwellIndicator;
 use crate::tooltip::registry::{with_tooltip_registry, TooltipContent, TooltipRegistry};
@@ -235,7 +236,7 @@ impl Widget for RichTooltipWidget {
         let shortcut_text: Option<String> = content.shortcut_label.clone().or_else(|| {
             content.shortcut_id.and_then(|id| {
                 ctx.effective_shortcut(id)
-                    .and_then(|eff| eff.primary.map(|ks| ks.to_string()))
+                    .and_then(|eff| eff.primary.map(|ks| format_keystroke(ks)))
             })
         });
         if content.shortcut_id.is_some() {
