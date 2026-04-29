@@ -33,7 +33,7 @@ python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tool
 
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/fern-widgets/src/](crates/fern-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 
-The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`).
+The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`, `recent_projects`).
 
 Tests are fully headless — no Xvfb, no GPU, no display server needed.
 
@@ -56,6 +56,10 @@ fern-tokens          Pure data: Theme, Color, TextStyle, SpacingTokens, alignmen
 fern-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBackend trait
 fern-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
 fern-data            Reactive data models: ListModel, TreeModel, SelectionModel, ListDataSource
+fern-settings        Persistent reactive prefs: SettingsStore (dotted-key Signal<T>), SettingsFile<T>,
+                     PersistedListModel/PersistedTreeModel, MruList<T: MruEntry>, WindowStateService
+fern-telemetry       Privacy-respecting product analytics built on fern-settings: ConsentStore,
+                     InstallId, TelemetryBundle. See docs/plans/telemetry-plan.md (early-phase)
 fern-widgets         ~35 widgets + ~19 layout primitives (Button, ListView, TreeView, MenuBar, Dialog, etc.)
 fern-text            TextBackend impl via text-typeset (external path dep)
 fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher
@@ -67,7 +71,7 @@ fern-app             FernAppBuilder, WindowManager, event loop
 fern-ui              Umbrella crate with re-exports and feature flags
 ```
 
-Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `canvas → render → platform → app → ui`, `i18n-macros → i18n`, `ui-macros → ui`
+Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`
 
 External path dependency: `text-typeset` lives at `../../../text-typeset` (outside workspace).
 
@@ -209,6 +213,61 @@ Handler rule:  call `AppIntent::from_intent(intent)` **only** when you need type
 
 Full reference: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md). Working demo: [examples/shortcuts_demo](examples/shortcuts_demo/src/main.rs).
 
+## Settings & Persistence
+
+Persistent, reactive user preferences via `fern-settings`. **In-memory is the source of truth** — `Signal<T>` and `*Model<T>` handles drive both UI and disk; the disk side is a debounced atomic projection (write-temp + rename, single shared I/O thread per process).
+
+Three persistence shapes:
+
+- **`SettingsStore`** — dotted-key K/V for **scalars** (numbers, strings, bools, arrays of those). `store.signal::<T>(key, default)` or `store.signal_for(&KEY)` returns a cached `Signal<T>`. Same key → same signal across call sites. Struct values rejected at registration with a clear error pointing to `SettingsFile<T>` (TOML serializes structs as tables, indistinguishable from nested key paths).
+- **`SettingsFile<T>`** — typed single-struct persistence with `Versioned` + `Migrator<T>` migrations on raw `toml::Value` *before* deserialize. Corrupt files quarantine to `<path>.broken-<unix_ts>` and fall back to `T::default()`.
+- **`PersistedListModel<T>` / `PersistedTreeModel<T>`** — bridges from `ListModel<T>` / `TreeModel<T>` to `SettingsFile<*File<T>>`. Every mutation re-serializes the whole collection (debounced) — fine for <1k items, use SQLite beyond that.
+
+Built-in services on top:
+
+- **`MruList<T: MruEntry>`** — generic dedupe + pin + LRU-cap recents. Apps define their own item type implementing `MruEntry { type Key; fn key(); fn is_pinned()/set_pinned(); fn touch(); }`. The framework knows nothing about projects / files / palettes.
+- **`WindowStateService`** — per-`label` window geometry. **Auto-restored and auto-saved by `fern-app`'s window manager** when a `WindowConfig` carries `id(...)` and the bundle has `with_window_state(true)`. No widget-side wiring.
+
+```rust
+use fern_ui::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt, SettingsKey};
+
+const FONT_SIZE: SettingsKey<f32> = SettingsKey::new("editor.font_size", || 14.0);
+
+fn main() {
+    let paths = AppPaths::new("com", "FernTech", "Skribisto").expect("config dir");
+    let recents: MruList<RecentProject> = MruList::open(&paths, "recent_projects", 10).unwrap();
+
+    FernAppBuilder::new()
+        .app_paths(paths)                                         // OR .application(qual, org, app)
+        .settings(SettingsBundle::new().with_window_state(true))  // store + window state
+        .app_state(recents)                                       // app-typed MRU
+        .initial_window(
+            WindowConfig::new()
+                .id("main")                                       // <- enables auto save/restore
+                .title("Skribisto")
+                .size(1200, 800),
+        )
+        .run();
+}
+
+// Inside a handler / build:
+let size = ctx.settings().signal_for(&FONT_SIZE);  // Signal<f32>
+size.set(18.0);                                    // schedules debounced flush
+let recents = ctx.mru::<RecentProject>();          // &MruList<RecentProject>
+```
+
+Key rules:
+
+- `app_paths(...)` or `application(...)` must come **before** `settings(...)`. Bundle has nowhere to write otherwise; calling `settings(...)` without paths panics at `run` / `build_headless`.
+- `application(qual, org, app)` panics if the OS can't resolve a home directory. Sandboxed CI / portable apps use `app_paths(AppPaths::for_testing(...) | from_dirs(...))`.
+- Window auto-persist requires both `.with_window_state(true)` on the bundle AND `WindowConfig::id("...")`. Modal dialogs and popovers are naturally excluded — they don't carry stable ids.
+- Saved geometry is sanitized on restore against the current monitor's work area: oversized rectangles clamp, off-screen positions recenter per-axis (so a saved coordinate from a now-disconnected secondary monitor gets recentered onto the primary while keeping the other axis if it was visible). `WindowPlacement::Minimized` is downgraded to `Floating` on restore.
+- Wayland ignores window position by protocol design (compositor-authority); size and `WindowPlacement` round-trip, position is a no-op there.
+- `SettingsExt` accessors (`use fern_settings::SettingsExt;`): `ctx.settings()`, `ctx.window_state()`, `ctx.mru::<T>()`. `try_*` variants return `Option`.
+- Tests use `AppPaths::for_testing(tmp.path())` and `Duration::ZERO` for the debounce — never the real `ProjectDirs`.
+
+Full reference: [docs/settings.md](docs/settings.md). Working demo: [examples/recent_projects](examples/recent_projects/src/main.rs).
+
 ## Three-Tier Rendering
 
 | Tier | Type | Used For |
@@ -282,6 +341,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)
 - Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
 - Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`)
+- Settings & persistence (fern-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
 - Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge
 - Containers: Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Tooltip, SplitView, TabWidget, Dialog, Popover, Snackbar, Wizard, Breadcrumb
 - Menus: MenuBar, MenuList, MenuItem, MenuContext (context menu)
@@ -323,6 +383,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - fern! DSL macro: [crates/fern-ui-macros/src/](crates/fern-ui-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/fern-ui/tests/fern_ui/pass/](crates/fern-ui/tests/fern_ui/pass/)
 - fern! reference: [docs/fern-macro-reference.md](docs/fern-macro-reference.md) (user-facing), [docs/fern-language-spec-v3.md](docs/fern-language-spec-v3.md) (design spec)
 - Actions/Intents/Shortcuts: [crates/fern-core/src/action.rs](crates/fern-core/src/action.rs), [intent.rs](crates/fern-core/src/intent.rs), [shortcut.rs](crates/fern-core/src/shortcut.rs). `IntentKind` derive: [crates/fern-ui-macros/src/intent_kind.rs](crates/fern-ui-macros/src/intent_kind.rs). Settings widget: [crates/fern-widgets/src/shortcut_settings.rs](crates/fern-widgets/src/shortcut_settings.rs). Reference doc: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md)
+- Settings/persistence: [crates/fern-settings/src/](crates/fern-settings/src/) (`store.rs`, `file.rs`, `mru.rs`, `window_state.rs`, `bundle.rs`, `ext.rs`, `migration.rs`, `flush.rs`, `path.rs`). Auto window save/restore wiring: [crates/fern-app/src/window_persist.rs](crates/fern-app/src/window_persist.rs). Reference doc: [docs/settings.md](docs/settings.md). Demo: [examples/recent_projects/src/main.rs](examples/recent_projects/src/main.rs)
 - Canvas API: `crates/fern-canvas/src/canvas.rs`
 - Renderer: `crates/fern-render/src/renderer.rs`
 - App builder: `crates/fern-app/src/app.rs`
@@ -440,14 +501,21 @@ translate/debug workflows.
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
-        .window_title("My App")
-        .window_size(800, 600)
-        .root(|tree| tree.add(MyRootWidget::new()))
+        .initial_window(
+            WindowConfig::new()
+                .title("My App")
+                .size(800, 600)
+                .root(|tree, _state| tree.add(MyRootWidget::new())),
+        )
         .run();
 }
 ```
 
+Every window — initial or runtime-opened — is described by a `WindowConfig`. There is no `.window_title` / `.window_size` / `.root` on `FernAppBuilder` directly; secondary windows are opened from handler code via `ctx.open_window(WindowConfig::new()...)`. See [docs/multi-window.md](docs/multi-window.md) for the full multi-window API.
+
 App-wide behavior lives inside the root widget: register `Shortcut`s, declare `Action`s keyed by intent name, and react to them via handlers. See "Actions, Intents & Shortcuts" above and [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md) for the full pattern. Ambient mutations are available on `EventContext` from any handler: `ctx.set_theme(...)`, `ctx.set_locale(...)`, `ctx.close_window()`.
+
+If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier, organization, application)`) and `.settings(SettingsBundle::new()...)` before `.initial_window(...)`. App-typed handles (`MruList<T>`, `SettingsFile<T>`) register via `.app_state(handle.clone())`. See "Settings & Persistence" above and [docs/settings.md](docs/settings.md).
 
 ## Architecture Reference
 

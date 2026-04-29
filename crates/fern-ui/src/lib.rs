@@ -3,6 +3,7 @@ pub use fern_canvas as canvas;
 pub use fern_core as core;
 pub use fern_data as data;
 pub use fern_platform as platform;
+pub use fern_settings as settings;
 pub use fern_tokens as tokens;
 
 /// The `fern!` DSL macro. See `docs/fern-language-spec-v3.md` for the
@@ -67,6 +68,12 @@ pub mod prelude {
 
     // App
     pub use fern_app::{FernAppBuilder, ThemeMode};
+
+    // Settings (persistence layer)
+    pub use fern_settings::{
+        AppPaths, MruEntry, MruList, PerWindowState, SettingsBundle, SettingsExt,
+        SettingsFile, SettingsKey, SettingsStore, WindowStateService,
+    };
 
     // Multi-window API
     pub use fern_core::{

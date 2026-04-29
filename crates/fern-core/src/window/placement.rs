@@ -19,7 +19,7 @@
 /// is responsible for preserving the restored rect (held by the
 /// `size` / `position` signals on `WindowState`) when crossing through
 /// `Maximized`, `Fullscreen`, or `Minimized`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum WindowPlacement {
     /// Regular overlapping window. Uses `WindowState::size` and
     /// `WindowState::position` as the current geometry.

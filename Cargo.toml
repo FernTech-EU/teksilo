@@ -25,6 +25,9 @@ unic-langid = "0.9"
 sys-locale = "0.3"
 notify = "8.2.0"
 serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+directories = "6"
+tempfile = "3"
 arboard = { version = "3.4", features = ["wayland-data-control"] }
 open = "5"
 roxmltree = "0.20"
@@ -39,6 +42,7 @@ fern-tokens = { path = "crates/fern-tokens", version = "0.1.0" }
 fern-canvas = { path = "crates/fern-canvas", version = "0.1.0" }
 fern-core = { path = "crates/fern-core", version = "0.1.0" }
 fern-data = { path = "crates/fern-data", version = "0.1.0" }
+fern-settings = { path = "crates/fern-settings", version = "0.1.0" }
 fern-widgets = { path = "crates/fern-widgets", version = "0.1.0" }
 fern-i18n = { path = "crates/fern-i18n", version = "0.1.0" }
 fern-i18n-macros = { path = "crates/fern-i18n-macros", version = "0.1.0" }

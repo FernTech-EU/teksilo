@@ -1,0 +1,11 @@
+[package]
+name = "recent-projects"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+fern-ui = { workspace = true }
+serde = { workspace = true }

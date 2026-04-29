@@ -58,6 +58,11 @@ pub(crate) struct ManagedWindow {
     /// to decide whether the widget tree's animation scheduler should
     /// run: `active = focused && !occluded`.
     pub occluded: bool,
+    /// RAII handles for the auto-save observers wired to
+    /// `state.{size, position, placement}` when a
+    /// `WindowStateService` is registered. Dropped when the window
+    /// is removed from `WindowManager::windows`.
+    pub _persist_handles: Vec<fern_core::ObserverHandle>,
 }
 
 /// Manages multiple application windows.
@@ -175,6 +180,19 @@ impl WindowManager {
         mut config: WindowConfig,
         target: &winit::event_loop::ActiveEventLoop,
     ) -> FernWindowId {
+        // If a `WindowStateService` is registered AND this window has
+        // a stable `id(...)`, restore the saved geometry — sanitized
+        // against the current monitor — into `config` before any
+        // winit attribute is built. See `window_persist` for the
+        // exact policy.
+        let persist_service: Option<fern_settings::WindowStateService> = self
+            .app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<fern_settings::WindowStateService>().cloned());
+        if let Some(svc) = persist_service.as_ref() {
+            crate::window_persist::apply_restored_geometry(&mut config, svc, target);
+        }
+
         let fern_id = self.alloc_id();
         let state = WindowState::new(WindowStateInit {
             id: fern_id,
@@ -478,6 +496,18 @@ impl WindowManager {
             self.modal_blocked.insert(parent_id, fern_id);
         }
 
+        // Install the auto-save observers if persistence is wired and
+        // this window opted in by carrying a stable id. The handles
+        // outlive the function via `ManagedWindow._persist_handles`.
+        let persist_handles = match (&persist_service, &config.string_id) {
+            (Some(svc), Some(label)) => crate::window_persist::install_persist_observers(
+                &state,
+                svc.clone(),
+                label.clone(),
+            ),
+            _ => Vec::new(),
+        };
+
         let managed = ManagedWindow {
             fern_id,
             string_id: config.string_id,
@@ -491,6 +521,7 @@ impl WindowManager {
             title_bar_host,
             focused: true,
             occluded: false,
+            _persist_handles: persist_handles,
         };
 
         self.windows.insert(winit_id, managed);

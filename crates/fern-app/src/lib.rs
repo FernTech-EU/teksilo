@@ -1,4 +1,5 @@
 pub mod app;
+pub(crate) mod window_persist;
 pub mod window_config;
 pub mod window_manager;
 

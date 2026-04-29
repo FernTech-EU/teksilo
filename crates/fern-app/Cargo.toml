@@ -27,6 +27,11 @@ fern-platform = { workspace = true }
 # (`FernAppBuilder::register_tooltips` takes `Vec<TooltipContent>`).
 # Registration wiring only — no widget constructors used here.
 fern-widgets = { workspace = true }
+fern-settings = { workspace = true }
 fern-text = { workspace = true, optional = true }
 winit = { workspace = true }
 pollster = "0.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serde = { workspace = true }

@@ -18,11 +18,11 @@
 > points at the V2 replacement:
 >
 > - **§5 Widget Extensibility** — the `CompositeWidget` / `Widget` split is
->   replaced by the unified `Widget` trait. See **§28 V2 Widget Authoring
+>   replaced by the unified `Widget` trait. See **§29 V2 Widget Authoring
 >   Model**.
 > - **§7 Reactivity Model** — `State<T>` / `DerivedState<T>` / `Reactive<T>`
 >   are gone. `Signal<T>` and `Prop<T>` are the only reactive primitives.
->   See **§28.4**.
+>   See **§29.4**.
 > - **§9.1 Input Event Routing** + **§9.2 Typed Command Flow** — the monolithic
 >   `event()` method and `AppCommand` trait are replaced by attached handlers
 >   and the Shortcut / Intent / Action pipeline. See
@@ -31,8 +31,8 @@
 > - **§11 Keyboard Shortcuts** — `ShortcutMap<C: AppCommand>` replaced by
 >   `ShortcutRegistry` with two-layer defaults + user overrides. See
 >   [`shortcut-intent-action.md`](shortcut-intent-action.md).
-> - **§25 Button — Reference Widget Design** — the V1 `CompositeWidget`
->   pattern; the actual Button code follows the V2 exemplar in §28.1. See
+> - **§26 Button — Reference Widget Design** — the V1 `CompositeWidget`
+>   pattern; the actual Button code follows the V2 exemplar in §29.1. See
 >   [`crates/fern-widgets/src/button.rs`](../crates/fern-widgets/src/button.rs).
 >
 > The *design rationale* in each V1 section survives unchanged — only the
@@ -67,7 +67,7 @@ FernUI is the outermost layer of an application — the "Frameworks & UI" ring i
 
 The integration surface is the typed intent system (FernUI widgets emit application-defined intent variants that ancestor `Action`s consume — see [`shortcut-intent-action.md`](shortcut-intent-action.md)) and the reactive data models in `fern-data` (application-written view-models hold entity collections as `ListModel<EntityVM>` / `TreeModel<EntityVM>` that widgets bind to — see [`data-models.md`](data-models.md)).
 
-The decision not to structure FernUI's internals using a Clean-Architecture split was deliberate. Layout, rendering, and event dispatch are hot paths with fundamentally different performance characteristics from transactional domain operations; the useful seams fall in different places. FernUI instead splits into ten focused crates (see §24) each with a single concern, which is the right decomposition for a framework whose internal churn pattern is "rendering backend changes independently of widget tree changes independently of the data model layer."
+The decision not to structure FernUI's internals using a Clean-Architecture split was deliberate. Layout, rendering, and event dispatch are hot paths with fundamentally different performance characteristics from transactional domain operations; the useful seams fall in different places. FernUI instead splits into focused crates (see §25) each with a single concern, which is the right decomposition for a framework whose internal churn pattern is "rendering backend changes independently of widget tree changes independently of the data model layer."
 
 ### 1.2 Reuse Strategy
 
@@ -263,7 +263,7 @@ The framework processes the tree through well-defined passes (event, layout, acc
 >
 > The split forced authors to *choose at definition time* between composition and custom paint. Real widgets regularly want both (a Card that composes children but paints its own background; a ScrollArea that composes children but clips them with a scissor rect), which pushed the framework into a compatibility adapter and widgets into awkward indirection. The `CompositeWidget::build(&self)` signature — immutable receiver — also forced every stateful composite into the `RefCell<Option<State<T>>>` pattern so mutation-needing event handlers could reach state created in `build`.
 >
-> **V2 (current).** The two traits are one. The unified `Widget` trait has a single `build(&mut self, ctx)` for composition, a single `paint()` for own-visuals, and both are optional with sensible defaults. There is no composite adapter; widgets are widgets. See [§28.1 Unified Widget Trait](#281-unified-widget-trait) for the full signature and the four common widget shapes (leaf / container / composing / hybrid). The V2 model is what the entire widget library is written against — no `CompositeWidget` references remain in the codebase.
+> **V2 (current).** The two traits are one. The unified `Widget` trait has a single `build(&mut self, ctx)` for composition, a single `paint()` for own-visuals, and both are optional with sensible defaults. There is no composite adapter; widgets are widgets. See [§29.1 Unified Widget Trait](#291-unified-widget-trait) for the full signature and the four common widget shapes (leaf / container / composing / hybrid). The V2 model is what the entire widget library is written against — no `CompositeWidget` references remain in the codebase.
 
 ### 5.1 The Slot System
 
@@ -345,7 +345,7 @@ The core question this section answers — how does a widget stay in sync with m
 
 > **V1 (superseded).** The original design had four reactive types: `State<T>` (mutable handle, owned by a widget), `DerivedState<T>` (read-only, `.map()` of another handle), `Reactive<T>` (widget property that might be either static or bound), and `StateHandle<T>` (erased inter-handle reference). Bindings wired state to widget properties via method pairs: `.background(Color)` for a fixed value, `.bind_background(State<Color>)` for a reactive link. A composite's `build(&self, ctx)` returned `&self`, forcing the `RefCell<Option<State<T>>>` pattern so mutation-needing event handlers could reach state created in `build`. The framework rebuilt on theme/environment change to re-capture derived-state closures that had frozen-in theme values.
 >
-> **V2 (current).** `Signal<T>` replaces `State<T>` and `DerivedState<T>` (derived signals are just `signal.map(|v| ...)`), `Prop<T>` replaces `Reactive<T>`, and `ObserverHandle` replaces `StateHandle<T>`. `Signal::new(x)` is mutable; `signal.map(f)` is read-only and derived. `build(&mut self, ctx)` takes `&mut self`, so event handlers close over `Signal<T>` clones (not `RefCell<Option<…>>`) and mutate them directly. The dual static-vs-bound method pair (`background()` / `bind_background()`) collapses into a single method taking `impl Into<ColorProp>` — the prop type knows whether to track a signal. Theme changes no longer trigger rebuild: the theme is itself a `Signal<Theme>` and role-based props resolve at paint time. See **§28.4** for the full unified model and [`reactive-theme.md`](reactive-theme.md) for the theme-reactivity mechanism.
+> **V2 (current).** `Signal<T>` replaces `State<T>` and `DerivedState<T>` (derived signals are just `signal.map(|v| ...)`), `Prop<T>` replaces `Reactive<T>`, and `ObserverHandle` replaces `StateHandle<T>`. `Signal::new(x)` is mutable; `signal.map(f)` is read-only and derived. `build(&mut self, ctx)` takes `&mut self`, so event handlers close over `Signal<T>` clones (not `RefCell<Option<…>>`) and mutate them directly. The dual static-vs-bound method pair (`background()` / `bind_background()`) collapses into a single method taking `impl Into<ColorProp>` — the prop type knows whether to track a signal. Theme changes no longer trigger rebuild: the theme is itself a `Signal<Theme>` and role-based props resolve at paint time. See **§29.4** for the full unified model and [`reactive-theme.md`](reactive-theme.md) for the theme-reactivity mechanism.
 
 ### 7.1 Why declarative bindings plus imperative structural change
 
@@ -425,7 +425,7 @@ FernUI goes with typed. The bet is that the target applications — writing tool
 #### 9.2.3 What typed intents cost
 
 - **Friction during prototyping.** Defining the variant, registering the action, only then writing the behavior is slower than writing click behavior inline. Mature applications don't feel this (the intent set stabilizes); exploratory work does. See §9.2.5 on the escape hatch.
-- **Third-party widget libraries.** A library widget cannot anticipate the host application's intent type. Iced threads a `Message` generic through every widget signature; FernUI's non-generic `Widget` trait (see §28) cannot do that. Library widgets that need to fire application-level behavior have to either take a closure at the boundary (the `.on_activate_fn(...)` escape hatch) or define their own internal intent type that the host translates.
+- **Third-party widget libraries.** A library widget cannot anticipate the host application's intent type. Iced threads a `Message` generic through every widget signature; FernUI's non-generic `Widget` trait (see §29) cannot do that. Library widgets that need to fire application-level behavior have to either take a closure at the boundary (the `.on_activate_fn(...)` escape hatch) or define their own internal intent type that the host translates.
 - **Highly dynamic UIs.** A plugin system where plugins contribute buttons with their own actions cannot have those variants in a central enum at compile time. A scripting console where users type arbitrary run-on-click code has no compile-time vocabulary for "this specific code." See §9.2.5.
 - **Cognitive overhead.** A developer coming from SwiftUI or Compose expects inline `Button(onClick: { doSomething() })`. The typed-intent pattern requires understanding why that's not how this framework works. The documentation has to teach the pattern; code review enforces it.
 
@@ -2601,7 +2601,233 @@ Each tree has its own `FocusManager`. OS-level focus (`WindowEvent::Focused`) de
 
 ---
 
-## 23. Testability
+## 23. Settings and Persistence
+
+User-visible state survives across sessions through `fern-settings`,
+which sits between `fern-data` (reactive models) and `fern-widgets`
+(consumers). The crate exposes three persistence shapes — a dynamic
+K/V store, a typed-struct file, and reactive-collection bridges —
+plus two built-in services (`MruList<T>` for recents-style lists, and
+`WindowStateService` for window geometry) that fern-app wires
+automatically.
+
+The architectural rule is **in-memory is the source of truth**.
+Widgets bind against `Signal<T>` / `ListModel<T>` / `TreeModel<T>`
+handles whose mutations propagate (a) to the UI through the
+existing reactive graph, and (b) to disk through a debounced atomic
+writer. Disk is a flushed projection of the in-memory state, never
+the read path during runtime — files are loaded once at startup and
+written on change. This is the same shape used by
+[reactive-theme.md](reactive-theme.md): the *signal* is the
+authoritative copy, anything else is a downstream observer.
+
+For the user-facing API surface, see
+[`docs/settings.md`](settings.md). This section covers only the
+architectural decisions and their consequences for the rest of the
+framework.
+
+### 23.1 Three persistence shapes, not one
+
+| Shape               | Type                                                  | Use for                                                            |
+| ------------------- | ----------------------------------------------------- | ------------------------------------------------------------------ |
+| Dynamic K/V         | `SettingsStore` → `Signal<T>`                         | Scalar prefs (font size, theme name, bools, arrays of scalars)     |
+| Typed file          | `SettingsFile<T>` (with `Versioned` + `Migrator<T>`)  | App-shaped structs with their own schema and migrations            |
+| Reactive collection | `PersistedListModel<T>` / `PersistedTreeModel<T>`     | Anything driving a `Repeater` / `ListView` / `TreeView`            |
+
+The shapes can't be collapsed into one without losing information:
+
+- **`SettingsStore`** stores scalars under dotted keys (`editor.font_size`,
+  `ui.theme`). The on-disk form is a TOML map. Struct values are
+  rejected at registration with a clear error: TOML serializes structs
+  as tables, indistinguishable on a re-read from "a parent of nested
+  keys" — so allowing `signal::<MyStruct>("foo")` would corrupt the
+  K/V model the moment another caller did `signal::<f32>("foo.bar")`.
+- **`SettingsFile<T>`** owns one struct per file and is the right tool
+  for arbitrary app schemas. It's where the `Versioned` /
+  `Migrator<T>` machinery lives. Migrations operate on raw
+  `toml::Value` *before* deserialize — a v1 payload that no longer
+  matches the v2 type can still be upgraded.
+- **`PersistedListModel<T>` / `PersistedTreeModel<T>`** wrap the
+  reactive `*Model<T>` (§15) and re-serialize on every mutation,
+  debounced. They're a convenience layer over `SettingsFile<ListFile<T>>`,
+  not a separate primitive.
+
+A common temptation is to back recents with `Signal<Vec<T>>`. That
+would full-rebuild every `Repeater` on every add — the persisted
+list bridge keeps the incremental-update contract `ListModel`
+provides.
+
+### 23.2 `MruList<T: MruEntry>` — generic recents
+
+`MruList` is the only collection-shaped service the framework ships,
+and it's deliberately *generic*. Earlier drafts had a hardcoded
+`RecentsService` typed to `RecentProject`; that put application
+vocabulary ("projects") into a framework crate. The current design
+exposes a small `MruEntry` trait (dedupe key, optional pin flag,
+optional touch hook) and lets apps define their own item type:
+
+```rust
+pub trait MruEntry: Clone + Serialize + DeserializeOwned + 'static {
+    type Key: PartialEq + ?Sized + 'static;
+    fn key(&self) -> &Self::Key;
+    fn is_pinned(&self) -> bool { false }
+    fn set_pinned(&mut self, _pinned: bool) {}
+    fn touch(&mut self) {}
+}
+```
+
+`Key: ?Sized` makes unsized keys like `Path` and `str` work without
+forcing apps to box them. The dedupe / pin-aware-cap policy lives in
+`MruList`; the schema lives in the app type. Apps register their
+`MruList<T>` via `FernAppBuilder::app_state(handle.clone())` and
+recover it through `ctx.mru::<T>()` (the `SettingsExt` accessor).
+
+The framework knows nothing about projects, files, palettes, or
+saved searches — those are application concepts.
+
+### 23.3 `WindowStateService` and framework-driven save/restore
+
+Window geometry is the one persistence concern that genuinely belongs
+in the framework: it interacts with `WindowConfig`, the winit window
+manager, and the `WindowState` signals (§22). `WindowStateService`
+stores per-`label` entries — a multi-window app records each window
+under its own id. The label is the same `string_id` set via
+`WindowConfig::id(...)` (the existing `find_window` lookup key), so
+the persistence entry is keyed by an identifier the rest of the
+framework already recognizes.
+
+A window participates in auto save / restore when both:
+
+1. Its `WindowConfig` carries `id(...)` (a stable string label), **and**
+2. A `WindowStateService` is registered (via `SettingsBundle::with_window_state(true)`).
+
+That naturally excludes modal dialogs, popovers, and any transient
+surface that never asked for an id. The integration lives in
+`fern-app`'s [`window_persist.rs`](../crates/fern-app/src/window_persist.rs):
+
+- **Restore.** At the top of `WindowManager::create_window`, before
+  any winit attribute is built, the service is consulted and the
+  saved `PerWindowState` is sanitized against the active monitor's
+  work area (queried via `winit::ActiveEventLoop::primary_monitor()`,
+  converted to logical pixels with the monitor's scale factor). The
+  sanitized values are written back into the `WindowConfig` so the
+  window opens at the right geometry from the first frame.
+- **Save.** Once the `WindowState` exists, observers are installed
+  on the `size`, `position`, and `placement` signals (at the end of
+  `create_window`, before the `ManagedWindow` is inserted into
+  `WindowManager.windows`). Each observer fires `service.record(...)`
+  with the current full state. The `ObserverHandle`s are stashed on
+  `ManagedWindow._persist_handles` so they live exactly as long as
+  the window itself; removing the window drops the handles, which
+  unsubscribes the observers.
+
+This split (restore *before* winit, save *after* `WindowState`) is
+load-bearing. Restoring inside the root widget's `build()` would
+race the OS layer's initial sync; saving inside `WindowManager` lets
+the same `applying_from_os` re-entrancy guard from §22.4 prevent
+echo loops.
+
+### 23.4 Sanitizing geometry against the current monitor
+
+`PerWindowState::sanitize(min_size, work_area)` is pure math; the
+caller (`window_persist.rs`) supplies the work-area hint. The policy:
+
+- **Width / height** clamp to `[min, work_area]`. A 4K saved size on
+  a 1080p host comes back at `1920×1080`.
+- **Position is checked per-axis** against a 50-pixel intersection
+  test with the work area. A window saved at `x = 2200, y = 100` on
+  a now-disconnected secondary monitor recenters its `x` (the saved
+  X axis no longer overlaps the work area) but *keeps* `y = 100`
+  (it was always on-screen vertically). A fully off-screen position
+  recenters both axes.
+- **`WindowPlacement::Minimized`** is downgraded to `Floating` on
+  restore. A window that comes back invisible looks like the app
+  failed to start — no other native platform behaves that way.
+- **Original on-disk state is untouched.** Re-plugging the missing
+  monitor restores the original geometry on the next launch — the
+  sanitize step is a *runtime adjustment*, not a destructive write.
+
+### 23.5 Wayland constraint
+
+Wayland's xdg-shell protocol does not expose
+`set_position(x, y)` — the compositor is the sole authority on
+window placement, by design (security, tiling-manager compatibility,
+multi-output policy). Concretely, on Wayland:
+
+- `winit::Window::set_outer_position(...)` silently no-ops.
+- `winit::Window::outer_position()` returns
+  `Err(NotSupportedError)`.
+- The position observer in `window_persist.rs` rarely fires.
+- `WindowState.position` keeps whatever value we initialized it
+  with at `WindowState::new` time.
+
+The framework persists `(x, y)` regardless because the saved
+coordinate is *portable storage* — useful when the same config
+roams to an X11 / macOS / Windows session later. On Wayland itself,
+compositors with per-app placement memory (KWin window rules, sway
+`for_window` patterns, GNOME's heuristic stickiness) match windows
+by their Wayland `app_id` (typically derived from the binary name
+by winit) — *that* is where window placement on Wayland actually
+gets remembered, not by us. Width / height / `WindowPlacement`
+round-trip on every platform regardless.
+
+### 23.6 Atomic writes through one shared I/O thread
+
+Every persistence shape ultimately goes through `DebouncedWriter`,
+which:
+
+- Holds a `WriterId` and routes payloads through a single lazy
+  `OnceLock<Sender<PoolMsg>>` worker thread shared by every writer
+  in the process. An app with the K/V store + window state + a
+  recents list opens *one* I/O thread, not three.
+- Coalesces rapid bursts inside a debounce window: a new payload
+  during the window replaces the prior one and resets the deadline.
+- Writes atomically — write to a temp file in the same directory,
+  fsync, then `tempfile::persist` (rename) into place. Same-directory
+  rename is atomic on every supported filesystem.
+- Synchronously flushes pending payloads in `Drop`: a process that
+  exits cleanly never loses queued state.
+
+Application code stays single-threaded and reactive. Only the
+atomic write hops onto the worker. Signal observers fire on the UI
+thread as ever — the path from `signal.set(v)` to the worker's
+channel is `tx.send(...)`, cheap and synchronous.
+
+### 23.7 Cycle-free observer wiring in `SettingsStore`
+
+Each registered key in `SettingsStore` owns an observer that writes
+the new value back into the in-memory `toml::Value` and schedules a
+flush. The closure captures **`Weak<RefCell<StoreInner>>`**, never a
+strong `Rc` — a strong capture would trap the entire store inside
+its own observer (the closure lives in an `ObserverHandle` stored in
+a `SignalCell` stored in `StoreInner.cells`), leaking it for the
+life of the process. This is the same `Rc` cycle pattern documented
+on `Signal::downgrade` and the same trap any persistence layer that
+wires "model writes its own state to disk" can fall into.
+
+The `weak.upgrade()?` early-return also gives correct teardown
+semantics: in-flight signal sets after a store drop simply bail.
+
+### 23.8 Threading and out-of-scope
+
+`Signal<T>`, `ListModel<T>`, and `TreeModel<T>` are
+`Rc<RefCell<>>`-based; the settings store inherits that. **Single-
+threaded UI logic, debounced I/O on one shared worker** is the
+explicit threading model. Multi-process is out of scope: two app
+instances writing to the same file are last-write-wins (Skribisto
+and similar single-instance apps are the target). Encryption is
+out of scope — secrets go through a future `fern-secrets` crate
+against the OS keychain. Cloud sync is out of scope. Per-document
+state belongs in the document file or its sidecar, not in app
+settings — `SettingsFile<T>` is reusable for that, but no built-in
+service.
+
+For the full API surface, recipes, and the v1→v2 migration record
+on `WindowStateService`, see [`docs/settings.md`](settings.md).
+
+---
+
+## 24. Testability
 
 ### 23.1 Headless by Design
 
@@ -2644,9 +2870,9 @@ No `Xvfb`, no GPU, no display server required. Pure logic tests run in `cargo te
 
 ---
 
-## 24. Crate Structure
+## 25. Crate Structure
 
-### 24.1 Crate Map
+### 25.1 Crate Map
 
 ```
 fern-tokens          Pure data types: Theme, Color, TextStyle, SpacingTokens, etc.
@@ -2681,6 +2907,18 @@ fern-widgets         All standard widgets: Button, Label, TextWidget, TextInput,
                      Dependencies: fern-core, fern-tokens, fern-canvas
                      Optional [rich-text]: + text-document, text-typeset
 
+fern-settings        Persistent reactive user preferences. SettingsStore (dotted-key
+                     Signal<T> K/V), SettingsFile<T> with versioned migrations,
+                     PersistedListModel/PersistedTreeModel bridges, generic
+                     MruList<T: MruEntry>, WindowStateService. Atomic write-temp +
+                     rename through one shared I/O thread per process.
+                     Dependencies: fern-core, fern-data, serde, toml, directories, tempfile
+
+fern-telemetry       Privacy-respecting product analytics built on fern-settings.
+                     ConsentStore, InstallId, TelemetryBundle. Phase-1 scaffolding;
+                     full design in docs/plans/telemetry-plan.md.
+                     Dependencies: fern-core, fern-settings, serde, uuid
+
 fern-i18n            Fluent integration, tr! macro, ShortcutFormatter, locale management
                      Dependencies: fluent-rs, unic-langid
 
@@ -2693,14 +2931,18 @@ fern-platform        winit integration, AccessKit winit adapter, cursor manageme
 
 fern-app             Application runner, FernApp builder, event loop glue.
                      Wires the fern-text TextBackend into the Canvas system.
-                     Dependencies: fern-core, fern-canvas, fern-render, fern-platform
-                     Optional: fern-text, fern-widgets, fern-i18n
+                     Wires fern-settings: opens the SettingsBundle on run(),
+                     and (in window_persist.rs) auto-restores + auto-saves
+                     window geometry for any WindowConfig that carries id(...).
+                     Dependencies: fern-core, fern-canvas, fern-render, fern-platform,
+                                   fern-widgets, fern-i18n, fern-settings
+                     Optional: fern-text
 
 fern-ui              Umbrella crate with re-exports and default features.
                      Dependencies: all of the above
 ```
 
-### 24.2 Dependency Graph
+### 25.2 Dependency Graph
 
 ```
 fern-tokens
@@ -2709,6 +2951,10 @@ fern-canvas ← tiny-skia
     ↑           ↑
 fern-core    fern-text ← text-typeset
     ↑ ← accesskit
+    │
+    ├── fern-data
+    │       ↑
+    │   fern-settings ← serde, toml, directories, tempfile
     │
     ├── fern-widgets
     │   └── [rich-text] ← text-document, text-typeset
@@ -2719,7 +2965,9 @@ fern-render ← wgpu
     ↑
 fern-platform ← winit, accesskit-winit
     ↑
-fern-app (wires fern-text into Canvas, optional fern-widgets, fern-i18n)
+fern-app (wires fern-text into Canvas, fern-widgets, fern-i18n,
+          fern-settings — auto-restores/saves window geometry,
+          optionally fern-text)
     ↑
 fern-ui (umbrella, re-exports)
 ```
@@ -2730,7 +2978,7 @@ The RichTextEditor widget (in fern-widgets behind the `rich-text` feature) depen
 
 Platform-specific code (winit, wgpu, accesskit-winit) is confined to fern-render and fern-platform. Everything above them is platform-independent and headlessly testable.
 
-### 24.3 The fern-ui Umbrella
+### 25.3 The fern-ui Umbrella
 
 The standard application developer depends on a single crate:
 
@@ -2765,13 +3013,13 @@ Sub-crates remain independently publishable for advanced users (custom widget au
 
 ---
 
-## 25. Button — Reference Widget Design
+## 26. Button — Reference Widget Design
 
 The button serves as the reference implementation exercising most architectural features: composition of primitives, interaction state as a `Signal<InteractionState>`, role-based color resolution per visual state, attached handler activation from multiple input paths, AccessKit role and actions. A new widget author implementing their first custom widget should read Button's source alongside this doc.
 
 > **V1 (superseded).** The original description below framed Button as a `CompositeWidget` — the two-trait split — with interaction state stored in `RefCell<Option<State<InteractionState>>>` and an `event()` method that matched `PointerEnter` / `PointerLeave` / `PointerDown` / `PointerUp` / `KeyDown`. The V2 Button at [`crates/fern-widgets/src/button.rs`](../crates/fern-widgets/src/button.rs) is about half the size, uses `Signal<InteractionState>` directly, registers attached handlers via `HandlerSet` in `build(&mut self)`, and resolves colors through `Signal<Role>` mapped from the interaction signal (see [`reactive-theme.md`](reactive-theme.md)). Read the file; it's the authoritative exemplar.
 
-### 25.1 What the V1 and V2 versions agree on
+### 26.1 What the V1 and V2 versions agree on
 
 - **Composition.** A button is a `RectWidget` (background, border, corner radius) wrapping an internal `HStack` or `VStack` (by `IconPosition`) containing an optional `IconWidget` and a `TextWidget` label. Leading/Trailing positions respect locale `LayoutDirection`.
 - **Visual states.** Five: idle, hovered, pressed, focused, disabled. Each resolves to a different color role. Four styles: Filled, Outlined, Flat, Tonal. Style × state → (background role, border role, text role) resolved at paint time.
@@ -2782,17 +3030,17 @@ What changed was only the Rust code that lands these behaviors. The widget is th
 
 ---
 
-## 26. Architectural Comparisons
+## 27. Architectural Comparisons
 
-### 26.1 vs. QPalette → Design Tokens
+### 27.1 vs. QPalette → Design Tokens
 
 QPalette provides a fixed set of color roles across three interaction groups, with no support for spacing, typography, or shape. FernUI's design token system covers the full visual vocabulary, uses typed Rust structs instead of role/group enums, and supports subtree overrides through environment propagation.
 
-### 26.2 vs. QAbstractItemModel → ListModel<T> and TreeModel<T>
+### 27.2 vs. QAbstractItemModel → ListModel<T> and TreeModel<T>
 
 Qt's model uses type-erased `QVariant` with role-based data access and `void*` internal pointers. FernUI's `ListModel<T>` and `TreeModel<T>` are concrete generic types with compile-time type safety. The delegate closure receives `&T` directly — no variant casting, no role integers. The `ListDataSource` trait provides an escape hatch for large/external datasets, also with an associated `Item` type.
 
-### 26.3 vs. Existing Rust GUI Frameworks
+### 27.3 vs. Existing Rust GUI Frameworks
 
 FernUI is architecturally ahead on accessibility (AccessKit at the trait level, tested by every test), text rendering (text-document + text-typeset), and widget extensibility (two-tier model with slots). It is comparable to Xilem/Masonry on layout and event design. It is weaker on rendering sophistication (quad-based vs. Vello's GPU compute renderer) and has zero maturity compared to established frameworks.
 
@@ -2800,11 +3048,11 @@ The honest comparison is not against other Rust GUI frameworks but against Qt Wi
 
 ---
 
-## 27. Widget Catalog
+## 28. Widget Catalog
 
 This section defines every widget in `fern-widgets`, organized by implementation tier. Each entry specifies the widget's purpose, its implementation approach, its accessibility contract, and whether any infrastructure blocks it. The codebase currently provides: animation system (AnimationScheduler with easing), image rendering pipeline (Canvas::draw_image, ImageManager), CPU-rasterized path rendering with atlas caching (PathAtlas with tiny-skia), overlay system with dismissal and cascading, scrolling infrastructure (clips_children, scissor rects, ScrollIntoView), two-level reactive bindings, and gesture recognizers. These capabilities unblock most widgets in the catalog.
 
-### 27.1 Primitives (`fern-widgets/src/primitives/`)
+### 28.1 Primitives (`fern-widgets/src/primitives/`)
 
 Primitives are Level 2 widgets that serve as building blocks for composition. They implement the `Widget` trait directly, have no reactive internal state, and read theme tokens from context during layout and paint. They are not composites.
 
@@ -2836,7 +3084,7 @@ Primitives are Level 2 widgets that serve as building blocks for composition. Th
 
 **IconWidget** — new primitive. Renders a vector icon from a predefined icon set. Icons are defined as `Path` data (sequences of `PathCommand`) and rendered via the Canvas's `fill_path` method, which is CPU-rasterized by tiny-skia and cached in the PathAtlas. Supports color (from theme or explicit), size (defaulting to 16×16 or 24×24 from theme), and reactive color binding. Accessibility: `Role::Image` with `set_name` describing the icon's meaning. The icon set is a separate data module (`fern-icons` or an icon enum in `fern-widgets`) providing named paths: `Icon::Search`, `Icon::Close`, `Icon::ChevronDown`, `Icon::ChevronRight`, `Icon::Check`, `Icon::Plus`, `Icon::Minus`, etc. This widget is a dependency for many composites (Button with icon, ComboBox chevron, TreeView expand arrow, Checkbox checkmark).
 
-### 27.2 Layout Primitives (`fern-widgets/src/primitives/`)
+### 28.2 Layout Primitives (`fern-widgets/src/primitives/`)
 
 These are Level 2 widgets that provide layout behavior beyond simple stacking.
 
@@ -2846,7 +3094,7 @@ These are Level 2 widgets that provide layout behavior beyond simple stacking.
 
 **AspectRatio** — new. Single-child wrapper that constrains the child's bounds to a specific width-to-height ratio. `size_that_fits` computes the largest rectangle with the given ratio that fits within the proposal. Used for images, videos, and fixed-proportion containers.
 
-### 27.3 Container Widgets (`fern-widgets/src/`)
+### 28.3 Container Widgets (`fern-widgets/src/`)
 
 These are higher-level widgets built from primitives, providing themed visual framing and structural organization.
 
@@ -2858,7 +3106,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **StatusBar** — new composite. An HStack in a Panel positioned at the bottom of a window. Similar structure to Toolbar but with `caption` typography. Typically contains read-only text labels showing application state (word count, line number, connection status). Accessibility: `Role::Status`.
 
-### 27.4 Interactive Controls (`fern-widgets/src/`)
+### 28.4 Interactive Controls (`fern-widgets/src/`)
 
 **Button** ✅ implemented. Non-generic composite using the V2 unified `Widget` trait. Four visual styles (Filled, Outlined, Flat, Tonal), five interaction states (Idle, Hovered, Pressed, Focused, Disabled). Reactive color bindings driven by `Signal<InteractionState>` mapped to `Signal<Role>` (see [`reactive-theme.md`](reactive-theme.md)). Attached `on_tap` handler auto-wires the TapRecognizer. MinSize wrapper for touch target enforcement. Supports optional icon (leading or trailing) via the slot system. Tooltip attachment via builder method. Accessibility: `Role::Button`.
 
@@ -2886,7 +3134,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **Link** — new composite. A focusable, clickable TextWidget with underline decoration and `CursorIcon::Pointer` on hover. Emits a command on click. Visually distinguished from plain text by color (theme `primary`) and underline. Accessibility: `Role::Link` with `set_name`.
 
-### 27.5 Display Widgets (`fern-widgets/src/`)
+### 28.5 Display Widgets (`fern-widgets/src/`)
 
 **ProgressBar** — new composite. A ZStack of a background track RectWidget and a foreground fill RectWidget. The fill width is driven by a `Signal<f32>` (0.0 to 1.0) that computes the fill width as `value * track_width`. Optionally displays a percentage label. Determinate mode (known progress) shows the fill bar. Indeterminate mode (unknown duration) uses an animated sweep driven by the AnimationScheduler. Accessibility: `Role::ProgressIndicator` with `set_numeric_value`, `set_min_numeric_value(0.0)`, `set_max_numeric_value(1.0)`.
 
@@ -2896,7 +3144,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **Accordion / CollapsibleSection** — new composite. A clickable header bar (HStack of label + chevron IconWidget) above a content panel. Bound to a `Signal<bool>` for expanded/collapsed. The content panel uses `visible_when` for instant show/hide, or animated expand/collapse via `Signal<f32>::animate_to()` on a max-height signal. The chevron rotates (via a rotation path or by swapping between ChevronDown and ChevronRight icons). Accessibility: header is `Role::Button` with `set_expanded`; content is `Role::Group`.
 
-### 27.6 Scroll and Split (`fern-widgets/src/`)
+### 28.6 Scroll and Split (`fern-widgets/src/`)
 
 **ScrollBar** ✅ implemented (Milestones 3 and 4). Detailed in Section 3.6. Standalone interactive scroll bar with thumb drag, track click, and keyboard adjustment. Shared `Signal<f32>` for scroll position with ScrollArea. Supports an `overlay_mode(true)` flag for the Ubuntu-style thin-to-full expansion: a `resting_thickness` (default 4px) indicator paints at rest, expanding to the full thickness (default 12px) when hovered. Accessibility: `Role::ScrollBar` with `set_numeric_value`, `set_orientation`, `Action::SetValue`.
 
@@ -2904,7 +3152,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **SplitView** — new Level 2 widget. Two children separated by a draggable divider. The divider's position is a `Signal<f32>` representing the proportion or pixel width of the first child. DragRecognizer on the divider handles resizing. `CursorIcon::ColResize` (horizontal split) or `CursorIcon::RowResize` (vertical split) on hover. Configurable minimum sizes for each pane. Keyboard: when focused, Left/Right (or Up/Down) adjusts the split position by a step. Double-click on divider resets to default position. Accessibility: divider declares `Role::Splitter` with `set_numeric_value`, `Action::SetValue`.
 
-### 27.7 Tabs and Navigation (`fern-widgets/src/`)
+### 28.7 Tabs and Navigation (`fern-widgets/src/`)
 
 **Switcher** — new primitive (in `fern-widgets/src/primitives/`). A container that shows exactly one child at a time, driven by an external `Signal<usize>` index. Internally a ZStack where each child has a `visible_when` binding derived from `selected_index.map(|i| *i == this_child_index)`. The selected child is active (layout, paint, events, accessibility); all others are dormant (state preserved, no rendering cost). The Switcher does not own the selection logic — it receives the `Signal<usize>` from outside, so it composes with any navigation pattern (wizard Next/Back buttons, sidebar navigation, routing logic, tab headers) without encoding assumptions about how the index changes. Used for wizard flows, view mode switching (list/grid/detail), authentication gates (login → main), and navigation-driven content areas. If animated transitions are desired (crossfade, slide), the outgoing and incoming children's opacity or position are driven by the AnimationScheduler before the dormancy toggle completes. Accessibility: `Role::GenericContainer` — the semantic meaning comes from the external control, not the Switcher itself. Only the active child produces AccessKit nodes.
 
@@ -2912,7 +3160,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **Breadcrumb** — new composite. An HStack of clickable path segments separated by chevron or slash icons. Each segment emits a navigation command. The last segment is non-interactive (current location). Accessibility: `Role::Navigation` containing `Role::Link` items, with the last item marked `aria-current`.
 
-### 27.8 Overlays and Dialogs (`fern-widgets/src/`)
+### 28.8 Overlays and Dialogs (`fern-widgets/src/`)
 
 **Tooltip** — exists. Non-interactive text or rich content shown after a hover delay. Managed by the TooltipHost wrapper and the WidgetTree's tooltip timer system.
 
@@ -2922,7 +3170,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **Snackbar / Toast** — new. An auto-dismissing notification shown as an overlay near the bottom of the window. Managed by a `SnackbarManager` (similar to OverlayManager) that queues notifications and displays them sequentially. Each notification has a message, an optional action button, and a configurable display duration. The SnackbarManager handles show/hide animation (slide in from bottom, fade out) via the AnimationScheduler. Accessibility: `Role::Alert` with `set_live("polite")` so screen readers announce the notification without interrupting the current task.
 
-### 27.9 Data-Driven Widgets (`fern-widgets/src/`)
+### 28.9 Data-Driven Widgets (`fern-widgets/src/`)
 
 **Repeater** — new Level 2 widget. Creates one child subtree per item in a `ListModel<T>`. When the `ListModel` emits `DataChange` notifications (insert, remove, move), the Repeater performs targeted arena mutations. Designed for small, non-virtualized dynamic collections (toolbar buttons, chapter list, tag chips). Detailed in Section 6.4.
 
@@ -2932,7 +3180,7 @@ These are higher-level widgets built from primitives, providing themed visual fr
 
 **SelectionModel** — new utility (not a widget). A `Signal<SelectionSet>` that tracks which items are selected, with methods for single-select (click), toggle (Ctrl+click), range-select (Shift+click), and select-all (Ctrl+A). Consumed by ListView and TreeView. The SelectionSet stores selected indices as a `BTreeSet<usize>`. The SelectionModel emits selection change notifications through the Signal binding system.
 
-### 27.10 Text Editing (`fern-widgets/src/`, feature-gated)
+### 28.10 Text Editing (`fern-widgets/src/`, feature-gated)
 
 > **Note on `AppCommand` in this section.** The API surface below
 > (event callbacks typed as `Fn(...) -> Box<dyn AppCommand>`) is from
@@ -2952,7 +3200,7 @@ This section is longer than other widget catalog entries because the rich text e
 
 FernUI ships a single rich text widget, `RichTextEditor`, feature-gated behind the `[rich-text]` cargo feature. The widget has two public constructors that bundle different **policy presets** — a command filter, a caret policy, an accessibility role, and a clipboard policy — at construction time. There is no separate `RichTextView` type and no runtime-mutable `read_only` flag.
 
-**`RichTextEditor::editor(document)`** produces an editable widget. All editing commands accepted. Caret blinks. Accessibility role is `Role::MultilineTextInput`. Full clipboard support (cut, copy, paste). IME composition hooks active (even when IME itself is deferred to a post-M9 refinement; see §27.10.14). Undo stack active. This is the foundation for the writer-IDE use case (Atelier, novelist tools), code editors, note-taking applications, and any case where the user authors rich content.
+**`RichTextEditor::editor(document)`** produces an editable widget. All editing commands accepted. Caret blinks. Accessibility role is `Role::MultilineTextInput`. Full clipboard support (cut, copy, paste). IME composition hooks active (even when IME itself is deferred to a post-M9 refinement; see §28.10.14). Undo stack active. This is the foundation for the writer-IDE use case (Atelier, novelist tools), code editors, note-taking applications, and any case where the user authors rich content.
 
 **`RichTextEditor::read_only(document)`** produces a non-editing display widget. The command filter rejects every mutating command. The caret does not blink — it is either static (visible on focus for screen-reader navigation) or hidden entirely, depending on whether the application wants keyboard navigation. Accessibility role is `Role::Document`. Clipboard is limited to copy and select-all. No undo stack (nothing to undo). Link click activation still works (and is in fact the main interaction in a read-only view). This is the right starting point for documentation viewers, help panels, message displays, log readers, and any case where text content needs rich rendering without modification.
 
@@ -3438,9 +3686,9 @@ The Godot reference at github.com/jacquetc/godot-rich-text is the working implem
 
 ---
 
-**TextInput** — Milestone 9 widget, plain-text specialization of `RichTextEditor`. A natural fit for the policy-preset machinery introduced in M8 (§27.10.1): TextInput is a thin wrapper that constructs a `RichTextEditor` with a command filter rejecting formatting commands (Bold, Italic, Heading), an Enter key handler that emits `on_submit` instead of inserting a new block, and an optional single-line constraint that rejects Enter entirely. Bound to a `Signal<String>` via two-way binding with the underlying TextDocument's plain-text representation. Cursor rendering, selection, keyboard editing, and clipboard are all inherited from RichTextEditor — TextInput is a thin configuration layer, not a reimplementation. Whether TextInput exposes itself as its own public type or as a third `RichTextEditor::plain_text(...)` constructor preset is a judgement call for M9 — the former gives TextInput a distinct name and builder methods, the latter emphasizes the shared implementation. Either way, the underlying code is the same. NumberInput/SpinBox is TextInput plus increment/decrement buttons plus a numeric validation filter on character input. IME is deferred (see 27.10.14). Accessibility: `Role::TextInput` with `set_value`, `set_text_selection`, `Action::SetValue`.
+**TextInput** — Milestone 9 widget, plain-text specialization of `RichTextEditor`. A natural fit for the policy-preset machinery introduced in M8 (§28.10.1): TextInput is a thin wrapper that constructs a `RichTextEditor` with a command filter rejecting formatting commands (Bold, Italic, Heading), an Enter key handler that emits `on_submit` instead of inserting a new block, and an optional single-line constraint that rejects Enter entirely. Bound to a `Signal<String>` via two-way binding with the underlying TextDocument's plain-text representation. Cursor rendering, selection, keyboard editing, and clipboard are all inherited from RichTextEditor — TextInput is a thin configuration layer, not a reimplementation. Whether TextInput exposes itself as its own public type or as a third `RichTextEditor::plain_text(...)` constructor preset is a judgement call for M9 — the former gives TextInput a distinct name and builder methods, the latter emphasizes the shared implementation. Either way, the underlying code is the same. NumberInput/SpinBox is TextInput plus increment/decrement buttons plus a numeric validation filter on character input. IME is deferred (see §28.10.14). Accessibility: `Role::TextInput` with `set_value`, `set_text_selection`, `Action::SetValue`.
 
-### 27.11 Platform-Dependent (`fern-platform/`, `fern-app/`)
+### 28.11 Platform-Dependent (`fern-platform/`, `fern-app/`)
 
 **Native MenuBar integration** — planned for Milestone 10. The in-window `MenuBar` widget (Milestone 4, above) already provides the Windows/Linux implementation. On macOS, Milestone 10 adds a platform abstraction: the application declares its menu structure once through the FernApp builder, and `fern-platform` translates it to native `NSMenu` at runtime. Blocked on: Cocoa/AppKit interop code that goes beyond what winit provides.
 
@@ -3450,13 +3698,13 @@ The Godot reference at github.com/jacquetc/godot-rich-text is the working implem
 
 ---
 
-## 28. V2 Widget Authoring Model
+## 29. V2 Widget Authoring Model
 
 This section defines the redesigned widget authoring surface for FernUI. The redesign unifies two traits into one, replaces four reactivity types with one, and moves event handling from a monolithic method to attached handlers. The underlying framework infrastructure — the arena, layout protocol, rendering pipeline, overlay system, animation scheduler, accessibility integration, window management — is unchanged. What changes is the API that widget authors program against.
 
 The redesign is motivated by three problems identified during Milestone 3 implementation. The `Widget` / `CompositeWidget` split forces the wrong decision at definition time — a widget must choose between custom painting and child composition, when real widgets need both. The `RefCell<Option<State<T>>>` pattern is required by every stateful composite because `CompositeWidget::build()` takes `&self` while `event()` needs mutable access to state created during `build()`. The four reactivity types (`State<T>`, `DerivedState<T>`, `Reactive<T>`, `StateHandle<T>`) expose implementation details that widget authors should not need to understand.
 
-### 28.1 Unified Widget Trait
+### 29.1 Unified Widget Trait
 
 The `CompositeWidget` trait (composite_widget.rs) and `CompositeWidgetAdapter` (composite_adapter.rs) are removed. There is one trait:
 
@@ -3499,7 +3747,7 @@ Methods removed from the trait compared to V1:
 - `register_bindings()` — gone, signal-to-widget bindings register automatically through `Prop<T>` resolution.
 - `take_pending_children()`, `set_resolved_children()`, `take_visible_when()`, `take_enabled_when()` — moved to the `WidgetBuilder` blanket impl and arena resolution.
 
-### 28.2 The `build(&mut self)` Lifecycle
+### 29.2 The `build(&mut self)` Lifecycle
 
 The `build` method takes `&mut self`, eliminating the `RefCell<Option<State<T>>>` pattern. Widget authors store child IDs, signal handles, and any construction-time state as plain struct fields:
 
@@ -3546,7 +3794,7 @@ fn build_widget(&mut self, id: WidgetId) {
 
 **Constraint.** During `build()`, the widget cannot read its own arena node (bounds, parent, activation state) because it has been extracted. This is correct — `build()` runs before the first layout, so the widget has no bounds yet. If a widget needs its own ID during `build()`, `BuildContext` provides `ctx.self_id()`.
 
-### 28.3 Attached Event Handlers
+### 29.3 Attached Event Handlers
 
 Instead of implementing a monolithic `event()` method with a match on every event variant, widgets attach named handlers that express intent. Handlers are closures stored on the arena node, dispatched by the framework during the existing preview/bubble event passes.
 
@@ -3602,7 +3850,7 @@ Handler attachment works by storing closures temporarily on the widget value (vi
 
 **Low-level escape hatch.** For widgets that need raw pointer events (a color wheel, a node graph editor, a custom drawing canvas), `on_pointer_event` provides unprocessed `PointerEvent::Down`, `PointerEvent::Move`, `PointerEvent::Up` with full position and button information.
 
-### 28.4 Signal<T> — Unified Reactivity
+### 29.4 Signal<T> — Unified Reactivity
 
 `State<T>`, `DerivedState<T>`, `Reactive<T>`, and `StateHandle<T>` are replaced by a single public type: `Signal<T>`.
 
@@ -3673,7 +3921,7 @@ fn color(mut self, color: impl Into<Prop<Color>>) -> Self
 
 The dirty tracking level (repaint vs relayout) is determined by the property method, not by the consumer. `.color()` registers a repaint-level binding. `.text()` registers a relayout-level binding. The `BindingRegistry` remains as an internal framework mechanism — widget authors never see it.
 
-### 28.5 Scoped Effects
+### 29.5 Scoped Effects
 
 `ctx.effect()` replaces the unscoped `state.observe()` pattern for widget-internal side effects. Effects registered during `build()` are tied to the build cycle — on rebuild, old effects are cleaned up before the new `build()` runs. On widget destruction, effects are cleaned up with the widget.
 
@@ -3691,7 +3939,7 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 
 The `BuildContext` tracks all effects registered during this build call as a list of `ObserverHandle` values. Before each rebuild, the framework drops the handles from the previous build, removing the old callbacks. This is the same lifecycle model as SolidJS createEffect or React useEffect cleanup.
 
-### 28.6 Arena Node Changes
+### 29.6 Arena Node Changes
 
 The `WidgetNode` in `arena.rs` stores handlers and framework-level properties that were previously on the Widget trait or on the widget struct:
 
@@ -3742,7 +3990,7 @@ pub(crate) struct EventHandlers {
 
 When a widget with `on_tap` is added to the arena, the framework creates a `TapRecognizer` in the `gesture_arena`. When a widget has both `on_tap` and `on_drag`, both recognizers compete in the same `GestureArena`. The widget author never manages this — the framework infers the correct recognizer configuration from which handlers are attached.
 
-### 28.7 Widget Tree Changes
+### 29.7 Widget Tree Changes
 
 The `WidgetTree` in `widget_tree.rs` simplifies:
 
@@ -3761,7 +4009,7 @@ No `add_widget()`, `add_composite()`, `add_composite_inner()`, `add_widget_direc
 
 **Event dispatch.** The `dispatch_to_widget` method changes from calling `node.widget.event(event, ctx)` to checking the appropriate handler on `node.handlers` and calling it. The preview/bubble pass structure is unchanged. The gesture recognizer integration moves from per-node `gesture_binding` to `handlers.gesture_arena`, with the framework feeding raw pointer events through the arena and dispatching recognized gestures to the corresponding handler.
 
-### 28.8 What Each Widget Type Looks Like
+### 29.8 What Each Widget Type Looks Like
 
 **Leaf primitive (TextWidget, RectWidget, IconWidget, Divider).** Implements `size_that_fits` and `paint`. Properties use `Prop<T>` with `Into<Prop<T>>` for static/reactive flexibility. No `build()`, no handlers, no `children()`. Binding registration happens automatically during arena insertion through `Prop<T>` resolution. Migration: replace `Reactive<T>` with `Prop<T>`, remove `register_bindings()`, `take_visible_when()`, `take_enabled_when()`. Net change per file: ~20 lines.
 
@@ -3773,7 +4021,7 @@ No `add_widget()`, `add_composite()`, `add_composite_inner()`, `add_widget_direc
 
 **Hybrid widget (Card, Panel, ScrollArea, Accordion).** Implements both `build` for child construction and `paint` for custom background/shadow/decoration rendering. This combination was awkward in V1 — Card had to be a Widget with manual child management because CompositeWidget had no `paint()`. In V2, `build()` and `paint()` coexist naturally on the same trait. Migration: add `build()` for child creation, keep `paint()` for visuals. Net simplification for every hybrid widget.
 
-### 28.9 DSL Readiness
+### 29.9 DSL Readiness
 
 The unified model has one construction pattern for every widget: `WidgetType::new(args).property(value).on_event(handler).child(child_widget)`. This uniformity means a proc macro can provide a thin syntactic transform:
 
@@ -3807,7 +4055,7 @@ The macro compiles to the builder calls. No runtime overhead, no hidden allocati
 
 **Status.** The `fern!` DSL has since shipped as [`fern-ui-macros`](../crates/fern-ui-macros/) (re-exported from the `fern-ui` umbrella crate as `fern!`). The surface is block-structured with newline-separated body items rather than the property-in-parens sketch above; every construct desugars one-to-one to the V2 builder calls at macro-expansion time — no runtime, no virtual tree. The user-facing reference is [`fern-macro-reference.md`](fern-macro-reference.md) (cheat sheet, limitations, worked translations). The formal grammar, error reporting, and desugaring rules are in [`fern-language-spec-v3.md`](fern-language-spec-v3.md). The widget_catalog example uses both the classic builder form and the `fern!` form side by side in split panes; see [`examples/widget_catalog`](../examples/widget_catalog/).
 
-### 28.10 Impact Assessment (Post-Migration)
+### 29.10 Impact Assessment (Post-Migration)
 
 The V2 migration is complete. All widgets use the unified Widget trait and Signal<T> reactivity.
 
@@ -3825,7 +4073,7 @@ The V2 migration is complete. All widgets use the unified Widget trait and Signa
 
 **Final line counts.** fern-core: 9,989 lines (was 8,554 in V1 — net increase from signal.rs, build_context.rs, event_handlers.rs, widget_builder.rs, animation.rs expansion, offset by composite deletions). fern-widgets: 11,641 lines (was 11,780 in V1 — slight net reduction despite adding more features, each widget simpler). Infrastructure crates (tokens, canvas, text, render, platform, app): 8,946 lines — untouched by V2 migration.
 
-### 28.11 Superseded Sections
+### 29.11 Superseded Sections
 
 The following sections describe the V1 model and should be read as historical context:
 
@@ -3838,7 +4086,7 @@ Sections 2 (Layout Model), 3 (Scrolling), 6 (UI Construction Patterns), 8 (Dorma
 
 ---
 
-## 29. Open Questions (Current, April 2026)
+## 30. Open Questions (Current, April 2026)
 
 The bulk of the original post-milestone question list has landed. The short list below is what remains actively open; see [`fern-ui-milestones.md`](fern-ui-milestones.md) for detailed status and the Next-candidates roadmap.
 
@@ -3856,7 +4104,7 @@ The bulk of the original post-milestone question list has landed. The short list
 
 ---
 
-## 30. First Milestone: Button in a Window
+## 31. First Milestone: Button in a Window
 
 The first concrete deliverable is a window displaying a single button that responds to clicks, changes visual state on hover/press, renders text via text-typeset, announces itself to screen readers via AccessKit, and respects a theme.
 

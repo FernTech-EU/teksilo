@@ -1255,6 +1255,14 @@ pub struct FernAppBuilder {
     /// thread-local registry in `run` / `build_headless` before the
     /// first frame builds.
     tooltip_contents: Vec<fern_widgets::tooltip::TooltipContent>,
+    /// OS-correct application paths (config / data dirs). Set via
+    /// [`application`](Self::application) or [`app_paths`](Self::app_paths).
+    /// Required when `settings_bundle` is set.
+    app_paths: Option<fern_settings::AppPaths>,
+    /// Persistence configuration. When present, the bundle is opened
+    /// at startup and each enabled service is registered into the
+    /// `app_state` registry under its concrete type.
+    settings_bundle: Option<fern_settings::SettingsBundle>,
 }
 
 impl FernAppBuilder {
@@ -1271,7 +1279,63 @@ impl FernAppBuilder {
             app_state_registry: HashMap::new(),
             i18n: None,
             tooltip_contents: Vec::new(),
+            app_paths: None,
+            settings_bundle: None,
         }
+    }
+
+    /// Identify the application for OS-correct path resolution. The
+    /// `(qualifier, organization, application)` triple follows the
+    /// [`directories`] convention (e.g. `("com", "FernTech", "Skribisto")`).
+    /// Required when [`settings`](Self::settings) is used.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS does not expose a usable home directory
+    /// (typically a sandboxed environment with `HOME` unset). Use
+    /// [`app_paths`](Self::app_paths) to supply an explicit path
+    /// in that situation.
+    pub fn application(
+        mut self,
+        qualifier: &str,
+        organization: &str,
+        application: &str,
+    ) -> Self {
+        let paths = fern_settings::AppPaths::new(qualifier, organization, application)
+            .unwrap_or_else(|| {
+                panic!(
+                    "FernAppBuilder::application(\"{qualifier}\", \"{organization}\", \
+                     \"{application}\"): could not resolve a usable OS config directory. \
+                     This typically happens in sandboxed environments with no HOME set. \
+                     Use FernAppBuilder::app_paths(AppPaths::for_testing(...) or \
+                     AppPaths::from_dirs(...)) to supply an explicit location.",
+                )
+            });
+        self.app_paths = Some(paths);
+        self
+    }
+
+    /// Provide an explicit [`AppPaths`](fern_settings::AppPaths). Used
+    /// for portable-mode apps and tests.
+    pub fn app_paths(mut self, paths: fern_settings::AppPaths) -> Self {
+        self.app_paths = Some(paths);
+        self
+    }
+
+    /// Configure the persistence bundle. When `run`/`build_headless`
+    /// fires, the bundle is opened against the configured `AppPaths`
+    /// and every active service is registered in `app_state`, where
+    /// it becomes reachable via the
+    /// [`SettingsExt`](fern_settings::SettingsExt) trait.
+    ///
+    /// # Panics
+    ///
+    /// Panics during `run` / `build_headless` if no `AppPaths` was
+    /// configured first via [`application`](Self::application) or
+    /// [`app_paths`](Self::app_paths).
+    pub fn settings(mut self, bundle: fern_settings::SettingsBundle) -> Self {
+        self.settings_bundle = Some(bundle);
+        self
     }
 
     /// Register the application's tooltip string catalog.
@@ -1396,6 +1460,35 @@ impl FernAppBuilder {
         self
     }
 
+    /// Open the configured settings bundle (if any) and register
+    /// each service in the app-state registry.
+    fn install_settings(&mut self) -> Option<fern_settings::OpenedSettings> {
+        let bundle = self.settings_bundle.take()?;
+        let paths = self.app_paths.clone().expect(
+            "FernAppBuilder::settings(...) requires .application(...) or .app_paths(...) \
+             to be set first so persistence has a target directory.",
+        );
+        match bundle.open(&paths) {
+            Ok(opened) => {
+                self.app_state_registry.insert(
+                    TypeId::of::<fern_settings::SettingsStore>(),
+                    Box::new(opened.store.clone()),
+                );
+                if let Some(w) = &opened.window_state {
+                    self.app_state_registry.insert(
+                        TypeId::of::<fern_settings::WindowStateService>(),
+                        Box::new(w.clone()),
+                    );
+                }
+                Some(opened)
+            }
+            Err(e) => {
+                eprintln!("fern-app: failed to open settings bundle: {e}");
+                None
+            }
+        }
+    }
+
     /// Build a headless app for testing (no window, no GPU).
     pub fn build_headless(mut self) -> HeadlessApp {
         // Install the tooltip registry before anything else — widgets
@@ -1406,6 +1499,11 @@ impl FernAppBuilder {
                 &mut self.tooltip_contents,
             ));
         }
+
+        // Open settings (if a bundle was configured) and register the
+        // services into `app_state_registry` so they're reachable from
+        // any handler via the SettingsExt trait.
+        let opened_settings = self.install_settings();
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
 
@@ -1471,6 +1569,7 @@ impl FernAppBuilder {
             tree,
             theme: self.theme,
             i18n_manager,
+            settings: opened_settings,
         }
     }
 
@@ -1484,6 +1583,13 @@ impl FernAppBuilder {
                 &mut self.tooltip_contents,
             ));
         }
+
+        // Open settings (if a bundle was configured) so the services
+        // are present in the app_state registry when window trees
+        // start being built. The `OpenedSettings` handle is kept on
+        // the stack so its inner `SettingsFile` clones live long
+        // enough to flush on shutdown.
+        let opened_settings = self.install_settings();
 
         // Construct the i18n manager (if configured) and install it on
         // the thread-local before any window or widget tree is created.
@@ -1625,6 +1731,17 @@ impl FernAppBuilder {
         );
 
         event_loop.run_app(&mut app).unwrap();
+
+        // Flush any pending settings writes synchronously before the
+        // process exits. The `DebouncedWriter` background threads also
+        // flush on Drop, but doing it synchronously here also surfaces
+        // any I/O errors to stderr before the binding goes out of
+        // scope.
+        if let Some(opened) = opened_settings {
+            if let Err(e) = opened.flush_all() {
+                eprintln!("fern-app: settings flush on exit failed: {e}");
+            }
+        }
     }
 }
 
@@ -1667,6 +1784,10 @@ pub struct HeadlessApp {
     /// can reach the bundles, version signal, and locale signal directly
     /// through this handle.
     pub i18n_manager: Option<Rc<I18nManager>>,
+    /// Active persistence services, if `FernAppBuilder::settings(...)`
+    /// was used. Held here so the underlying `SettingsFile` clones
+    /// (and their I/O threads) live as long as the headless app.
+    pub settings: Option<fern_settings::OpenedSettings>,
 }
 
 impl HeadlessApp {

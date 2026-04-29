@@ -72,6 +72,7 @@ fern-data = { workspace = true }
 fern-render = { workspace = true }
 fern-platform = { workspace = true }
 fern-app = { workspace = true }
+fern-settings = { workspace = true }
 fern-widgets = { workspace = true, optional = true }
 # Declared directly (not via `workspace = true`) so we can set
 # `default-features = false` — Cargo rejects overriding
