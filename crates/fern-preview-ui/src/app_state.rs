@@ -59,24 +59,57 @@ impl BackgroundMode {
 
 /// Theme choice for the canvas sub-tree (separate from the previewer
 /// chrome's theme so a buggy theme can't break the tool itself).
+///
+/// - `Native` — adopt the OS desktop's actual colour palette (KDE
+///   Breeze, GNOME Adwaita, Cinnamon Mint-Y, etc.) by querying
+///   `fern_platform::os_theme::query_os_theme_colors`. Same semantics
+///   as the framework's `ThemeMode::Native`. Resolves at click-time;
+///   clicking again re-queries.
+/// - `Light` / `Dark` — the framework's built-in JetBrains Int UI
+///   light/dark themes. Independent of the OS.
+///
+/// We deliberately do *not* expose a "follow OS light/dark
+/// preference but stay on Int UI" option — that would coincide with
+/// `Light`/`Dark` whenever the OS preference matched, producing two
+/// buttons that look identical. The current three options each give
+/// a distinct, predictable result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanvasTheme {
+    Native,
     Light,
     Dark,
 }
 
 impl CanvasTheme {
-    pub const ALL: &'static [CanvasTheme] = &[CanvasTheme::Light, CanvasTheme::Dark];
+    pub const ALL: &'static [CanvasTheme] =
+        &[CanvasTheme::Native, CanvasTheme::Light, CanvasTheme::Dark];
 
     pub fn label(self) -> &'static str {
         match self {
+            CanvasTheme::Native => "Native",
             CanvasTheme::Light => "Light",
             CanvasTheme::Dark => "Dark",
         }
     }
 
+    /// Resolve to a concrete theme. For `Native`, builds a theme that
+    /// *adopts* the OS palette rather than picking between FernUI's
+    /// built-in Int UI light/dark — this is what gives a visibly
+    /// distinct result from clicking Light/Dark on most desktops.
     pub fn theme(self) -> fern_tokens::Theme {
         match self {
+            CanvasTheme::Native => {
+                let os = fern_platform::os_theme::query_os_theme_colors();
+                let base = if os.color_scheme.is_dark() {
+                    fern_tokens::Theme::dark_default()
+                } else {
+                    fern_tokens::Theme::light_default()
+                };
+                fern_tokens::Theme {
+                    colors: fern_tokens::ColorTokens::from_os_colors(&os),
+                    ..base
+                }
+            }
             CanvasTheme::Light => fern_tokens::Theme::light_default(),
             CanvasTheme::Dark => fern_tokens::Theme::dark_default(),
         }
@@ -118,9 +151,13 @@ impl AppState {
             selected_variant: Signal::new(None),
             knobs_cache: Rc::new(RefCell::new(HashMap::new())),
             canvas_rebuild_tick: Signal::new(0),
-            // Match `run_previewer`'s initial app theme so the toolbar
-            // shows the active option highlighted on startup.
-            canvas_theme: Signal::new(CanvasTheme::Dark),
+            // Default to "Native" so the previewer adopts the OS
+            // desktop palette at startup (KDE Breeze, GNOME Adwaita,
+            // etc.). `run_previewer` calls `CanvasTheme::Native.theme()`
+            // to resolve the initial concrete `Theme` so chrome,
+            // canvas, and the highlighted toolbar button all agree
+            // on frame 1.
+            canvas_theme: Signal::new(CanvasTheme::Native),
             canvas_locale: Signal::new(None),
             zoom_percent: Signal::new(100.0),
             background_mode: Signal::new(BackgroundMode::Themed),

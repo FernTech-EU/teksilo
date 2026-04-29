@@ -66,9 +66,22 @@ fn output_path(
     out_dir.push(".fern-previewer");
     out_dir.push("exports");
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("create_dir_all: {}", e))?;
-    let theme_label = match canvas_theme {
+    // Resolve the chosen theme to its concrete light/dark identity
+    // for the filename. `Native` resolves at click-time via
+    // `theme()`; we mirror that resolution here so an export taken
+    // while "Native" is selected still gets a meaningful suffix
+    // ("native-light" / "native-dark") rather than a bare "native"
+    // that drops information about what was actually rendered.
+    let theme_label: &'static str = match canvas_theme {
         crate::app_state::CanvasTheme::Light => "light",
         crate::app_state::CanvasTheme::Dark => "dark",
+        crate::app_state::CanvasTheme::Native => {
+            if fern_platform::os_theme::query_color_scheme().is_dark() {
+                "native-dark"
+            } else {
+                "native-light"
+            }
+        }
     };
     Ok(out_dir.join(format!(
         "{}__{}__{}.png",

@@ -27,7 +27,11 @@ mod platform {
     };
 
     pub(super) fn query_color_scheme() -> ColorSchemePreference {
-        // XDG portal: 0 = no preference, 1 = dark, 2 = light
+        // XDG portal: 0 = no preference, 1 = dark, 2 = light.
+        // Works on GNOME and on KDE Plasma 5.27+ (with the
+        // `xdg-desktop-portal-kde` package installed). On older or
+        // headless KDE setups the portal call returns None and we
+        // fall through.
         if let Some(v) = read_portal_u32("org.freedesktop.appearance", "color-scheme") {
             return match v {
                 1 => ColorSchemePreference::Dark,
@@ -36,17 +40,49 @@ mod platform {
             };
         }
 
-        // Fallback: infer from GTK theme name
-        let theme_name = match detect_desktop() {
-            Desktop::Cinnamon => read_gsettings("org.cinnamon.desktop.interface", "gtk-theme"),
-            _ => read_gsettings("org.gnome.desktop.interface", "gtk-theme"),
-        };
-
-        if let Some(name) = theme_name {
-            if name.to_lowercase().contains("dark") {
-                return ColorSchemePreference::Dark;
+        // Desktop-specific fallback. Picks the right config source
+        // for the current DE rather than blindly trying GNOME's
+        // gsettings (which is empty on a clean KDE install and
+        // would otherwise leave us at `NoPreference`, mapping
+        // dark-mode KDE users to a light theme).
+        match detect_desktop() {
+            Desktop::Kde => {
+                // KDE stores the active scheme in `kdeglobals` —
+                // `[General] ColorScheme=BreezeDark` for dark,
+                // `BreezeLight` (or any name without "dark") for
+                // light. Reading the file is cheap; we already
+                // do it under `ThemeMode::Native` for the full
+                // colour palette.
+                let path = dirs_kdeglobals();
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Some(scheme) = ini_value(&content, "General", "ColorScheme") {
+                        if scheme.to_lowercase().contains("dark") {
+                            return ColorSchemePreference::Dark;
+                        }
+                        return ColorSchemePreference::Light;
+                    }
+                }
             }
-            return ColorSchemePreference::Light;
+            Desktop::Cinnamon => {
+                if let Some(name) =
+                    read_gsettings("org.cinnamon.desktop.interface", "gtk-theme")
+                {
+                    if name.to_lowercase().contains("dark") {
+                        return ColorSchemePreference::Dark;
+                    }
+                    return ColorSchemePreference::Light;
+                }
+            }
+            Desktop::Gnome | Desktop::Other(_) => {
+                if let Some(name) =
+                    read_gsettings("org.gnome.desktop.interface", "gtk-theme")
+                {
+                    if name.to_lowercase().contains("dark") {
+                        return ColorSchemePreference::Dark;
+                    }
+                    return ColorSchemePreference::Light;
+                }
+            }
         }
 
         ColorSchemePreference::NoPreference

@@ -33,8 +33,18 @@ pub fn run_previewer(opts: PreviewerOptions) {
     let initial_widget = opts.initial_widget.clone();
     let initial_variant = opts.initial_variant.clone();
 
+    // Resolve the initial theme from the OS desktop palette. This
+    // matches the toolbar's default `CanvasTheme::Native` selection
+    // so the chrome (which `ctx.set_theme` reskins app-wide) and the
+    // toolbar's highlighted button agree on frame 1. We use
+    // `ThemeMode::Manual` here rather than `ThemeMode::Native` /
+    // `ThemeMode::FollowSystem` because the toolbar's pickers later
+    // call `ctx.set_theme(...)` directly — those builder-time modes
+    // would override on the next OS event and fight the user's
+    // explicit choice.
+    let initial_canvas_theme = crate::app_state::CanvasTheme::Native;
     FernAppBuilder::new()
-        .theme(Theme::dark_default())
+        .theme(initial_canvas_theme.theme())
         .theme_mode(ThemeMode::Manual)
         .initial_window(
             WindowConfig::new()
