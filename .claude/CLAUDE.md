@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-FernUI is a pure-Rust GUI framework for serious desktop applications. Primary target: **Skribisto** (cross-platform writing app). Architecture: retained widget tree with SwiftUI-style layout, AccessKit accessibility, wgpu rendering.
+FernUI is a pure-Rust GUI framework for serious desktop applications. Architecture: retained widget tree with SwiftUI-style layout, AccessKit accessibility, wgpu rendering.
 
 - **License:** Proprietary — Copyright (c) 2026-2026 FernTech, all rights reserved
 - **Rust edition:** 2024 (resolver 3)
@@ -20,6 +20,14 @@ cargo run -p widget-catalog                    # Browse all available widgets
 cargo test -p fern-core                        # Test a specific crate
 cargo test -p fern-widgets                     # Includes layout integration tests
 cargo doc --no-deps --open                     # Generate docs
+cargo run -p drag-and-drop                      # Drag-and-drop showcase
+cargo run -p multi_window                      # Multi-window demo
+cargo run -p recent_projects                   # MRU/persistence demo
+cargo run -p rich_text_editor                  # Rich text editing
+cargo run -p rich_text_viewer                  # Rich text viewing
+cargo run -p spin_box                          # Numeric input demo
+cargo run -p tool_box                          # Tool box widget demo
+cargo run -p fern-widgets-previewer            # Widget catalog previewer
 ```
 
 ## Tools
@@ -29,11 +37,12 @@ python3 tools/extract_widget_api.py --list                 # List all widget fil
 python3 tools/extract_widget_api.py Button HStack Dialog   # Extract public API + docs for widgets
 python3 tools/extract_widget_api.py --all                  # Every widget
 python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tooling
+python3 tools/bench_examples.py                          # Run benchmarks with report generation
 ```
 
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/fern-widgets/src/](crates/fern-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 
-The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`, `recent_projects`).
+The workspace has two member globs: `crates/*` for libraries and `examples/*` for runnable demos. Examples live under [examples/](examples/) (e.g. `simple_button`, `text_and_layout`, `widget_catalog`, `data_collections`, `dialogs_and_popovers`, `menus_and_dropdowns`, `split_view`, `tab_widget`, `title_bar_demo`, `internationalization`, `shortcuts_demo`, `recent_projects`, `drag_and_drop`, `multi_window`, `rich_text_editor`, `rich_text_viewer`, `spin_box`, `tool_box`).
 
 Tests are fully headless — no Xvfb, no GPU, no display server needed.
 
@@ -60,20 +69,24 @@ fern-settings        Persistent reactive prefs: SettingsStore (dotted-key Signal
                      PersistedListModel/PersistedTreeModel, MruList<T: MruEntry>, WindowStateService
 fern-telemetry       Privacy-respecting product analytics built on fern-settings: ConsentStore,
                      InstallId, TelemetryBundle. See docs/plans/telemetry-plan.md (early-phase)
-fern-widgets         ~35 widgets + ~19 layout primitives (Button, ListView, TreeView, MenuBar, Dialog, etc.)
+fern-widgets         ~54 widgets + ~21 layout primitives (Button, ListView, TreeView, MenuBar, Dialog, TextInput, SpinBox, etc.)
 fern-text            TextBackend impl via text-typeset (external path dep)
 fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher
 fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by fern-i18n)
 fern-ui-macros       fern! DSL proc macro (re-exported by fern-ui as fern!)
 fern-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
-fern-platform        winit + AccessKit adapter, event translation
+fern-platform        winit + AccessKit adapter, event translation, clipboard, OS theme
 fern-app             FernAppBuilder, WindowManager, event loop
 fern-ui              Umbrella crate with re-exports and feature flags
+fern-resources       Resource handling and embedding infrastructure
+fern-preview         Widget previewer infrastructure (trait + types + inventory registry)
+fern-preview-ui      GUI library for widget previewer
+fern-widgets-previewer Previewer binary for fern-widgets catalog
 ```
 
-Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`
+Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app → ui`, `settings → app`, `i18n-macros → i18n`, `ui-macros → ui`, `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`
 
-External path dependency: `text-typeset` lives at `../../../text-typeset` (outside workspace).
+External path dependency: `text-typeset` lives at `../text-typeset` (outside workspace).
 
 ## Unified Widget Trait (V2)
 
@@ -110,9 +123,11 @@ pub trait Widget: std::fmt::Debug + 'static {
 
 SwiftUI-style two-phase negotiation: parent proposes size → child responds with actual size → parent places child. All in logical pixels. `Leading`/`Trailing` instead of Left/Right (RTL-aware).
 
-**Layout primitives** (in [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)): `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `Switcher`, `Divider`, `FocusRing`, `IconWidget`
+**Layout primitives** (in [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)): `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `Switcher`, `Divider`, `FocusRing`, `IconWidget`, `ImageWidget`, `MasonryLayout`, `FormLayout`
 
 **Rendering primitives:** `RectWidget`, `TextWidget`
+
+**Text editing primitives:** `TextInputField` (gated behind `rich-text` feature)
 
 ## Signals & Reactivity (V2)
 
@@ -234,7 +249,7 @@ use fern_ui::settings::{AppPaths, MruEntry, MruList, SettingsBundle, SettingsExt
 const FONT_SIZE: SettingsKey<f32> = SettingsKey::new("editor.font_size", || 14.0);
 
 fn main() {
-    let paths = AppPaths::new("com", "FernTech", "Skribisto").expect("config dir");
+    let paths = AppPaths::new("com", "FernTech", "FernUI").expect("config dir");
     let recents: MruList<RecentProject> = MruList::open(&paths, "recent_projects", 10).unwrap();
 
     FernAppBuilder::new()
@@ -244,7 +259,7 @@ fn main() {
         .initial_window(
             WindowConfig::new()
                 .id("main")                                       // <- enables auto save/restore
-                .title("Skribisto")
+                .title("FernUI")
                 .size(1200, 800),
         )
         .run();
@@ -334,7 +349,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Design tokens (full Theme system)
 - Window management (multi-window, modal dialogs, custom title bar)
 - GPU rendering (3 pipelines, glyph atlas, path atlas)
-- All ~19 layout primitives (including Grid, Wrap, AspectRatio, Switcher)
+- All ~21 layout primitives (including Grid, Wrap, AspectRatio, Switcher, MasonryLayout, FormLayout)
 - Accessibility (AccessKit integration at trait level)
 - Animation system (`Signal<f32>::animate_to`, easing, per-frame scheduler)
 - Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal)
@@ -342,23 +357,19 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
 - Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`)
 - Settings & persistence (fern-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
-- Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge
-- Containers: Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Tooltip, SplitView, TabWidget, Dialog, Popover, Snackbar, Wizard, Breadcrumb
+- Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge, SpinBox, SplitButton
+- Containers: Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Tooltip, SplitView, TabWidget, Dialog, Popover, Snackbar, Wizard, Breadcrumb, GroupBox, MessageBox
 - Menus: MenuBar, MenuList, MenuItem, MenuContext (context menu)
-- Chrome: Toolbar, StatusBar, TitleBar
+- Chrome: Toolbar, StatusBar, TitleBar, GroupHeader
 - Data-driven: ListView, TreeView, Repeater (backed by fern-data models)
+- Text: TextInput (styled single-line), rich text viewer
 
 ### Partial / In Progress
 
 - Text rendering (depends on external text-typeset)
-- ScrollArea (viewport clipping + scroll bars work, no virtualized content yet)
+- Rich text editor widget (rich_text/ module: state, paint, clipboard, keyboard, mouse, hit_test, context_menu, frame_loop, policy, image_cache)
 
 ### Not Started
-
-- Rich text editor widget
-- Drag-and-drop
-- Text input / IME
-- Clipboard integration
 
 ## Key Files
 
@@ -388,6 +399,16 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Renderer: `crates/fern-render/src/renderer.rs`
 - App builder: `crates/fern-app/src/app.rs`
 - Umbrella exports: `crates/fern-ui/src/lib.rs`
+- Resources: `crates/fern-resources/src/lib.rs`
+- Previewer infrastructure: `crates/fern-preview/src/lib.rs` (trait + registry), `crates/fern-preview-ui/src/lib.rs` (GUI library)
+- Drag-and-drop: `crates/fern-core/src/drag_payload.rs`, `crates/fern-core/src/drag_state.rs`
+- Clipboard: `crates/fern-platform/src/clipboard.rs`
+- Text input: `crates/fern-widgets/src/text_input.rs`, `crates/fern-widgets/src/primitives/text_input_field.rs`
+- Rich text: `crates/fern-widgets/src/rich_text/` (state, paint, clipboard, keyboard, mouse, hit_test, context_menu, frame_loop, policy, image_cache)
+- New widgets: `crates/fern-widgets/src/spin_box.rs`, `crates/fern-widgets/src/split_button.rs`, `crates/fern-widgets/src/group_box.rs`, `crates/fern-widgets/src/group_header.rs`, `crates/fern-widgets/src/message_box.rs`, `crates/fern-widgets/src/tool_box.rs`, `crates/fern-widgets/src/keystroke_format.rs`, `crates/fern-widgets/src/privacy_settings.rs`
+- New primitives: `crates/fern-widgets/src/primitives/masonry.rs`, `crates/fern-widgets/src/primitives/form_layout.rs`, `crates/fern-widgets/src/primitives/image_widget.rs`
+- OS integration: `crates/fern-platform/src/os_theme.rs`, `crates/fern-platform/src/accessibility_prefs.rs`
+- Title bar hosts: `crates/fern-platform/src/title_bar_host/` (wayland.rs, x11.rs, windows.rs, macos.rs)
 
 ## Widget Construction Patterns
 
@@ -520,3 +541,5 @@ If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier
 ## Architecture Reference
 
 Full architecture document: `../fern-ui-perso/fern-ui-architecture.md` (28 sections, covers layout model, scrolling, widget state, reactivity, overlays, DnD, data sources, Canvas API, rendering pipeline, theming, threading, accessibility, window management, testability, i18n)
+
+Additional documentation: [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md), [docs/plans/settings-plan.md](docs/plans/settings-plan.md)

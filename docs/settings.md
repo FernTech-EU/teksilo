@@ -41,7 +41,7 @@ use fern_ui::app::FernAppBuilder;
 use fern_ui::settings::{AppPaths, MruList, SettingsBundle};
 
 fn main() {
-    let paths = AppPaths::new("com", "FernTech", "Skribisto")
+    let paths = AppPaths::new("com", "FernTech", "FernUI")
         .expect("could not resolve OS config directory");
 
     // App-typed MRU list — the framework knows nothing about projects.
@@ -51,7 +51,7 @@ fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
         .app_paths(paths)                                // explicit
-        // or .application("com", "FernTech", "Skribisto") // shortcut
+        // or .application("com", "FernTech", "FernUI") // shortcut
         .settings(
             SettingsBundle::new()
                 .with_window_state(true),                // opt-in
@@ -60,7 +60,7 @@ fn main() {
         .initial_window(
             WindowConfig::new()
                 .id("main")                              // <- enables auto save/restore
-                .title("Skribisto")
+                .title("FernUI")
                 .size(1200, 800)
                 .min_size(640, 400)
                 .root(|tree, _state| tree.add(AppRoot::new())),
@@ -139,10 +139,10 @@ panics with a clear message in that case; production apps that want
 to fall back to a portable directory use the `Option` directly:
 
 ```rust
-let paths = AppPaths::new("com", "FernTech", "Skribisto")
+let paths = AppPaths::new("com", "FernTech", "FernUI")
     .or_else(|| {
         let cwd = std::env::current_dir().ok()?;
-        Some(AppPaths::for_testing(&cwd.join(".skribisto-state")))
+        Some(AppPaths::for_testing(&cwd.join(".ferni-state")))
     })
     .expect("no usable directory");
 ```
@@ -512,10 +512,10 @@ one. Cloning each contained service is an `Rc` bump; mutations
 through any clone are visible to every clone.
 
 Multi-process is **out of scope**. Two app instances writing to the
-same file is last-write-wins. Skribisto and similar single-instance
-apps are the target; if a CLI tool ever wants to share config with
-the GUI, an advisory `fcntl` lock around the atomic write is the path
-forward — file format unchanged.
+same file is last-write-wins. Single-instance apps are the target;
+if a CLI tool ever wants to share config with the GUI, an advisory
+`fcntl` lock around the atomic write is the path forward — file format
+unchanged.
 
 ---
 

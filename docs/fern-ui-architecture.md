@@ -2814,8 +2814,8 @@ semantics: in-flight signal sets after a store drop simply bail.
 `Rc<RefCell<>>`-based; the settings store inherits that. **Single-
 threaded UI logic, debounced I/O on one shared worker** is the
 explicit threading model. Multi-process is out of scope: two app
-instances writing to the same file are last-write-wins (Skribisto
-and similar single-instance apps are the target). Encryption is
+instances writing to the same file are last-write-wins (single-instance
+apps are the target). Encryption is
 out of scope — secrets go through a future `fern-secrets` crate
 against the OS keychain. Cloud sync is out of scope. Per-document
 state belongs in the document file or its sidecar, not in app

@@ -8,7 +8,7 @@ driven to completeness. Sources cross-referenced:
 1. Authoritative design: **Section 27** of
    [docs/fern-ui-architecture.md](docs/fern-ui-architecture.md#L2721).
 2. Qt 6 widget catalog: <https://doc.qt.io/qt-6/widget-classes.html> — the
-   reference desktop toolkit FernUI is replacing for Skribisto.
+   reference desktop toolkit.
 3. JetBrains Int UI / Jewel: FernUI's visual target, with a handful of
    distinctive components not found in Qt.
 
@@ -103,7 +103,7 @@ and Qt offers them as `QFoo`.
    window, tabbed with sibling docks, and saved/restored as a layout.
    IntelliJ's tool-window system is the same idea. **Large effort** — this is
    a layout subsystem (drag-to-dock regions, stripe buttons, layout
-   persistence), not a single widget. Central to Skribisto's UX.
+   persistence), not a single widget.
 
 9. **CommandLinkButton** — `QCommandLinkButton`. Large button with icon,
    primary title, and descriptive subtitle. Used for wizard landing choices
@@ -267,8 +267,7 @@ primitives are still missing:
    [SplitView](crates/fern-widgets/src/split_view.rs) (which is a fixed
    2-pane resizable splitter) by being responsive: at narrow widths it
    collapses panes into a stack with back-navigation; at wide widths it
-   shows all panes side-by-side. Central to a writer-IDE shell like
-   Skribisto (project tree / chapter list / editor).
+   shows all panes side-by-side.
 
 3. **MasonryLayout** — variable-height grid that packs children into the
    shortest column (Pinterest-style). Useful for image galleries, card
@@ -424,8 +423,8 @@ exhaustive and nothing is forgotten:
 Listed so they're consciously out of scope, not accidentally forgotten:
 
 - **LCDNumber** (`QLCDNumber`) — seven-segment display. Niche.
-- **MDI area** (`QMdiArea`) — MDI child-window workspace. Skribisto does not
-  need it; DockWidget covers the real use case.
+- **MDI area** (`QMdiArea`) — MDI child-window workspace. Out of scope;
+  DockWidget covers the real use case.
 - **GraphicsView / QGraphicsScene** — a whole interactive drawing canvas
   subsystem, not a widget. Out of scope for FernUI's retained widget model.
 - **SizeGrip** (`QSizeGrip`) — native platform resize is handled by winit;

@@ -125,7 +125,7 @@ in [`crates/fern-ui/src/lib.rs`](../../crates/fern-ui/src/lib.rs).
 pub struct AppPaths {
     qualifier: String,      // "com"
     organization: String,   // "FernTech"
-    application: String,    // "Skribisto"
+    application: String,    // "FernUI"
     project_dirs: ProjectDirs,
 }
 
@@ -643,7 +643,7 @@ captures final geometry.
 
 ```rust
 FernAppBuilder::new()
-    .application("com", "FernTech", "Skribisto")    // mandatory if persistence used
+    .application("com", "FernTech", "FernUI")       // mandatory if persistence used
     .settings(Settings::default()
         .with_recent_projects(10)
         .with_window_state(true))
@@ -753,8 +753,8 @@ last-write-wins. QSettings has the same problem on Linux INI; macOS
 plist is fundamentally the same; only Windows registry is partially
 arbitrated by the kernel.
 
-Decision: **don't try to solve it in v1**. Document it. Skribisto is
-single-instance via DBus single-instance lock anyway. If a multi-app
+Decision: **don't try to solve it in v1**. Document it. FernUI targets
+single-instance apps; if a multi-app scenario emerges (e.g., a CLI
 scenario emerges (e.g., a CLI tool sharing config with the app), add a
 `fcntl`/`LockFile` advisory lock around the atomic write — file format
 unchanged. Out of scope for the initial cut.

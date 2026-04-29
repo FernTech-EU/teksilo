@@ -18,9 +18,7 @@ bug. Track it down.
 
 ## Why so absolute
 
-FernUI is meant for long-running desktop apps (Skribisto writes for
-hours). A 30 Hz idle pump costs CPU, GPU, battery, fan noise, and —
-on laptops — holds the package out of deep C-states. Compounded
+FernUI is meant for long-running desktop apps. A 30 Hz idle pump costs CPU, GPU, battery, fan noise, and — on laptops — holds the package out of deep C-states. Compounded
 across every running animation, every unfocused window, every
 background process, it is the difference between "I left it open" and
 "my battery is dead".
@@ -223,7 +221,7 @@ pixel work and compositor recomposite work — neither is on the hot
 path at this scale. Implementing damage rects would require a
 multi-day refactor (persistent swap-chain back buffer, per-widget
 dirty-rect tracking through overlays / clips / DPI changes, per-OS
-compositor integration) for no measurable win on Skribisto-sized
+compositor integration) for no measurable win on typical UI-sized
 workloads.
 
 **Revisit when any of these trigger:**

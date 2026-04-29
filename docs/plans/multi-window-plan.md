@@ -517,7 +517,7 @@ Sites touched: `fern-core` (new `window/` submodule, `build_context.rs`,
 - `always_on_bottom`, `content_protected`, per-monitor targeting, icon
   hot-swap, cursor operations on the window handle. Same mechanism
   extends trivially — add a variant to `WindowCommand`.
-- Web backend multi-window semantics (Skribisto is desktop).
+- Web backend multi-window semantics (FernUI is desktop).
 - Theme / locale migration onto the same signal-driven writeback.
   Follow-up refactor after this lands.
 - `FernWindowId` → string-id idempotence caching in `open_window`. Apps do
