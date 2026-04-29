@@ -338,9 +338,80 @@ impl<T: 'static> Widget for TreeView<T> {
 
                     let current = fi.get().unwrap_or(0).min(visible_count - 1);
 
-                    // Alt+Arrow: reorder (when reorderable)
+                    // Alt+Arrow: sibling reorder (when reorderable)
                     if modifiers.alt() && reorderable {
-                        // TODO: implement tree node sibling reorder
+                        let selected_idx = sel_for_key
+                            .as_ref()
+                            .and_then(|s| s.selected_indices().first().copied())
+                            .or(fi.get());
+                        
+                        if let Some(flat_idx) = selected_idx {
+                            if let Some(entry) = tsh.entry_at(flat_idx) {
+                                let node_id = entry.node_id;
+                                let tree = tsh.tree();
+                                let parent = tree.parent(node_id);
+                                
+                                // Determine siblings: either children of parent or root list
+                                let (siblings, is_root_level) = if let Some(parent_id) = parent {
+                                    (tree.children(parent_id), false)
+                                } else {
+                                    // Node is a root - get all roots
+                                    let root_count = tree.root_count();
+                                    let siblings: Vec<NodeId> = (0..root_count)
+                                        .map(|i| tree.root(i))
+                                        .collect();
+                                    (siblings, true)
+                                };
+                                
+                                let sibling_idx = siblings
+                                    .iter()
+                                    .position(|&n| n == node_id)
+                                    .unwrap_or(0);
+                                
+                                match key {
+                                    fern_core::event::Key::ArrowUp if sibling_idx > 0 => {
+                                        if is_root_level {
+                                            tree.move_to_root(node_id, sibling_idx - 1);
+                                        } else {
+                                            tree.move_node(node_id, parent.unwrap(), sibling_idx - 1);
+                                        }
+                                        // Find new flat index after node was moved
+                                        for new_flat in 0..visible_count {
+                                            if tsh.visible_node_id(new_flat) == Some(node_id) {
+                                                fi.set(Some(new_flat));
+                                                if let Some(ref sel) = sel_for_key {
+                                                    sel.select(new_flat);
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        return fern_core::event::EventResponse::Handled;
+                                    }
+                                    fern_core::event::Key::ArrowDown
+                                        if sibling_idx + 1 < siblings.len() =>
+                                    {
+                                        if is_root_level {
+                                            tree.move_to_root(node_id, sibling_idx + 1);
+                                        } else {
+                                            tree.move_node(node_id, parent.unwrap(), sibling_idx + 1);
+                                        }
+                                        // Find new flat index after node was moved
+                                        for new_flat in 0..visible_count {
+                                            if tsh.visible_node_id(new_flat) == Some(node_id) {
+                                                fi.set(Some(new_flat));
+                                                if let Some(ref sel) = sel_for_key {
+                                                    sel.select(new_flat);
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        return fern_core::event::EventResponse::Handled;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        return fern_core::event::EventResponse::Ignored;
                     }
 
                     // ArrowRight: expand / ArrowLeft: collapse or move to parent
@@ -1507,5 +1578,224 @@ mod tests {
             button: PointerButton::Primary,
             modifiers: Modifiers::NONE,
         });
+    }
+
+    // --- Alt+Arrow keyboard reorder test ---
+
+    #[test]
+    fn alt_arrow_reorders_flat_root_sibling() {
+        use fern_core::event::{Key, Modifiers};
+        use fern_data::{SelectionMode, SelectionModel};
+
+        let model = sample_tree(); // A, B, C (3 roots)
+        let a = model.root(0);
+        let b = model.root(1);
+        let c = model.root(2);
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+        let model_clone = model.clone();
+
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(model_clone, move |_item, entry, _sel| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .selection(sel_clone)
+            .reorderable(true),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Focus the TreeView and select the middle item (B)
+        wtree.focus(tv_id);
+        wtree.click(wtree.children(tv_id)[1]); // B at index 1
+        assert_eq!(selection.selected_indices(), vec![1]);
+
+        // Press Alt+ArrowUp: B should move above A
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowUp,
+            modifiers: Modifiers::ALT,
+            text: None,
+        });
+
+        // After move: the roots should be reordered as B, A, C
+        let new_roots: Vec<NodeId> = (0..model.root_count())
+            .map(|i| model.root(i))
+            .collect();
+        assert_eq!(
+            model.with_item(new_roots[0], |&v| v),
+            Some("B"),
+            "B should now be first root"
+        );
+        assert_eq!(
+            model.with_item(new_roots[1], |&v| v),
+            Some("A"),
+            "A should now be second root"
+        );
+        // Selection should follow the moved node
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0],
+            "Selection should now be at index 0 (B moved to top)"
+        );
+
+        // Press Alt+ArrowDown on B: B should move below A
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowDown,
+            modifiers: Modifiers::ALT,
+            text: None,
+        });
+
+        // After move: order should be A, B, C again
+        let new_roots: Vec<NodeId> = (0..model.root_count())
+            .map(|i| model.root(i))
+            .collect();
+        assert_eq!(
+            model.with_item(new_roots[0], |&v| v),
+            Some("A"),
+            "A should be back at first root"
+        );
+        assert_eq!(
+            model.with_item(new_roots[1], |&v| v),
+            Some("B"),
+            "B should be back at second root"
+        );
+        assert_eq!(
+            selection.selected_indices(),
+            vec![1],
+            "Selection should be back at index 1"
+        );
+    }
+
+    #[test]
+    fn alt_arrow_reorders_nested_sibling() {
+        use fern_core::event::{Key, Modifiers};
+        use fern_data::{SelectionMode, SelectionModel};
+
+        // Tree: A with children A1, A2 (in that order)
+        let tree = TreeModel::new();
+        let a = tree.insert_root(0, "A");
+        let a1 = tree.insert_child(a, 0, "A1");
+        let a2 = tree.insert_child(a, 1, "A2");
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+        let model = tree.clone();
+
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(model, |_item, entry, _sel| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .selection(sel_clone)
+            .reorderable(true),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Focus the TreeView so ArrowRight expands the focused node (A)
+        wtree.focus(tv_id);
+        
+        // Expand A so children are visible
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowRight,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Select A2 (flat index 2: A at 0, A1 at 1, A2 at 2)
+        let children = wtree.children(tv_id);
+        wtree.click(children[2]);
+        assert_eq!(selection.selected_indices(), vec![2]);
+
+        // Press Alt+ArrowUp: A2 should move above A1
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowUp,
+            modifiers: Modifiers::ALT,
+            text: None,
+        });
+        // After move, relayout to refresh the tree view
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Check model: A2 should now be at index 0 under A, A1 at index 1
+        let children_of_a = tree.children(a);
+        assert_eq!(
+            children_of_a.len(),
+            2,
+            "A should still have 2 children"
+        );
+        assert_eq!(
+            tree.with_item(children_of_a[0], |&v| v),
+            Some("A2"),
+            "A2 should now be first child of A"
+        );
+        assert_eq!(
+            tree.with_item(children_of_a[1], |&v| v),
+            Some("A1"),
+            "A1 should now be second child of A"
+        );
+
+        // Selection should now be at flat index 1 (A2 moved up, now at position 1)
+        assert_eq!(
+            selection.selected_indices(),
+            vec![1],
+            "Selection should follow A2 to flat index 1"
+        );
+    }
+
+    #[test]
+    fn alt_arrow_cannot_move_past_boundaries() {
+        use fern_core::event::{Key, Modifiers};
+        use fern_data::{SelectionMode, SelectionModel};
+
+        let model = sample_tree(); // A, B, C (3 roots)
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let sel_clone = selection.clone();
+        let model_clone = model.clone();
+
+        let mut wtree = WidgetTree::new();
+        let tv_id = wtree.add(
+            TreeView::new(model_clone, move |_item, entry, _sel| {
+                Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+            })
+            .item_height(28.0)
+            .selection(sel_clone)
+            .reorderable(true),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Focus and select first item (A)
+        wtree.focus(tv_id);
+        wtree.click(wtree.children(tv_id)[0]);
+
+        let a = model.root(0);
+        let c = model.root(2);
+
+        // Alt+ArrowUp on first item should do nothing
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowUp,
+            modifiers: Modifiers::ALT,
+            text: None,
+        });
+        assert_eq!(
+            model.with_item(a, |&v| v),
+            Some("A"),
+            "A should still be first after Alt+Up on first item"
+        );
+
+        // Select last item (C)
+        wtree.click(wtree.children(tv_id)[2]);
+
+        // Alt+ArrowDown on last item should do nothing
+        wtree.dispatch_event(fern_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowDown,
+            modifiers: Modifiers::ALT,
+            text: None,
+        });
+        assert_eq!(
+            model.with_item(c, |&v| v),
+            Some("C"),
+            "C should still be last after Alt+Down on last item"
+        );
     }
 }
