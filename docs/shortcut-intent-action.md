@@ -54,9 +54,11 @@ KeyStroke::alt(Key::Enter)
 KeyStroke::new(Key::PageUp, Modifiers::NONE)   // plain PageUp
 ```
 
-`Display` renders "Ctrl+S" style text (platform/locale-aware formatter
-is a TODO — see architecture §11.2). `Serialize`/`Deserialize` are
-derived so user overrides can be persisted.
+`Display` renders "Ctrl+S" style text. Widgets displaying shortcuts to users
+should call `fern_widgets::keystroke_format::format_keystroke()` which handles
+platform-specific symbols (⌘ on macOS) and locale-aware modifier names via
+`tr_widget!` (e.g., "Strg" in German). `Serialize`/`Deserialize` are derived
+so user overrides can be persisted.
 
 ---
 

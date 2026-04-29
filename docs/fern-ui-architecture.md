@@ -1035,7 +1035,7 @@ Three concerns were conflated in V1 and are separate layers in V2:
 
 The three layers buy what V1's single `ShortcutMap` couldn't cleanly express: a shortcut can fire the same intent as a button without any coupling (press Ctrl+S or click the toolbar save button — same code path), an action can be moved up or down the tree to change scope without editing widgets, and shortcut labels on menu items track rebinds without the widget knowing it's bound to a shortcut.
 
-Shortcut labels remain translatable and platform-aware — "Ctrl+S" / "⌘S" / "Strg+S" — via a `ShortcutFormatter` hook (still pending implementation as of April 2026; see [`fern-ui-milestones.md`](fern-ui-milestones.md) M7 remaining work). Shortcuts bind to logical keys (character produced), not scancodes, so Ctrl+Z works on AZERTY keyboards where the Z key is physically elsewhere.
+Shortcut labels are translatable and platform-aware — "Ctrl+S" / "⌘S" / "Strg+S" — via `fern_widgets::keystroke_format::format_keystroke()` using platform detection and `tr_widget!` locale lookup. Shortcuts bind to logical keys (character produced), not scancodes, so Ctrl+Z works on AZERTY keyboards where the Z key is physically elsewhere.
 
 Working demo: [`examples/shortcuts_demo`](../examples/shortcuts_demo/src/main.rs).
 
@@ -2919,7 +2919,7 @@ fern-telemetry       Privacy-respecting product analytics built on fern-settings
                      full design in docs/plans/telemetry-plan.md.
                      Dependencies: fern-core, fern-settings, serde, uuid
 
-fern-i18n            Fluent integration, tr! macro, ShortcutFormatter, locale management
+fern-i18n            Fluent integration, tr! macro, keystroke_format, locale management
                      Dependencies: fluent-rs, unic-langid
 
 fern-render          wgpu renderer, shader pipelines (quad/rect/SDF), atlas GPU upload
@@ -4098,7 +4098,7 @@ The bulk of the original post-milestone question list has landed. The short list
 
 **Virtualized dropdowns.** `ComboBox` now virtualizes via `ListView` under `max_visible_items`: lists beyond the cap materialize only the visible rows (plus `ListView`'s small buffer) instead of building every `DropdownItem` eagerly. The searchable (`rich-text`) filtered path shares the same virtualized renderer. `MenuList` grew a `max_visible_items` builder that caps panel height and wraps the item column in a `ScrollArea`, but does **not** virtualize — its API still takes arbitrary `impl Widget` children, so true virtualization would require a model-driven MenuList rewrite (tracked as follow-up). The eager build is cheap enough that capped 100+ item menus are fine in practice.
 
-**ShortcutFormatter.** `shortcut.rs` still renders chords as `Ctrl+S` regardless of platform or locale. The design calls for `⌘S` on macOS and translated modifier names (`Strg+S` in German). Scope is a single formatter hook consulted by `MenuItem::for_shortcut(id)` and `TooltipContent::for_shortcut(id)`. Tracked alongside the M7 polish.
+**ShortcutFormatter.** Implemented as `fern_widgets::keystroke_format::format_keystroke()` — platform-specific symbols on macOS (⌘⇧⌥⌃) and `tr_widget!` locale lookup on other platforms (e.g., "Strg" in German). `MenuItem::for_shortcut(id)` and `TooltipContent::for_shortcut(id)` use this formatter. The raw `KeyStroke::Display` remains a simple "Ctrl+S" form; widgets that render to users should use `format_keystroke()`.
 
 **Widget-level vs. application-level undo.** Text input undo (last few typed characters coalesced into one undo step) and application undo (the domain's use-case undo stack) coexist in the rich text editor. The current design keeps them separate and lets the application decide when to promote widget-local undo records into the domain log. The generalization to other widgets — undo for a slider drag, undo for a selection change — has not been designed and may or may not prove necessary.
 
