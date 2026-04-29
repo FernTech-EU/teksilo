@@ -1452,8 +1452,10 @@ impl WidgetTree {
             self.arena.mark_needs_layout(content_id);
         }
 
-        // Hit-test to find the widget under the pointer
-        let target = self.hit_test(position);
+        // Hit-test to find the widget under the pointer, excluding the drag
+        // preview overlay so it doesn't block hit-testing of actual drop targets.
+        let exclude_overlay = self.active_drag.as_ref().and_then(|d| d.preview_overlay_id);
+        let target = self.hit_test_excluding_overlay(position, exclude_overlay);
 
         // Walk up from hit target to find a widget with on_drag_hover
         let drop_target = target.and_then(|t| self.find_drop_target_at_or_above(t));
@@ -1624,10 +1626,23 @@ impl WidgetTree {
     }
 
     pub fn hit_test(&self, point: Point) -> Option<WidgetId> {
-        if let Some(overlay_id) = self.overlay_manager.hit_test(point)
-            && let Some(overlay) = self.overlay_manager.overlay(overlay_id)
-        {
-            return self.hit_test_recursive(overlay.content_id, point);
+        self.hit_test_excluding_overlay(point, None)
+    }
+
+    /// Hit-test at a point, excluding a specific overlay from consideration.
+    /// Used during drag-and-drop to exclude the preview overlay, so it doesn't
+    /// block hit-testing of the actual drop targets underneath.
+    pub fn hit_test_excluding_overlay(
+        &self,
+        point: Point,
+        exclude_overlay: Option<crate::overlay::OverlayId>,
+    ) -> Option<WidgetId> {
+        if let Some(overlay_id) = self.overlay_manager.hit_test(point) {
+            if Some(overlay_id) == exclude_overlay {
+                // Skip this excluded overlay, fall through to widget tree
+            } else if let Some(overlay) = self.overlay_manager.overlay(overlay_id) {
+                return self.hit_test_recursive(overlay.content_id, point);
+            }
         }
 
         if self.overlay_manager.topmost_centered().is_some() {
