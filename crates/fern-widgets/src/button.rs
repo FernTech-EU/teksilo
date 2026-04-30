@@ -476,7 +476,7 @@ impl fern_core::widget::Widget for Button {
         } else if let Some(ref tooltip_text) = self.tooltip_text {
             let tooltip_widget = crate::tooltip::TooltipWidget::new_literal(tooltip_text);
             let tooltip_id = ctx.add(tooltip_widget);
-            let delay = std::time::Duration::from_millis(500);
+            let delay = std::time::Duration::from_millis(200);
             ctx.attach_tooltip(root_id, tooltip_id, delay);
         }
 

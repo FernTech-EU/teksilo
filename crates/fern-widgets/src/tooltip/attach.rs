@@ -27,7 +27,7 @@ use crate::tooltip::rich::{RichTooltipWidget, DWELL_PROMOTION};
 
 /// Default hover-to-show delay for rich tooltips — matches the plain
 /// tooltip delay used by Button, Link, and MenuItem today.
-pub const DEFAULT_RICH_TOOLTIP_DELAY: Duration = Duration::from_millis(500);
+pub const DEFAULT_RICH_TOOLTIP_DELAY: Duration = Duration::from_millis(200);
 
 /// Source resolution for a rich tooltip — either a registry key (the
 /// common path) or an inline [`TooltipContent`] entry (one-offs that
