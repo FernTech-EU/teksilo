@@ -182,6 +182,12 @@ impl WidgetTree {
                         &mut act_ctx,
                     ) {
                         self.collect_from_ctx(act_ctx, anchor_id);
+                        // Phase 5.2: tag shortcut origin so analytics can
+                        // distinguish keyboard-driven activations from
+                        // button / menu / programmatic ones.
+                        let intent = intent.with_source(
+                            crate::telemetry::IntentSource::Shortcut,
+                        );
                         self.enqueue_intent(anchor_id, intent, propagate_when_disabled);
                         self.drain_pending_intents(&mut *ops);
                         return;
@@ -668,9 +674,15 @@ impl WidgetTree {
                 // and own handlers — Button (own) and Dialog (external)
                 // layered together rely on both firing for a single
                 // accesskit click.
+                // Phase 5.2 — assistive-tech action paths run under
+                // the `Accessibility` source label. Restored after
+                // the inner if/else.
+                let saved_a11y_source = ctx.current_source.replace(
+                    crate::telemetry::IntentSource::Accessibility,
+                );
                 let request_is_set = node.handlers.on_access_action_request.is_some()
                     || node.external_handlers.on_access_action_request.is_some();
-                if request_is_set {
+                let result = if request_is_set {
                     let r1 = node
                         .external_handlers
                         .on_access_action_request
@@ -714,7 +726,9 @@ impl WidgetTree {
                     )
                 } else {
                     None
-                }
+                };
+                ctx.current_source = saved_a11y_source;
+                result
             }
             WidgetEvent::Gesture { gesture } => {
                 // Pre-recognized gestures from the platform (OS trackpad
@@ -934,6 +948,15 @@ impl WidgetTree {
         ctx: &mut EventContext,
     ) {
         use crate::gesture::{DragPhase, PinchPhase};
+        // Phase 5.2 — every gesture handler invocation runs under a
+        // `Handler` source label. Any `ctx.send_intent(...)` issued
+        // from inside a tap / double-tap / drag / etc. handler
+        // emits with `IntentSource::Handler`. The label is restored
+        // at the bottom of this fn so nested dispatch doesn't
+        // pollute the wrong bucket.
+        let saved_source = ctx
+            .current_source
+            .replace(crate::telemetry::IntentSource::Handler);
         // For every gesture handler, fire BOTH the external and own slot
         // in that order so a widget that wired an on_tap via the
         // WidgetBuilder AND via apply_self_handlers sees both callbacks —
@@ -1049,6 +1072,9 @@ impl WidgetTree {
                 }
             }
         }
+        // Phase 5.2 restore — see the matching `replace` at the
+        // top of this function.
+        ctx.current_source = saved_source;
     }
 
     pub(super) fn collect_from_ctx<'ops>(
@@ -3462,6 +3488,106 @@ mod tests {
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.click(button);
         assert!(save_seen.get(), "ctx.send_intent must reach ancestor action");
+    }
+
+    #[test]
+    fn widget_type_histogram_counts_distinct_types() {
+        // Phase 5.3: the histogram surfaces concrete widget types
+        // by std::any::type_name_of_val. Widgets become active
+        // after the first layout pass, so we run that before
+        // checking the histogram.
+        let mut tree = WidgetTree::new();
+        let _ = tree.add(FillWidget::new());
+        let _ = tree.add(FillWidget::new());
+        let _ = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let histogram = tree.widget_type_histogram();
+        let total: u32 = histogram.values().sum();
+        assert!(total >= 3, "expected at least 3 active widgets, got {total}: {histogram:?}");
+        let fillwidget_entries: u32 = histogram
+            .iter()
+            .filter(|(k, _)| k.contains("FillWidget"))
+            .map(|(_, v)| *v)
+            .sum();
+        assert!(
+            fillwidget_entries >= 3,
+            "expected ≥3 FillWidget instances; histogram = {histogram:?}"
+        );
+        assert_eq!(tree.active_widget_count() as u32, total);
+    }
+
+    #[test]
+    fn intent_source_tagged_handler_for_tap_activation() {
+        // Phase 5.2: a tap-driven `ctx.send_intent` must surface as
+        // `IntentSource::Handler` to ancestor actions, not the
+        // `Programmatic` default of `Intent::new`.
+        use crate::action::Action;
+        use crate::intent::Intent;
+        use crate::telemetry::IntentSource;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let captured = Rc::new(Cell::new(IntentSource::Unknown));
+        let captured_for_action = captured.clone();
+
+        let mut tree = WidgetTree::new();
+        let root = tree.add(FillWidget::new());
+        let button = tree.add_child(
+            root,
+            FillWidget::new().on_tap(|_pos, ctx| {
+                ctx.send_intent(Intent::new("app.save"));
+            }),
+        );
+        tree.push_action(
+            root,
+            Action::new("app.save").on_invoke(move |intent, _c| {
+                captured_for_action.set(intent.source);
+            }),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.click(button);
+        assert_eq!(
+            captured.get(),
+            IntentSource::Handler,
+            "tap-driven intent must tag IntentSource::Handler"
+        );
+    }
+
+    #[test]
+    fn intent_source_programmatic_when_no_handler_active() {
+        use crate::intent::Intent;
+        use crate::telemetry::IntentSource;
+        let intent = Intent::new("app.demo");
+        assert_eq!(intent.source, IntentSource::Programmatic);
+
+        // ctx.send_intent without a handler scope keeps it Programmatic.
+        let mut ctx = EventContext::new();
+        ctx.send_intent(Intent::new("app.demo"));
+        let queued = ctx.pending_intents.first().expect("intent queued");
+        assert_eq!(queued.source, IntentSource::Programmatic);
+    }
+
+    #[test]
+    fn with_intent_source_overrides_for_managed_widgets() {
+        use crate::intent::Intent;
+        use crate::telemetry::IntentSource;
+        let mut ctx = EventContext::new();
+        ctx.with_intent_source(IntentSource::Menu, |ctx| {
+            ctx.send_intent(Intent::new("app.demo"));
+        });
+        let queued = ctx.pending_intents.first().expect("intent queued");
+        assert_eq!(
+            queued.source,
+            IntentSource::Menu,
+            "with_intent_source(Menu) must tag the dispatched intent"
+        );
+
+        // After the closure returns, current_source is restored —
+        // a follow-up send_intent without a wrapping closure goes
+        // back to the default (no override).
+        ctx.send_intent(Intent::new("app.next"));
+        let next = ctx.pending_intents.last().expect("second intent");
+        assert_eq!(next.source, IntentSource::Programmatic);
     }
 
     #[test]

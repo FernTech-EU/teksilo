@@ -121,6 +121,22 @@ pub enum CursorIcon {
 
 /// The full Widget trait for Level 2 (custom rendering) widgets.
 pub trait Widget: std::fmt::Debug + std::any::Any {
+    /// Concrete type name of this widget (e.g.
+    /// `"fern_widgets::button::Button"`). The default implementation
+    /// resolves at the impl site via `std::any::type_name::<Self>()`,
+    /// so calls through `&dyn Widget` correctly dispatch to the
+    /// monomorphized fn for the concrete type — getting the
+    /// concrete name through the vtable without per-impl boilerplate.
+    ///
+    /// Used by [`crate::widget_tree::WidgetTree::widget_type_histogram`]
+    /// for the `widget.census` telemetry event (Phase 5.3). Custom
+    /// widgets that wrap their state in a generic struct may
+    /// override to give analytics a stable name independent of the
+    /// generic parameter.
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
     /// Compose child widgets. Called once after the widget is placed in the
     /// arena, and again on environment change (theme switch, locale switch).
     /// Takes `&mut self` — store child IDs, signal handles, any state needed later.
@@ -294,6 +310,15 @@ pub struct EventContext<'ops> {
     /// Intents queued by handlers via `send_intent`. Drained by the
     /// tree after event dispatch and routed source-widget → root.
     pub(crate) pending_intents: Vec<crate::intent::Intent>,
+    /// Phase 5.2 — the dispatcher sets this to the appropriate
+    /// [`IntentSource`](crate::telemetry::IntentSource) before
+    /// invoking a typed handler (menu select → `Menu`, AccessKit
+    /// action → `Accessibility`, on_tap / button activation →
+    /// `Handler`, …). `send_intent` reads it and stamps the intent
+    /// before queuing. `None` outside a managed handler — bare
+    /// programmatic sends keep their `Intent::source` value
+    /// (default `Programmatic`).
+    pub(crate) current_source: Option<crate::telemetry::IntentSource>,
     /// Key-capture callback armed via `ctx.begin_key_capture(...)`.
     /// The callback + its shared slot are installed on the tree by
     /// `collect_from_ctx`. Only one per ctx; the last caller wins.
@@ -363,6 +388,7 @@ impl<'ops> EventContext<'ops> {
             frame_requested: false,
             app_context: None,
             pending_intents: Vec::new(),
+            current_source: None,
             pending_key_capture: None,
             cancel_key_capture: false,
             pending_shortcut_mutations: Vec::new(),
@@ -420,8 +446,44 @@ impl<'ops> EventContext<'ops> {
     /// source-widget → root after the current handler returns,
     /// invoking any matching [`Action`](crate::action::Action) it
     /// finds. Unmatched intents are silently dropped.
+    ///
+    /// The intent's `source` is overridden by the dispatcher's
+    /// current handler-source label (`current_source`) when one is
+    /// active. This is how the framework distinguishes
+    /// `IntentSource::Handler` (button taps, generic on_tap) from
+    /// `IntentSource::Menu`, `IntentSource::Accessibility`, etc.
+    /// Programmatic callers outside any handler pass through with
+    /// `IntentSource::Programmatic` (the default).
     pub fn send_intent(&mut self, intent: impl Into<crate::intent::Intent>) {
-        self.pending_intents.push(intent.into());
+        let mut intent: crate::intent::Intent = intent.into();
+        if let Some(src) = self.current_source {
+            intent.source = src;
+        }
+        self.pending_intents.push(intent);
+    }
+
+    /// Run a closure with the given [`IntentSource`] active. Any
+    /// `ctx.send_intent(...)` issued from within the closure will
+    /// be tagged with this source instead of the dispatcher's
+    /// default (`Handler` / `Shortcut` / `Accessibility`).
+    ///
+    /// The previous source is restored after the closure returns.
+    /// Panic during the closure unwinds the dispatcher's whole
+    /// frame, so the EventContext is destroyed before the next
+    /// dispatch — no need for a panic-safe drop guard.
+    ///
+    /// Used by framework widgets that want a more specific source
+    /// label than the default — `MenuItem` wraps its activation
+    /// handler to emit `IntentSource::Menu`, etc.
+    pub fn with_intent_source<R>(
+        &mut self,
+        source: crate::telemetry::IntentSource,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let prev = self.current_source.replace(source);
+        let r = f(self);
+        self.current_source = prev;
+        r
     }
 
     /// Arm a one-shot key-capture callback, returning a

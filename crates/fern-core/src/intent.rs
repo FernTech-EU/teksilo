@@ -31,18 +31,33 @@ use std::rc::Rc;
 /// `payload` carries any type the sender wants to attach — recover
 /// it with [`Intent::payload::<T>`] when the handler knows the
 /// expected type (typically via `IntentKind::from_intent`).
+///
+/// The `source` field records where the intent originated — set by
+/// the framework's standard activation paths (button taps, menu
+/// selects, shortcut chords, gesture recognizers) so analytics can
+/// answer "which surface drives this intent?". See
+/// [`crate::telemetry::IntentSource`].
 pub struct Intent {
     /// Stable intent name. Usually matches the originating
     /// [`Shortcut`](crate::shortcut::Shortcut)'s `intent_name()`.
     pub name: &'static str,
+    /// Origin of the intent. The framework's activation paths
+    /// (button, menu, shortcut, gesture) set this; programmatic
+    /// callers default to `Programmatic` via [`Intent::new`].
+    /// Read by the dispatch-tap to fill the `source` prop on
+    /// `intent.dispatched` events.
+    pub source: crate::telemetry::IntentSource,
     payload: Option<Rc<dyn Any>>,
 }
 
 impl Intent {
-    /// A parameter-less intent (no payload).
+    /// A parameter-less intent. Defaults to
+    /// [`IntentSource::Programmatic`]; framework activation paths
+    /// override via [`Intent::with_source`] before dispatching.
     pub fn new(name: &'static str) -> Self {
         Self {
             name,
+            source: crate::telemetry::IntentSource::Programmatic,
             payload: None,
         }
     }
@@ -53,8 +68,24 @@ impl Intent {
     pub fn with_payload<T: 'static>(name: &'static str, payload: T) -> Self {
         Self {
             name,
+            source: crate::telemetry::IntentSource::Programmatic,
             payload: Some(Rc::new(payload)),
         }
+    }
+
+    /// Tag the intent with its origin. Called by framework
+    /// activation wrappers (button on_activate, menu on_select,
+    /// shortcut activation, gesture on_recognized) right before
+    /// dispatch. App code typically doesn't call this directly
+    /// — use [`EventContext::send_intent`] from inside the right
+    /// handler and the source is set automatically.
+    ///
+    /// (Note: `EventContext::send_intent` infers the source from
+    /// the handler context where possible; this method is the
+    /// escape hatch for callers that need to override.)
+    pub fn with_source(mut self, source: crate::telemetry::IntentSource) -> Self {
+        self.source = source;
+        self
     }
 
     /// Borrow the payload as `&T`, or `None` if the intent has no
@@ -74,6 +105,7 @@ impl Clone for Intent {
     fn clone(&self) -> Self {
         Self {
             name: self.name,
+            source: self.source,
             // Rc<dyn Any> is cheaply clonable — bumps the refcount.
             payload: self.payload.clone(),
         }
@@ -84,6 +116,7 @@ impl std::fmt::Debug for Intent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Intent")
             .field("name", &self.name)
+            .field("source", &self.source)
             .field("has_payload", &self.payload.is_some())
             .finish()
     }

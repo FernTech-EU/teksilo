@@ -20,6 +20,7 @@ pub mod modal;
 pub mod overlay;
 pub mod shortcut;
 pub mod signal;
+pub mod telemetry;
 pub mod binding;
 pub mod widget;
 pub mod widget_builder;

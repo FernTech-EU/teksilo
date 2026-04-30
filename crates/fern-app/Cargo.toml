@@ -28,9 +28,11 @@ fern-platform = { workspace = true }
 # Registration wiring only — no widget constructors used here.
 fern-widgets = { workspace = true }
 fern-settings = { workspace = true }
+fern-telemetry = { workspace = true }
 fern-text = { workspace = true, optional = true }
 winit = { workspace = true }
 pollster = "0.4"
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "telemetry-codegen"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+fern-telemetry = { workspace = true }
+fern-telemetry-codegen = { workspace = true }

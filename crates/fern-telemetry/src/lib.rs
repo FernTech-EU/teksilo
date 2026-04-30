@@ -1,0 +1,52 @@
+//! `fern-telemetry` — privacy-respecting product analytics for FernUI.
+//!
+//! See `docs/plans/telemetry-plan.md` for the full design. Phase 1
+//! (this crate today) ships the foundational pieces:
+//!
+//! - [`ConsentStore`] — persisted consent state atop
+//!   [`fern_settings::SettingsFile`].
+//! - [`InstallId`] — pseudonymous-mode UUID with 13-month rotation.
+//! - [`TelemetryBundle`] / [`OpenedTelemetry`] — declarative
+//!   configuration following the same pattern as
+//!   [`fern_settings::SettingsBundle`].
+//! - [`DynamicReporter`] — runtime mode-switch wrapper holding both
+//!   anonymous-mode and pseudonymous-mode adapters and forwarding to
+//!   the active one.
+//! - [`TelemetryExt`] — convenience accessors for `BuildContext` /
+//!   `EventContext` (`use fern_telemetry::TelemetryExt;`).
+//! - In-memory event queue (SQLite persistence deferred to Phase 2).
+//! - [`StubReporter`] — testing-only adapter that collects events into
+//!   a `Vec`.
+//! - Hand-written framework events in [`generated`] (the YAML-driven
+//!   proc-macro codegen lands in Phase 5).
+//!
+//! Re-exports the pure trait/type surface from `fern_core::telemetry`
+//! so apps need only `use fern_telemetry::*` to access the full API.
+
+pub mod bundle;
+pub mod consent;
+pub mod dynamic_reporter;
+pub mod ext;
+pub mod generated;
+pub mod install_id;
+pub mod queue;
+pub mod scopes;
+pub mod stub;
+
+pub use bundle::{
+    DataResidencyRegion, OpenedTelemetry, PrivacyPolicy, TelemetryBundle,
+    TelemetryBundleError, TelemetryMode,
+};
+pub use consent::{ConsentFile, ConsentStore, PersistedConsentState};
+pub use dynamic_reporter::DynamicReporter;
+pub use ext::TelemetryExt;
+pub use install_id::{InstallId, InstallIdFile};
+pub use queue::{EventQueue, InMemoryEventQueue, PersistentEventQueue, PersistentQueueError};
+pub use stub::StubReporter;
+
+// Re-exports from fern-core so apps need only one `use`.
+pub use fern_core::telemetry::{
+    ConsentScope, ConsentState, Event, EventCategory, F64Bucket, IntentSource, OwnedEvent,
+    OwnedProp, OwnedPropValue, Prop, PropValue, RemoteDataExport, RemoteEvent, RemoteValue,
+    TelemetryContext, TelemetryError, UsageReporter,
+};

@@ -63,6 +63,17 @@ enum ResolvedModalPresentation {
     NativeWindow,
 }
 
+/// Generate a per-process random session id for telemetry.
+///
+/// Not persisted across restarts — by design (a stable id would be
+/// pseudonymous tracking, distinct from `InstallId`'s 13-month UUID).
+/// The first 16 hex chars of a fresh UUID are sufficient for grouping
+/// events within one process lifetime.
+fn generate_session_id() -> String {
+    let uuid = uuid::Uuid::new_v4().simple().to_string();
+    uuid[..16].to_string()
+}
+
 fn resolve_modal_presentation(
     requested: ModalPresentation,
     content: &ModalContent,
@@ -1263,6 +1274,14 @@ pub struct FernAppBuilder {
     /// at startup and each enabled service is registered into the
     /// `app_state` registry under its concrete type.
     settings_bundle: Option<fern_settings::SettingsBundle>,
+    /// Telemetry configuration. When present, the bundle is opened
+    /// after `settings_bundle` (it depends on `SettingsStore`) and the
+    /// resulting `OpenedTelemetry` + `TelemetryContext` are registered
+    /// into the `app_state` registry. The `TelemetryContext` is the
+    /// hook the dispatch tap in
+    /// [`fern_core::widget_tree::WidgetTree::dispatch_intent`] uses to
+    /// emit `intent.dispatched` events.
+    telemetry_bundle: Option<fern_telemetry::TelemetryBundle>,
 }
 
 impl FernAppBuilder {
@@ -1281,6 +1300,7 @@ impl FernAppBuilder {
             tooltip_contents: Vec::new(),
             app_paths: None,
             settings_bundle: None,
+            telemetry_bundle: None,
         }
     }
 
@@ -1335,6 +1355,27 @@ impl FernAppBuilder {
     /// [`app_paths`](Self::app_paths).
     pub fn settings(mut self, bundle: fern_settings::SettingsBundle) -> Self {
         self.settings_bundle = Some(bundle);
+        self
+    }
+
+    /// Configure the telemetry stack (`fern-telemetry`). Mirrors
+    /// [`settings`](Self::settings): the bundle is opened during
+    /// `run` / `build_headless` against the configured `AppPaths`
+    /// **and** the live `SettingsStore`, and the resulting handles
+    /// (`OpenedTelemetry`, `TelemetryContext`, `DynamicReporter`) are
+    /// registered into `app_state`. Apps reach them via
+    /// [`fern_telemetry::TelemetryExt`] (`use fern_telemetry::TelemetryExt;`).
+    ///
+    /// # Panics
+    ///
+    /// Panics during `run` / `build_headless` if no `AppPaths` was
+    /// configured first via [`application`](Self::application) or
+    /// [`app_paths`](Self::app_paths), or if no
+    /// [`settings`](Self::settings) bundle was registered (the
+    /// telemetry consent file is opened via the same `AppPaths` and
+    /// the endpoint-override key is read from the `SettingsStore`).
+    pub fn telemetry(mut self, bundle: fern_telemetry::TelemetryBundle) -> Self {
+        self.telemetry_bundle = Some(bundle);
         self
     }
 
@@ -1489,6 +1530,63 @@ impl FernAppBuilder {
         }
     }
 
+    /// Open the configured telemetry bundle (if any) and register the
+    /// resulting handles into `app_state` so the dispatch tap and the
+    /// `TelemetryExt` accessors can reach them. Must be called *after*
+    /// `install_settings`, because `TelemetryBundle::open` reads the
+    /// endpoint-override key from the live `SettingsStore`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `.telemetry(...)` was called without prior
+    /// `.application(...)` / `.app_paths(...)`, or without a
+    /// `.settings(...)` bundle. Both are hard requirements: the
+    /// consent file needs an `AppPaths` target, and the runtime
+    /// endpoint-override key lives in the `SettingsStore`.
+    /// Fail-closed by design — a misconfigured app must not silently
+    /// skip telemetry installation.
+    fn install_telemetry(&mut self, settings: Option<&fern_settings::SettingsStore>) {
+        let Some(bundle) = self.telemetry_bundle.take() else {
+            return;
+        };
+        let paths = self.app_paths.clone().expect(
+            "FernAppBuilder::telemetry(...) requires .application(...) or .app_paths(...) \
+             to be set first so the consent file has a target directory.",
+        );
+        let store = settings.expect(
+            "FernAppBuilder::telemetry(...) requires .settings(...) so the runtime \
+             endpoint-override key can be read from the SettingsStore. \
+             Add .settings(SettingsBundle::new()) before .telemetry(...).",
+        );
+        match bundle.open(&paths, store) {
+            Ok(opened) => {
+                // Register the OpenedTelemetry under its concrete type
+                // so widgets can access it via TelemetryExt::telemetry().
+                self.app_state_registry.insert(
+                    TypeId::of::<fern_telemetry::OpenedTelemetry>(),
+                    Box::new(opened.clone()),
+                );
+                // Register the dispatch hook under the fern-core type.
+                // The dispatch tap looks this up by TypeId.
+                let session_id = generate_session_id();
+                let tcx = fern_core::telemetry::TelemetryContext {
+                    reporter: opened.reporter.clone() as std::rc::Rc<
+                        dyn fern_core::telemetry::UsageReporter,
+                    >,
+                    session_id,
+                    schema_version: opened.event_schema_version,
+                };
+                self.app_state_registry.insert(
+                    TypeId::of::<fern_core::telemetry::TelemetryContext>(),
+                    Box::new(tcx),
+                );
+            }
+            Err(e) => {
+                eprintln!("fern-app: failed to open telemetry bundle: {e}");
+            }
+        }
+    }
+
     /// Build a headless app for testing (no window, no GPU).
     pub fn build_headless(mut self) -> HeadlessApp {
         // Install the tooltip registry before anything else — widgets
@@ -1504,6 +1602,11 @@ impl FernAppBuilder {
         // services into `app_state_registry` so they're reachable from
         // any handler via the SettingsExt trait.
         let opened_settings = self.install_settings();
+
+        // Open telemetry (if a bundle was configured). Must come after
+        // install_settings — TelemetryBundle reads the endpoint-override
+        // key from the SettingsStore.
+        self.install_telemetry(opened_settings.as_ref().map(|s| &s.store));
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
 
@@ -1590,6 +1693,11 @@ impl FernAppBuilder {
         // the stack so its inner `SettingsFile` clones live long
         // enough to flush on shutdown.
         let opened_settings = self.install_settings();
+
+        // Open telemetry (if a bundle was configured). Must come after
+        // install_settings — TelemetryBundle reads the endpoint-override
+        // key from the SettingsStore.
+        self.install_telemetry(opened_settings.as_ref().map(|s| &s.store));
 
         // Construct the i18n manager (if configured) and install it on
         // the thread-local before any window or widget tree is created.

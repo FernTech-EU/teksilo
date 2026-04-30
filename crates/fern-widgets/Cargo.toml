@@ -27,6 +27,19 @@ fern-data = { workspace = true }
 fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-i18n = { workspace = true }
+# `PrivacySettings` widget binds to `OpenedTelemetry` and `ConsentStore`.
+# Pulling fern-telemetry in unconditionally is fine — when an app doesn't
+# install a `TelemetryBundle`, the widget shows a "telemetry not configured"
+# placeholder and produces no events.
+fern-telemetry = { workspace = true }
+# JSON rendering for the privacy widget's "Get my data" viewer.
+serde_json = { workspace = true }
+# Native file-picker for the privacy widget's "Save as JSON…" flow.
+# rfd routes to xdg-desktop-portal on Linux (lightweight), Cocoa on
+# macOS, Win32 on Windows. ~50 KB binary cost; sync API used so the
+# dialog blocks the UI thread for the duration the OS dialog is up
+# (the FernUI app is hidden behind the dialog anyway).
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 fern-preview = { workspace = true, optional = true }
 # `open` powers rich-tooltip links that point at real URLs
 # (http, https, mailto, file paths, …). Small, pure-Rust, no deps

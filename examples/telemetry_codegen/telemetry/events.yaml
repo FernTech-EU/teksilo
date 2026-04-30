@@ -1,0 +1,45 @@
+schema_version: 1
+events:
+  - name: intent.dispatched
+    category: intent
+    expires: "2027-06-01"
+    bug: "https://github.com/jacquetc/fern-ui/issues/42"
+    description: "An app-defined intent fired through the FernUI dispatch path."
+    props:
+      - name: name
+        type: dev_static
+      - name: source
+        type: enum
+        values: [shortcut, menu, handler, programmatic, accessibility]
+
+  - name: lifecycle.app_started
+    category: lifecycle
+    expires: "2027-06-01"
+    bug: "https://github.com/jacquetc/fern-ui/issues/1"
+    description: "Emitted once after the first window opens."
+    props:
+      - name: app_version
+        type: bounded_str
+      - name: fern_ui_version
+        type: bounded_str
+      - name: theme_kind
+        type: enum
+        values: [light, dark, custom]
+
+  - name: lifecycle.app_exited
+    category: lifecycle
+    expires: "2027-06-01"
+    bug: "https://github.com/jacquetc/fern-ui/issues/1"
+    description: "Emitted during graceful shutdown with a bucketed session duration."
+    props:
+      - name: session_duration_secs
+        type: u32
+
+  - name: widget.census
+    category: census
+    expires: "2027-06-01"
+    bug: "https://github.com/jacquetc/fern-ui/issues/43"
+    description: "Periodic snapshot of widget type distribution in the live tree."
+    props:
+      - name: total_widgets
+        type: u32

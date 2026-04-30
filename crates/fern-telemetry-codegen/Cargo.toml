@@ -1,0 +1,18 @@
+[package]
+name = "fern-telemetry-codegen"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+serde = { workspace = true }
+serde_yaml = "0.9"

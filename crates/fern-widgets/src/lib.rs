@@ -23,6 +23,7 @@ pub(crate) mod overlay_trigger;
 pub mod panel;
 pub mod popover;
 pub mod primitives;
+pub mod privacy_settings;
 pub mod progress_bar;
 pub mod radio_button;
 pub mod radio_group;
@@ -94,6 +95,7 @@ pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarMode};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
 pub use segmented_control::SegmentedControl;
 pub use shortcut_settings::ShortcutSettings;
+pub use privacy_settings::PrivacySettings;
 pub use slider::Slider;
 pub use snackbar::Snackbar;
 #[cfg(feature = "rich-text")]

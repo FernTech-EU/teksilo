@@ -68,8 +68,23 @@ fern-data            Reactive data models: ListModel, TreeModel, SelectionModel,
 fern-settings        Persistent reactive prefs: SettingsStore (dotted-key Signal<T>), SettingsFile<T>,
                      PersistedListModel/PersistedTreeModel, MruList<T: MruEntry>, WindowStateService
 fern-telemetry       Privacy-respecting product analytics built on fern-settings: ConsentStore,
-                     InstallId, TelemetryBundle. See docs/plans/telemetry-plan.md (early-phase)
+                     InstallId, TelemetryBundle, recent-log ring buffer. RGPD-compliant by
+                     construction. Reference: docs/telemetry.md. Design + progress log:
+                     docs/plans/telemetry-plan.md.
+fern-analytics-plausible  Plausible adapter (anonymous mode). HTTP + retry/backoff + redb queue.
+fern-analytics-fern  Home-grown gRPC adapter for the FernUI-operated fern-collector backend.
+                     Anonymous + pseudonymous modes; bearer token + TLS; fetch + erase wired.
+fern-analytics-otlp  OTLP/HTTP-logs adapter. Maps FernUI events to OTLP LogRecords; worker
+                     thread with batching, exponential backoff, flush-on-shutdown.
+fern-telemetry-codegen  Proc-macro: `include_telemetry_schema!("events.yaml")` reads a YAML
+                     manifest at compile time and expands to typed `emit_*` functions + enum
+                     types. Validates required fields, prop types, enum variants, expiry dates.
+cargo-fern-telemetry-lint  CLI schema-drift linter. Checks expiry, required fields, unused
+                     events (declared but not emitted in src/), unknown prop types. Run as
+                     `cargo fern-telemetry-lint`. CI mode: `--fail-on-warnings`.
 fern-widgets         ~54 widgets + ~21 layout primitives (Button, ListView, TreeView, MenuBar, Dialog, TextInput, SpinBox, etc.)
+fern-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
+                     as fern-widgets — no dep on widgets. See docs/plans/charts-plan.md.
 fern-text            TextBackend impl via text-typeset (external path dep)
 fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher
 fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by fern-i18n)
@@ -542,4 +557,4 @@ If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier
 
 Full architecture document: `../fern-ui-perso/fern-ui-architecture.md` (28 sections, covers layout model, scrolling, widget state, reactivity, overlays, DnD, data sources, Canvas API, rendering pipeline, theming, threading, accessibility, window management, testability, i18n)
 
-Additional documentation: [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md), [docs/plans/settings-plan.md](docs/plans/settings-plan.md)
+Additional documentation: [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md), [docs/plans/settings-plan.md](docs/plans/settings-plan.md), [docs/plans/telemetry-plan.md](docs/plans/telemetry-plan.md), [docs/plans/fern-collector-plan.md](docs/plans/fern-collector-plan.md)

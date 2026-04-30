@@ -1344,6 +1344,82 @@ impl WidgetTree {
         }
     }
 
+    /// Telemetry dispatch tap. Looks up a registered
+    /// [`crate::telemetry::TelemetryContext`] in `app_state` and emits
+    /// an `intent.dispatched` event with the intent's name. No-op when
+    /// no telemetry is configured. Errors and consent gating are
+    /// handled inside the reporter — this site only needs to call
+    /// `record`.
+    fn tap_intent_dispatched(&self, intent: &crate::intent::Intent) {
+        let Some(tcx) = self
+            .app_context()
+            .app_state::<crate::telemetry::TelemetryContext>()
+        else {
+            return;
+        };
+        let install_id = tcx.reporter.install_id();
+        let props = [
+            crate::telemetry::Prop {
+                key: "name",
+                value: crate::telemetry::PropValue::StaticStr(intent.name),
+            },
+            crate::telemetry::Prop {
+                key: "source",
+                value: crate::telemetry::PropValue::Enum {
+                    variant: intent.source.as_str(),
+                },
+            },
+        ];
+        let event = crate::telemetry::Event {
+            name: "intent.dispatched",
+            category: crate::telemetry::EventCategory::Intent,
+            timestamp: std::time::SystemTime::now(),
+            install_id,
+            session_id: &tcx.session_id,
+            schema_version: tcx.schema_version,
+            props: &props,
+        };
+        tcx.reporter.record(&event);
+    }
+
+    /// Histogram of widget concrete-type names across the active
+    /// arena. Used by the `widget.census` telemetry emitter
+    /// (Phase 5.3) to surface "which widgets does this app actually
+    /// use" data back to the framework. Keyed by
+    /// `std::any::type_name::<T>()` of the concrete widget — a
+    /// dotted, fully-qualified path like
+    /// `fern_widgets::button::Button`.
+    ///
+    /// `&'static str` keys: `type_name_of_val` returns a
+    /// compile-time string, so the histogram preserves the static
+    /// lifetime all the way to the wire-format prop. This avoids
+    /// any allocation for the type-name strings themselves.
+    ///
+    /// Cost: one `Box<dyn Widget>` indirection per active node plus
+    /// a `HashMap` insert. Sub-millisecond on arenas with thousands
+    /// of widgets. Safe to call every frame in tests; in production
+    /// gate behind a periodic ticker (hourly or on-idle).
+    pub fn widget_type_histogram(&self) -> std::collections::HashMap<&'static str, u32> {
+        let mut out = std::collections::HashMap::<&'static str, u32>::new();
+        for id in self.arena.active_ids() {
+            if let Some(node) = self.arena.get(id) {
+                // `Widget::type_name` is monomorphized per impl, so
+                // calling through the vtable correctly resolves to
+                // the concrete type — `type_name_of_val(&*widget)`
+                // alone would collapse to `"dyn fern_core::widget::Widget"`.
+                let name: &'static str = node.widget.type_name();
+                *out.entry(name).or_insert(0) += 1;
+            }
+        }
+        out
+    }
+
+    /// Number of active widgets in the arena. Cheap; matches the
+    /// totals returned by [`widget_type_histogram`] when summed.
+    pub fn active_widget_count(&self) -> usize {
+        self.arena.active_ids().len()
+    }
+
     /// Enqueue an intent for dispatch from `source`. Called from
     /// `collect_from_ctx` after a handler runs `ctx.send_intent(...)`
     /// and from the KeyDown shortcut-interception path.
@@ -1383,6 +1459,12 @@ impl WidgetTree {
         propagate_when_disabled: bool,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        // Telemetry tap. Single insertion point catches every intent
+        // — shortcut-driven, programmatic via `send_intent`, etc. —
+        // because every dispatch funnels through here. A no-op when
+        // no `TelemetryContext` is registered.
+        self.tap_intent_dispatched(&intent);
+
         // Pre-compute the source → root chain so the walk doesn't
         // need to hold any arena borrow while invoking handlers.
         let chain: Vec<WidgetId> = {

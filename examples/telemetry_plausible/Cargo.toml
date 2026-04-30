@@ -1,0 +1,14 @@
+[package]
+name = "telemetry-plausible"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+fern-ui = { workspace = true }
+fern-analytics-plausible = { workspace = true }
+fern-settings = { workspace = true }
+fern-telemetry = { workspace = true }
+fern-core = { workspace = true }

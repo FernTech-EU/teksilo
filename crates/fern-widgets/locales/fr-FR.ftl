@@ -60,3 +60,61 @@ messagebox-btn-ignore = Ignorer
 messagebox-btn-open = Ouvrir
 messagebox-btn-help = Aide
 messagebox-show-details = Afficher les détails
+
+# Widget PrivacySettings. Voir crates/fern-widgets/src/privacy_settings.rs.
+# Mention d'information RGPD Art. 13 + boutons d'action. Les clés à
+# paramètres utilisent la syntaxe Fluent { $nom }.
+privacy-not-configured = La télémétrie n'est pas configurée pour cette application.
+privacy-heading = Confidentialité et télémétrie
+privacy-notice-controller = Les données sont traitées par { $processor } ; le sous-traitant technique est { $adapter } (point de collecte : { $endpoint }).
+privacy-notice-purposes = Finalités : amélioration de l'application — quelles fonctionnalités sont utilisées, où se concentrent les bugs, sur quelles plates-formes l'application tourne. Aucun contenu de document, ni presse-papiers, ni frappe clavier, ni capture d'écran.
+privacy-notice-lawful-anonymous = Base légale : notre intérêt légitime à améliorer le produit (RGPD Art. 6(1)(f) ; exemption CNIL « mesure d'audience »).
+privacy-notice-lawful-pseudonymous = Base légale : votre consentement explicite (RGPD Art. 6(1)(a)).
+privacy-notice-retention = Conservation : les données côté serveur sont conservées au plus { $days } jours.
+privacy-notice-withdrawal-right = Droit de retrait : vous pouvez désactiver à tout moment les bascules ci-dessous, cliquer sur « Retirer le consentement » pour interrompre toute collecte, ou en mode pseudonyme cliquer sur « Effacer mes données » pour supprimer les enregistrements du serveur.
+privacy-notice-policy-link = Politique de confidentialité complète : { $url }
+
+privacy-scope-section-heading = Que peut partager l'application ?
+privacy-scope-anonymous-metrics-label = Statistiques d'usage anonymes
+privacy-scope-anonymous-metrics-description = Comptage des boutons / menus / raccourcis utilisés, version de l'application et système d'exploitation.
+privacy-scope-crash-reports-label = Rapports de plantage
+privacy-scope-crash-reports-description = Traces d'appel et métadonnées du processus en cas de plantage. Aucun contenu de document, aucun chemin de fichier.
+privacy-scope-feature-flags-label = Drapeaux de fonctionnalités
+privacy-scope-feature-flags-description = Permet à l'application de recevoir des mises à jour de drapeaux de fonctionnalités (déploiement progressif d'outils).
+
+privacy-btn-reject-all = Tout refuser
+privacy-btn-accept-all = Tout accepter
+privacy-btn-erase = Effacer mes données
+privacy-btn-erase-tooltip = Demande au serveur de supprimer tous les événements enregistrés pour cette installation, puis retire le consentement localement.
+privacy-btn-fetch = Récupérer mes données
+privacy-btn-fetch-tooltip = Récupère tous les événements que le serveur a enregistrés sous votre identifiant d'installation. Le résultat peut être enregistré au format JSON.
+privacy-btn-withdraw = Retirer le consentement
+privacy-btn-withdraw-tooltip = Interrompt toute nouvelle collecte. Les données déjà enregistrées sur le serveur sont conservées — utilisez « Effacer mes données » d'abord si vous souhaitez les supprimer.
+privacy-btn-switch-to-anonymous = Basculer en mode Anonyme
+privacy-btn-switch-to-pseudonymous = Basculer en mode Pseudonyme
+
+privacy-identity-heading = Vos données sur le serveur
+privacy-identity-install-id = Identifiant d'installation : { $id }
+privacy-identity-retention = Le serveur conserve vos enregistrements au plus { $days } jours.
+
+privacy-mode-heading = Mode de confidentialité
+privacy-mode-current-anonymous = Actuel : Anonyme (aucun identifiant d'installation)
+privacy-mode-current-pseudonymous = Actuel : Pseudonyme (identifiant d'installation présent)
+privacy-mode-blurb-anonymous = Le mode anonyme ne transmet aucun identifiant par appareil. Basculer effacera vos enregistrements côté serveur et supprimera l'UUID d'installation local — cette action est irréversible.
+privacy-mode-blurb-pseudonymous = Le mode pseudonyme génère un UUID d'installation aléatoire. Vous pourrez récupérer ou effacer vos enregistrements côté serveur. Nécessite un consentement explicite et redemande votre choix lors du basculement.
+
+privacy-confirm-mode-switch-title = Changer de mode de confidentialité ?
+privacy-confirm-mode-switch-leaving-pseudonymous = Cette action demandera au serveur d'effacer tous les événements enregistrés sous votre identifiant d'installation, supprimera l'UUID d'installation local, réinitialisera votre décision de consentement et changera le mode de confidentialité. Voulez-vous continuer ?
+privacy-confirm-mode-switch-leaving-anonymous = Cette action réinitialisera votre décision de consentement et changera le mode de confidentialité. Vous serez à nouveau invité avant toute nouvelle collecte. Continuer ?
+privacy-confirm-erase-title = Effacer vos données ?
+privacy-confirm-erase-text = Cette action envoie une demande de suppression pour chaque événement enregistré sous votre identifiant d'installation, supprime tout ce qui est encore en mémoire tampon localement, et retire le consentement pour qu'aucune autre donnée ne soit collectée. L'action ne peut pas être annulée.
+privacy-confirm-withdraw-title = Retirer le consentement ?
+privacy-confirm-withdraw-text = Aucun nouvel événement d'analyse ne sera collecté depuis cette application. Les données déjà enregistrées sur le serveur sont conservées — utilisez « Effacer mes données » avant de retirer le consentement si vous souhaitez les supprimer également.
+
+privacy-fetch-success-title = Vos données sur le serveur
+privacy-fetch-success-text = { $count } événements récupérés pour cette installation.
+privacy-fetch-error-title = Impossible de récupérer vos données
+
+privacy-inspect-title = Inspecter les données envoyées ({ $count } événement(s) en mémoire)
+privacy-inspect-empty = Aucun événement n'a encore été émis dans cette session. Interagissez avec l'application — clics, menus et raccourcis passent tous par ici.
+privacy-inspect-summary = Affichage des { $count } derniers événements, du plus récent au plus ancien.
