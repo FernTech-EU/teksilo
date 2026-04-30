@@ -52,6 +52,20 @@ keystroke-modifier-shift = Shift
 keystroke-modifier-alt = Alt
 keystroke-modifier-super = Super
 keystroke-separator = +
+keystroke-key-space = Space
+keystroke-key-enter = Enter
+keystroke-key-escape = Esc
+keystroke-key-tab = Tab
+keystroke-key-backspace = Backspace
+keystroke-key-delete = Del
+keystroke-key-arrow-up = Up
+keystroke-key-arrow-down = Down
+keystroke-key-arrow-left = Left
+keystroke-key-arrow-right = Right
+keystroke-key-home = Home
+keystroke-key-end = End
+keystroke-key-page-up = PageUp
+keystroke-key-page-down = PageDown
 
 # MessageBox standard button labels. These are the canonical English
 # labels used when a caller doesn't override with

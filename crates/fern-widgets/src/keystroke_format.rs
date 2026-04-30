@@ -3,12 +3,14 @@
 //! - On macOS, the returned string uses the traditional symbol
 //!   modifiers (⌘⇧⌥⌃) and Unicode key glyphs (↑↩⇥ …). These symbols
 //!   are universal — no locale lookup needed.
-//! - On Windows / Linux, the modifier labels flow through
-//!   `tr_widget!` (fern-i18n's compile-time-checked translation
-//!   macro) so apps that register fern-widgets' framework locales
-//!   see "Strg+S" in German, "Ctrl+S" in English, etc. Key names
-//!   currently use the plain [`Key::Display`] impl; per-key
-//!   localization can be layered on later the same way.
+//! - On Windows / Linux, the modifier labels and named-key labels
+//!   (Enter, Esc, Space, arrows, Home/End, PageUp/Down, …) flow
+//!   through `tr_widget!` (fern-i18n's compile-time-checked
+//!   translation macro) so apps that register fern-widgets'
+//!   framework locales see "Strg+Eingabe" in German, "Ctrl+Entrée"
+//!   in French, "Ctrl+Enter" in English, etc. Letters, digits,
+//!   character keys and F1..F12 fall through to [`Key::Display`]
+//!   — those names are universal.
 //!
 //! Apps that want full control can bypass this function entirely —
 //! the settings widget simply calls [`format_keystroke`] at render
@@ -90,7 +92,32 @@ fn write_key(out: &mut String, key: Key) {
 
 #[cfg(not(target_os = "macos"))]
 fn write_key(out: &mut String, key: Key) {
-    out.push_str(&key.to_string());
+    // Named-key labels come from framework locale bundles
+    // (`crates/fern-widgets/locales/*.ftl`) so apps see "Entrée"
+    // in French, "Enter" in English, etc. Letters, digits, the
+    // `Character(_)` catch-all and F1..F12 use `Key::Display` —
+    // those names are universal across Latin-script locales.
+    let label = match key {
+        Key::Space => Some(tr_widget!(keystroke_key_space()).resolve_now()),
+        Key::Enter => Some(tr_widget!(keystroke_key_enter()).resolve_now()),
+        Key::Escape => Some(tr_widget!(keystroke_key_escape()).resolve_now()),
+        Key::Tab => Some(tr_widget!(keystroke_key_tab()).resolve_now()),
+        Key::Backspace => Some(tr_widget!(keystroke_key_backspace()).resolve_now()),
+        Key::Delete => Some(tr_widget!(keystroke_key_delete()).resolve_now()),
+        Key::ArrowUp => Some(tr_widget!(keystroke_key_arrow_up()).resolve_now()),
+        Key::ArrowDown => Some(tr_widget!(keystroke_key_arrow_down()).resolve_now()),
+        Key::ArrowLeft => Some(tr_widget!(keystroke_key_arrow_left()).resolve_now()),
+        Key::ArrowRight => Some(tr_widget!(keystroke_key_arrow_right()).resolve_now()),
+        Key::Home => Some(tr_widget!(keystroke_key_home()).resolve_now()),
+        Key::End => Some(tr_widget!(keystroke_key_end()).resolve_now()),
+        Key::PageUp => Some(tr_widget!(keystroke_key_page_up()).resolve_now()),
+        Key::PageDown => Some(tr_widget!(keystroke_key_page_down()).resolve_now()),
+        _ => None,
+    };
+    match label {
+        Some(s) => out.push_str(&s),
+        None => out.push_str(&key.to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -110,6 +137,21 @@ mod tests {
             "Ctrl+Shift+Z"
         );
         assert_eq!(format_keystroke(KeyStroke::alt(Key::F4)), "Alt+F4");
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn non_macos_named_keys_route_through_bundle() {
+        // Named keys flow through `tr_widget!`. Asserting against the
+        // English source confirms the bundle keys exist and the match
+        // arms cover the named-key variants.
+        assert_eq!(format_keystroke(KeyStroke::ctrl(Key::Enter)), "Ctrl+Enter");
+        assert_eq!(format_keystroke(KeyStroke::new(Key::Escape, Modifiers::NONE)), "Esc");
+        assert_eq!(format_keystroke(KeyStroke::ctrl(Key::ArrowLeft)), "Ctrl+Left");
+        assert_eq!(
+            format_keystroke(KeyStroke::new(Key::Tab, Modifiers::SHIFT)),
+            "Shift+Tab"
+        );
     }
 
     #[test]

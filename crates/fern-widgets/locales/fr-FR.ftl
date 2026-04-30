@@ -39,6 +39,20 @@ keystroke-modifier-shift = Maj
 keystroke-modifier-alt = Alt
 keystroke-modifier-super = Super
 keystroke-separator = +
+keystroke-key-space = Espace
+keystroke-key-enter = Entrée
+keystroke-key-escape = Échap
+keystroke-key-tab = Tab
+keystroke-key-backspace = Retour
+keystroke-key-delete = Suppr
+keystroke-key-arrow-up = Haut
+keystroke-key-arrow-down = Bas
+keystroke-key-arrow-left = Gauche
+keystroke-key-arrow-right = Droite
+keystroke-key-home = Début
+keystroke-key-end = Fin
+keystroke-key-page-up = Pg.préc
+keystroke-key-page-down = Pg.suiv
 
 # MessageBox — boutons standards et divulgation des détails.
 messagebox-btn-ok = OK
