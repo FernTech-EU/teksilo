@@ -99,30 +99,74 @@ pub(crate) fn install_persist_observers(
     // (DPI rounding, snap-to-grid window managers, etc.).
     record_snapshot(&service, state, &label);
 
+    // We deliberately capture the three child signals *by value*
+    // instead of cloning the whole `WindowState`. `WindowState` is
+    // `Rc<WindowStateInner>`, and `WindowStateInner` itself owns
+    // these signals plus a `Vec<ObserverHandle>` of OS-sync observers
+    // bound to the same signals. If the closure held a `WindowState`
+    // clone, the registered observer would form an Rc cycle:
+    // signal_X.observers[i] → Rc<dyn Fn> → WindowState →
+    // WindowStateInner._observer_handles[j] → signal_X. Tearing the
+    // first ObserverHandle then triggers `signal_X.borrow_mut()
+    // .retain(...)`, which drops the closure and the inner Rc — and
+    // dropping `WindowStateInner._observer_handles` mid-retain calls
+    // `signal_X.borrow_mut()` *again*, panicking with
+    // "RefCell already borrowed". Capturing only the signals breaks
+    // the cycle: each `Signal<T>` is its own `Rc<RefCell<...>>`, so
+    // the closure keeps the *signal innards* alive (harmless — the
+    // OS-sync observers would have done that anyway) without
+    // pinning `WindowStateInner`.
+    let placement = state.placement().clone();
+    let size = state.size().clone();
+    let position = state.position().clone();
+
     handles.push(observe(
         state.size(),
         service.clone(),
-        state.clone(),
+        placement.clone(),
+        size.clone(),
+        position.clone(),
         label.clone(),
     ));
     handles.push(observe(
         state.position(),
         service.clone(),
-        state.clone(),
+        placement.clone(),
+        size.clone(),
+        position.clone(),
         label.clone(),
     ));
-    handles.push(observe(state.placement(), service, state.clone(), label));
+    handles.push(observe(
+        state.placement(),
+        service,
+        placement,
+        size,
+        position,
+        label,
+    ));
     handles
 }
 
 fn observe<T: Clone + 'static>(
     signal: &Signal<T>,
     service: WindowStateService,
-    state: WindowState,
+    placement: Signal<fern_core::WindowPlacement>,
+    size: Signal<(u32, u32)>,
+    position: Signal<(i32, i32)>,
     label: String,
 ) -> ObserverHandle {
     signal.observe(move |_| {
-        record_snapshot(&service, &state, &label);
+        let (w, h) = size.get();
+        let (x, y) = position.get();
+        let placement = placement.get();
+        let _ = service.record(PerWindowState {
+            label: label.clone(),
+            x,
+            y,
+            width: w,
+            height: h,
+            placement,
+        });
     })
 }
 
