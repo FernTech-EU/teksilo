@@ -1,0 +1,25 @@
+[package]
+name = "fern-charts"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+preview = ["dep:fern-preview"]
+
+[dependencies]
+fern-core = { workspace = true }
+fern-data = { workspace = true }
+fern-tokens = { workspace = true }
+fern-canvas = { workspace = true }
+fern-i18n = { workspace = true }
+fern-preview = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Used only by tests for the donut center-slot integration (TextWidget
+# placement). Not part of the runtime dep graph — keeps the public
+# layering (charts at the same tier as widgets).
+fern-widgets = { workspace = true }
