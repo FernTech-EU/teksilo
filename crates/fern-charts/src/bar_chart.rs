@@ -20,6 +20,7 @@ use crate::legend::{
 };
 use crate::palette::ChartPalette;
 use crate::series::ChartSeries;
+use crate::text::measure_text_width;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarOrientation {
@@ -599,7 +600,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                     let x = plot.x + self.min_bar_gap + i as f32 * (bar_w + self.min_bar_gap);
                     let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
                     let label = self.axis_y.format(datum.value);
-                    let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                    let approx_w = measure_text_width(canvas, &label, label_style);
                     let rect = Rect::new(
                         x + (bar_w - approx_w) * 0.5,
                         value_y - label_style.size * 1.2 - 2.0,
@@ -623,7 +624,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                         let x = group_x + si as f32 * (bar_w + self.min_bar_gap);
                         let value_y = y_to_pixel(datum.value, y_lo, y_hi, plot);
                         let label = self.axis_y.format(datum.value);
-                        let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                        let approx_w = measure_text_width(canvas, &label, label_style);
                         let rect = Rect::new(
                             x + (bar_w - approx_w) * 0.5,
                             value_y - label_style.size * 1.2 - 2.0,
@@ -642,7 +643,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                     let y = plot.y + self.min_bar_gap + i as f32 * (bar_h + self.min_bar_gap);
                     let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
                     let label = self.axis_y.format(datum.value);
-                    let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                    let approx_w = measure_text_width(canvas, &label, label_style);
                     let rect = Rect::new(
                         value_x + 4.0,
                         y + (bar_h - label_style.size * 1.2) * 0.5,
@@ -666,7 +667,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
                         let y = group_y + si as f32 * (bar_h + self.min_bar_gap);
                         let value_x = value_to_pixel_h(datum.value, y_lo, y_hi, plot);
                         let label = self.axis_y.format(datum.value);
-                        let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                        let approx_w = measure_text_width(canvas, &label, label_style);
                         let rect = Rect::new(
                             value_x + 4.0,
                             y + (bar_h - label_style.size * 1.2) * 0.5,
@@ -725,16 +726,17 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             );
         }
 
-        // Y tick labels.
+        // Y tick labels — measure via text backend so wider digits ("100",
+        // "1000") aren't truncated to "..." by draw_text's max_width gate.
         if self.axis_y.show_labels {
             for &t in y_ticks {
                 let y = y_to_pixel(t, y_lo, y_hi, plot);
                 let label = self.axis_y.format(t);
-                let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                let w = measure_text_width(canvas, &label, label_style);
                 let rect = Rect::new(
-                    plot.x - style.axis_tick_length - style.axis_label_gap - approx_w,
+                    plot.x - style.axis_tick_length - style.axis_label_gap - w,
                     y - label_style.size * 0.6,
-                    approx_w,
+                    w,
                     label_style.size * 1.2,
                 );
                 canvas.draw_text(&label, rect, label_style, label_color);
@@ -746,12 +748,12 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
             let n = x_labels.len();
             let slot_w = plot.width / n as f32;
             for (i, label) in x_labels.iter().enumerate() {
-                let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                let w = measure_text_width(canvas, label, label_style);
                 let center_x = plot.x + slot_w * (i as f32 + 0.5);
                 let rect = Rect::new(
-                    center_x - approx_w * 0.5,
+                    center_x - w * 0.5,
                     plot.bottom() + style.axis_tick_length + style.axis_label_gap,
-                    approx_w,
+                    w,
                     label_style.size * 1.2,
                 );
                 canvas.draw_text(label, rect, label_style, label_color);
@@ -760,21 +762,21 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
 
         // Axis titles.
         if let Some(title) = self.axis_y.label.as_ref() {
-            let approx_w = title.chars().count() as f32 * label_style.size * 0.6;
+            let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
-                plot.x - style.axis_tick_length - style.axis_label_gap - approx_w * 1.1,
+                plot.x - style.axis_tick_length - style.axis_label_gap - w - 4.0,
                 plot.y + plot.height * 0.5 - label_style.size * 0.6,
-                approx_w,
+                w,
                 label_style.size * 1.2,
             );
             canvas.draw_text(title, rect, label_style, label_color);
         }
         if let Some(title) = self.axis_x.label.as_ref() {
-            let approx_w = title.chars().count() as f32 * label_style.size * 0.6;
+            let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
-                plot.x + plot.width * 0.5 - approx_w * 0.5,
+                plot.x + plot.width * 0.5 - w * 0.5,
                 plot.bottom() + style.axis_tick_length + style.axis_label_gap + label_style.size * 1.4,
-                approx_w,
+                w,
                 label_style.size * 1.2,
             );
             canvas.draw_text(title, rect, label_style, label_color);
@@ -817,6 +819,7 @@ fn measure_max_label_width(
     }
     max
 }
+
 
 #[cfg(test)]
 mod tests {

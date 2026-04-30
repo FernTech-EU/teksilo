@@ -24,6 +24,7 @@ use crate::legend::{
 };
 use crate::palette::ChartPalette;
 use crate::series::ChartSeries;
+use crate::text::measure_text_width;
 
 /// One screen-space data point cached during paint, used by the hover
 /// hit-test.
@@ -523,11 +524,11 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             for &t in y_ticks {
                 let y = y_to_pixel(t, y_lo, y_hi, plot);
                 let label = self.axis_y.format(t);
-                let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                let w = measure_text_width(canvas, &label, label_style);
                 let rect = Rect::new(
-                    plot.x - style.axis_tick_length - style.axis_label_gap - approx_w,
+                    plot.x - style.axis_tick_length - style.axis_label_gap - w,
                     y - label_style.size * 0.6,
-                    approx_w,
+                    w,
                     label_style.size * 1.2,
                 );
                 canvas.draw_text(&label, rect, label_style, label_color);
@@ -537,12 +538,12 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         if self.axis_x.show_labels && !x_labels.is_empty() {
             let n = x_labels.len();
             for (i, label) in x_labels.iter().enumerate() {
-                let approx_w = label.chars().count() as f32 * label_style.size * 0.55;
+                let w = measure_text_width(canvas, label, label_style);
                 let center_x = x_for_index(i, n, plot);
                 let rect = Rect::new(
-                    center_x - approx_w * 0.5,
+                    center_x - w * 0.5,
                     plot.bottom() + style.axis_tick_length + style.axis_label_gap,
-                    approx_w,
+                    w,
                     label_style.size * 1.2,
                 );
                 canvas.draw_text(label, rect, label_style, label_color);
@@ -550,24 +551,24 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
         }
 
         if let Some(title) = self.axis_y.label.as_ref() {
-            let approx_w = title.chars().count() as f32 * label_style.size * 0.6;
+            let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
-                plot.x - style.axis_tick_length - style.axis_label_gap - approx_w * 1.1,
+                plot.x - style.axis_tick_length - style.axis_label_gap - w - 4.0,
                 plot.y + plot.height * 0.5 - label_style.size * 0.6,
-                approx_w,
+                w,
                 label_style.size * 1.2,
             );
             canvas.draw_text(title, rect, label_style, label_color);
         }
         if let Some(title) = self.axis_x.label.as_ref() {
-            let approx_w = title.chars().count() as f32 * label_style.size * 0.6;
+            let w = measure_text_width(canvas, title, label_style);
             let rect = Rect::new(
-                plot.x + plot.width * 0.5 - approx_w * 0.5,
+                plot.x + plot.width * 0.5 - w * 0.5,
                 plot.bottom()
                     + style.axis_tick_length
                     + style.axis_label_gap
                     + label_style.size * 1.4,
-                approx_w,
+                w,
                 label_style.size * 1.2,
             );
             canvas.draw_text(title, rect, label_style, label_color);
@@ -603,7 +604,8 @@ impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
             hit.category_label,
             self.axis_y.format(hit.value)
         );
-        let approx_w = (label.chars().count() as f32 * label_style.size * 0.55) + style.tooltip_padding * 2.0;
+        let text_w = measure_text_width(canvas, &label, label_style);
+        let approx_w = text_w + style.tooltip_padding * 2.0;
         let height = label_style.size * 1.4 + style.tooltip_padding;
 
         // Place the tooltip above the marker by default; flip below if it

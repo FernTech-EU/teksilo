@@ -32,6 +32,7 @@ use crate::legend::{
 };
 use crate::palette::ChartPalette;
 use crate::series::{ChartDatum, ChartSeries};
+use crate::text::measure_text_width;
 
 /// How slice labels are placed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -552,7 +553,7 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
         } else {
             category.to_string()
         };
-        let approx_w = label_text.chars().count() as f32 * label_style.size * 0.55;
+        let approx_w = measure_text_width(canvas, &label_text, label_style);
         let height = label_style.size * 1.2;
 
         // Convert to a screen direction.
@@ -648,7 +649,8 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
             self.axis_y_format_dummy(hit.value),
             hit.percent
         );
-        let approx_w = (label.chars().count() as f32 * label_style.size * 0.55) + style.tooltip_padding * 2.0;
+        let text_w = measure_text_width(canvas, &label, label_style);
+        let approx_w = text_w + style.tooltip_padding * 2.0;
         let height = label_style.size * 1.4 + style.tooltip_padding;
 
         // Anchor at the bisector midpoint between inner and outer radius.

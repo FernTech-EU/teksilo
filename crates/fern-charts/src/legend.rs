@@ -156,7 +156,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                         final_color,
                     );
                     x += style.legend_swatch_size + 4.0;
-                    let label_w = approx_label_width(&series.name, &label_style);
+                    let label_w = crate::text::measure_text_width(canvas, &series.name, &label_style);
                     let text_color = if visible {
                         label_color
                     } else {
@@ -202,7 +202,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                         fern_tokens::CornerRadius::uniform(2.0),
                         final_color,
                     );
-                    let label_w = approx_label_width(&series.name, &label_style);
+                    let label_w = crate::text::measure_text_width(canvas, &series.name, &label_style);
                     let text_color = if visible {
                         label_color
                     } else {
