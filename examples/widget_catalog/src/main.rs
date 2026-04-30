@@ -2605,19 +2605,17 @@ impl WidgetCatalog {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
-                acc_content1 = TextWidget::new_literal("This content is revealed with an animated expand.") {
-                    style: TextStyleRole::Body
-                    color: TextRole::Primary
-                }
                 Accordion::new_literal("Click to expand", sigs.accordion_expanded.clone()) {
-                    content_id: acc_content1
-                }
-                acc_content2 = TextWidget::new_literal("This section starts expanded and can be collapsed.") {
-                    style: TextStyleRole::Body
-                    color: TextRole::Primary
+                    content: TextWidget::new_literal("This content is revealed with an animated expand.") {
+                        style: TextStyleRole::Body
+                        color: TextRole::Primary
+                    }
                 }
                 Accordion::new_literal("Already expanded", sigs.accordion2_expanded.clone()) {
-                    content_id: acc_content2
+                    content: TextWidget::new_literal("This section starts expanded and can be collapsed.") {
+                        style: TextStyleRole::Body
+                        color: TextRole::Primary
+                    }
                 }
                 Divider { }
                 TextWidget::new_literal("ToolBox") {
