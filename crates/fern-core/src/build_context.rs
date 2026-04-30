@@ -221,6 +221,16 @@ impl<'a> BuildContext<'a> {
         self.tree.visible_when(id, state);
     }
 
+    /// Bind an opacity multiplier (0..1) to a widget. The render walker
+    /// emits `SetOpacity(value)` before painting the widget's subtree
+    /// and `RestoreOpacity` afterwards, so the multiplier composes
+    /// correctly with ancestor opacity scopes. Bound at `RepaintOnly`:
+    /// opacity changes never trigger relayout. Used by the `Fade`
+    /// wrapper to animate a child between hidden and fully visible.
+    pub fn set_opacity(&mut self, id: WidgetId, opacity: impl Into<crate::signal::Prop<f32>>) {
+        self.tree.set_opacity(id, opacity);
+    }
+
     /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.enabled_when(id, state);

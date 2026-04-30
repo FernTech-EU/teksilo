@@ -176,6 +176,27 @@ fn paint_widget_cached(
         node_mut.last_painted_epoch = paint_epoch;
     }
 
+    // Read the optional opacity scope before borrowing the node again
+    // for the paint/cache path. The scope wraps both this widget's own
+    // paint and its children's paint, composing with any ancestor
+    // opacity via the canvas's stacked-opacity model.
+    let node = arena.get(id).unwrap();
+    let opacity = node.opacity_prop.as_ref().map(|p| p.get().clamp(0.0, 1.0));
+    if let Some(o) = opacity
+        && o < 1.0 / 512.0
+    {
+        // Sub-perceptual: skip the subtree entirely. Saves a draw
+        // pass when a `Fade` is fully transparent (e.g. just-dismissed
+        // tooltip waiting for cleanup) and prevents 0.0 from emitting
+        // a spurious blend pass on the GPU.
+        return;
+    }
+    if let Some(o) = opacity {
+        frame
+            .draw_order
+            .push(fern_canvas::DrawCommand::SetOpacity(o));
+    }
+
     let node = arena.get(id).unwrap();
     let needs_paint = node.dirty.needs_paint;
 
@@ -265,6 +286,12 @@ fn paint_widget_cached(
 
     if clips {
         frame.draw_order.push(fern_canvas::DrawCommand::ClearClip);
+    }
+
+    if opacity.is_some() {
+        frame
+            .draw_order
+            .push(fern_canvas::DrawCommand::RestoreOpacity);
     }
 }
 
@@ -462,6 +489,62 @@ mod tests {
 
         let child_theme = tree.resolved_theme(child);
         assert_eq!(child_theme.colors.accent, Color::RED);
+    }
+
+    #[test]
+    fn opacity_prop_emits_set_and_restore_around_subtree() {
+        // A widget with opacity_prop = Some(Static(0.5)) wraps its
+        // own paint AND its children's paint inside a SetOpacity /
+        // RestoreOpacity pair, so the canvas's stacked-opacity model
+        // multiplies through.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        let _child = tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.set_opacity(parent, 0.5_f32);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let mut set_count = 0;
+        let mut restore_count = 0;
+        for cmd in &frame.draw_order {
+            match cmd {
+                fern_canvas::DrawCommand::SetOpacity(v) => {
+                    assert!((v - 0.5).abs() < 1e-6, "expected 0.5, got {}", v);
+                    set_count += 1;
+                }
+                fern_canvas::DrawCommand::RestoreOpacity => restore_count += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(set_count, 1, "draw_order = {:?}", frame.draw_order);
+        assert_eq!(restore_count, 1);
+    }
+
+    #[test]
+    fn opacity_prop_zero_skips_subtree_entirely() {
+        // Sub-perceptual opacity (< 1/512) returns early — no
+        // SetOpacity, no children draw commands. Saves a blend pass.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.set_opacity(parent, 0.0_f32);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        for cmd in &frame.draw_order {
+            assert!(
+                !matches!(cmd, fern_canvas::DrawCommand::SetOpacity(_)),
+                "fully-transparent subtree should not emit SetOpacity"
+            );
+        }
+        // The red FillWidget child must not appear either.
+        assert!(
+            !frame
+                .shapes
+                .iter()
+                .any(|s| s.color == Color::RED.to_array()),
+            "fully-transparent subtree should not paint its descendants"
+        );
     }
 
     #[test]

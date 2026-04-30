@@ -211,6 +211,11 @@ Application:
 - `Collapse { expanded: Signal<bool>, child }` — wraps a child and animates
   its height (and width gate) between zero and natural when `expanded` flips.
   Used internally by `Accordion`. See [crates/fern-widgets/src/collapse.rs](crates/fern-widgets/src/collapse.rs).
+- `Fade { visible: Prop<bool>, child }` — wraps a child and animates the
+  entire subtree's opacity between 0 and 1. Layout-transparent: the child
+  reports its full natural size at all opacity values. Built on
+  `BuildContext::set_opacity` (a node-level opacity scope, parallel to
+  `clips_children`). See [crates/fern-widgets/src/fade.rs](crates/fern-widgets/src/fade.rs).
 
 **Lower-level types** (still public, used when you need full control):
 

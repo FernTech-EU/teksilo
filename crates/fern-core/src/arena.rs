@@ -69,6 +69,16 @@ pub struct WidgetNode {
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
     pub clips_children: bool,
+    /// Optional opacity multiplier (0..1) applied to this widget's
+    /// entire subtree during paint. The render walker emits
+    /// `SetOpacity(value)` before walking the widget's own paint and
+    /// children, then `RestoreOpacity` afterwards — so the multiplier
+    /// composes with ancestor opacity scopes via the canvas's
+    /// already-stacked opacity model. Bound at `Repaint` level: opacity
+    /// changes never trigger relayout. `None` means "no opacity scope"
+    /// (the default for almost every widget). The `Fade` widget sets
+    /// this on its own node to drive an animated visibility tween.
+    pub(crate) opacity_prop: Option<Prop<f32>>,
     /// Cached paint output for this widget (excludes children).
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
@@ -195,6 +205,7 @@ impl WidgetArena {
             enabled_state: None,
             alignment_override: None,
             clips_children: false,
+            opacity_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
@@ -245,6 +256,7 @@ impl WidgetArena {
             enabled_state: None,
             alignment_override: None,
             clips_children: false,
+            opacity_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),

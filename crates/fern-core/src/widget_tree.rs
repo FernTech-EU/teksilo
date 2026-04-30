@@ -1739,6 +1739,25 @@ impl WidgetTree {
         }
     }
 
+    /// Bind an opacity multiplier (0..1) to a widget. The render walker
+    /// emits `SetOpacity(value)` before painting the widget's subtree
+    /// and `RestoreOpacity` afterwards, so the multiplier composes
+    /// correctly with ancestor opacity scopes via the canvas's stacked
+    /// opacity model. Bound at `Repaint` level: opacity changes never
+    /// trigger relayout. Pass any `Prop<f32>` or `Signal<f32>` source
+    /// (typically an animated signal driven by a `Fade` wrapper).
+    pub fn set_opacity(&mut self, id: WidgetId, opacity: impl Into<crate::signal::Prop<f32>>) {
+        let prop = opacity.into();
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        if let Some(node) = self.arena.get_mut(id) {
+            node.opacity_prop = Some(prop);
+        }
+    }
+
     /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
     /// When false, the widget and its entire subtree ignore all events but remain
     /// visible. Focus traversal skips disabled subtrees and AccessKit marks their
