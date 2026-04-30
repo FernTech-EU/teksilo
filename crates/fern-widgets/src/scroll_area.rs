@@ -196,8 +196,12 @@ impl ScrollArea {
         self
     }
 
-    /// Enable or disable smooth animated scrolling for discrete wheel events.
-    /// Enabled by default. Trackpad pixel scrolling is always direct.
+    /// Enable or disable smooth animated scrolling for wheel events.
+    /// Enabled by default. Applies to both line-based (`ScrollDelta::Lines`)
+    /// and pixel-based (`ScrollDelta::Pixels`) wheel events — on Wayland and
+    /// other platforms with high-resolution scroll axes, mouse wheel notches
+    /// are delivered as pixel deltas, so animating both paths is required for
+    /// a fast flick to feel smooth instead of jumping.
     pub fn smooth_scrolling(mut self, enabled: bool) -> Self {
         self.smooth_scrolling = enabled;
         self
@@ -389,9 +393,25 @@ impl Widget for ScrollArea {
                             }
                         }
                         ScrollDelta::Pixels { x, y } => {
-                            scroll_y.set(cur_y + y);
-                            scroll_x.set(cur_x + x);
-                            clamp_and_set();
+                            let base_y = scroll_y.animation_target().unwrap_or(cur_y);
+                            let base_x = scroll_x.animation_target().unwrap_or(cur_x);
+                            let target_y = (base_y + y).clamp(0.0, max_y);
+                            let target_x = (base_x + x).clamp(0.0, max_x);
+                            if smooth_scrolling {
+                                scroll_y.animate_to(
+                                    target_y,
+                                    smooth_scroll_duration,
+                                    Easing::EaseOut,
+                                );
+                                scroll_x.animate_to(
+                                    target_x,
+                                    smooth_scroll_duration,
+                                    Easing::EaseOut,
+                                );
+                            } else {
+                                scroll_y.set(target_y);
+                                scroll_x.set(target_x);
+                            }
                         }
                     }
                     EventResponse::Handled
@@ -803,7 +823,7 @@ mod tests {
         let b = tree.add(TallLeaf::new(200.0, 100.0));
         let content = tree.add(VStack::new().add_child(a).add_child(b));
 
-        let _scroll = tree.add(ScrollArea::from_id(content));
+        let _scroll = tree.add(ScrollArea::from_id(content).smooth_scrolling(false));
 
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -841,7 +861,7 @@ mod tests {
     fn scroll_offset_is_clamped() {
         let mut tree = WidgetTree::new();
         let content = tree.add(TallLeaf::new(200.0, 200.0));
-        let _scroll = tree.add(ScrollArea::from_id(content));
+        let _scroll = tree.add(ScrollArea::from_id(content).smooth_scrolling(false));
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -887,7 +907,8 @@ mod tests {
         let scroll = tree.add(
             ScrollArea::new()
                 .child(leaf)
-                .scroll_bar_style(ScrollBarMode::Permanent),
+                .scroll_bar_style(ScrollBarMode::Permanent)
+                .smooth_scrolling(false),
         );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1089,7 +1110,8 @@ mod tests {
             ScrollArea::new()
                 .child(WideLeaf::new(400.0, 100.0))
                 .scroll_bar_style(ScrollBarMode::Permanent)
-                .scroll_bar_thickness(12.0),
+                .scroll_bar_thickness(12.0)
+                .smooth_scrolling(false),
         );
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1383,7 +1405,11 @@ mod tests {
     fn scroll_survives_theme_switch_at_root() {
         use fern_tokens::Theme;
         let mut tree = WidgetTree::new();
-        let scroll = tree.add(ScrollArea::new().child(TallLeaf::new(200.0, 500.0)));
+        let scroll = tree.add(
+            ScrollArea::new()
+                .child(TallLeaf::new(200.0, 500.0))
+                .smooth_scrolling(false),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Scroll partway down
@@ -1429,7 +1455,11 @@ mod tests {
     }
     impl Widget for ScrollParent {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-            let id = ctx.add(ScrollArea::new().child(TallLeaf::new(200.0, 500.0)));
+            let id = ctx.add(
+                ScrollArea::new()
+                    .child(TallLeaf::new(200.0, 500.0))
+                    .smooth_scrolling(false),
+            );
             self.scroll_id = Some(id);
             vec![id]
         }

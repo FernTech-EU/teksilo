@@ -151,6 +151,32 @@ impl AnimationScheduler {
         max_duration: Option<Duration>,
         now: Instant,
     ) {
+        // If an animation is already in flight on this signal, fast-forward
+        // its value to where it *should* be at `now` before cancelling.
+        // Without this, a stream of `animate_to` calls (e.g. one per frame
+        // from a fast mouse-wheel flick) would each restart from the same
+        // pre-tick `signal.get()` value: `process_pending_animations` runs
+        // before `tick` in the layout pass, so a freshly-started animation
+        // always has `elapsed == 0` on its first tick. Net effect: the
+        // signal would never advance until events stop, then the last
+        // animation eases to target — the "lag-then-catch-up" pattern.
+        if let Some(existing) = self
+            .animations
+            .iter()
+            .find(|a| Signal::same(&a.signal, signal))
+            && !existing.looping
+        {
+            let elapsed = now.saturating_duration_since(existing.start_time);
+            let t = if existing.duration.is_zero() {
+                1.0
+            } else {
+                (elapsed.as_secs_f32() / existing.duration.as_secs_f32()).min(1.0)
+            };
+            let eased = existing.easing.apply(t);
+            let value = fern_tokens::lerp(existing.start_value, existing.end_value, eased);
+            signal.set(value);
+        }
+
         let current = signal.get();
         self.cancel(signal);
 
