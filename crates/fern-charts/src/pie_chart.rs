@@ -14,7 +14,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
+use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal, TextBackend};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
@@ -27,9 +27,7 @@ use fern_core::color_prop::ColorProp;
 use fern_tokens::{CornerRadius, TextRole, TextStyleRole};
 
 use crate::layout::{carve_plot_area, CarveParams, LegendPosition};
-use crate::legend::{
-    legend_main_axis_size, orientation_for_position, paint_embedded_legend,
-};
+use crate::legend::{orientation_for_position, paint_embedded_legend, LegendOrientation};
 use crate::palette::ChartPalette;
 use crate::series::{ChartDatum, ChartSeries};
 use crate::text::measure_text_width;
@@ -318,11 +316,14 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         if children.is_empty() {
             return;
         }
+        let style = &ctx.theme.components.chart;
+        let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
+        let legend_size = self.compute_legend_size(ctx.text_backend, style, &label_style);
         // Carve off the legend band first so the disc placed here matches
         // the disc rendered in paint (otherwise the center widget drifts
         // off-center when a legend is shown).
-        let plot_rect = self.compute_plot_rect(bounds, ctx.theme);
-        let (center, _outer, inner) = self.compute_disc_geometry(plot_rect);
+        let plot_rect = self.compute_plot_rect(bounds, style, legend_size);
+        let (center, _outer, inner) = self.compute_disc_geometry(plot_rect, style);
         let side = (inner * std::f32::consts::FRAC_1_SQRT_2 * 2.0).max(0.0);
         for child in children.iter_mut() {
             child.origin = Point::new(center.x - side * 0.5, center.y - side * 0.5);
@@ -345,28 +346,16 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
 
         let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
         let legend_orientation = orientation_for_position(self.legend_position);
-        // Synthesized series list — slices presented as "series" so the
-        // embedded legend painter from bar/line charts works for pie too.
-        let pseudo_series: Vec<ChartSeries<String>> = data
-            .iter()
-            .map(|d| ChartSeries::new(format!("{}", d.category)))
-            .collect();
 
-        let plot = self.compute_plot_rect(bounds, theme);
+        let legend_size = self.compute_legend_size(canvas.text_backend(), style, &label_style);
+        let plot = self.compute_plot_rect(bounds, style, legend_size);
         if plot.width <= 0.0 || plot.height <= 0.0 {
             return;
         }
-        // Re-derive the legend band rect inside `bounds` for the legend
-        // painter (compute_plot_rect drops the band, we need its rect).
-        let legend_size = if self.show_legend {
-            legend_main_axis_size(&pseudo_series, style, &label_style, legend_orientation)
-        } else {
-            0.0
-        };
         let legend_band = legend_band_rect(bounds, self.legend_position, legend_size);
 
         // Disc geometry.
-        let (center, outer_radius, inner_radius) = self.compute_disc_geometry(plot);
+        let (center, outer_radius, inner_radius) = self.compute_disc_geometry(plot, style);
         if outer_radius <= 0.0 {
             return;
         }
@@ -435,8 +424,13 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         }
         *self.hit_index.borrow_mut() = new_hits;
 
-        // Embedded legend (uses the synthesized series list).
+        // Embedded legend — synthesize a series list (one entry per slice)
+        // so the embedded-legend painter works uniformly across charts.
         if self.show_legend && legend_band.width > 0.0 && legend_band.height > 0.0 {
+            let pseudo_series: Vec<ChartSeries<String>> = data
+                .iter()
+                .map(|d| ChartSeries::new(format!("{}", d.category)))
+                .collect();
             paint_embedded_legend(
                 canvas,
                 legend_band,
@@ -468,24 +462,49 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
 }
 
 impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
+    /// Compute the size the embedded legend would reserve along its main
+    /// axis (height for Top/Bottom, width for Leading/Trailing). Returns
+    /// 0 when the legend is disabled. Vertical orientation measures the
+    /// widest slice label via `backend` so the reservation matches what
+    /// will later be drawn.
+    fn compute_legend_size(
+        &self,
+        backend: Option<&Rc<RefCell<dyn TextBackend>>>,
+        style: &fern_tokens::ChartStyle,
+        label_style: &fern_tokens::TextStyle,
+    ) -> f32 {
+        if !self.show_legend {
+            return 0.0;
+        }
+        let orientation = orientation_for_position(self.legend_position);
+        match orientation {
+            LegendOrientation::Horizontal => {
+                style.legend_swatch_size.max(label_style.size * 1.2)
+            }
+            LegendOrientation::Vertical => {
+                let data = self.data.get();
+                let max_w = data
+                    .iter()
+                    .map(|d| {
+                        let name = format!("{}", d.category);
+                        crate::text::measure_text_width_via(backend, &name, label_style)
+                    })
+                    .fold(0.0_f32, f32::max);
+                style.legend_swatch_size + 4.0 + max_w
+            }
+        }
+    }
+
     /// Carve the legend band off `bounds` and return the inner plot rect
     /// where the disc lives. Both `place_children` and `paint` go through
     /// this so the donut's center-slot placement matches the rendered
     /// disc when a legend is shown.
-    fn compute_plot_rect(&self, bounds: Rect, theme: &fern_tokens::Theme) -> Rect {
-        let style = &theme.components.chart;
-        let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
-        let data = self.data.get();
-        let pseudo: Vec<ChartSeries<String>> = data
-            .iter()
-            .map(|d| ChartSeries::new(format!("{}", d.category)))
-            .collect();
-        let legend_orientation = orientation_for_position(self.legend_position);
-        let legend_size = if self.show_legend {
-            legend_main_axis_size(&pseudo, style, &label_style, legend_orientation)
-        } else {
-            0.0
-        };
+    fn compute_plot_rect(
+        &self,
+        bounds: Rect,
+        style: &fern_tokens::ChartStyle,
+        legend_size: f32,
+    ) -> Rect {
         let no_axis = crate::axis::AxisConfig::new()
             .show_labels(false)
             .show_axis_line(false);
@@ -508,8 +527,12 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     }
 
     /// Compute (center, outer_radius, inner_radius) given a bounds rect.
-    fn compute_disc_geometry(&self, bounds: Rect) -> (Point, f32, f32) {
-        let pad = 8.0;
+    fn compute_disc_geometry(
+        &self,
+        bounds: Rect,
+        style: &fern_tokens::ChartStyle,
+    ) -> (Point, f32, f32) {
+        let pad = style.pie_padding;
         let usable_w = (bounds.width - pad * 2.0).max(0.0);
         let usable_h = (bounds.height - pad * 2.0).max(0.0);
         let diameter = usable_w.min(usable_h);
