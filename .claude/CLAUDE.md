@@ -216,6 +216,11 @@ Application:
   reports its full natural size at all opacity values. Built on
   `BuildContext::set_opacity` (a node-level opacity scope, parallel to
   `clips_children`). See [crates/fern-widgets/src/fade.rs](crates/fern-widgets/src/fade.rs).
+- `Spinner::new(size)` — circular-arc loading indicator backed by the
+  shader-driven `AnimatedQuadKind::SpinnerArc` pipeline (~one uniform
+  write + one `draw_indexed` per frame, no `paint()` re-runs). Honours
+  `prefers-reduced-motion` with a static three-quarter arc fallback.
+  See [crates/fern-widgets/src/spinner.rs](crates/fern-widgets/src/spinner.rs).
 
 **Lower-level types** (still public, used when you need full control):
 

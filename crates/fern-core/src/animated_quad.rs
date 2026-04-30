@@ -106,7 +106,25 @@ pub enum AnimatedQuadKind {
         period: Duration,
         tint: Option<ColorProp>,
     },
-    // Future kinds: Pulse, Shimmer, Skeleton, Spinner (circular rotation).
+    /// Rotating arc spinner — a `arc_fraction`-portion of a circle
+    /// that rotates around the widget centre with period `period`.
+    /// Drawn as a stroked ring of width `stroke_fraction * min(w,h)`.
+    /// Matches [`fern_widgets::Spinner`](https://docs.rs/fern-widgets/latest/fern_widgets/struct.Spinner.html).
+    SpinnerArc {
+        /// One full rotation period.
+        period: Duration,
+        /// Length of the moving arc as a fraction of the full circle
+        /// (0..1). Typical value ≈ 0.25 — a quarter-circle "comet
+        /// tail" spinner.
+        arc_fraction: f32,
+        /// Stroke thickness as a fraction of the smaller of width or
+        /// height (0..0.5). Typical value ≈ 0.12.
+        stroke_fraction: f32,
+        /// Arc colour. Resolved against the live theme each tick so
+        /// theme switches re-tint without rebuilding the widget.
+        color: ColorProp,
+    },
+    // Future kinds: Pulse, Shimmer, Skeleton.
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +448,28 @@ fn compute_params(entry: &AnimatedQuadEntry, now: Instant, theme: &Theme) -> Ani
                 color1: tint_rgba,
                 atlas_cols: *cols as f32,
                 atlas_rows: *rows as f32,
+                ..AnimParams::default()
+            }
+        }
+        AnimatedQuadKind::SpinnerArc {
+            period,
+            arc_fraction,
+            stroke_fraction,
+            color,
+        } => {
+            // Linear phase 0..1 — one full rotation per period.
+            let phase = looping_phase(entry.started_at, now, *period, Easing::Linear);
+            AnimParams {
+                kind: 2,
+                phase,
+                // Reuse `sweep_ratio` to carry the arc length —
+                // semantically the "portion of the quad covered by
+                // the moving region" matches between sweep and arc.
+                sweep_ratio: arc_fraction.clamp(0.0, 1.0),
+                // Reuse `_pad0` as a generic per-kind parameter slot
+                // for stroke thickness (0..0.5 of the smaller extent).
+                _pad0: stroke_fraction.clamp(0.0, 0.5),
+                color1: color_to_rgba(&color.resolve(theme)),
                 ..AnimParams::default()
             }
         }

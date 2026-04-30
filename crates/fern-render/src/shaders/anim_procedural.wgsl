@@ -85,6 +85,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }
             return srgb_to_linear_rgba(p.color1);
         }
+        // SpinnerArc: a `sweep_ratio`-portion of a circle rotating
+        // around the centre with period = phase 0→1. Stroke
+        // thickness is `_pad0 * 0.5` of the quad's min extent (uv is
+        // already normalised so min extent is 1.0 here). Rendered
+        // with leading edge at the top (theta=0) and rotating
+        // clockwise — matches the CSS spinner convention.
+        case 2u: {
+            let to_centre = in.uv - vec2<f32>(0.5);
+            let dist = length(to_centre);
+            let stroke = p._pad0;
+            let outer = 0.5;
+            let inner = 0.5 - stroke;
+            if (dist > outer || dist < inner) {
+                discard;
+            }
+            // theta_raw normalised to 0..1, with 0 at the leftmost
+            // point (atan2 returns -π..π). Shift by 0.75 so 0 lands
+            // at the top — the conventional spinner anchor.
+            let theta_raw = (atan2(to_centre.y, to_centre.x) + 3.14159265) / 6.28318530;
+            let theta = fract(theta_raw + 0.75);
+            // Distance behind the leading edge (mod 1). A fragment is
+            // in the arc when this distance is less than the arc
+            // length.
+            let local = fract(theta - p.phase + 1.0);
+            if (local > p.sweep_ratio) {
+                discard;
+            }
+            return srgb_to_linear_rgba(p.color1);
+        }
         default: {
             // Magenta fallback so an unknown `kind` is visually obvious
             // in development — better than silently rendering nothing.

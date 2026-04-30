@@ -41,6 +41,7 @@ pub mod segmented_control;
 pub mod shortcut_settings;
 pub mod slider;
 pub mod snackbar;
+pub mod spinner;
 #[cfg(feature = "rich-text")]
 pub mod spin_box;
 pub mod split_button;
@@ -102,6 +103,7 @@ pub use shortcut_settings::ShortcutSettings;
 pub use privacy_settings::PrivacySettings;
 pub use slider::Slider;
 pub use snackbar::Snackbar;
+pub use spinner::Spinner;
 #[cfg(feature = "rich-text")]
 pub use spin_box::{ButtonLayout as SpinButtonLayout, SpinBox, SpinValue, StepType, WheelMode, WrapMode};
 pub use split_button::SplitButton;

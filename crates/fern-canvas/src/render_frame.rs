@@ -403,18 +403,26 @@ pub enum AnimatedQuadClass {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct AnimParams {
-    /// Discriminator — 0 = IndeterminateSweep, 1 = SpriteCycle, ...
-    /// Matches the `kind: u32` constant in the fragment shader switch.
+    /// Discriminator — 0 = IndeterminateSweep, 1 = SpriteCycle,
+    /// 2 = SpinnerArc, ... Matches the `kind: u32` constant in the
+    /// fragment shader switch.
     pub kind: u32,
     /// Continuous phase for procedural kinds (0..1) OR integer frame
-    /// index (as f32) for sprite kinds.
+    /// index (as f32) for sprite kinds. SpinnerArc: rotation phase
+    /// (0..1, one full rotation per period).
     pub phase: f32,
-    /// IndeterminateSweep: sweep band width (0..1). Other kinds unused.
+    /// IndeterminateSweep: sweep band width (0..1).
+    /// SpinnerArc: arc length as a fraction of the full circle.
+    /// Other kinds unused.
     pub sweep_ratio: f32,
+    /// Generic per-kind parameter slot. SpinnerArc: stroke thickness
+    /// as a fraction of the smaller extent (0..0.5). Other kinds
+    /// treat this as padding for std140 alignment.
     pub _pad0: f32,
-    /// IndeterminateSweep: track color. Unused for sprite.
+    /// IndeterminateSweep: track color. Unused for sprite and spinner.
     pub color0: [f32; 4],
-    /// IndeterminateSweep: fill color. Sprite: tint (alpha 0 = no tint).
+    /// IndeterminateSweep: fill color. SpriteCycle: tint (alpha 0 = no
+    /// tint). SpinnerArc: arc color.
     pub color1: [f32; 4],
     /// Sprite atlas grid width (cols). Unused for procedural.
     pub atlas_cols: f32,
