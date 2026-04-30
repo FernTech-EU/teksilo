@@ -328,6 +328,21 @@ impl<'a> BuildContext<'a> {
         self.tree.apply_self_handler_set(id, handler_set);
     }
 
+    /// Move keyboard focus to `id`. Mirrors
+    /// [`EventContext::request_focus`] for use during `build()` — e.g.
+    /// when a composing widget pre-builds an editor and needs focus to
+    /// land on it as soon as the subtree is wired in.
+    pub fn focus(&mut self, id: WidgetId) {
+        self.tree.focus(id);
+    }
+
+    /// Find the first focusable widget within the subtree rooted at
+    /// `root` in depth-first order. Returns `None` when the subtree has
+    /// no focusable descendant or `root` is not in the arena.
+    pub fn first_focusable_descendant(&self, root: WidgetId) -> Option<WidgetId> {
+        self.tree.first_focusable_descendant(root)
+    }
+
     // --- Actions & shortcuts (step 3) ---
 
     /// Attach an [`Action`](crate::action::Action) to the widget being

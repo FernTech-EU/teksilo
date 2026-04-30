@@ -985,7 +985,7 @@ fn f2_triggers_edit_request() {
     let table = tree.add(
         TableView::new(rows(5))
             .add_column(id_col())
-            .add_column(name_col())
+            .add_column(name_col().editable(true))
             .row_height(20.0)
             .edit_trigger(super::EditTrigger::F2)
             .on_cell_edit_request(move |row, col_id, _ctx| {
@@ -1010,7 +1010,9 @@ fn typing_triggers_edit_request_in_f2_or_type_mode() {
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let table = tree.add(
         TableView::new(rows(5))
-            .add_column(id_col())
+            // Mark the focused column editable; the gate keeps F2 /
+            // type-to-edit a no-op on non-editable columns.
+            .add_column(id_col().editable(true))
             .add_column(name_col())
             .row_height(20.0)
             .edit_trigger(super::EditTrigger::F2OrType)

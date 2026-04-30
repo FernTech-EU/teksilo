@@ -232,13 +232,78 @@ impl<T: 'static> Widget for BodyPane<T> {
                 });
                 if let Some(widget) = cell_widget {
                     let inner_id = ctx.add_boxed(widget);
+                    // When the cell delegate just swapped in an editor
+                    // (because `is_editing` flipped to true), the
+                    // delegate's child subtree is built fresh — focus
+                    // is still on whatever it was before the rebuild,
+                    // which is now stale. Walk the editing cell's
+                    // subtree for the first focusable descendant and
+                    // hand keyboard focus to it. Without this, F2 puts
+                    // a `TextInput` on screen but the user has to
+                    // click it before they can type.
+                    if is_editing {
+                        if let Some(focus_target) = ctx.first_focusable_descendant(inner_id) {
+                            ctx.focus(focus_target);
+                        }
+                    }
                     let cell_a11y = CellA11y::new(
                         inner_id,
                         row_idx + 2, // header is row 1
                         display_pos + 1,
                         is_selected,
                     );
-                    cell_ids.push(ctx.add(cell_a11y));
+                    let cell_id = ctx.add(cell_a11y);
+
+                    // Per-cell pointer handler: a click on the cell
+                    // sets `focused_cell` to (row, col) so the focus
+                    // ring follows the mouse. Also mirrors the click
+                    // into `cell_selection` when the table is in a
+                    // cell-selection mode (Ctrl/Shift modifiers extend
+                    // the rectangular selection just like the keyboard
+                    // handler). Skipped while editing — the click
+                    // belongs to the inner editor.
+                    let focused_for_cell = self.focused_cell.clone();
+                    let editing_for_cell = self.editing_cell.clone();
+                    let cell_sel_for_click = self.cell_selection.clone();
+                    let row_for_cell = row_idx;
+                    let col_for_cell = display_pos;
+                    let mode_for_cell = selection_mode;
+                    let cell_handlers = HandlerSet::new().on_pointer_event(
+                        move |event, _ctx| match event {
+                            fern_core::event::WidgetEvent::PointerDown {
+                                button: fern_core::event::PointerButton::Primary,
+                                modifiers,
+                                ..
+                            } => {
+                                if editing_for_cell.get().is_some() {
+                                    return fern_core::event::EventResponse::Ignored;
+                                }
+                                focused_for_cell.set(Some((row_for_cell, col_for_cell)));
+                                if let Some(ref cs) = cell_sel_for_click {
+                                    match mode_for_cell {
+                                        TableSelectionMode::SingleCell => {
+                                            cs.select(row_for_cell, col_for_cell);
+                                        }
+                                        TableSelectionMode::MultiCell => {
+                                            if modifiers.shift() {
+                                                cs.extend_to(row_for_cell, col_for_cell);
+                                            } else if modifiers.ctrl() {
+                                                cs.toggle(row_for_cell, col_for_cell);
+                                            } else {
+                                                cs.select(row_for_cell, col_for_cell);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                fern_core::event::EventResponse::Ignored
+                            }
+                            _ => fern_core::event::EventResponse::Ignored,
+                        },
+                    );
+                    ctx.apply_handlers(cell_id, cell_handlers);
+
+                    cell_ids.push(cell_id);
                 }
             }
 
@@ -246,11 +311,16 @@ impl<T: 'static> Widget for BodyPane<T> {
                 BodyRow::new(cell_ids, row_idx + 2, row_selected_for_a11y, self.row_height, row_widths_handle.clone());
             let row_id = ctx.add(row_widget);
 
-            // Selection click on the row.
+            // Selection click on the row. Skipped while a cell is in
+            // edit mode so clicks landing inside the editor (e.g. on
+            // the cell's `TextInput`) don't change the selection — a
+            // selection change would re-emit the row, destroying the
+            // editor and dropping focus mid-click.
             let mut row_handlers = HandlerSet::new();
             if let Some(ref sel) = self.selection {
                 let row_index_for_click = row_idx;
                 let sel_for_click = sel.clone();
+                let editing_for_click = self.editing_cell.clone();
                 if matches!(
                     selection_mode,
                     TableSelectionMode::SingleRow | TableSelectionMode::MultiRow
@@ -261,6 +331,9 @@ impl<T: 'static> Widget for BodyPane<T> {
                             modifiers,
                             ..
                         } => {
+                            if editing_for_click.get().is_some() {
+                                return fern_core::event::EventResponse::Ignored;
+                            }
                             if modifiers.ctrl()
                                 && sel_for_click.mode() == SelectionMode::Multi
                             {

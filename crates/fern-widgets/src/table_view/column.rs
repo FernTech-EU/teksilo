@@ -162,6 +162,7 @@ pub struct Column<T: 'static> {
     pub(crate) reorderable: bool,
     pub(crate) sortable: bool,
     pub(crate) filterable: bool,
+    pub(crate) editable: bool,
     pub(crate) pinned: PinnedSide,
     pub(crate) truncation: TruncationPolicy,
     pub(crate) cell: Rc<dyn Fn(&T, &CellContext) -> Box<dyn Widget>>,
@@ -188,6 +189,7 @@ impl<T: 'static> Column<T> {
             reorderable: true,
             sortable: false,
             filterable: false,
+            editable: false,
             pinned: PinnedSide::None,
             truncation: TruncationPolicy::default(),
             cell: Rc::new(cell),
@@ -235,6 +237,16 @@ impl<T: 'static> Column<T> {
         self
     }
 
+    /// Mark the column as editable. Default `false`. F2 / type-to-edit
+    /// only enter edit mode on cells of editable columns; the
+    /// `on_cell_edit_request` hook also fires only for these. Cells of
+    /// non-editable columns continue to render their static delegate
+    /// regardless of `editing_cell`.
+    pub fn editable(mut self, b: bool) -> Self {
+        self.editable = b;
+        self
+    }
+
     pub fn pinned(mut self, side: PinnedSide) -> Self {
         self.pinned = side;
         self
@@ -276,6 +288,7 @@ impl<T: 'static> Clone for Column<T> {
             reorderable: self.reorderable,
             sortable: self.sortable,
             filterable: self.filterable,
+            editable: self.editable,
             pinned: self.pinned,
             truncation: self.truncation,
             cell: self.cell.clone(),

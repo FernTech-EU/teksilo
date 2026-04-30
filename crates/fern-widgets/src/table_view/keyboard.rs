@@ -39,6 +39,11 @@ pub(crate) struct KeyHandlerConfig {
     /// `&str` so the keyboard module doesn't need a `Column<T>`
     /// reference.
     pub display_col_to_id: Rc<dyn Fn(usize) -> Option<String>>,
+    /// Whether the column at the given display position is editable.
+    /// F2 and type-to-edit are no-ops on cells of non-editable
+    /// columns — entering edit mode on a column whose delegate has no
+    /// editor would only confuse the focus / dispatch state.
+    pub display_col_editable: Rc<dyn Fn(usize) -> bool>,
     /// Optional: user callback fired when an edit trigger matches.
     #[allow(clippy::type_complexity)]
     pub on_cell_edit_request: Option<
@@ -165,7 +170,7 @@ pub(crate) fn build_key_handler(
             Key::F2 if matches!(
                 cfg.edit_trigger,
                 EditTrigger::F2 | EditTrigger::F2OrType | EditTrigger::F2OrTypeOrDoubleClick
-            ) =>
+            ) && (cfg.display_col_editable)(col) =>
             {
                 if let Some(col_id) = (cfg.display_col_to_id)(col) {
                     cfg.editing_cell.set(Some((row, col)));
@@ -176,12 +181,22 @@ pub(crate) fn build_key_handler(
                 }
                 return EventResponse::Ignored;
             }
-            Key::Character(_) if matches!(
+            // Type-to-edit. `Key::Character` only fires for non-letter
+            // printable chars on this platform; letters arrive as the
+            // dedicated `Key::A`..`Key::Z` variants. Match any key that
+            // has a printable char form via `Key::to_char()`. Gated on
+            // the column's `editable` flag so non-editable columns
+            // don't enter edit mode (which would set `editing_cell`
+            // without any actual editor in the cell to receive focus
+            // and follow-up keystrokes).
+            k if matches!(
                 cfg.edit_trigger,
                 EditTrigger::F2OrType | EditTrigger::F2OrTypeOrDoubleClick
             ) && !modifiers.ctrl()
                 && !modifiers.alt()
-                && !modifiers.super_key() =>
+                && !modifiers.super_key()
+                && k.to_char().is_some()
+                && (cfg.display_col_editable)(col) =>
             {
                 if let Some(col_id) = (cfg.display_col_to_id)(col) {
                     cfg.editing_cell.set(Some((row, col)));

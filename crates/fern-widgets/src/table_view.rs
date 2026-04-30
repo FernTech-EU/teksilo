@@ -967,6 +967,13 @@ impl<T: 'static> Widget for TableView<T> {
             let ids = column_ids_in_display_order;
             Rc::new(move |pos| ids.get(pos).cloned())
         };
+        let display_col_editable: Rc<dyn Fn(usize) -> bool> = {
+            let editable_in_display_order: Vec<bool> = display_indices_now
+                .iter()
+                .map(|&i| self.columns[i].editable)
+                .collect();
+            Rc::new(move |pos| editable_in_display_order.get(pos).copied().unwrap_or(false))
+        };
 
         let key_cfg = keyboard::KeyHandlerConfig {
             navigator,
@@ -983,6 +990,7 @@ impl<T: 'static> Widget for TableView<T> {
             editing_cell: self.editing_cell.clone(),
             edit_trigger: self.edit_trigger,
             display_col_to_id,
+            display_col_editable,
             on_cell_edit_request: self.on_cell_edit_request.clone(),
             on_row_activate: self.on_row_activate.clone(),
         };

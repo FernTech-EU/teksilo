@@ -12,18 +12,25 @@
 //! - `SortFilterListModel<Employee>` proxy bound to `table.sort_signal()`
 //!   and `table.filters_signal()` so sort + filter compose.
 //! - Reset-filters button + status-bar row count.
+//! - **Editable name column**: `EditTrigger::F2OrType` plus an
+//!   `is_editing`-aware cell delegate that swaps a `TextInput` in for
+//!   the focused cell. (This example does not write the edited value
+//!   back into the model — see the comment on `name_column`.)
 //!
 //! Resize columns by dragging their trailing edge. Reorder columns by
 //! dragging a header. Click a header to cycle sort. Use arrow keys /
 //! Home / End / PgUp / PgDn / Tab on the focused cell to navigate.
+//! Press F2 (or just start typing) on a focused name cell to edit it.
 
+use fern_ui::core::signal::Signal;
 use fern_ui::data::{
     ListDataSource, ListModel, SelectionMode, SelectionModel, SortDirection, SortFilterListModel,
 };
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, CellContext, Column, ColumnWidth, GridLines, HStack, Padding, Panel, Spacer,
-    TableAlignment as Alignment, TableSelectionMode, TableView, TextWidget, VStack,
+    Button, CellContext, Column, ColumnWidth, EditTrigger, GridLines, HStack, Padding, Panel,
+    Spacer, TableAlignment as Alignment, TableSelectionMode, TableView, TextInput, TextWidget,
+    VStack,
 };
 
 #[derive(Clone, Debug)]
@@ -64,12 +71,26 @@ fn id_column() -> Column<Employee> {
 }
 
 fn name_column() -> Column<Employee> {
-    Column::<Employee>::new("name", "Name", |row, _: &CellContext| {
-        Box::new(TextWidget::new_literal(row.name.clone()))
+    // Editable column: when the focused cell enters edit mode (F2 or
+    // typing a printable character), the delegate swaps a `TextInput`
+    // in for the static label. The `Signal<String>` is initialised
+    // from the row's name; this example deliberately does not write
+    // the edited value back into the underlying `ListModel<Employee>`
+    // — the focus here is on the cell-delegate edit surface, not the
+    // persistence path. A real app would forward `on_submit` to a
+    // `model.set(row, ...)` call.
+    Column::<Employee>::new("name", "Name", |row, ctx: &CellContext| {
+        if ctx.is_editing {
+            let buffer = Signal::new(row.name.clone());
+            Box::new(TextInput::new(buffer).placeholder("Name"))
+        } else {
+            Box::new(TextWidget::new_literal(row.name.clone()))
+        }
     })
     .width(ColumnWidth::Flex(2.0))
     .sortable(true)
     .filterable(true)
+    .editable(true)
 }
 
 fn email_column() -> Column<Employee> {
@@ -153,7 +174,10 @@ fn main() {
                         .alternating_rows(true)
                         .grid_lines(GridLines::Horizontal)
                         .selection_mode(TableSelectionMode::MultiRow)
-                        .selection(selection.clone());
+                        .selection(selection.clone())
+                        // Press F2 (or start typing a letter) on the
+                        // focused name cell to swap in a TextInput.
+                        .edit_trigger(EditTrigger::F2OrType);
 
                     // Wire the proxy's sort + filter from the table's signals.
                     proxy.bind_sort_signal(table.sort_signal().clone());
