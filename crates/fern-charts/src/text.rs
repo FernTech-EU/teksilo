@@ -8,7 +8,10 @@
 //! These helpers go through the live text backend when one is wired and
 //! pad by 1 pixel for sub-pixel headroom.
 
-use fern_canvas::Canvas;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use fern_canvas::{Canvas, TextBackend};
 use fern_tokens::TextStyle;
 
 /// Measure the actual rendered width of `text` in logical pixels using
@@ -16,9 +19,22 @@ use fern_tokens::TextStyle;
 /// back to a generous `chars * 0.7 * size + 4` estimate when no backend
 /// is wired (headless tests).
 pub fn measure_text_width(canvas: &mut Canvas, text: &str, style: &TextStyle) -> f32 {
-    if let Some(backend) = canvas.text_backend() {
-        let mut backend = backend.borrow_mut();
-        backend.layout_single_line(text, style, None).width + 1.0
+    measure_text_width_via(canvas.text_backend(), text, style)
+}
+
+/// Same measurement as [`measure_text_width`] but takes the backend
+/// directly so it can be called from layout-time paths that have a
+/// `LayoutContext` (with `text_backend: Option<&Rc<RefCell<…>>>`) but
+/// no `Canvas`. Both axis labels at paint time and legend-band size
+/// reservation at layout time go through this same fallback so the
+/// reserved space matches what later gets rendered.
+pub fn measure_text_width_via(
+    backend: Option<&Rc<RefCell<dyn TextBackend>>>,
+    text: &str,
+    style: &TextStyle,
+) -> f32 {
+    if let Some(b) = backend {
+        b.borrow_mut().layout_single_line(text, style, None).width + 1.0
     } else {
         text.chars().count() as f32 * style.size * 0.7 + 4.0
     }

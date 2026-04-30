@@ -207,7 +207,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 
         let legend_orientation = orientation_for_position(self.legend_position);
         let legend_size = if self.show_legend {
-            legend_main_axis_size(&series_vec, style, &label_style, legend_orientation)
+            legend_main_axis_size(canvas.text_backend(), &series_vec, style, &label_style, legend_orientation)
         } else {
             0.0
         };
@@ -802,22 +802,10 @@ fn measure_max_label_width(
     axis: &AxisConfig,
     style: &fern_tokens::TextStyle,
 ) -> f32 {
-    let Some(backend) = canvas.text_backend() else {
-        return ticks
-            .iter()
-            .map(|t| axis.format(*t).chars().count() as f32 * style.size * 0.55)
-            .fold(0.0_f32, f32::max);
-    };
-    let mut max = 0.0_f32;
-    let mut backend = backend.borrow_mut();
-    for &t in ticks {
-        let label = axis.format(t);
-        let layout = backend.layout_single_line(&label, style, None);
-        if layout.width > max {
-            max = layout.width;
-        }
-    }
-    max
+    ticks
+        .iter()
+        .map(|t| measure_text_width(canvas, &axis.format(*t), style))
+        .fold(0.0_f32, f32::max)
 }
 
 

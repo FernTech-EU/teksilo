@@ -5,17 +5,21 @@
 //! this internally when constructed with `.legend(true)`, sharing the
 //! same `series` and `palette` props.
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use fern_canvas::{Canvas, Rect, Size, SizeProposal, TextBackend};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::signal::Prop;
 use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, TextRole, TextStyleRole};
+use fern_tokens::{TextRole, TextStyleRole};
 
 use crate::palette::ChartPalette;
 use crate::series::ChartSeries;
+use crate::text::{measure_text_width, measure_text_width_via};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LegendOrientation {
@@ -88,7 +92,10 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
 
         // Item = swatch + small gap + label text.
-        let label_widths = measure_label_widths(ctx, &series_vec, &label_style);
+        let label_widths: Vec<f32> = series_vec
+            .iter()
+            .map(|s| measure_text_width_via(ctx.text_backend, &s.name, &label_style))
+            .collect();
         let item_widths: Vec<f32> = label_widths
             .iter()
             .map(|w| style.legend_swatch_size + 4.0 + w)
@@ -156,7 +163,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                         final_color,
                     );
                     x += style.legend_swatch_size + 4.0;
-                    let label_w = crate::text::measure_text_width(canvas, &series.name, &label_style);
+                    let label_w = measure_text_width(canvas, &series.name, &label_style);
                     let text_color = if visible {
                         label_color
                     } else {
@@ -202,7 +209,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                         fern_tokens::CornerRadius::uniform(2.0),
                         final_color,
                     );
-                    let label_w = crate::text::measure_text_width(canvas, &series.name, &label_style);
+                    let label_w = measure_text_width(canvas, &series.name, &label_style);
                     let text_color = if visible {
                         label_color
                     } else {
@@ -239,33 +246,16 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
     }
 }
 
-fn measure_label_widths<T: Clone + 'static>(
-    ctx: &LayoutContext,
-    series_vec: &[ChartSeries<T>],
-    style: &fern_tokens::TextStyle,
-) -> Vec<f32> {
-    if let Some(backend) = ctx.text_backend {
-        let mut backend = backend.borrow_mut();
-        series_vec
-            .iter()
-            .map(|s| backend.layout_single_line(&s.name, style, None).width)
-            .collect()
-    } else {
-        series_vec
-            .iter()
-            .map(|s| approx_label_width(&s.name, style))
-            .collect()
-    }
-}
-
-fn approx_label_width(name: &str, style: &fern_tokens::TextStyle) -> f32 {
-    name.chars().count() as f32 * style.size * 0.55
-}
-
 /// Compute the size the legend would occupy along its main axis (used by
 /// charts to reserve space for an embedded legend). For Horizontal returns
 /// height; for Vertical returns width.
+///
+/// `backend` is the live text backend if one is wired (canvas at paint
+/// time, layout context at layout time) — `None` falls back to the same
+/// `chars * size * 0.7 + 4` heuristic used by `measure_text_width` so
+/// reservation matches what the painter will later request.
 pub(crate) fn legend_main_axis_size<T: Clone + 'static>(
+    backend: Option<&Rc<RefCell<dyn TextBackend>>>,
     series_vec: &[ChartSeries<T>],
     style: &fern_tokens::ChartStyle,
     label_style: &fern_tokens::TextStyle,
@@ -277,7 +267,7 @@ pub(crate) fn legend_main_axis_size<T: Clone + 'static>(
         LegendOrientation::Vertical => {
             let max_w = series_vec
                 .iter()
-                .map(|s| approx_label_width(&s.name, label_style))
+                .map(|s| measure_text_width_via(backend, &s.name, label_style))
                 .fold(0.0_f32, f32::max);
             style.legend_swatch_size + 4.0 + max_w
         }
@@ -317,10 +307,16 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
 
     match orientation {
         LegendOrientation::Horizontal => {
-            // Center horizontally inside `band`.
-            let item_widths: Vec<f32> = series_vec
+            // Center horizontally inside `band`. Measure label widths via
+            // the live text backend so longer series names don't get
+            // truncated to "…" by `draw_text`'s max_width gate.
+            let label_widths: Vec<f32> = series_vec
                 .iter()
-                .map(|s| style.legend_swatch_size + 4.0 + approx_label_width(&s.name, &label_style))
+                .map(|s| measure_text_width(canvas, &s.name, &label_style))
+                .collect();
+            let item_widths: Vec<f32> = label_widths
+                .iter()
+                .map(|w| style.legend_swatch_size + 4.0 + w)
                 .collect();
             let total_w: f32 = item_widths.iter().sum::<f32>()
                 + style.legend_item_gap * (item_widths.len() as f32 - 1.0).max(0.0);
@@ -350,7 +346,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                     final_color,
                 );
                 x += style.legend_swatch_size + 4.0;
-                let label_w = approx_label_width(&series.name, &label_style);
+                let label_w = label_widths[i];
                 let text_color = if visible {
                     label_color
                 } else {
@@ -396,7 +392,7 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
                     fern_tokens::CornerRadius::uniform(2.0),
                     final_color,
                 );
-                let label_w = approx_label_width(&series.name, &label_style);
+                let label_w = measure_text_width(canvas, &series.name, &label_style);
                 let text_color = if visible {
                     label_color
                 } else {
@@ -416,7 +412,6 @@ pub(crate) fn paint_embedded_legend<T: Clone + 'static>(
             }
         }
     }
-    let _ = Color::BLACK; // silence unused import in some builds
 }
 
 #[cfg(test)]
