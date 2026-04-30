@@ -23,11 +23,10 @@ use fern_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 #[cfg(test)]
 use fern_tokens::Color;
-use fern_tokens::{CornerRadius, Easing, Orientation, SurfaceRole};
+use fern_tokens::{CornerRadius, Orientation, SurfaceRole};
 use std::time::Duration;
 
 const DEFAULT_THICKNESS: f32 = 4.0;
-const INDETERMINATE_SWEEP_DURATION: Duration = Duration::from_millis(900);
 /// ~15 Hz cadence. The indeterminate sweep is a continuous smooth
 /// motion; the eye doesn't resolve >15 fps for a 42%-wide bar moving
 /// across the viewport in ~0.9 s, and every doubled frame is a full
@@ -153,6 +152,7 @@ impl Widget for ProgressBar {
         let reduced_motion = ctx.prefers_reduced_motion();
         let animate = self.indeterminate && !reduced_motion;
         let use_shader_path = animate && matches!(self.orientation, Orientation::Horizontal);
+        let sweep_period = ctx.theme().motion.duration_indeterminate_sweep;
 
         // Horizontal indeterminate: register a shader-driven animated
         // quad. paint() below emits ONE DrawCommand::AnimatedQuad; the
@@ -168,7 +168,7 @@ impl Widget for ProgressBar {
                 .clone()
                 .unwrap_or_else(|| SurfaceRole::Accent.into());
             self.anim_handle = Some(ctx.animated_quad(AnimatedQuadKind::IndeterminateSweep {
-                period: INDETERMINATE_SWEEP_DURATION,
+                period: sweep_period,
                 sweep_ratio: INDETERMINATE_SWEEP_RATIO,
                 track_color,
                 fill_color,
@@ -191,12 +191,18 @@ impl Widget for ProgressBar {
         if animate && !use_shader_path {
             self.indeterminate_pos
                 .bind_to(id, registry, BindingLevel::RepaintOnly);
-            self.indeterminate_pos.animate_looping(
-                1.0,
-                INDETERMINATE_SWEEP_DURATION,
-                Easing::Linear,
-                Some(INDETERMINATE_FRAME_INTERVAL),
-            );
+            // `sweep()` reads `duration_indeterminate_sweep` from
+            // theme motion tokens AND switches the spec to looping
+            // mode with a sub-perceptual epsilon and the default
+            // 30 Hz frame interval. Override to 15 Hz here: the
+            // sweep is wide and slow enough that the eye can't
+            // resolve the difference, and every doubled frame is a
+            // wgpu submit.
+            ctx.animate()
+                .sweep()
+                .linear()
+                .frame_interval(INDETERMINATE_FRAME_INTERVAL)
+                .to(&self.indeterminate_pos, 1.0);
         }
         vec![]
     }

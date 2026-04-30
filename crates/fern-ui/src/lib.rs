@@ -45,11 +45,11 @@ pub mod prelude {
 
     // Core widget types
     pub use fern_core::{
-        AccessNodeBuilder, Action, BuildContext, CursorIcon, EventContext, EventResponse,
-        FernBranch, FernBranch3, FernBranch4, FocusPolicy, Intent, IntentKind, IntentResponse,
-        IntoFernChild, IntoFernCondition, Key, KeyStroke, LayoutContext, ModalCloseBehavior,
-        ModalPresentation, Modifiers, PaintContext, Prop, Shortcut, ShortcutRegistry,
-        ShortcutScope, Signal, Widget, WidgetBuilder, WidgetEvent, WidgetId,
+        AccessNodeBuilder, Action, AnimationSpec, BuildContext, CursorIcon, EventContext,
+        EventResponse, FernBranch, FernBranch3, FernBranch4, FocusPolicy, Intent, IntentKind,
+        IntentResponse, IntoFernChild, IntoFernCondition, Key, KeyStroke, LayoutContext,
+        ModalCloseBehavior, ModalPresentation, Modifiers, PaintContext, Prop, Shortcut,
+        ShortcutRegistry, ShortcutScope, Signal, Widget, WidgetBuilder, WidgetEvent, WidgetId,
     };
 
     // Geometry (lives in fern-canvas)

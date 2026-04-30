@@ -5,8 +5,6 @@
 //! expanded, it animates to a large value (content sizes naturally within).
 //! V2 attached handlers — no event() override.
 
-use std::time::Duration;
-
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
@@ -16,12 +14,10 @@ use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{BorderRole, Color, Easing, TextRole, TextStyle, TextStyleRole};
+use fern_tokens::{BorderRole, Color, TextRole, TextStyle, TextStyleRole};
 
-use crate::primitives::{HStack, IconWidget, MaxSize, Spacer, TextWidget, VStack};
-
-/// Large enough to never clip content when fully expanded.
-const EXPANDED_MAX_HEIGHT: f32 = 10000.0;
+use crate::collapse::Collapse;
+use crate::primitives::{HStack, IconWidget, Spacer, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // AccordionRegion — thin wrapper that exposes Role::Region for aria-controls.
@@ -81,7 +77,6 @@ pub struct Accordion {
     expanded: Signal<bool>,
     content_id: Option<WidgetId>,
     pending_content: Option<Box<dyn Widget>>,
-    content_height: Option<Signal<f32>>,
     root_child_id: Option<WidgetId>,
     /// Region wrapper ID — used for `aria-controls` on the header button.
     region_id: Option<WidgetId>,
@@ -104,7 +99,6 @@ impl Accordion {
             expanded,
             content_id: None,
             pending_content: None,
-            content_height: None,
             root_child_id: None,
             region_id: None,
             title_color: None,
@@ -165,7 +159,6 @@ impl Widget for Accordion {
         let accordion_corner_radius = theme.components.accordion.corner_radius;
         let focus_ring_width = theme.shape.focus_ring_width;
         let expanded = self.expanded.clone();
-        let is_expanded = expanded.get();
 
         // Keyboard focus state for focus ring
         let kb_focused = ctx.signal(false);
@@ -242,35 +235,12 @@ impl Widget for Accordion {
             let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
             self.region_id = Some(region_id);
 
-            // Wrap region in MaxSize with animated height for smooth expand/collapse.
-            // Width is also constrained to a derived signal so the
-            // collapsed wrapper claims **zero** width — without this,
-            // `size_that_fits` pass-through would let the content's
-            // natural single-line width through, ballooning the
-            // accordion's intrinsic width and pushing siblings (e.g.
-            // a sibling dwell indicator inside a tooltip footer) off
-            // the available row.
-            let initial_height = if is_expanded {
-                EXPANDED_MAX_HEIGHT
-            } else {
-                0.0
-            };
-            let height_state = ctx.animated_signal(initial_height);
-            self.content_height = Some(height_state.clone());
-
-            // f32::MAX when expanded, 0 when collapsed. Derived from
-            // the same `expanded` signal so the two states stay in
-            // sync without a second observer.
-            let width_state = self
-                .expanded
-                .map(|e| if *e { f32::MAX } else { 0.0 });
-
-            let wrapper = ctx.add(
-                MaxSize::new(f32::MAX, EXPANDED_MAX_HEIGHT)
-                    .bind_max_width(width_state)
-                    .bind_max_height(height_state)
-                    .child_id(region_id),
-            );
+            // Disclosure animation is handled by `Collapse`, which
+            // observes `expanded` and tweens both height and width
+            // (width gate prevents the natural-width balloon that
+            // would otherwise push tooltip-footer siblings off the row
+            // mid-tween).
+            let wrapper = ctx.add(Collapse::new(self.expanded.clone()).child_id(region_id));
             vstack = vstack.add_child(wrapper);
         }
 
@@ -278,25 +248,16 @@ impl Widget for Accordion {
         self.root_child_id = Some(root);
 
         // --- V2 attached handlers ---
+        // Handlers just flip `expanded`; the inner `Collapse` widget
+        // observes the signal and drives the height/width tween.
         let expanded_tap = self.expanded.clone();
         let expanded_key = self.expanded.clone();
-        let height_tap = self.content_height.clone();
-        let height_key = self.content_height.clone();
         let kb_focused_focus = kb_focused.clone();
 
         let handler_set = HandlerSet::new()
             .on_tap({
                 move |_pos, _ctx: &mut EventContext| {
-                    let new_expanded = !expanded_tap.get();
-                    expanded_tap.set(new_expanded);
-                    if let Some(ref height) = height_tap {
-                        let target = if new_expanded {
-                            EXPANDED_MAX_HEIGHT
-                        } else {
-                            0.0
-                        };
-                        height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
-                    }
+                    expanded_tap.set(!expanded_tap.get());
                 }
             })
             .on_key({
@@ -310,20 +271,7 @@ impl Widget for Accordion {
                             key: Key::Space | Key::Enter,
                             ..
                         } => {
-                            let new_expanded = !expanded_key.get();
-                            expanded_key.set(new_expanded);
-                            if let Some(ref height) = height_key {
-                                let target = if new_expanded {
-                                    EXPANDED_MAX_HEIGHT
-                                } else {
-                                    0.0
-                                };
-                                height.animate_to(
-                                    target,
-                                    Duration::from_millis(200),
-                                    Easing::EaseInOut,
-                                );
-                            }
+                            expanded_key.set(!expanded_key.get());
                             EventResponse::Handled
                         }
                         _ => EventResponse::Ignored,
@@ -436,9 +384,88 @@ mod tests {
     }
 
     #[test]
-    fn content_dormant_when_collapsed() {
-        use crate::primitives::TextWidget;
+    fn external_signal_set_triggers_animation() {
+        // Simulates an external mutation: app code sets `expanded` to
+        // true without going through the accordion's tap handler. The
+        // `Collapse` observer should still kick off the height tween.
         use std::time::Duration;
+        use crate::primitives::TextWidget;
+
+        let expanded = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let content = tree.add(TextWidget::new_literal("Some content"));
+        let acc = tree.add(
+            Accordion::new_literal("Section", expanded.clone()).content_id(content),
+        );
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
+        let collapsed = tree.bounds(acc).height;
+
+        expanded.set(true);
+        tree.tick_animations(Duration::from_millis(250));
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
+        let after = tree.bounds(acc).height;
+
+        assert!(
+            after > collapsed,
+            "external set must drive expansion: {} > {}",
+            after,
+            collapsed
+        );
+    }
+
+    #[test]
+    fn double_toggle_round_trips_height() {
+        use std::time::Duration;
+        use crate::primitives::TextWidget;
+
+        let expanded = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let content = tree.add(TextWidget::new_literal("Some content"));
+        let acc = tree.add(
+            Accordion::new_literal("Section", expanded.clone()).content_id(content),
+        );
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
+        let collapsed_initial = tree.bounds(acc).height;
+
+        // Expand then collapse.
+        tree.click(acc);
+        tree.tick_animations(Duration::from_millis(250));
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
+        let expanded_h = tree.bounds(acc).height;
+
+        tree.click(acc);
+        tree.tick_animations(Duration::from_millis(250));
+        tree.layout(SizeProposal {
+            width: Some(300.0),
+            height: None,
+        });
+        let collapsed_again = tree.bounds(acc).height;
+
+        assert!(expanded_h > collapsed_initial);
+        assert!(
+            (collapsed_again - collapsed_initial).abs() < 1.0,
+            "after collapse round-trip, height should match initial: {} vs {}",
+            collapsed_again,
+            collapsed_initial
+        );
+    }
+
+    #[test]
+    fn content_dormant_when_collapsed() {
+        use std::time::Duration;
+        use crate::primitives::TextWidget;
 
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());

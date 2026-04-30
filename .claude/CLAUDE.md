@@ -160,25 +160,73 @@ Legacy types (`State<T>`, `DerivedState<T>`, `Reactive<T>`) exist in `fern-core:
 
 ## Animation System
 
-Smooth animated transitions for `Signal<f32>` values. Call `animate_to()` instead of `set()`.
+Smooth animated transitions for `Signal<f32>` values. The recommended path is
+the fluent **`ctx.animate()`** spec builder — it captures `MotionTokens` and
+the platform reduced-motion preference at build time, picks pixel-stable
+defaults for looping animations, and provides a one-call `to_or_snap()` that
+respects accessibility settings.
 
-**High-level API:**
+**Recommended API (one-shot, theme-aware):**
 ```rust
 // In build():
 let sidebar_width = ctx.animated_signal(300.0);
 let sidebar = ctx.add(FixedSize::new().bind_width(sidebar_width.clone()).child(content));
+let slide = ctx.animate().normal().standard();   // duration_normal + easing_standard
 
 // In a handler:
-sidebar_width.animate_to(0.0, Duration::from_millis(200), Easing::EaseInOut);
+slide.to_or_snap(&sidebar_width, 0.0);   // snaps under prefers-reduced-motion
 ```
 
-**Key types:**
-- `Easing` — `Linear`, `EaseIn`, `EaseOut`, `EaseInOut` (in fern-tokens)
-- `Signal<f32>::animate_to(target, duration, easing)` — start animated transition
-- `AnimationScheduler` — internal scheduler that ticks each frame
-- `BuildContext::animated_signal(value)` — creates animated Signal<f32>
+**Recommended API (looping with sub-perceptual epsilon):**
+```rust
+// `sweep()` reads `duration_indeterminate_sweep` AND turns on looping
+// mode with epsilon = 1/255 + 30 Hz frame interval defaults.
+ctx.animate().sweep().linear().to(&sweep_pos, 1.0);
+```
 
-**Files:** `fern-tokens/src/motion.rs`, `fern-core/src/animation.rs`, `fern-core/src/signal.rs`
+`AnimationSpec` presets (all `pub fn ... (self) -> Self`):
+
+| Method | Pulls from `MotionTokens` |
+| --- | --- |
+| `.instant()` | `duration_instant` |
+| `.fast()` | `duration_fast` (tooltip fade, interactive feedback) |
+| `.normal()` | `duration_normal` |
+| `.slow()` | `duration_slow` |
+| `.collapse()` | `duration_collapse` (accordion / disclosure tween) |
+| `.sweep()` | `duration_indeterminate_sweep`, plus implies `looping()` |
+| `.duration(d)` | explicit `Duration` |
+| `.standard()` | `easing_standard` (the Int-UI mild ease-out) |
+| `.linear()` / `.ease_in_out()` / etc. | explicit `Easing` |
+| `.looping()` | sub-perceptual `epsilon = 1/255` + 30 Hz frame interval |
+| `.frame_interval(d)` | throttle ticks (e.g. 66 ms = 15 Hz for slow sweeps) |
+
+Application:
+
+- `.to(&signal, target)` — always tween.
+- `.to_or_snap(&signal, target)` — one-shot tween that snaps under
+  `prefers-reduced-motion`. Use this for almost all UI transitions.
+
+**Animated wrapper widgets:**
+
+- `Collapse { expanded: Signal<bool>, child }` — wraps a child and animates
+  its height (and width gate) between zero and natural when `expanded` flips.
+  Used internally by `Accordion`. See [crates/fern-widgets/src/collapse.rs](crates/fern-widgets/src/collapse.rs).
+
+**Lower-level types** (still public, used when you need full control):
+
+- `Signal<f32>::animate_to(target, duration, easing)` — direct one-shot
+- `Signal<f32>::animate_looping(target, period, easing, frame_interval)` — direct loop
+- `Signal<f32>::try_animate_with_options(AnimationRequest)` — full control (epsilon, max_duration)
+- `BuildContext::animated_signal(value)` — creates the `Signal<f32>` itself
+- `BuildContext::prefers_reduced_motion()` — raw platform pref query
+- `Easing` — `Linear`, `EaseIn`, `EaseOut`, `EaseInOut` (in fern-tokens)
+
+**Files:** [crates/fern-tokens/src/motion.rs](crates/fern-tokens/src/motion.rs),
+[crates/fern-core/src/animation.rs](crates/fern-core/src/animation.rs),
+[crates/fern-core/src/animation_builder.rs](crates/fern-core/src/animation_builder.rs),
+[crates/fern-core/src/signal.rs](crates/fern-core/src/signal.rs),
+[crates/fern-widgets/src/collapse.rs](crates/fern-widgets/src/collapse.rs).
+Plan: [/home/cyril/.claude/plans/animations-are-difficulty-use-fluttering-pizza.md](/home/cyril/.claude/plans/animations-are-difficulty-use-fluttering-pizza.md).
 
 ## Event System (V2 Attached Handlers)
 

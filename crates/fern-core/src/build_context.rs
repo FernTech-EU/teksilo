@@ -82,6 +82,26 @@ impl<'a> BuildContext<'a> {
         self.tree.prefers_reduced_motion()
     }
 
+    /// Build an [`AnimationSpec`](crate::animation_builder::AnimationSpec)
+    /// — the fluent ergonomic façade over `Signal<f32>::animate_to`.
+    /// Captures the theme's `MotionTokens` and the platform
+    /// reduced-motion preference at build time, returns a clonable
+    /// spec that event-handler closures can drive without
+    /// re-threading durations and easing.
+    ///
+    /// ```ignore
+    /// let knob_anim = ctx.animate().fast().standard();
+    /// handlers = handlers.on_tap(move |_, _| {
+    ///     knob_anim.to_or_snap(&knob_position, target);
+    /// });
+    /// ```
+    pub fn animate(&self) -> crate::animation_builder::AnimationSpec {
+        crate::animation_builder::AnimationSpec::from_motion(
+            self.theme().motion.clone(),
+            self.prefers_reduced_motion(),
+        )
+    }
+
     /// Opt into the shader-driven animated-quad pipeline. The widget
     /// paint() emits ONE `canvas.draw_animated_quad(bounds, handle.slot(),
     /// class)` call; the renderer samples per-slot state from its

@@ -56,6 +56,16 @@ pub struct MotionTokens {
     /// ~300 ms — dialog appearance.
     #[serde(with = "duration_millis")]
     pub duration_slow: Duration,
+    /// ~200 ms — accordion / disclosure expand-collapse height tween.
+    /// Held distinct from `duration_normal` so apps that want a slower
+    /// disclosure feel can adjust it without slowing every other motion.
+    #[serde(with = "duration_millis")]
+    pub duration_collapse: Duration,
+    /// ~900 ms — period of one full sweep for indeterminate progress
+    /// bars and the future spinner. Long enough to read as continuous
+    /// motion without strobing.
+    #[serde(with = "duration_millis")]
+    pub duration_indeterminate_sweep: Duration,
     /// Standard easing curve. Int UI uses one mild ease-out everywhere.
     pub easing_standard: Easing,
 }
@@ -67,6 +77,8 @@ impl Default for MotionTokens {
             duration_fast: Duration::from_millis(120),
             duration_normal: Duration::from_millis(200),
             duration_slow: Duration::from_millis(300),
+            duration_collapse: Duration::from_millis(200),
+            duration_indeterminate_sweep: Duration::from_millis(900),
             easing_standard: Easing::EaseOut,
         }
     }

@@ -3,8 +3,6 @@
 //! Level 2 widget that paints a track and knob directly. The knob position
 //! is animated via `Signal<f32>::animate_to()`.
 
-use std::time::Duration;
-
 use fern_canvas::{Canvas, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
@@ -14,7 +12,7 @@ use fern_core::binding::BindingLevel;
 use fern_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius, Easing};
+use fern_tokens::{Color, CornerRadius};
 
 
 /// An animated toggle switch bound to a `Signal<bool>`.
@@ -87,6 +85,10 @@ impl Widget for Toggle {
             .bind_to(id, registry, BindingLevel::RepaintOnly);
         self.on.bind_to(id, registry, BindingLevel::RepaintOnly);
 
+        // Tween spec for the knob slide. `to_or_snap` skips the
+        // tween when the platform reports `prefers-reduced-motion`.
+        let knob_anim = ctx.animate().fast().standard();
+
         // Set up handlers
         let on = self.on.clone();
         let knob_position = self.knob_position.clone();
@@ -97,11 +99,12 @@ impl Widget for Toggle {
         let toggle = {
             let on = on.clone();
             let knob_position = knob_position.clone();
+            let knob_anim = knob_anim.clone();
             move || {
                 let new_on = !on.get();
                 on.set(new_on);
                 let target = if new_on { 1.0 } else { 0.0 };
-                knob_position.animate_to(target, Duration::from_millis(150), Easing::EaseInOut);
+                knob_anim.to_or_snap(&knob_position, target);
             }
         };
 
@@ -322,6 +325,8 @@ impl Widget for Toggle {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use fern_core::event::Modifiers;
     use fern_core::widget_tree::WidgetTree;

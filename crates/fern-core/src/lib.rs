@@ -2,6 +2,7 @@ pub mod accessibility;
 pub mod action;
 pub mod animated_quad;
 pub mod animation;
+pub mod animation_builder;
 pub mod app_event;
 pub mod arena;
 pub mod build_context;
@@ -68,6 +69,7 @@ pub use shortcut::{
     ShortcutBuilder, ShortcutOnActivate, ShortcutRegistry, ShortcutScope, SlotOverride,
 };
 pub use animation::AnimationRequest;
+pub use animation_builder::AnimationSpec;
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
 pub use binding::{BindingLevel, BindingRegistry};
 pub use widget::{

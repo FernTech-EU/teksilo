@@ -272,11 +272,15 @@ impl AnimationScheduler {
     /// Returns true if any animation is still running *and eligible to
     /// run next tick* (caller should request another frame).
     ///
-    /// `arena` + `paint_epoch` gate per-widget visibility: an animation
-    /// whose driving widget is dormant or hasn't been painted in the
-    /// most recent paint pass skips its tick and does not contribute to
-    /// `next_deadline`. Pass `paint_epoch == 0` to disable the paint
-    /// gate (headless tests that never call `render()`).
+    /// `arena` + `paint_epoch` gate per-widget visibility for **looping**
+    /// animations only: a continuous spinner whose owner widget is
+    /// dormant or hasn't been painted in the most recent paint pass
+    /// skips its tick. One-shot tweens are NOT visibility-gated — a
+    /// widget that animates its own size from zero (e.g. `Collapse`
+    /// growing from height=0 to natural) would otherwise be paused on
+    /// the very tick that would make it visible, locking it in the
+    /// invisible state forever. Pass `paint_epoch == 0` to disable the
+    /// gate entirely (headless tests that never call `render()`).
     pub fn tick(&mut self, now: Instant, arena: &WidgetArena, paint_epoch: u64) -> bool {
         if !self.window_active {
             return !self.animations.is_empty();
@@ -296,10 +300,12 @@ impl AnimationScheduler {
                 return false;
             }
 
-            if !anim_widget_visible(arena, anim.widget_id, paint_epoch) {
-                // Leave start_time alone so resume picks up mid-phase.
-                // Push next_tick so we don't spin on a paused entry when
-                // the scheduler is polled via some other deadline.
+            if anim.looping && !anim_widget_visible(arena, anim.widget_id, paint_epoch) {
+                // Looping animation on an offscreen owner — pause to
+                // save CPU. Leave start_time alone so resume picks up
+                // mid-phase. Push next_tick so we don't spin on a
+                // paused entry when the scheduler is polled via some
+                // other deadline.
                 anim.next_tick = now + anim.frame_interval;
                 return true;
             }
@@ -363,9 +369,11 @@ impl AnimationScheduler {
         self.window_active && !self.animations.is_empty()
     }
 
-    /// Earliest deadline at which a visible, not-paused animation wants
-    /// to tick. Returns `None` when the scheduler is window-paused, all
-    /// animations are hidden, or there are no animations at all.
+    /// Earliest deadline at which a not-paused animation wants to
+    /// tick. Returns `None` when the scheduler is window-paused, all
+    /// (looping) animations are hidden, or there are no animations at
+    /// all. One-shot tweens are NOT visibility-gated — see the
+    /// matching note on [`tick`](Self::tick).
     pub fn next_deadline(&self, arena: &WidgetArena, paint_epoch: u64) -> Option<Instant> {
         if !self.window_active {
             return None;
@@ -374,7 +382,8 @@ impl AnimationScheduler {
             .iter()
             .filter(|anim| {
                 anim_widget_alive(arena, anim.widget_id)
-                    && anim_widget_visible(arena, anim.widget_id, paint_epoch)
+                    && (!anim.looping
+                        || anim_widget_visible(arena, anim.widget_id, paint_epoch))
             })
             .map(|anim| anim.next_tick)
             .min()
@@ -806,6 +815,82 @@ mod tests {
         assert!(
             signal.get().abs() < 0.01,
             "capped animation should snap to start_value (0), got {}",
+            signal.get()
+        );
+    }
+
+    #[test]
+    fn one_shot_tween_runs_even_when_owner_appears_offscreen() {
+        // Regression: a `Collapse`-style widget animating its own
+        // height from 0 → natural would set up a one-shot tween whose
+        // owner is the Collapse widget itself. Because the widget's
+        // current bounds are zero, the paint pass would skip it,
+        // never stamping `last_painted_epoch`. The visibility gate
+        // would then see `lpe + 1 < paint_epoch` and pause the
+        // animation forever — locking the widget at height=0.
+        let signal = Signal::<f32>::new_animated(0.0);
+        let mut scheduler = AnimationScheduler::new();
+        let (mut arena, id) = test_arena_with_widget();
+        // Simulate a never-painted widget (lpe stays at the default 0)
+        // while the global paint_epoch has advanced many frames.
+        let _ = arena.get_mut(id); // ensure node exists; lpe defaults to 0
+        let start = Instant::now();
+        let paint_epoch: u64 = 42; // many frames have passed
+
+        scheduler.animate(
+            &signal,
+            id,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            start,
+        );
+
+        scheduler.tick(start + Duration::from_millis(100), &arena, paint_epoch);
+        assert!(
+            signal.get() > 10.0,
+            "one-shot tween must progress despite owner having stale paint_epoch (got {})",
+            signal.get()
+        );
+
+        scheduler.tick(start + Duration::from_millis(200), &arena, paint_epoch);
+        assert!(
+            (signal.get() - 100.0).abs() < 0.01,
+            "one-shot tween must reach target (got {})",
+            signal.get()
+        );
+    }
+
+    #[test]
+    fn looping_animation_pauses_when_owner_offscreen() {
+        // The looping case (e.g. spinner in a hidden tab) keeps the
+        // visibility gate: we don't want a hidden spinner to burn CPU
+        // ticking against a widget the user can't see.
+        let signal = Signal::<f32>::new_animated(0.0);
+        let mut scheduler = AnimationScheduler::new();
+        let (arena, id) = test_arena_with_widget();
+        let start = Instant::now();
+        let paint_epoch: u64 = 42;
+
+        scheduler.animate_looping(
+            &signal,
+            id,
+            0.0,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            None,
+            0.0,
+            None,
+            start,
+        );
+
+        // With paint_epoch high and lpe at 0, the loop must NOT
+        // progress — the value stays at the start.
+        scheduler.tick(start + Duration::from_millis(100), &arena, paint_epoch);
+        assert!(
+            signal.get().abs() < 0.01,
+            "looping animation should pause for offscreen owner (got {})",
             signal.get()
         );
     }
