@@ -25,7 +25,7 @@ use fern_core::widget::{
 };
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{CornerRadius, Orientation};
+use fern_tokens::Orientation;
 
 #[derive(Debug, Clone, Copy)]
 struct SplitBounds {
@@ -106,7 +106,27 @@ struct SplitHandle {
     enabled: bool,
     container_bounds: Rc<Cell<Rect>>,
     interaction: Signal<SplitHandleState>,
+    /// Hover-dwell progress driving the focus-ring fade-in. The signal
+    /// linearly animates 0→1 over `HOVER_DWELL_TOTAL` on hover-enter and
+    /// is mapped in paint to "hold at 0 for `HOVER_DWELL_DELAY`, then
+    /// fade in" via the (raw - delay_frac) / fade_frac formula. On
+    /// hover-leave the same signal animates back to 0 over a short
+    /// `HOVER_FADE_OUT` so the ring fades out cleanly.
+    hover_progress: Signal<f32>,
 }
+
+/// Total animation duration for hover-enter. Split into a hold phase
+/// (delay) and a visible fade-in phase. 300ms hold + 100ms fade-in
+/// keeps the divider unobtrusive during incidental cursor crossings
+/// while still feeling responsive once the user dwells.
+const HOVER_DWELL_TOTAL: std::time::Duration = std::time::Duration::from_millis(400);
+/// Portion of `HOVER_DWELL_TOTAL` spent at zero opacity before the
+/// fade-in starts. Drives the (1.0 - HOVER_DWELL_DELAY/HOVER_DWELL_TOTAL)
+/// fraction used in paint to map the linear signal to a delayed ramp.
+const HOVER_DWELL_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+/// Fade-out duration on hover-leave. Quick enough to feel snappy but
+/// long enough to avoid a hard pop.
+const HOVER_FADE_OUT: std::time::Duration = std::time::Duration::from_millis(120);
 
 impl SplitHandle {
     fn new(config: SplitHandleConfig) -> Self {
@@ -120,6 +140,7 @@ impl SplitHandle {
             enabled: config.enabled,
             container_bounds: config.container_bounds,
             interaction: Signal::new(SplitHandleState::Idle),
+            hover_progress: Signal::new_animated(0.0),
         }
     }
 }
@@ -140,7 +161,14 @@ impl Widget for SplitHandle {
         let registry = ctx.binding_registry();
         self.interaction
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        self.hover_progress
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        // hover_progress was created by SplitHandle::new() (outside the
+        // tree), so register it with the animation scheduler now —
+        // otherwise animate_to() silently no-ops.
+        ctx.register_animated_signal(&self.hover_progress);
         let interaction = self.interaction.clone();
+        let hover_progress = self.hover_progress.clone();
 
         let enabled = self.enabled;
         let orientation = self.orientation;
@@ -250,9 +278,15 @@ impl Widget for SplitHandle {
             })
             .on_hover({
                 let interaction = interaction.clone();
+                let hover_progress = hover_progress.clone();
                 move |entered, _ctx| {
                     if !enabled {
                         interaction.set(SplitHandleState::Idle);
+                        hover_progress.animate_to(
+                            0.0,
+                            HOVER_FADE_OUT,
+                            fern_tokens::Easing::Linear,
+                        );
                         return;
                     }
                     if interaction.get() == SplitHandleState::Dragging {
@@ -263,6 +297,19 @@ impl Widget for SplitHandle {
                     } else {
                         SplitHandleState::Idle
                     });
+                    if entered {
+                        hover_progress.animate_to(
+                            1.0,
+                            HOVER_DWELL_TOTAL,
+                            fern_tokens::Easing::Linear,
+                        );
+                    } else {
+                        hover_progress.animate_to(
+                            0.0,
+                            HOVER_FADE_OUT,
+                            fern_tokens::Easing::Linear,
+                        );
+                    }
                 }
             })
             .on_focus({
@@ -410,64 +457,59 @@ impl Widget for SplitHandle {
         let colors = &ctx.theme.colors;
         let interaction = self.interaction.get();
 
-        let background = if !self.enabled {
-            colors.surface_main
-        } else if interaction == SplitHandleState::Dragging {
-            colors.accent.with_alpha(0.14)
-        } else if interaction == SplitHandleState::Focused {
-            colors.accent.with_alpha(0.10)
-        } else if interaction == SplitHandleState::Hovered {
-            colors.surface_main
-        } else {
-            colors.surface_main
-        };
-        canvas.fill_rounded_rect(
-            bounds,
-            CornerRadius::uniform(ctx.theme.components.split_view.corner_radius),
-            background,
-        );
+        // Int UI convention: thin static line at the gutter's center, no
+        // visible handle, no filled background. The hit area is wider
+        // than the line for comfortable pointer targeting; the cursor
+        // change on hover is what tells the user it's grabbable.
+        let style = ctx.theme.components.split_view;
+        let line_thickness = style.divider_line_thickness.max(1.0);
+        // Focus indicator is the same divider line drawn thicker with
+        // the focus color — not a bounding stroke. Cross-fades over the
+        // resting line via alpha during the hover-dwell phase, fully
+        // replaces it on keyboard focus / drag.
+        let focus_thickness = (line_thickness * 3.0).max(line_thickness + 2.0);
 
-        let grip_color = if !self.enabled {
-            colors.text_disabled
-        } else if interaction == SplitHandleState::Dragging
-            || interaction == SplitHandleState::Focused
+        let line_rect = |thickness: f32| match self.orientation {
+            Orientation::Horizontal => Rect::new(
+                bounds.x + (bounds.width - thickness) / 2.0,
+                bounds.y,
+                thickness,
+                bounds.height,
+            ),
+            Orientation::Vertical => Rect::new(
+                bounds.x,
+                bounds.y + (bounds.height - thickness) / 2.0,
+                bounds.width,
+                thickness,
+            ),
+        };
+
+        // Resting line — always present so the divider never disappears.
+        canvas.fill_rect(line_rect(line_thickness), colors.border);
+
+        // Focus indicator alpha: instant on keyboard focus / drag,
+        // hover-dwell fade-in otherwise. The hover_progress signal
+        // animates 0→1 linearly over HOVER_DWELL_TOTAL; this maps the
+        // first 75% of progress to alpha=0 (the dwell delay) and the
+        // last 25% to alpha 0..1 (the visible fade). Same signal
+        // animates back to 0 on hover-leave so the indicator fades out
+        // via the same formula.
+        let focus_alpha = if !self.enabled {
+            0.0
+        } else if interaction == SplitHandleState::Focused
+            || interaction == SplitHandleState::Dragging
         {
-            colors.accent
-        } else if interaction == SplitHandleState::Hovered {
-            colors.text_primary
+            1.0
         } else {
-            colors.text_secondary
+            let p = self.hover_progress.get();
+            let delay_frac = HOVER_DWELL_DELAY.as_secs_f32() / HOVER_DWELL_TOTAL.as_secs_f32();
+            ((p - delay_frac) / (1.0 - delay_frac)).clamp(0.0, 1.0)
         };
 
-        let center_x = bounds.x + bounds.width / 2.0;
-        let center_y = bounds.y + bounds.height / 2.0;
-        match self.orientation {
-            Orientation::Horizontal => {
-                canvas.fill_rect(
-                    Rect::new(center_x - 1.0, bounds.y + 2.0, 2.0, bounds.height - 4.0),
-                    grip_color.with_alpha(0.35),
-                );
-                for offset in [-8.0_f32, 0.0, 8.0] {
-                    canvas.fill_circle(Point::new(center_x, center_y + offset), 1.6, grip_color);
-                }
-            }
-            Orientation::Vertical => {
-                canvas.fill_rect(
-                    Rect::new(bounds.x + 2.0, center_y - 1.0, bounds.width - 4.0, 2.0),
-                    grip_color.with_alpha(0.35),
-                );
-                for offset in [-8.0_f32, 0.0, 8.0] {
-                    canvas.fill_circle(Point::new(center_x + offset, center_y), 1.6, grip_color);
-                }
-            }
-        }
-
-        if interaction == SplitHandleState::Focused {
-            canvas.stroke_rounded_rect(
-                bounds,
-                CornerRadius::uniform(ctx.theme.components.split_view.corner_radius),
-                colors.focus_ring,
-                2.0,
+        if focus_alpha > 0.0 {
+            canvas.fill_rect(
+                line_rect(focus_thickness),
+                colors.focus_ring.with_alpha(focus_alpha),
             );
         }
     }
@@ -864,10 +906,11 @@ mod tests {
         let handle = tree.child_widget(root, 1);
         let second = tree.child_widget(root, 2);
 
-        assert!((tree.bounds(first).width - 97.0).abs() < 0.01);
         let default_thickness = fern_tokens::SplitViewStyle::default().gutter_thickness;
+        let available = 400.0 - default_thickness;
+        assert!((tree.bounds(first).width - available * 0.25).abs() < 0.01);
         assert!((tree.bounds(handle).width - default_thickness).abs() < 0.01);
-        assert!((tree.bounds(second).width - 291.0).abs() < 0.01);
+        assert!((tree.bounds(second).width - available * 0.75).abs() < 0.01);
     }
 
     #[test]
