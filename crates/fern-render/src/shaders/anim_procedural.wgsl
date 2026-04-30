@@ -87,19 +87,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         // SpinnerArc: a `sweep_ratio`-portion of a circle rotating
         // around the centre with period = phase 0→1. Stroke
-        // thickness is `_pad0 * 0.5` of the quad's min extent (uv is
+        // thickness is `_pad0` of the quad's min extent (uv is
         // already normalised so min extent is 1.0 here). Rendered
         // with leading edge at the top (theta=0) and rotating
-        // clockwise — matches the CSS spinner convention.
+        // clockwise — matches the CSS spinner convention. Edges
+        // are anti-aliased via `fwidth`-driven smoothstep ramps so
+        // the radial bounds and arc start/end fade out over a
+        // single pixel instead of producing the visibly stair-stepped
+        // outline a hard `discard` at each boundary would yield.
         case 2u: {
             let to_centre = in.uv - vec2<f32>(0.5);
             let dist = length(to_centre);
             let stroke = p._pad0;
             let outer = 0.5;
             let inner = 0.5 - stroke;
-            if (dist > outer || dist < inner) {
+            let aa_radial = fwidth(dist);
+            // Reject pixels that are clearly outside the ring even
+            // accounting for the AA band — keeps the discard fast
+            // path for the majority of the quad, which is empty.
+            if (dist > outer + aa_radial || dist < inner - aa_radial) {
                 discard;
             }
+            let outer_alpha = smoothstep(outer + aa_radial, outer - aa_radial, dist);
+            let inner_alpha = smoothstep(inner - aa_radial, inner + aa_radial, dist);
+            let radial_alpha = outer_alpha * inner_alpha;
             // theta_raw normalised to 0..1, with 0 at the leftmost
             // point (atan2 returns -π..π). Shift by 0.75 so 0 lands
             // at the top — the conventional spinner anchor.
@@ -109,10 +120,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             // in the arc when this distance is less than the arc
             // length.
             let local = fract(theta - p.phase + 1.0);
-            if (local > p.sweep_ratio) {
+            // Tangential pixel width in normalised-angle units
+            // (0..1 = full circle). One UV pixel maps to `aa_uv`
+            // along each axis; the corresponding angular span is
+            // `aa_uv / (2π · dist)`. fwidth on `theta` directly
+            // would explode at the wrap from 1.0→0.0 (the top of
+            // the spinner), so we go through the screen-space UV.
+            let aa_uv = max(fwidth(in.uv.x), fwidth(in.uv.y));
+            let aa_theta = aa_uv / (6.28318530 * max(dist, 1e-3));
+            let lead_alpha = smoothstep(0.0, aa_theta, local);
+            let trail_alpha = smoothstep(p.sweep_ratio + aa_theta, p.sweep_ratio, local);
+            let arc_alpha = lead_alpha * trail_alpha;
+            let alpha = radial_alpha * arc_alpha;
+            if (alpha < 1.0 / 255.0) {
                 discard;
             }
-            return srgb_to_linear_rgba(p.color1);
+            let c = srgb_to_linear_rgba(p.color1);
+            return vec4<f32>(c.rgb, c.a * alpha);
         }
         default: {
             // Magenta fallback so an unknown `kind` is visually obvious

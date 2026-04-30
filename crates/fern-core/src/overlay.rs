@@ -805,12 +805,30 @@ impl OverlayManager {
                     };
                     Rect::new(x, y, content_size.width, content_size.height)
                 }
-                OverlayPlacement::NearAnchor { offset } => Rect::new(
-                    anchor.x + offset.x,
-                    anchor.y + anchor.height + offset.y + 4.0,
-                    content_size.width,
-                    content_size.height,
-                ),
+                OverlayPlacement::NearAnchor { offset } => {
+                    // Prefer below the anchor at `offset` + 4 px.
+                    // Flip above when the content would otherwise spill
+                    // past the viewport bottom — same pattern as
+                    // `BelowPreferred`. Without this, a tooltip whose
+                    // anchor sits near the window edge gets clipped by
+                    // the surface bounds (overlays paint unclipped, but
+                    // the window itself still bounds the framebuffer).
+                    let below_y = anchor.y + anchor.height + offset.y + 4.0;
+                    let fits_below = below_y + content_size.height <= vh;
+                    let y = if fits_below {
+                        below_y
+                    } else {
+                        // Symmetric offset above: same gap as below.
+                        let above_y = anchor.y - content_size.height - offset.y - 4.0;
+                        above_y.max(0.0)
+                    };
+                    // Clamp horizontally so the content stays in view
+                    // when the anchor is near the leading/trailing edge.
+                    let x = (anchor.x + offset.x)
+                        .min(vw - content_size.width)
+                        .max(0.0);
+                    Rect::new(x, y, content_size.width, content_size.height)
+                }
                 OverlayPlacement::Centered => Rect::new(
                     ((vw - content_size.width) / 2.0).max(0.0),
                     ((vh - content_size.height) / 2.0).max(0.0),
