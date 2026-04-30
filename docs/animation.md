@@ -39,11 +39,13 @@ Easing curves and standard durations are design tokens, not ad-hoc magic numbers
 pub enum Easing { Linear, EaseIn, EaseOut, EaseInOut }
 
 pub struct MotionTokens {
-    pub duration_instant: Duration,  //   0 ms — most state changes
-    pub duration_fast:    Duration,  // 120 ms — tooltip fade
-    pub duration_normal:  Duration,  // 200 ms — notification slide
-    pub duration_slow:    Duration,  // 300 ms — dialog scale-in
-    pub easing_standard:  Easing,    // EaseOut
+    pub duration_instant: Duration,             //   0 ms — most state changes
+    pub duration_fast:    Duration,             // 120 ms — tooltip fade, interactive feedback
+    pub duration_normal:  Duration,             // 200 ms — notification slide
+    pub duration_slow:    Duration,             // 300 ms — dialog scale-in
+    pub duration_collapse:               Duration, // 200 ms — accordion / disclosure tween
+    pub duration_indeterminate_sweep:    Duration, // 900 ms — indeterminate sweep / spinner period
+    pub easing_standard:  Easing,               // mild ease-out
 }
 ```
 
@@ -59,7 +61,7 @@ The `Easing::apply(t)` method takes a linear parameter `t ∈ [0, 1]` and return
 - **Stop cleanly** when an animation reaches its target (set exactly the end value on the terminal tick, regardless of epsilon quantization).
 - **Pause when the window is occluded or unfocused** (`set_window_active(false)`). The scheduler reports no next deadline to the event loop during pause, so a hidden window doesn't keep the event loop in `WaitUntil`. On resume, each animation's start time is rebased by the paused duration — a sweep paused at 50% resumes from 50%, phase-continuous, not snapped.
 - **Cancel when the driving widget disappears.** `cancel_by_widget(id)` runs whenever a widget is rebuilt or destroyed. Otherwise a `Signal<f32>` clone in the scheduler would outlive its widget, silently ticking a signal whose observers no longer exist.
-- **Skip offscreen ticks.** If a widget hasn't painted in the latest paint epoch, the scheduler does not call `signal.set(...)` for it — it keeps the animation alive internally but doesn't drive work through it. This avoids re-paints for animations inside a minimized split-view pane or a closed accordion subtree.
+- **Skip offscreen ticks for *looping* animations.** If a widget hasn't painted in the latest paint epoch, the scheduler holds back ticks for any *looping* animation it owns — keeps the animation alive internally but doesn't drive work through it. This avoids re-paints for spinners and indeterminate progress bars inside a minimized split-view pane or a closed accordion subtree. **One-shot animations always tick** regardless of paint epoch: a widget like `Collapse` whose own size depends on the animated value (zero height when collapsed → never painted → never re-stamped) would deadlock if the gate also covered one-shots. The cost is bounded — a one-shot with no observers on screen still completes in `duration` and then stops itself.
 
 The frame-loop integration point is `WidgetTree::process_pending_animations` (called from `layout()`) plus `scheduler.tick(now, &arena, paint_epoch)` called from the event loop. Widget authors don't invoke either directly.
 
@@ -94,6 +96,25 @@ self.indeterminate_pos.animate_looping(
 
 Looping animations respect `prefers_reduced_motion`: widgets check `ctx.prefers_reduced_motion()` before starting them and fall back to a static representation when the user has disabled motion. Non-looping transitions typically don't need the check — a one-shot 150 ms ease is below the threshold most accessibility guidance worries about — but looping ones always do.
 
+### 4.3 `AnimationSpec` — the recommended façade
+
+Reaching for `animate_to(target, Duration::from_millis(150), Easing::EaseInOut)` directly works, but it shifts three responsibilities onto the call site: pulling the right `MotionTokens` constant from the theme, picking pixel-stable `epsilon` / `frame_interval` defaults for looping animations, and remembering to honour `prefers_reduced_motion`. `AnimationSpec` is a fluent builder that captures all three at construction time:
+
+```rust
+// One-shot, theme-aware, accessibility-aware:
+let spec = ctx.animate().fast().standard();
+spec.to_or_snap(&knob_position, target);
+//                ^^^^^^^^^^^^ snaps without tween under prefers-reduced-motion
+
+// Looping with sub-perceptual epsilon and 30 Hz throttle baked in:
+ctx.animate().sweep().linear().to(&sweep_pos, 1.0);
+//             ^^^^^^^ implies looping(), reads duration_indeterminate_sweep
+```
+
+Duration presets (`fast()` / `normal()` / `slow()` / `collapse()` / `sweep()` / `instant()`) all read from the live theme's `MotionTokens` — no hardcoded `Duration::from_millis(...)` literals at the call site. Easing presets (`standard()` / `linear()` / `ease_in_out()` / etc.) similarly pull `easing_standard` from tokens. `looping()` flips on sub-perceptual ε = 1/255 and a 30 Hz frame interval — the safe defaults for paint-bound loops; `frame_interval(d)` overrides for slower loops (e.g. 66 ms = 15 Hz for a long sweep). `to(&signal, target)` always tweens; `to_or_snap(&signal, target)` snaps without tween when `prefers_reduced_motion` is true.
+
+`AnimationSpec` is a thin façade — it constructs an `AnimationRequest` and calls `Signal<f32>::try_animate_with_options`. The lower-level `animate_to` / `animate_looping` paths remain public; reach for them only when you need control the spec doesn't expose (custom epsilon for non-pixel signals, `max_duration` for indefinite loops with a bounded budget). Source: [crates/fern-core/src/animation_builder.rs](../crates/fern-core/src/animation_builder.rs).
+
 ## 5. Worked examples from the widget tree
 
 ### 5.1 Toggle thumb — the canonical transform transition
@@ -104,12 +125,13 @@ Looping animations respect `prefers_reduced_motion`: widgets check `ctx.prefers_
 fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
     let initial = if self.on.get() { 1.0 } else { 0.0 };
     self.knob_position = ctx.animated_signal(initial);
+    let knob_spec = ctx.animate().fast().standard();
     // ...
     let toggle = move || {
         let new_on = !on.get();
         on.set(new_on);
         let target = if new_on { 1.0 } else { 0.0 };
-        knob_position.animate_to(target, Duration::from_millis(150), Easing::EaseInOut);
+        knob_spec.to_or_snap(&knob_position, target);
     };
     // ...
 }
@@ -118,18 +140,13 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 - `knob_position` is recreated each `build()` — not preserved across rebuilds. This is intentional: rebuilds are rare (theme change, structural dirty), and the value is trivially restorable from `self.on`.
 - The `paint()` method reads `knob_position.get()` directly and positions the knob at `lerp(left_edge, right_edge, position)`.
 - No `Signal::map`, no `Prop::Bound` wrapping needed — direct read in paint is fine because the scheduler's `signal.set()` on each tick already dirty-marks the widget for repaint via the binding registry.
+- `to_or_snap` quietly snaps to the target without tweening when the platform reports `prefers_reduced_motion` — same handler code, accessible by default.
 
-### 5.2 Accordion height — animating a layout dimension
+### 5.2 Accordion / Collapse — animating a layout dimension
 
-[crates/fern-widgets/src/accordion.rs](../crates/fern-widgets/src/accordion.rs):
+[Accordion](../crates/fern-widgets/src/accordion.rs) wraps its content in a [`Collapse`](../crates/fern-widgets/src/collapse.rs) widget — the reusable primitive for the "animate child between hidden and natural height" pattern. `Collapse` drives an internal `Signal<f32>` from 0..1 with `ctx.animate().collapse().standard().to_or_snap(...)`, and its `size_that_fits` reports `natural * progress` while `place_children` always lays the child out at its full natural size. The framework's clip pass crops the overflow during the tween. Effect: the visible height interpolates over the full duration without the child being squashed (which would re-wrap text and produce flicker).
 
-```rust
-let height_state = ctx.animated_signal(initial_height);
-// Later, from the expand/collapse handler:
-height.animate_to(target, Duration::from_millis(200), Easing::EaseInOut);
-```
-
-Animating a layout-participating dimension is more expensive than animating a paint-only value — the binding level has to be `Relayout`, not `RepaintOnly`, so the tree dirtys the layout of the accordion's ancestor on each tick. Use this sparingly. Most animations should target paint-only properties (offsets, scales, opacities projected into paint).
+Animating a layout-participating dimension is more expensive than animating a paint-only value — the binding level is `Relayout`, not `RepaintOnly`, so the tree dirtys the accordion's ancestor's layout on each tick. Use sparingly. Paint-only targets (offsets, scales, opacities — see §5.6) are cheaper.
 
 ### 5.3 Snackbar slide-in
 
@@ -143,6 +160,27 @@ When ScrollArea receives a `ScrollIntoView` request (for example after tab-focus
 
 [icon_widget.rs](../crates/fern-widgets/src/primitives/icon_widget.rs) animates a frame-index signal looping over the frame count for animated WebP icons. Frame interval comes from the asset, not from `MotionTokens` — this is a content-driven animation, not a UI transition.
 
+### 5.6 Wrap-and-go animation widgets
+
+Three widgets package the most common animation patterns so callers don't re-implement them:
+
+- **[`Fade`](../crates/fern-widgets/src/fade.rs)** wraps a child and tweens an internal opacity signal between 0 and 1 driven by a `Signal<bool>`. Layout-transparent: the child reports its full natural size at all opacity values. Built on `BuildContext::set_opacity`, a node-level opacity scope (parallel to `clips_children`) emitted by the rendering walker as `SetOpacity` / `RestoreOpacity` draw commands wrapping the subtree. Sub-perceptual opacities (`< 1/512`) are short-circuited — no draw passes.
+- **[`Collapse`](../crates/fern-widgets/src/collapse.rs)** — see §5.2. The accordion-pattern primitive.
+- **[`Spinner`](../crates/fern-widgets/src/spinner.rs)** — circular-arc loading indicator backed by `AnimatedQuadKind::SpinnerArc`, the shader-driven path (see [idle-and-animation.md §"Two animation paths — signal vs shader"](idle-and-animation.md#two-animation-paths-signal-vs-shader)). One `queue.write_buffer` of `AnimParams` + one `draw_indexed` per frame; `paint()` does not run while spinning. Edges are anti-aliased via `fwidth` smoothstep ramps in the fragment shader. Honours `prefers-reduced-motion` with a static three-quarter arc fallback.
+
+For overlays, **`OverlayRequest::with_fade(duration)`** is the recommended path for tooltip / popover / snackbar fade-in / fade-out. The framework wires opacity internally — caller specifies just the duration:
+
+```rust
+tree.show_overlay(OverlayRequest {
+    content_id, anchor, placement, dismiss,
+    layer: OverlayLayer::InTree,
+    parent_overlay: None, on_dismiss: None,
+    fade_duration: Some(theme.motion.duration_fast),
+});
+```
+
+When `fade_duration` is `Some`, `WidgetTree` creates an animated `Signal<f32>`, applies it as an opacity scope on the content (via `set_opacity` — same primitive `Fade` uses), kicks off the 0→1 tween at show time, and on dismiss reverses to 0 then defers the actual stack removal by `duration` so the tween plays out before the content goes dormant. The `OverlayManager` tracks fade-out state on a dual sim/real clock so headless tests can use `tree.advance_time(...)` to drive deterministic dismissal.
+
 ## 6. When NOT to use the animation system
 
 Animation via `animate_to` is for a value that crosses time smoothly. It is **not** for:
@@ -150,7 +188,7 @@ Animation via `animate_to` is for a value that crosses time smoothly. It is **no
 - **Color shifts on hover / press.** Those are instant in Int UI's vocabulary. Express them as `Signal<Role>` mapped from the interaction state signal (see [reactive-theme.md](reactive-theme.md) §"Interaction-driven colors"). No scheduler involved; color resolves from the current theme per frame.
 - **Caret blink.** The caret is either drawn or not, on a cadence. It uses `BuildContext::frame_tick()` + `request_frame()` to pump the event loop on a schedule and flips a boolean — no smooth interpolation happens, so `animate_to` would be the wrong tool.
 - **Fade-in of a list of items appearing on filter change.** Decorative; Int UI's guidance is "don't." If the visual disruption is bad enough to warrant fade, consider whether the list widget itself should not disrupt — for example, a virtualized list that only creates newly-visible items, rather than full remount on filter change.
-- **Tooltip delay.** The *opening* delay is a timer, not an animation. Once the tooltip appears, its fade-in can use `animate_to` on an opacity signal if a theme wants that — but the delay before it shows is a scheduled task, not a running interpolation.
+- **Tooltip delay.** The *opening* delay is a timer, not an animation. Once the tooltip appears, its fade-in is driven by `OverlayRequest::with_fade(theme.motion.duration_fast)` (see §5.6) — the framework owns the opacity tween, callers do not roll their own `animate_to` on the tooltip content.
 
 ## 7. Testing animations deterministically
 
@@ -177,12 +215,13 @@ Headless tests that never call `render()` have `paint_epoch == 0`; the scheduler
 
 ## 8. Design rules in one list
 
-- One entry point: `Signal<f32>::animate_to(target, duration, easing)`.
-- One looping entry point for indeterminate work: `animate_looping(target, period, easing, frame_interval)`.
+- Recommended entry point: `ctx.animate().<duration>().<easing>().to_or_snap(&signal, target)` (§4.3). Captures `MotionTokens`, easing presets, and `prefers_reduced_motion` in one place.
+- Lower-level entry points for cases the spec doesn't cover: `Signal<f32>::animate_to(...)`, `animate_looping(...)`, `try_animate_with_options(AnimationRequest)`.
 - Create the signal with `BuildContext::animated_signal(value)` inside `build()`. That handles scheduler registration and widget-lifetime cancellation.
-- Respect `ctx.prefers_reduced_motion()` before starting a looping animation. One-shot transitions under ~300 ms rarely need the check.
-- Durations come from `MotionTokens` (`duration_fast` / `_normal` / `_slow`), not from literal constants in widget code. Literal constants are acceptable for one-off durations a designer doesn't plan to retune (icon sprite frame intervals, for example).
-- Easing curves come from `Easing`. `EaseInOut` for symmetric transitions (toggle thumbs), `EaseOut` for appearance (snackbar slide-in, dialog fade), `Linear` for loops and indeterminate work.
+- Respect `ctx.prefers_reduced_motion()` before starting a looping animation; `to_or_snap` already does it for one-shots.
+- Durations come from `MotionTokens` (`duration_fast` / `_normal` / `_slow` / `_collapse` / `_indeterminate_sweep`), not from literal constants in widget code. Literal constants are acceptable for one-off durations a designer doesn't plan to retune (icon sprite frame intervals, for example).
+- Easing curves come from `Easing`. `EaseInOut` for symmetric transitions (toggle thumbs), `EaseOut` / `easing_standard` for appearance (snackbar slide-in, dialog fade), `Linear` for loops and indeterminate work.
+- For common shapes — fade an overlay, collapse a section, show a spinner — reach for `Fade` / `Collapse` / `Spinner` / `OverlayRequest::with_fade` (§5.6) before hand-rolling a signal-driven path.
 - Don't animate colors, hovers, presses, focus states, or anything instant in Int UI's vocabulary — those are reactive theme work, not scheduler work.
 
 ---

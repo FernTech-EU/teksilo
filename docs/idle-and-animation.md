@@ -51,19 +51,32 @@ equivalent rigor.
    ([app.rs](../crates/fern-app/src/app.rs),
    [window_manager.rs](../crates/fern-app/src/window_manager.rs))
 
-3. **Per-widget paint-epoch visibility.** `WidgetTree::paint_epoch`
+3. **Per-widget paint-epoch visibility (loops only).** `WidgetTree::paint_epoch`
    ticks on every non-cache-hit `render()`. `paint_widget_cached`
    stamps `last_painted_epoch` on each widget whose bounds survive
-   clip intersection. The scheduler skips any animation whose
-   widget's `last_painted_epoch + 1 < paint_epoch` — a scrolled-off
-   spinner pauses itself. When the widget scrolls back in, the
-   resulting paint re-stamps its epoch and
+   clip intersection. The scheduler skips any **looping** animation
+   whose widget's `last_painted_epoch + 1 < paint_epoch` — a
+   scrolled-off spinner pauses itself. When the widget scrolls back
+   in, the resulting paint re-stamps its epoch and
    `update_control_flow` re-queries `next_deadline` in `post_event`,
    re-arming the animation. `paint_epoch == 0` is the "never
    rendered" sentinel: always visible, so headless unit tests that
    only call `layout()` don't regress.
+
+   **One-shots are *not* gated by visibility.** A widget like
+   [`Collapse`](../crates/fern-widgets/src/collapse.rs) drives a
+   one-shot 0..1 progress signal that determines its own height —
+   so when collapsed, its bounds are zero, it never paints, never
+   re-stamps `last_painted_epoch`, and a visibility gate would
+   chicken-and-egg the expand: never tick, never grow, never paint.
+   Gating only loops keeps the scrolled-off-spinner saving while
+   making widget-driven layout tweens work. The cost is bounded —
+   a one-shot with no observers on screen still completes in
+   `duration` and stops itself, so the worst case is a single
+   tween's worth of background ticks.
    ([rendering_impl.rs](../crates/fern-core/src/widget_tree/rendering_impl.rs),
-   [arena.rs](../crates/fern-core/src/arena.rs))
+   [arena.rs](../crates/fern-core/src/arena.rs),
+   [animation.rs](../crates/fern-core/src/animation.rs))
 
 4. **Pixel-stable ε, mandatory terminal bypass.** Each
    `AnimationRequest` can carry an `epsilon` (unit: the signal's own
@@ -138,7 +151,7 @@ FernUI carries two animation paths that coexist. Pick by shape:
 | Path | When to use | Cost when visible | `paint()` re-runs per frame? |
 | --- | --- | --- | --- |
 | **`Signal<f32>::animate_to` / `animate_looping`** (via `AnimationScheduler`) | Tweens driving arbitrary values: scroll offsets, sidebar slide, toggle knob, slider fill width, any custom interpolation your `paint()` consumes | CPU: `signal.set` → `paint()` → vertex-buffer rewrite → wgpu submit. Tight but per-frame. | Yes. |
-| **`ctx.animated_quad(kind)`** (via `AnimatedQuadRegistry`) | Decorative motion that fits a quad + shader: `ProgressBar::indeterminate` (procedural sweep), animated `IconWidget` (sprite-atlas frame cycling), future pulse / shimmer / skeleton | CPU: one `queue.write_buffer` of the `AnimParams` struct (64 B per active quad) + one `draw_indexed` call. `paint()` does not run. | **No.** |
+| **`ctx.animated_quad(kind)`** (via `AnimatedQuadRegistry`) | Decorative motion that fits a quad + shader: `ProgressBar::indeterminate` (procedural sweep), `Spinner` (procedural arc), animated `IconWidget` (sprite-atlas frame cycling), future pulse / shimmer / skeleton | CPU: one `queue.write_buffer` of the `AnimParams` struct (64 B per active quad) + one `draw_indexed` call. `paint()` does not run. | **No.** |
 
 Use signal when `paint()` needs the current animated value to compute
 its draw commands (e.g., scroll offset shifts every child's
@@ -155,6 +168,17 @@ self.handle = Some(ctx.animated_quad(AnimatedQuadKind::IndeterminateSweep {
     sweep_ratio: 0.42,
     track_color: SurfaceRole::Sunken.into(),
     fill_color:  SurfaceRole::Accent.into(),
+}));
+
+// Procedural arc (Spinner). Anti-aliased via fwidth smoothstep
+// in shaders/anim_procedural.wgsl — soft alpha at radial bounds and
+// arc start/end. Pipeline already uses ALPHA_BLENDING, so the soft
+// alpha composites correctly.
+self.handle = Some(ctx.animated_quad(AnimatedQuadKind::SpinnerArc {
+    period: theme.motion.duration_indeterminate_sweep,
+    arc_fraction: 0.75,
+    stroke_fraction: 0.12,
+    color: TextRole::Accent.into(),
 }));
 
 // Sprite atlas (animated IconWidget — frames pre-packed into a grid).
