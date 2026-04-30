@@ -221,6 +221,14 @@ Application:
   write + one `draw_indexed` per frame, no `paint()` re-runs). Honours
   `prefers-reduced-motion` with a static three-quarter arc fallback.
   See [crates/fern-widgets/src/spinner.rs](crates/fern-widgets/src/spinner.rs).
+- `OverlayRequest::with_fade(duration)` — fade-in / fade-out animation
+  for any overlay (tooltip, popover, snackbar, …). The framework wires
+  everything internally: creates an animated opacity signal, applies it
+  as an opacity scope on the content (via `set_opacity`), kicks off the
+  0→1 tween at show time, runs the 1→0 tween on dismiss, and defers
+  the actual stack removal by `duration` so the tween plays out before
+  the content goes dormant. Caller specifies just the duration — no
+  `Fade` widget wrapping, no signal management.
 
 **Lower-level types** (still public, used when you need full control):
 

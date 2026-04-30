@@ -6,10 +6,11 @@
 //! event routing, and accessibility.
 
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fern_canvas::{Point, Rect, Size, Vec2};
 
+use crate::signal::Signal;
 use crate::widget_id::WidgetId;
 
 /// Callback invoked by the framework when an overlay is dismissed —
@@ -102,6 +103,66 @@ pub struct OverlayRequest {
     /// when the framework tears down the overlay without going
     /// through the anchor's own key/tap handlers.
     pub on_dismiss: Option<OverlayDismissCallback>,
+    /// Optional fade-in / fade-out duration. When `Some`, the
+    /// framework attaches an animated opacity scope to `content_id`
+    /// at show time (using the existing `set_opacity` rendering
+    /// pipeline — no `Fade` widget required from the caller), tweens
+    /// the opacity from 0 → 1 over `duration`, and on dismiss
+    /// reverses the tween and defers the actual stack removal by
+    /// `duration`. Construct with [`OverlayRequest::with_fade`] when
+    /// the struct-literal idiom isn't ergonomic.
+    pub fade_duration: Option<Duration>,
+}
+
+impl OverlayRequest {
+    /// Attach a fade-in / fade-out animation to this request.
+    /// `duration` controls both directions. The framework wires
+    /// everything internally — caller does not create a `Fade`
+    /// widget or manage a signal:
+    ///
+    /// ```ignore
+    /// let req = OverlayRequest { content_id, anchor, ... }
+    ///     .with_fade(theme.motion.duration_fast);
+    /// ```
+    pub fn with_fade(mut self, duration: Duration) -> Self {
+        self.fade_duration = Some(duration);
+        self
+    }
+}
+
+/// Fade-on-show / fade-on-dismiss state for an overlay. Populated by
+/// the framework when an [`OverlayRequest`] carries `fade_duration`.
+/// The framework owns the `Signal<f32>` (an animated 0..1 opacity)
+/// and applies it to the overlay's content via `set_opacity`, so the
+/// caller doesn't need to wrap the content in a `Fade` widget — the
+/// rendering walker's opacity scope (Item 1) does the work.
+///
+/// Mirrors the `pointer_leave_started_real/_sim` and
+/// `shown_at_real/_sim` dual-clock pattern used elsewhere in
+/// `ActiveOverlay`: the real-clock field drives the live event loop;
+/// the sim-clock field drives the headless `tick_animations` /
+/// `advance_time` test path so deterministic tests can advance the
+/// fade-out window without `std::thread::sleep`.
+#[derive(Clone)]
+pub(crate) struct OverlayFadeState {
+    /// Animated opacity (0..1) bound to the overlay's content via
+    /// `WidgetTree::set_opacity`. The framework starts the tween at
+    /// 0 and animates to 1 on show, then animates back to 0 on
+    /// dismiss before the deferred removal fires.
+    pub opacity: Signal<f32>,
+    /// Tween duration on both directions. Picked from
+    /// `theme.motion.duration_fast` for tooltip / popover and
+    /// `duration_normal` for snackbar / dialog.
+    pub duration: Duration,
+    /// `Some(start_real)` when a dismiss has been requested and the
+    /// fade-out tween has started. The real-clock processor
+    /// considers the overlay ready for removal once
+    /// `Instant::now() - start_real >= duration`.
+    pub dismissing_started_real: Option<Instant>,
+    /// `Some(start_sim)` set in lockstep with `dismissing_started_real`
+    /// using the tree's `sim_clock`. The sim-clock processor uses
+    /// it for deterministic headless tests.
+    pub dismissing_started_sim: Option<Instant>,
 }
 
 /// An active overlay in the stack.
@@ -133,6 +194,11 @@ pub(crate) struct ActiveOverlay {
     /// exactly once when the overlay is removed from the stack,
     /// regardless of dismiss path.
     pub on_dismiss: Option<OverlayDismissCallback>,
+    /// Optional fade-in / fade-out state. Configured post-show via
+    /// [`OverlayManager::set_fade`]. When `Some`, all dismiss paths
+    /// (auto, escape, click-outside, pointer-leave, manual) defer
+    /// the actual removal until the fade-out tween completes.
+    pub fade: Option<OverlayFadeState>,
 }
 
 // Manual Debug impl: `Rc<dyn Fn()>` doesn't derive Debug, but the
@@ -156,6 +222,7 @@ impl std::fmt::Debug for ActiveOverlay {
             .field("shown_at_real", &self.shown_at_real)
             .field("shown_at_sim", &self.shown_at_sim)
             .field("on_dismiss", &self.on_dismiss.as_ref().map(|_| "<callback>"))
+            .field("fading", &self.fade.is_some())
             .finish()
     }
 }
@@ -164,6 +231,13 @@ impl std::fmt::Debug for ActiveOverlay {
 pub struct OverlayManager {
     pub(crate) stack: Vec<ActiveOverlay>,
     next_id: u64,
+    /// Latest known sim-clock value, mirrored from
+    /// [`WidgetTree::sim_clock`] via [`Self::set_sim_clock`]. Read by
+    /// `dismiss` to stamp `dismissing_started_sim` in lockstep with
+    /// `dismissing_started_real`. Defaults to `Instant::now()` so
+    /// constructions outside a tree (tests of OverlayManager in
+    /// isolation) still produce sensible values.
+    sim_clock: Instant,
 }
 
 impl OverlayManager {
@@ -171,7 +245,16 @@ impl OverlayManager {
         Self {
             stack: Vec::new(),
             next_id: 1,
+            sim_clock: Instant::now(),
         }
+    }
+
+    /// Mirror the tree's sim_clock onto the manager so the fade
+    /// dismiss path can stamp the sim-time start in lockstep with
+    /// real time. Called by `WidgetTree` whenever `sim_clock` is
+    /// advanced (e.g. from `tick_animations` and `advance_time`).
+    pub(crate) fn set_sim_clock(&mut self, now_sim: Instant) {
+        self.sim_clock = now_sim;
     }
 
     /// Show a new overlay. Returns the OverlayId.
@@ -209,9 +292,43 @@ impl OverlayManager {
             shown_at_real: now,
             shown_at_sim: now,
             on_dismiss: request.on_dismiss,
+            fade: None,
         };
         self.stack.push(overlay);
         id
+    }
+
+    /// Internal: install a framework-managed opacity signal as the
+    /// overlay's fade state. Called by `WidgetTree::show_overlay`
+    /// when [`OverlayRequest::fade_duration`] is `Some`. The
+    /// framework also applies the same signal to `content_id` via
+    /// `set_opacity` (so the rendering walker emits the per-frame
+    /// opacity scope) and kicks off the 0→1 fade-in tween.
+    pub(crate) fn attach_fade(
+        &mut self,
+        id: OverlayId,
+        opacity: Signal<f32>,
+        duration: Duration,
+    ) {
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id) {
+            overlay.fade = Some(OverlayFadeState {
+                opacity,
+                duration,
+                dismissing_started_real: None,
+                dismissing_started_sim: None,
+            });
+        }
+    }
+
+    /// Public read-only accessor for the fade state. Returns the
+    /// duration if fade is configured, `None` otherwise. Used by
+    /// `WidgetTree::dismiss_overlay` to know whether to leave the
+    /// content active for the fade-out window.
+    pub fn fade_duration(&self, id: OverlayId) -> Option<Duration> {
+        self.stack
+            .iter()
+            .find(|o| o.id == id)
+            .and_then(|o| o.fade.as_ref().map(|f| f.duration))
     }
 
     pub fn next_auto_dismiss_deadline(&self) -> Option<std::time::Instant> {
@@ -340,7 +457,57 @@ impl OverlayManager {
 
     /// Dismiss an overlay and all its children (cascade).
     /// Returns the content widget IDs of all dismissed overlays.
+    ///
+    /// **Fade-aware**: when an overlay was shown with
+    /// [`OverlayRequest::with_fade`] and is not yet fading out, this
+    /// method instead kicks off the fade-out tween on the framework-
+    /// owned opacity signal and marks `dismiss_at`, returning an
+    /// empty vec — the actual stack removal and content dormancy
+    /// happen later via
+    /// [`process_pending_fade_dismissals`](Self::process_pending_fade_dismissals).
+    /// Cascaded descendants vanish with the leaf's fade-out (they're
+    /// typically submenus the user dismissed *via* the leaf, and a
+    /// per-descendant tween would compete with the leaf's).
     pub fn dismiss(&mut self, id: OverlayId) -> Vec<WidgetId> {
+        // Fade gate: if the target overlay has fade and isn't
+        // already fading out, kick off the fade-out and defer the
+        // entire cascade. Stamps both real and sim start times in
+        // lockstep — the sim time uses the manager's mirrored
+        // `sim_clock`, kept in sync by `WidgetTree::set_sim_clock`.
+        let sim_now = self.sim_clock;
+        if let Some(overlay) = self.stack.iter_mut().find(|o| o.id == id)
+            && let Some(fade) = &mut overlay.fade
+            && fade.dismissing_started_real.is_none()
+        {
+            // Animate opacity 1 → 0 over `duration`. Uses the same
+            // try_animate_with_options path the rest of the
+            // animation system uses; the scheduler picks it up next
+            // frame and ticks the signal, dirty-marking the
+            // content's opacity binding for repaint.
+            let _ = fade
+                .opacity
+                .try_animate_with_options(crate::animation::AnimationRequest {
+                    target: 0.0,
+                    duration: fade.duration,
+                    easing: fern_tokens::Easing::EaseOut,
+                    frame_interval: None,
+                    looping: false,
+                    epsilon: 0.0,
+                    max_duration: None,
+                });
+            let now_real = Instant::now();
+            fade.dismissing_started_real = Some(now_real);
+            fade.dismissing_started_sim = Some(sim_now);
+            return Vec::new();
+        }
+        self.dismiss_immediate(id)
+    }
+
+    /// Internal: same shape as the original `dismiss`, but bypasses
+    /// the fade gate. Used both by `dismiss` (no fade configured /
+    /// already fading out) and by `process_pending_fade_dismissals`
+    /// when a fade-out tween has completed.
+    fn dismiss_immediate(&mut self, id: OverlayId) -> Vec<WidgetId> {
         // Collect IDs to dismiss: the target + all descendants
         let mut to_dismiss = vec![id];
         let mut i = 0;
@@ -374,6 +541,76 @@ impl OverlayManager {
             cb();
         }
         dismissed_content
+    }
+
+    /// Drain overlays whose real-clock fade-out tween has completed.
+    /// Call from the live layout pass; the framework dormants the
+    /// returned content widget IDs and restores focus where
+    /// appropriate. Each entry is
+    /// `(overlay_id, dismissed_content_ids, focus_restore)` so the
+    /// layout pass can run the same dormant-and-restore-focus flow
+    /// it uses for
+    /// [`dismiss_with_focus_restore`](Self::dismiss_with_focus_restore).
+    pub fn process_pending_fade_dismissals(
+        &mut self,
+        now: Instant,
+    ) -> Vec<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
+        self.process_pending_fade_dismissals_with(|fade| {
+            let started = fade.dismissing_started_real?;
+            Some(now.saturating_duration_since(started) >= fade.duration)
+        })
+    }
+
+    /// Sim-clock variant for deterministic headless tests. Same
+    /// shape as [`process_pending_fade_dismissals`](Self::process_pending_fade_dismissals)
+    /// but reads `dismissing_started_sim`.
+    pub fn process_pending_fade_dismissals_sim(
+        &mut self,
+        now_sim: Instant,
+    ) -> Vec<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
+        self.process_pending_fade_dismissals_with(|fade| {
+            let started = fade.dismissing_started_sim?;
+            Some(now_sim.saturating_duration_since(started) >= fade.duration)
+        })
+    }
+
+    fn process_pending_fade_dismissals_with(
+        &mut self,
+        mut elapsed_done: impl FnMut(&OverlayFadeState) -> Option<bool>,
+    ) -> Vec<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
+        let ready: Vec<(OverlayId, Option<WidgetId>)> = self
+            .stack
+            .iter()
+            .filter_map(|o| {
+                let fade = o.fade.as_ref()?;
+                if elapsed_done(fade)? {
+                    Some((o.id, o.focus_restore))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        ready
+            .into_iter()
+            .map(|(id, focus_restore)| {
+                let dismissed = self.dismiss_immediate(id);
+                (id, dismissed, focus_restore)
+            })
+            .collect()
+    }
+
+    /// Earliest real-clock deadline at which a fading-out overlay
+    /// wants to finish its dismissal. Used by the event-loop wakeup
+    /// logic to schedule the next frame.
+    pub fn next_fade_dismiss_deadline(&self) -> Option<Instant> {
+        self.stack
+            .iter()
+            .filter_map(|o| {
+                let fade = o.fade.as_ref()?;
+                let started = fade.dismissing_started_real?;
+                Some(started + fade.duration)
+            })
+            .min()
     }
 
     /// Dismiss the topmost overlay unconditionally (e.g., ArrowLeft for submenu cascading).
@@ -439,9 +676,23 @@ impl OverlayManager {
         self.stack.iter().map(|o| o.content_id).collect()
     }
 
-    /// Get all active overlay IDs (for testing/querying).
+    /// Get all active overlay IDs (for testing/querying). Excludes
+    /// overlays currently fading out — once a dismiss has been
+    /// requested the overlay is conceptually gone (the visible
+    /// opacity tween is on the way to 0 and the deferred removal
+    /// will fire on the next layout pass after the fade-out
+    /// completes), so user code asking "is this overlay still up?"
+    /// gets the expected answer.
     pub fn active_ids(&self) -> Vec<OverlayId> {
-        self.stack.iter().map(|o| o.id).collect()
+        self.stack
+            .iter()
+            .filter(|o| {
+                o.fade
+                    .as_ref()
+                    .is_none_or(|f| f.dismissing_started_real.is_none())
+            })
+            .map(|o| o.id)
+            .collect()
     }
 
     /// Get the anchor widget for an overlay.
@@ -658,6 +909,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         assert_eq!(mgr.len(), 1);
 
@@ -676,6 +928,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         let _child = mgr.show(OverlayRequest {
             content_id: fake_id(11),
@@ -685,6 +938,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: Some(parent),
             on_dismiss: None,
+            fade_duration: None,
         });
         assert_eq!(mgr.len(), 2);
 
@@ -704,6 +958,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         let b = mgr.show(OverlayRequest {
             content_id: fake_id(11),
@@ -713,6 +968,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         let dismissed = mgr.dismiss_top();
@@ -731,6 +987,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         // Set overlay bounds
@@ -760,6 +1017,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert!(
@@ -780,6 +1038,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         let dismissed = mgr.try_dismiss_top_on_escape();
@@ -798,6 +1057,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         // Escape should dismiss
@@ -817,6 +1077,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert!(mgr.try_dismiss_top_on_escape().is_none());
@@ -834,6 +1095,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert!(mgr.try_dismiss_top_on_escape().is_none());
@@ -851,6 +1113,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         let id = mgr.active_ids()[0];
@@ -874,6 +1137,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert!(
@@ -894,6 +1158,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         mgr.show(OverlayRequest {
             content_id: fake_id(20),
@@ -903,6 +1168,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         let ids = mgr.active_content_ids();
@@ -922,6 +1188,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         let b = mgr.show(OverlayRequest {
             content_id: fake_id(11),
@@ -931,6 +1198,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         // Both overlays at origin with same bounds
@@ -952,6 +1220,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 120.0));
@@ -978,6 +1247,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 64.0));

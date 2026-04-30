@@ -977,6 +977,7 @@ mod tests {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         tree.layout(SizeProposal::exact(800.0, 600.0));
 

@@ -300,6 +300,14 @@ impl Widget for Popover {
         let show_caret = self.show_caret;
         let caret_size = self.caret_size;
         let style = self.style;
+        // Captured at build time so the open handlers don't need a
+        // theme lookup at fire-time. `duration_fast` matches the
+        // MotionTokens recommendation for popup fade.
+        let fade_duration = if ctx.prefers_reduced_motion() {
+            None
+        } else {
+            Some(ctx.theme().motion.duration_fast)
+        };
         let content_id = ctx.add(PopoverSurface::new(
             self.pending_content
                 .take()
@@ -353,6 +361,7 @@ impl Widget for Popover {
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
                                     on_dismiss: Some(tap_dismiss.clone()),
+                                    fade_duration,
                                 });
                             }
                         })
@@ -375,6 +384,7 @@ impl Widget for Popover {
                                         layer: OverlayLayer::InTree,
                                         parent_overlay: None,
                                         on_dismiss: Some(key_dismiss.clone()),
+                                        fade_duration,
                                     });
                                     EventResponse::Handled
                                 }
@@ -395,6 +405,7 @@ impl Widget for Popover {
                                         layer: OverlayLayer::InTree,
                                         parent_overlay: None,
                                         on_dismiss: Some(action_dismiss.clone()),
+                                        fade_duration,
                                     });
                                     EventResponse::Handled
                                 } else {
@@ -441,6 +452,7 @@ impl Widget for Popover {
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
                                 on_dismiss: Some(tap_dismiss.clone()),
+                                fade_duration,
                             });
                         }
                     })
@@ -463,6 +475,7 @@ impl Widget for Popover {
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
                                     on_dismiss: Some(key_dismiss.clone()),
+                                    fade_duration,
                                 });
                                 EventResponse::Handled
                             }
@@ -483,6 +496,7 @@ impl Widget for Popover {
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
                                     on_dismiss: Some(action_dismiss.clone()),
+                                    fade_duration,
                                 });
                                 EventResponse::Handled
                             } else {

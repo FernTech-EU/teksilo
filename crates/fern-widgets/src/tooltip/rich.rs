@@ -459,6 +459,7 @@ fn make_link_click_handler(
                     layer: OverlayLayer::InTree,
                     parent_overlay: None,
                     on_dismiss: None,
+                    fade_duration: None,
                 });
             }
             return;

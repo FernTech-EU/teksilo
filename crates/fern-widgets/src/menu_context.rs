@@ -103,6 +103,7 @@ impl MenuContext {
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         // Focus the inner MenuList (not the host) so it receives key events
         // first. ArrowLeft/Escape bubble from MenuList → host for cross-menu nav.

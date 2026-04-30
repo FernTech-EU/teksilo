@@ -193,6 +193,7 @@ fn handle_secondary_click(
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
     }
 

@@ -122,9 +122,17 @@ impl WidgetTree {
         }
         let sim_now = self.sim_clock;
         let real_now = std::time::Instant::now();
+        // Tooltips fade in over `duration_fast` (~120 ms) — matches the
+        // MotionTokens recommendation for "tooltip fade, popup fade".
+        // Reduced-motion users get an instant snap.
+        let fade_duration = if self.prefers_reduced_motion {
+            None
+        } else {
+            Some(self.theme.motion.duration_fast)
+        };
         for (anchor_id, content_id) in to_show {
             self.arena.activate(content_id);
-            let oid = self.overlay_manager.show(crate::overlay::OverlayRequest {
+            let oid = self.show_overlay(crate::overlay::OverlayRequest {
                 content_id,
                 anchor: anchor_id,
                 placement: crate::overlay::OverlayPlacement::NearAnchor {
@@ -136,6 +144,7 @@ impl WidgetTree {
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
                 on_dismiss: None,
+                fade_duration,
             });
             if let Some(entry) = self
                 .tooltips
@@ -414,9 +423,15 @@ impl WidgetTree {
 
         let sim_now = self.sim_clock;
         let real_now = std::time::Instant::now();
+        // Sticky tooltips share the standard tooltip fade.
+        let fade_duration = if self.prefers_reduced_motion {
+            None
+        } else {
+            Some(self.theme.motion.duration_fast)
+        };
         for (anchor_id, content_id) in to_show {
             self.arena.activate(content_id);
-            let oid = self.overlay_manager.show(crate::overlay::OverlayRequest {
+            let oid = self.show_overlay(crate::overlay::OverlayRequest {
                 content_id,
                 anchor: anchor_id,
                 placement: crate::overlay::OverlayPlacement::NearAnchor {
@@ -426,6 +441,7 @@ impl WidgetTree {
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
                 on_dismiss: None,
+                fade_duration,
             });
             if let Some(entry) = self
                 .tooltips
@@ -661,7 +677,13 @@ impl WidgetTree {
         &mut self,
         request: crate::overlay::OverlayRequest,
     ) -> crate::overlay::OverlayId {
-        self.overlay_manager.show(request)
+        let fade_duration = request.fade_duration;
+        let content_id = request.content_id;
+        let id = self.overlay_manager.show(request);
+        if let Some(duration) = fade_duration {
+            self.attach_overlay_fade(id, content_id, duration);
+        }
+        id
     }
 
     /// Show an overlay relative to a source widget, inheriting the source
@@ -678,10 +700,15 @@ impl WidgetTree {
             return existing;
         }
 
+        let fade_duration = request.fade_duration;
+        let content_id = request.content_id;
         let current_focus = self.focused;
         let id = self.overlay_manager.show(request);
         if let Some(focus_id) = current_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
+        }
+        if let Some(duration) = fade_duration {
+            self.attach_overlay_fade(id, content_id, duration);
         }
         id
     }
@@ -691,9 +718,42 @@ impl WidgetTree {
         request: crate::overlay::OverlayRequest,
         duration: std::time::Duration,
     ) -> crate::overlay::OverlayId {
+        let fade_duration = request.fade_duration;
+        let content_id = request.content_id;
         let id = self.overlay_manager.show_for(request, duration);
         self.overlay_manager.set_shown_at_sim(id, self.sim_clock);
+        if let Some(fade) = fade_duration {
+            self.attach_overlay_fade(id, content_id, fade);
+        }
         id
+    }
+
+    /// Internal: install an animated opacity scope on `content_id`,
+    /// kick off the 0→1 fade-in tween, and register the signal with
+    /// the overlay manager so the matching fade-out plays on
+    /// dismiss. Owner of the animated signal is `content_id` itself
+    /// — the visibility-gate fix from the scheduler ensures the
+    /// fade-in still ticks even when the content is freshly inserted
+    /// and not yet stamped with a paint epoch.
+    fn attach_overlay_fade(
+        &mut self,
+        overlay_id: crate::overlay::OverlayId,
+        content_id: WidgetId,
+        duration: std::time::Duration,
+    ) {
+        let opacity = crate::signal::Signal::<f32>::new_animated(0.0);
+        self.register_animated_signal(&opacity, content_id);
+        self.set_opacity(content_id, opacity.clone());
+        let _ = opacity.try_animate_with_options(crate::animation::AnimationRequest {
+            target: 1.0,
+            duration,
+            easing: fern_tokens::Easing::EaseOut,
+            frame_interval: None,
+            looping: false,
+            epsilon: 0.0,
+            max_duration: None,
+        });
+        self.overlay_manager.attach_fade(overlay_id, opacity, duration);
     }
 
     /// Dismiss an overlay programmatically. Uses
@@ -815,6 +875,7 @@ mod tests {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -840,6 +901,7 @@ mod tests {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -865,6 +927,7 @@ mod tests {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 1);
@@ -889,6 +952,7 @@ mod tests {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         tree.overlay_manager
@@ -921,6 +985,7 @@ mod tests {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         tree.show_overlay(crate::overlay::OverlayRequest {
             content_id: content_b,
@@ -930,6 +995,7 @@ mod tests {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: Some(parent),
             on_dismiss: None,
+            fade_duration: None,
         });
 
         assert_eq!(tree.active_overlays().len(), 2);
@@ -955,6 +1021,7 @@ mod tests {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
 
         tree.layout(SizeProposal::exact(800.0, 600.0));
@@ -1041,6 +1108,7 @@ mod tests {
                 layer: crate::overlay::OverlayLayer::InTree,
                 parent_overlay: None,
                 on_dismiss: None,
+                fade_duration: None,
             },
             std::time::Duration::from_millis(300),
         );
@@ -1053,5 +1121,71 @@ mod tests {
         tree.advance_time(std::time::Duration::from_millis(150));
         assert!(tree.active_overlays().is_empty());
         assert!(!tree.is_visible(content));
+    }
+
+    #[test]
+    fn fade_dismiss_keeps_overlay_off_active_list_immediately() {
+        // The user-facing `active_overlays()` accessor reports a
+        // dismissing-with-fade overlay as gone the moment dismiss is
+        // requested — even though the fade-out tween is still
+        // playing under the hood. Caller code asking "is this
+        // overlay still up?" gets the expected answer; the framework
+        // reaps the actual content on the next layout pass past the
+        // tween deadline.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Faded"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: Some(std::time::Duration::from_millis(100)),
+        });
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        tree.dismiss_overlay(id);
+        // Reported as gone immediately, even though the content
+        // widget is still active and painting the fade-out tween —
+        // the deferred removal happens later in
+        // process_overlay_fade_dismissals_real.
+        assert!(tree.active_overlays().is_empty());
+    }
+
+    #[test]
+    fn fade_dismiss_defers_content_dormancy_until_sim_tween_completes() {
+        // Sim-clock variant of the fade-defer contract: dismiss kicks
+        // off the fade-out tween and stamps both real- and sim-time
+        // start markers. `advance_time` (sim-clock) past the tween
+        // duration flushes the deferred removal via
+        // `process_overlay_fade_dismissals_sim`.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Faded"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: Some(std::time::Duration::from_millis(100)),
+        });
+        tree.dismiss_overlay(id);
+        assert!(tree.is_visible(content), "content stays active during fade-out");
+
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(
+            !tree.is_visible(content),
+            "after sim-time past the tween window, deferred removal fires"
+        );
     }
 }

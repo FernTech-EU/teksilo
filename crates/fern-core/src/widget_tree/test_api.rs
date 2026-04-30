@@ -91,10 +91,15 @@ impl WidgetTree {
     /// and tooltip timers. Enables deterministic testing without real delays.
     pub fn advance_time(&mut self, duration: std::time::Duration) {
         self.sim_clock += duration;
+        // Mirror the new sim_clock onto the overlay manager so any
+        // dismiss triggered by the process_* steps below stamps its
+        // sim-time start in lockstep with real time.
+        self.overlay_manager.set_sim_clock(self.sim_clock);
         self.process_tooltips();
         self.process_delayed_overlays();
         self.process_pointer_leave_overlays();
         self.process_auto_dismiss_overlays();
+        self.process_overlay_fade_dismissals_sim();
     }
 
     /// Get the current simulated clock value.

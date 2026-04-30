@@ -536,6 +536,7 @@ impl Widget for MenuItem {
                             layer: OverlayLayer::InTree,
                             parent_overlay: None,
                             on_dismiss: Some(dismiss_for_tap.clone()),
+                            fade_duration: None,
                         });
                         ctx.request_focus(sub_id);
                     }
@@ -561,6 +562,7 @@ impl Widget for MenuItem {
                                     layer: OverlayLayer::InTree,
                                     parent_overlay: None,
                                     on_dismiss: Some(dismiss_for_hover.clone()),
+                                    fade_duration: None,
                                 },
                                 open_delay,
                                 sub_id,
@@ -645,6 +647,7 @@ impl Widget for MenuItem {
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
                                 on_dismiss: Some(dismiss_for_key.clone()),
+                                fade_duration: None,
                             });
                             ctx.request_focus(sub_id);
                         }
@@ -670,6 +673,7 @@ impl Widget for MenuItem {
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
                                 on_dismiss: Some(dismiss_for_key.clone()),
+                                fade_duration: None,
                             });
                             ctx.request_focus(sub_id);
                             EventResponse::Handled

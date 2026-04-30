@@ -551,6 +551,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                     layer: OverlayLayer::InTree,
                     parent_overlay: None,
                     on_dismiss: Some(dismiss_callback.clone()),
+                    fade_duration: None,
                 });
                 // Searchable mode: land focus in the search field so
                 // the user can start typing immediately after opening.

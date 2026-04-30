@@ -599,6 +599,46 @@ impl WidgetTree {
         );
     }
 
+    /// Drain overlays whose fade-out tween has completed (set up by
+    /// [`OverlayRequest::with_fade`]). Same dormant-and-restore-focus
+    /// flow as the normal dismiss path; called once per layout pass
+    /// after `process_auto_dismiss_overlays_real` so an overlay that
+    /// hits its auto-dismiss deadline kicks off its fade-out tween
+    /// in the same pass.
+    pub(crate) fn process_overlay_fade_dismissals_real(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let now = std::time::Instant::now();
+        let pending = self.overlay_manager.process_pending_fade_dismissals(now);
+        for (_id, dismissed, focus_restore) in pending {
+            self.dormant_dismissed_content(&dismissed, &mut *ops);
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut *ops);
+            }
+        }
+    }
+
+    /// Sim-clock variant for headless tests. Same shape as
+    /// [`process_overlay_fade_dismissals_real`](Self::process_overlay_fade_dismissals_real)
+    /// but reads `dismissing_started_sim`.
+    pub(crate) fn process_overlay_fade_dismissals_sim(&mut self) {
+        let mut noop = crate::window::NoopWindowOps;
+        let pending = self
+            .overlay_manager
+            .process_pending_fade_dismissals_sim(self.sim_clock);
+        for (_id, dismissed, focus_restore) in pending {
+            self.dormant_dismissed_content(&dismissed, &mut noop);
+            if let Some(restore_id) = focus_restore
+                && self.arena.is_active(restore_id)
+            {
+                self.focus_ops(restore_id, &mut noop);
+            }
+        }
+    }
+
     fn process_auto_dismiss_overlays_impl(
         &mut self,
         elapsed_fn: impl Fn(&crate::overlay::ActiveOverlay) -> Option<std::time::Duration>,
@@ -933,6 +973,10 @@ impl WidgetTree {
         self.process_pending_animations_at(self.sim_clock);
 
         self.sim_clock += duration;
+        // Mirror onto the overlay manager so any fade-out tween
+        // started during this tick stamps its sim-time start in
+        // lockstep with real time.
+        self.overlay_manager.set_sim_clock(self.sim_clock);
 
         if self.frame_tick_requested.get() {
             self.frame_tick_requested.set(false);

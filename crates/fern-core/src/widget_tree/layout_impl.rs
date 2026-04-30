@@ -177,6 +177,7 @@ impl WidgetTree {
         self.process_delayed_overlays_real(&mut *ops);
         self.process_pointer_leave_overlays_real(&mut *ops);
         self.process_auto_dismiss_overlays_real(&mut *ops);
+        self.process_overlay_fade_dismissals_real(&mut *ops);
         // Overlay / tooltip activation may have flipped widgets from
         // dormant → active; if any of those had `needs_rebuild`
         // pending (e.g. a shortcut rebind happened while the tooltip

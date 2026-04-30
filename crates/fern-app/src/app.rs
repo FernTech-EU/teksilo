@@ -137,6 +137,7 @@ fn present_in_tree_modal_request(
             layer: OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss,
+            fade_duration: None,
         },
     );
 

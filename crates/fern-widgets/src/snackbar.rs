@@ -21,6 +21,7 @@ fn present_snackbar(
     content_id: WidgetId,
     dismiss: DismissBehavior,
     auto_dismiss_after: Option<Duration>,
+    fade_duration: Option<Duration>,
 ) {
     ctx.dismiss_all_overlays();
     ctx.activate(content_id);
@@ -32,6 +33,7 @@ fn present_snackbar(
         layer: OverlayLayer::InTree,
         parent_overlay: None,
         on_dismiss: None,
+        fade_duration,
     };
     if let Some(duration) = auto_dismiss_after {
         ctx.show_overlay_for(request, duration);
@@ -279,6 +281,15 @@ impl Widget for Snackbar {
         let dismiss = self.dismiss.clone();
         let auto_dismiss_after = self.auto_dismiss_after;
         let style = self.style;
+        // Captured at build time so the present-snackbar handlers
+        // don't need a theme lookup at fire-time. `duration_normal`
+        // matches the snackbar's typical "notification slide"
+        // recommendation in MotionTokens.
+        let fade_duration = if ctx.prefers_reduced_motion() {
+            None
+        } else {
+            Some(ctx.theme().motion.duration_normal)
+        };
         let content_id = ctx.add(
             SnackbarSurface::new(
                 self.pending_content
@@ -301,6 +312,7 @@ impl Widget for Snackbar {
                     content_id,
                     dismiss.clone(),
                     auto_dismiss_after,
+                    fade_duration,
                 );
             }
         };
@@ -323,6 +335,7 @@ impl Widget for Snackbar {
                                 content_id,
                                 dismiss.clone(),
                                 auto_dismiss_after,
+                                fade_duration,
                             );
                             EventResponse::Handled
                         }
@@ -338,6 +351,7 @@ impl Widget for Snackbar {
                                 content_id,
                                 dismiss.clone(),
                                 auto_dismiss_after,
+                                fade_duration,
                             );
                             EventResponse::Handled
                         } else {
@@ -370,6 +384,7 @@ impl Widget for Snackbar {
                                     content_id,
                                     dismiss.clone(),
                                     auto_dismiss_after,
+                                    fade_duration,
                                 );
                                 EventResponse::Handled
                             }
@@ -385,6 +400,7 @@ impl Widget for Snackbar {
                                     content_id,
                                     dismiss.clone(),
                                     auto_dismiss_after,
+                                    fade_duration,
                                 );
                                 EventResponse::Handled
                             } else {

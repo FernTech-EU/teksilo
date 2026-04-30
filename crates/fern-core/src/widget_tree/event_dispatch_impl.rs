@@ -396,6 +396,7 @@ impl WidgetTree {
             layer: crate::overlay::OverlayLayer::InTree,
             parent_overlay: None,
             on_dismiss: None,
+            fade_duration: None,
         });
         if let Some(focus_id) = prev_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
@@ -1287,6 +1288,7 @@ impl WidgetTree {
                     layer: crate::overlay::OverlayLayer::InTree,
                     parent_overlay: None,
                     on_dismiss: None,
+                    fade_duration: None,
                 });
                 // Force the next layout pass to run `position_overlays`
                 // and `set_content_bounds` — otherwise the preview sits
