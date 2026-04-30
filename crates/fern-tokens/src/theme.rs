@@ -103,6 +103,15 @@ pub struct ColorTokens {
     pub focus_ring: Color,
     pub focus_ring_error: Color,
     pub scrim: Color,
+
+    // ── Charts ──────────────────────────────────────────────────────────────
+    /// Series-color palette used by `fern-charts` BarChart / LineChart /
+    /// PieChart when an individual series carries no explicit color.
+    /// Defaults to the colorblind-safe Okabe-Ito sequence (see
+    /// Okabe & Ito 2008) — used by ggplot2, seaborn, and others.
+    /// Themes may override with brand colors. Charts wrap when the
+    /// series count exceeds the palette length.
+    pub chart_palette: Vec<Color>,
 }
 
 impl ColorTokens {
@@ -196,6 +205,9 @@ impl ColorTokens {
             focus_ring: Color::from_hex("#0FB5CC"),
             focus_ring_error: Color::from_hex("#DB3B4B"),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.32),
+
+            // Chart palette — Okabe-Ito (light: 8th color is black).
+            chart_palette: okabe_ito_palette(false),
         }
     }
 
@@ -301,6 +313,9 @@ impl ColorTokens {
             focus_ring: Color::from_hex("#19BDD4"),
             focus_ring_error: Color::from_hex("#E55765"),
             scrim: Color::from_rgba(0.0, 0.0, 0.0, 0.64),
+
+            // Chart palette — Okabe-Ito (dark: 8th color is white).
+            chart_palette: okabe_ito_palette(true),
         }
     }
 
@@ -466,6 +481,28 @@ impl ColorTokens {
     }
 }
 
+/// Okabe-Ito 8-color colorblind-safe palette (Okabe & Ito 2008).
+///
+/// The first 7 colors are identical in light and dark themes; the 8th
+/// flips between black (light) and white (dark) so the rest-of-spectrum
+/// fallback color contrasts with the surface.
+fn okabe_ito_palette(dark: bool) -> Vec<Color> {
+    vec![
+        Color::from_hex("#E69F00"), // Orange
+        Color::from_hex("#56B4E9"), // Sky blue
+        Color::from_hex("#009E73"), // Bluish green
+        Color::from_hex("#F0E442"), // Yellow
+        Color::from_hex("#0072B2"), // Blue
+        Color::from_hex("#D55E00"), // Vermilion
+        Color::from_hex("#CC79A7"), // Reddish purple
+        if dark {
+            Color::from_hex("#FFFFFF")
+        } else {
+            Color::from_hex("#000000")
+        },
+    ]
+}
+
 /// The complete theme containing all design tokens.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
@@ -603,6 +640,24 @@ mod tests {
         };
         let tokens = ColorTokens::from_os_colors(&os);
         assert_eq!(tokens.accent, sel);
+    }
+
+    #[test]
+    fn light_and_dark_palette_share_first_seven_colors() {
+        let light = ColorTokens::light_default();
+        let dark = ColorTokens::dark_default();
+        for i in 0..7 {
+            assert_eq!(light.chart_palette[i], dark.chart_palette[i]);
+        }
+        // 8th differs: black for light, white for dark.
+        assert_eq!(light.chart_palette[7], Color::from_hex("#000000"));
+        assert_eq!(dark.chart_palette[7], Color::from_hex("#FFFFFF"));
+    }
+
+    #[test]
+    fn chart_palette_has_eight_colors() {
+        assert_eq!(ColorTokens::light_default().chart_palette.len(), 8);
+        assert_eq!(ColorTokens::dark_default().chart_palette.len(), 8);
     }
 
     #[test]

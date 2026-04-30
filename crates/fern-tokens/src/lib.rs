@@ -14,13 +14,12 @@ pub mod typography;
 pub use alignment::{Alignment, HAlignment, VAlignment};
 pub use color::Color;
 pub use components::{
-    AccordionStyle, BadgeStyle, BreadcrumbStyle, ButtonStyle, CardStyle, CheckboxStyle,
-    ComboBoxStyle, ComponentStyles, DialogStyle, DividerStyle, GroupBoxStyle, IconButtonStyle,
-    LinkStyle, MenuStyle, NotificationStyle, PanelStyle, PopoverStyle, ProgressBarStyle,
-    RadioStyle, ScrollBarStyle, SegmentedControlStyle, SliderStyle, SnackbarStyle,
-    SplitButtonStyle, SplitViewStyle, StatusBarStyle, TabStyle, TextAreaStyle, TextFieldStyle,
-    ToggleStyle,
-    ToolbarStyle, TooltipStyle, TreeListStyle, WizardStyle,
+    AccordionStyle, BadgeStyle, BreadcrumbStyle, ButtonStyle, CardStyle, ChartStyle,
+    CheckboxStyle, ComboBoxStyle, ComponentStyles, DialogStyle, DividerStyle, GroupBoxStyle,
+    IconButtonStyle, LinkStyle, MenuStyle, NotificationStyle, PanelStyle, PopoverStyle,
+    ProgressBarStyle, RadioStyle, ScrollBarStyle, SegmentedControlStyle, SliderStyle,
+    SnackbarStyle, SplitButtonStyle, SplitViewStyle, StatusBarStyle, TabStyle, TextAreaStyle,
+    TextFieldStyle, ToggleStyle, ToolbarStyle, TooltipStyle, TreeListStyle, WizardStyle,
 };
 pub use layout::LayoutTokens;
 pub use motion::{Easing, MotionTokens, lerp};

@@ -722,6 +722,64 @@ impl Default for SplitViewStyle {
     }
 }
 
+// ─── Charts ─────────────────────────────────────────────────────────────────
+
+/// Style tokens for `fern-charts` (BarChart, LineChart, PieChart).
+///
+/// Charts pull their *colors* from theme roles + `ColorTokens::chart_palette`,
+/// so this struct only carries dimensions. Themes override individual fields
+/// to nudge density without touching layout code.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChartStyle {
+    pub plot_padding_top: f32,
+    pub plot_padding_right: f32,
+    pub plot_padding_bottom: f32,
+    pub plot_padding_leading: f32,
+    pub axis_tick_length: f32,
+    pub axis_label_gap: f32,
+    pub axis_title_gap: f32,
+    pub gridline_width: f32,
+    pub bar_min_width: f32,
+    pub line_default_width: f32,
+    pub point_default_radius: f32,
+    pub legend_swatch_size: f32,
+    pub legend_item_gap: f32,
+    pub legend_to_plot_gap: f32,
+    pub tooltip_padding: f32,
+    pub pie_padding: f32,
+    pub pie_label_gap: f32,
+    pub pie_leader_length: f32,
+    pub pie_min_slice_label_degrees: f32,
+    pub donut_default_inner_ratio: f32,
+}
+
+impl Default for ChartStyle {
+    fn default() -> Self {
+        Self {
+            plot_padding_top: 12.0,
+            plot_padding_right: 12.0,
+            plot_padding_bottom: 4.0,
+            plot_padding_leading: 4.0,
+            axis_tick_length: 4.0,
+            axis_label_gap: 4.0,
+            axis_title_gap: 8.0,
+            gridline_width: 1.0,
+            bar_min_width: 4.0,
+            line_default_width: 1.5,
+            point_default_radius: 3.0,
+            legend_swatch_size: 10.0,
+            legend_item_gap: 12.0,
+            legend_to_plot_gap: 8.0,
+            tooltip_padding: 8.0,
+            pie_padding: 8.0,
+            pie_label_gap: 4.0,
+            pie_leader_length: 12.0,
+            pie_min_slice_label_degrees: 12.0,
+            donut_default_inner_ratio: 0.55,
+        }
+    }
+}
+
 // ─── Aggregate ──────────────────────────────────────────────────────────────
 
 /// All per-component style structs, owned by the [`crate::theme::Theme`].
@@ -761,4 +819,5 @@ pub struct ComponentStyles {
     pub snackbar: SnackbarStyle,
     pub divider: DividerStyle,
     pub split_view: SplitViewStyle,
+    pub chart: ChartStyle,
 }
