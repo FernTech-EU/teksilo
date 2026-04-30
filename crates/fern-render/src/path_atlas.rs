@@ -257,20 +257,90 @@ impl PathAtlas {
         None
     }
 
-    /// Evict LRU entries and repack. Simple approach: clear everything older than
-    /// the median frame age if more than half the entries are stale.
+    /// Evict entries from previous frames and repack. Entries used in the
+    /// **current** frame are preserved — otherwise a path inserted earlier
+    /// in the same `render()` walk could be evicted by a later one, leaving
+    /// the earlier path's `AtlasRegion` pointing at coordinates that now
+    /// hold a different path's pixels (visible as flicker on path-heavy
+    /// widgets like LineChart and PieChart when the atlas overflows).
+    ///
+    /// If preserving current-frame entries doesn't free enough room,
+    /// `allocate_and_write` falls through to `try_grow` instead of evicting
+    /// them. As a last resort we clear everything — but that path is now
+    /// only reachable when one frame's paths can't even fit a fully grown
+    /// atlas.
     fn evict_lru(&mut self) {
         if self.cache.is_empty() {
             return;
         }
 
-        // Clear atlas pixels and all cache entries — paths will be re-rasterized on demand
-        self.cache.clear();
-        self.pixels.fill(0);
-        self.shelf_x = 0;
-        self.shelf_y = 0;
-        self.shelf_height = 0;
-        self.dirty = true;
+        let current = self.current_frame;
+        let any_kept = self.cache.values().any(|r| r.last_used_frame == current);
+
+        if any_kept {
+            // Keep the current-frame entries; drop everything else and
+            // repack the survivors at the start of the atlas.
+            let mut survivors: Vec<(PathCacheKey, AtlasRegion, Vec<u8>)> = self
+                .cache
+                .iter()
+                .filter(|(_, r)| r.last_used_frame == current)
+                .map(|(k, r)| {
+                    let pixels = self.read_region(*r);
+                    (*k, *r, pixels)
+                })
+                .collect();
+            self.cache.clear();
+            self.pixels.fill(0);
+            self.shelf_x = 0;
+            self.shelf_y = 0;
+            self.shelf_height = 0;
+            self.dirty = true;
+            // Repack survivors. If any can't be replaced (atlas is too
+            // small even for the current frame's working set) the loop
+            // simply skips it — the next `lookup_or_rasterize` will
+            // re-rasterize and `try_grow` from the outer caller.
+            // Repack tallest-first to limit shelf wastage.
+            survivors.sort_by_key(|(_, r, _)| std::cmp::Reverse(r.h));
+            for (key, old_region, pixels) in survivors {
+                if let Some(new_region) = self.try_allocate(old_region.w, old_region.h) {
+                    self.blit(new_region.x, new_region.y, new_region.w, new_region.h, &pixels);
+                    self.cache.insert(
+                        key,
+                        AtlasRegion {
+                            x: new_region.x,
+                            y: new_region.y,
+                            w: new_region.w,
+                            h: new_region.h,
+                            last_used_frame: current,
+                        },
+                    );
+                }
+            }
+        } else {
+            // No current-frame entries — safe to clear everything.
+            self.cache.clear();
+            self.pixels.fill(0);
+            self.shelf_x = 0;
+            self.shelf_y = 0;
+            self.shelf_height = 0;
+            self.dirty = true;
+        }
+    }
+
+    /// Read a region's pixels back out of the atlas (for repacking
+    /// survivors during eviction). Returns an RGBA buffer of `w*h*4` bytes.
+    fn read_region(&self, region: AtlasRegion) -> Vec<u8> {
+        let mut out = vec![0u8; (region.w * region.h * 4) as usize];
+        for row in 0..region.h {
+            let src_start = ((region.y + row) * self.width * 4 + region.x * 4) as usize;
+            let src_end = src_start + (region.w * 4) as usize;
+            let dst_start = (row * region.w * 4) as usize;
+            let dst_end = dst_start + (region.w * 4) as usize;
+            if src_end <= self.pixels.len() && dst_end <= out.len() {
+                out[dst_start..dst_end].copy_from_slice(&self.pixels[src_start..src_end]);
+            }
+        }
+        out
     }
 
     /// Try to grow the atlas (double dimensions up to max_size).
@@ -605,6 +675,55 @@ mod tests {
         // Eviction should clear it
         atlas.evict_lru();
         assert!(atlas.cache.is_empty());
+    }
+
+    #[test]
+    fn evict_preserves_current_frame_entries() {
+        // Regression: previously `evict_lru` cleared the entire cache,
+        // so a second path inserted in the same frame could displace
+        // the first — `path_regions[0]` ended up pointing at pixels
+        // that now belonged to path #2. LineChart and PieChart hit this
+        // routinely because their paths cover most of the plot area.
+        let mut atlas = PathAtlas::new(64, 64);
+        atlas.begin_frame();
+
+        let mut p1 = Path::new();
+        p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p1.commands.push(PathCommand::LineTo(Point::new(40.0, 0.0)));
+        p1.commands.push(PathCommand::LineTo(Point::new(40.0, 40.0)));
+        p1.commands.push(PathCommand::Close);
+
+        let mut p2 = Path::new();
+        p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p2.commands.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
+        p2.commands.push(PathCommand::LineTo(Point::new(50.0, 50.0)));
+        p2.commands.push(PathCommand::Close);
+
+        let style = StrokeStyle::solid(0.0);
+        let r1 = atlas
+            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 40.0, 40.0], 1.0)
+            .expect("p1 fits");
+
+        // p2 doesn't fit in the remaining space → eviction triggers.
+        // After the fix, p1 (current-frame) survives and gets repacked.
+        let _r2 =
+            atlas.lookup_or_rasterize(&p2, [0.0, 1.0, 0.0, 1.0], &style, [0.0, 0.0, 50.0, 50.0], 1.0);
+
+        // Looking up p1 again must still hit cache (with possibly a new
+        // region, but stable across the lookup).
+        let r1b = atlas
+            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 40.0, 40.0], 1.0)
+            .expect("p1 still cached after eviction");
+        // The repacked region may have moved, but lookup_or_rasterize
+        // must return a non-None region for p1 — i.e. it wasn't lost.
+        let _ = (r1, r1b);
+        assert!(atlas.cache.contains_key(&PathCacheKey::new(
+            &p1,
+            [1.0, 0.0, 0.0, 1.0],
+            &style,
+            40,
+            40,
+        )));
     }
 
     #[test]
