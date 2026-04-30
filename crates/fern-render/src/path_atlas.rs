@@ -181,7 +181,17 @@ impl PathAtlas {
     }
 
     /// Try to allocate space in the atlas via shelf packing.
-    /// Evicts LRU entries if needed. Returns None if impossible.
+    ///
+    /// Strategy, in order:
+    ///   1. Try the current shelf / a new shelf at the existing size.
+    ///   2. Grow the atlas (doubles up to `max_size`). Growth preserves
+    ///      every existing entry's `(x, y)` so any `AtlasRegion` values
+    ///      handed out earlier in the same render pass stay valid.
+    ///   3. Last resort, evict LRU entries. Eviction repacks current-frame
+    ///      survivors at fresh coordinates, which silently invalidates
+    ///      `AtlasRegion` values the caller already cached for those
+    ///      entries — so we only do it when growth has hit `max_size` and
+    ///      we'd otherwise drop the path.
     fn allocate_and_write(
         &mut self,
         key: PathCacheKey,
@@ -189,7 +199,6 @@ impl PathAtlas {
         h: u32,
         pixels: &[u8],
     ) -> Option<AtlasRegion> {
-        // Try to fit in the current shelf
         if let Some(region) = self.try_allocate(w, h) {
             self.blit(region.x, region.y, w, h, pixels);
             self.cache.insert(key, region);
@@ -197,21 +206,23 @@ impl PathAtlas {
             return Some(region);
         }
 
-        // Try LRU eviction: clear least recently used entries and reset packing
+        // Grow first — keeps every existing entry at the same coordinates.
+        while self.try_grow() {
+            if let Some(region) = self.try_allocate(w, h) {
+                self.blit(region.x, region.y, w, h, pixels);
+                self.cache.insert(key, region);
+                self.dirty = true;
+                return Some(region);
+            }
+        }
+
+        // Atlas at max size and still no room. Fall through to eviction
+        // as the only remaining option. Note that this may move
+        // current-frame entries, leaving any `AtlasRegion` already
+        // returned to the caller pointing at stale coordinates — but
+        // we're past the size budget at this point.
         self.evict_lru();
-
-        // Retry after eviction
         if let Some(region) = self.try_allocate(w, h) {
-            self.blit(region.x, region.y, w, h, pixels);
-            self.cache.insert(key, region);
-            self.dirty = true;
-            return Some(region);
-        }
-
-        // Try growing the atlas
-        if self.try_grow()
-            && let Some(region) = self.try_allocate(w, h)
-        {
             self.blit(region.x, region.y, w, h, pixels);
             self.cache.insert(key, region);
             self.dirty = true;
@@ -732,5 +743,47 @@ mod tests {
         assert!(atlas.try_grow());
         assert_eq!(atlas.width, 32);
         assert_eq!(atlas.height, 32);
+    }
+
+    #[test]
+    fn growth_preserves_earlier_frame_regions() {
+        // Regression: when a single frame inserts more paths than fit in
+        // the initial atlas, we must grow rather than evict — eviction
+        // repacks current-frame survivors at fresh coordinates,
+        // invalidating any AtlasRegion the renderer already cached for
+        // them earlier in the same frame. With grow-first, the first
+        // entry's region stays valid throughout the frame.
+        let mut atlas = PathAtlas::new(64, 64);
+        atlas.begin_frame();
+
+        let mut p1 = Path::new();
+        p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p1.commands.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
+        p1.commands.push(PathCommand::LineTo(Point::new(50.0, 50.0)));
+        p1.commands.push(PathCommand::Close);
+
+        let mut p2 = Path::new();
+        p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p2.commands.push(PathCommand::LineTo(Point::new(60.0, 0.0)));
+        p2.commands.push(PathCommand::LineTo(Point::new(60.0, 60.0)));
+        p2.commands.push(PathCommand::Close);
+
+        let style = StrokeStyle::solid(0.0);
+        let r1 = atlas
+            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 50.0, 50.0], 1.0)
+            .expect("p1 fits");
+
+        // p2 doesn't fit alongside p1 in 64×64 → atlas should grow,
+        // not evict. After growth, p1's region must still be at the
+        // same coordinates we got back the first time.
+        let _r2 = atlas
+            .lookup_or_rasterize(&p2, [0.0, 1.0, 0.0, 1.0], &style, [0.0, 0.0, 60.0, 60.0], 1.0)
+            .expect("p2 fits after grow");
+
+        let r1_after = atlas
+            .lookup_or_rasterize(&p1, [1.0, 0.0, 0.0, 1.0], &style, [0.0, 0.0, 50.0, 50.0], 1.0)
+            .expect("p1 still cached");
+        assert_eq!(r1.x, r1_after.x, "p1 must not move when atlas grows");
+        assert_eq!(r1.y, r1_after.y, "p1 must not move when atlas grows");
     }
 }
