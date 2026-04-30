@@ -950,6 +950,9 @@ impl FernAppHandler {
             WindowEvent::ModifiersChanged(mods) => {
                 if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.current_modifiers = mods.state();
+                    managed.translation_state.set_modifiers(
+                        event_translation::translate_modifiers(mods.state()),
+                    );
                 }
             }
             WindowEvent::KeyboardInput {

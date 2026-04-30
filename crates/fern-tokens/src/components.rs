@@ -701,9 +701,14 @@ impl Default for DividerStyle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SplitViewStyle {
+    /// Width of the gutter hit area in logical pixels. The visible
+    /// divider is a 1px line centered in this area; the rest is
+    /// invisible padding to give pointer interaction a comfortable
+    /// target.
     pub gutter_thickness: f32,
-    pub gutter_handle_size: f32,
-    pub corner_radius: f32,
+    /// Visible thickness of the divider line painted at the center of
+    /// the gutter, in logical pixels.
+    pub divider_line_thickness: f32,
     /// Default minimum size of either pane, in logical pixels.
     pub min_pane_size: f32,
     /// Step size in logical pixels for arrow-key and a11y increment/decrement.
@@ -713,9 +718,8 @@ pub struct SplitViewStyle {
 impl Default for SplitViewStyle {
     fn default() -> Self {
         Self {
-            gutter_thickness: 12.0,
-            gutter_handle_size: 4.0,
-            corner_radius: 2.0,
+            gutter_thickness: 6.0,
+            divider_line_thickness: 1.0,
             min_pane_size: 96.0,
             keyboard_step: 24.0,
         }
@@ -780,6 +784,72 @@ impl Default for ChartStyle {
     }
 }
 
+// ─── Tabular ────────────────────────────────────────────────────────────────
+
+/// Style tokens for `TableView` and `TreeTable`.
+///
+/// These are dimensions only; colors come from theme roles
+/// (`SurfaceRole::Selected` / `Hover` / `AltRow` / `Raised`,
+/// `BorderRole::Divider` / `DividerStrong` / `Focused`,
+/// `TextRole::Primary` / `Secondary` / `Accent`). Both widgets snapshot
+/// the layout numbers at build time so a theme change repaints without
+/// rebuilding the row tree.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TableStyle {
+    /// Body row height. Headers use `header_height`.
+    pub row_height: f32,
+    /// Sticky header row height.
+    pub header_height: f32,
+    /// Horizontal padding inside each cell (also applied to header cells).
+    pub cell_padding_horizontal: f32,
+    /// Vertical padding inside each cell.
+    pub cell_padding_vertical: f32,
+    /// Width of the right-edge resize hit zone on header cells.
+    pub resize_handle_width: f32,
+    /// Stroke width of grid lines drawn between rows / columns.
+    pub grid_line_thickness: f32,
+    /// Outer-frame corner radius.
+    pub corner_radius: f32,
+    /// Edge length of the sort-direction chevron in the header.
+    pub sort_indicator_size: f32,
+    /// Edge length of the filter glyph in the header.
+    pub filter_indicator_size: f32,
+    /// Spacing between adjacent header cells (in addition to grid lines).
+    pub header_inter_cell_spacing: f32,
+    /// Inset between the focused-cell bounds and the focus-ring stroke.
+    pub focus_ring_inset: f32,
+    /// Default minimum column width, used when a column does not set its own.
+    pub min_column_width_default: f32,
+    /// `TreeTable` only — pixels per indent level on the tree column.
+    pub tree_indent_per_level: f32,
+    /// `TreeTable` only — edge length of the twist (expand/collapse) chevron.
+    pub tree_twist_size: f32,
+    /// `TreeTable` only — gap between the twist chevron and the cell content.
+    pub tree_twist_label_gap: f32,
+}
+
+impl Default for TableStyle {
+    fn default() -> Self {
+        Self {
+            row_height: 28.0,
+            header_height: 32.0,
+            cell_padding_horizontal: 8.0,
+            cell_padding_vertical: 4.0,
+            resize_handle_width: 4.0,
+            grid_line_thickness: 1.0,
+            corner_radius: 4.0,
+            sort_indicator_size: 10.0,
+            filter_indicator_size: 12.0,
+            header_inter_cell_spacing: 0.0,
+            focus_ring_inset: 1.0,
+            min_column_width_default: 32.0,
+            tree_indent_per_level: 16.0,
+            tree_twist_size: 12.0,
+            tree_twist_label_gap: 4.0,
+        }
+    }
+}
+
 // ─── Aggregate ──────────────────────────────────────────────────────────────
 
 /// All per-component style structs, owned by the [`crate::theme::Theme`].
@@ -820,4 +890,5 @@ pub struct ComponentStyles {
     pub divider: DividerStyle,
     pub split_view: SplitViewStyle,
     pub chart: ChartStyle,
+    pub table: TableStyle,
 }

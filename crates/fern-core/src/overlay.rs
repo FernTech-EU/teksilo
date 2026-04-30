@@ -759,14 +759,24 @@ impl OverlayManager {
     /// Compute overlay positions based on anchor bounds.
     /// Called after layout to position overlays correctly.
     /// `viewport` is (width, height) used for clamping overlays to the visible area.
+    ///
+    /// `anchor_bounds_fn` returns `None` when the anchor widget is no
+    /// longer in the arena (destroyed by a host's rebuild while the
+    /// overlay is still up). In that case the overlay's bounds are
+    /// left untouched — keeping it at its last valid position rather
+    /// than collapsing to the (0,0) origin from a `Rect::ZERO`
+    /// fallback.
     pub fn position_overlays(
         &mut self,
-        anchor_bounds_fn: impl Fn(WidgetId) -> Rect,
+        anchor_bounds_fn: impl Fn(WidgetId) -> Option<Rect>,
         viewport: (f32, f32),
     ) {
         let (vw, vh) = viewport;
         for overlay in &mut self.stack {
-            let anchor = anchor_bounds_fn(overlay.anchor);
+            let Some(anchor) = anchor_bounds_fn(overlay.anchor) else {
+                // Anchor destroyed; preserve the previous bounds.
+                continue;
+            };
             let content_size = overlay.bounds.size(); // Will be set from content layout
 
             overlay.bounds = match &overlay.placement {
@@ -1242,7 +1252,7 @@ mod tests {
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 120.0));
-        mgr.position_overlays(|_| Rect::new(0.0, 0.0, 10.0, 10.0), (800.0, 600.0));
+        mgr.position_overlays(|_| Some(Rect::new(0.0, 0.0, 10.0, 10.0)), (800.0, 600.0));
 
         let bounds = mgr
             .stack
@@ -1269,7 +1279,7 @@ mod tests {
         });
 
         mgr.set_content_bounds(id, Size::new(240.0, 64.0));
-        mgr.position_overlays(|_| Rect::new(0.0, 0.0, 10.0, 10.0), (800.0, 600.0));
+        mgr.position_overlays(|_| Some(Rect::new(0.0, 0.0, 10.0, 10.0)), (800.0, 600.0));
 
         let bounds = mgr
             .stack

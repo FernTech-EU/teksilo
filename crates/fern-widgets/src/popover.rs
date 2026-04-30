@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal};
@@ -203,6 +204,11 @@ pub struct Popover {
     pending_trigger: Option<PendingChild>,
     show_caret: bool,
     caret_size: f32,
+    /// When set, the popover requests focus on the given widget
+    /// immediately after showing the overlay, so the user can type
+    /// without clicking again. Populated by callers that embed a
+    /// focusable editor in the content (e.g. filter popover).
+    initial_focus_slot: Option<Rc<Cell<Option<WidgetId>>>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -219,6 +225,7 @@ impl Popover {
             pending_trigger: None,
             show_caret: true,
             caret_size: 10.0,
+            initial_focus_slot: None,
             root_child_id: None,
         }
     }
@@ -278,6 +285,14 @@ impl Popover {
         self.caret_size = caret_size.max(0.0);
         self
     }
+
+    /// Request focus on a specific widget immediately after the popover
+    /// opens. The slot is written by the content widget during `build()`
+    /// (same pattern as `ComboBox`'s search-input slot).
+    pub fn focus_on_show(mut self, slot: Rc<Cell<Option<WidgetId>>>) -> Self {
+        self.initial_focus_slot = Some(slot);
+        self
+    }
 }
 
 impl std::fmt::Debug for Popover {
@@ -300,6 +315,7 @@ impl Widget for Popover {
         let show_caret = self.show_caret;
         let caret_size = self.caret_size;
         let style = self.style;
+        let initial_focus_slot = self.initial_focus_slot.take();
         // Captured at build time so the open handlers don't need a
         // theme lookup at fire-time. `duration_fast` matches the
         // MotionTokens recommendation for popup fade.
@@ -336,10 +352,13 @@ impl Widget for Popover {
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
             let tap_open = is_open.clone();
             let tap_dismiss = dismiss_callback.clone();
+            let tap_focus = initial_focus_slot.clone();
             let key_open = is_open.clone();
             let key_dismiss = dismiss_callback.clone();
+            let key_focus = initial_focus_slot.clone();
             let action_open = is_open.clone();
             let action_dismiss = dismiss_callback.clone();
+            let action_focus = initial_focus_slot.clone();
             let handlers = fern_core::widget_builder::HandlerSet::new()
                         .focusable(true)
                         .cursor(fern_core::widget::CursorIcon::Pointer)
@@ -363,6 +382,9 @@ impl Widget for Popover {
                                     on_dismiss: Some(tap_dismiss.clone()),
                                     fade_duration,
                                 });
+                                if let Some(id) = tap_focus.as_ref().and_then(|s| s.get()) {
+                                    ctx.request_focus(id);
+                                }
                             }
                         })
                         .on_key({
@@ -386,6 +408,9 @@ impl Widget for Popover {
                                         on_dismiss: Some(key_dismiss.clone()),
                                         fade_duration,
                                     });
+                                    if let Some(id) = key_focus.as_ref().and_then(|s| s.get()) {
+                                        ctx.request_focus(id);
+                                    }
                                     EventResponse::Handled
                                 }
                                 _ => EventResponse::Ignored,
@@ -407,6 +432,9 @@ impl Widget for Popover {
                                         on_dismiss: Some(action_dismiss.clone()),
                                         fade_duration,
                                     });
+                                    if let Some(id) = action_focus.as_ref().and_then(|s| s.get()) {
+                                        ctx.request_focus(id);
+                                    }
                                     EventResponse::Handled
                                 } else {
                                     EventResponse::Ignored
@@ -424,10 +452,13 @@ impl Widget for Popover {
         } else {
             let tap_open = is_open.clone();
             let tap_dismiss = dismiss_callback.clone();
+            let tap_focus = initial_focus_slot.clone();
             let key_open = is_open.clone();
             let key_dismiss = dismiss_callback.clone();
+            let key_focus = initial_focus_slot.clone();
             let action_open = is_open.clone();
             let action_dismiss = dismiss_callback.clone();
+            let action_focus = initial_focus_slot;
             ctx.add(
                 Button::new_literal(label)
                     .style(style)
@@ -454,6 +485,9 @@ impl Widget for Popover {
                                 on_dismiss: Some(tap_dismiss.clone()),
                                 fade_duration,
                             });
+                            if let Some(id) = tap_focus.as_ref().and_then(|s| s.get()) {
+                                ctx.request_focus(id);
+                            }
                         }
                     })
                     .on_key({
@@ -477,6 +511,9 @@ impl Widget for Popover {
                                     on_dismiss: Some(key_dismiss.clone()),
                                     fade_duration,
                                 });
+                                if let Some(id) = key_focus.as_ref().and_then(|s| s.get()) {
+                                    ctx.request_focus(id);
+                                }
                                 EventResponse::Handled
                             }
                             _ => EventResponse::Ignored,
@@ -498,6 +535,9 @@ impl Widget for Popover {
                                     on_dismiss: Some(action_dismiss.clone()),
                                     fade_duration,
                                 });
+                                if let Some(id) = action_focus.as_ref().and_then(|s| s.get()) {
+                                    ctx.request_focus(id);
+                                }
                                 EventResponse::Handled
                             } else {
                                 EventResponse::Ignored

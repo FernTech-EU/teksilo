@@ -102,6 +102,18 @@ impl From<String> for LocalizedString {
     }
 }
 
+impl From<&str> for LocalizedString {
+    fn from(text: &str) -> Self {
+        Self::literal(text)
+    }
+}
+
+impl From<&String> for LocalizedString {
+    fn from(text: &String) -> Self {
+        Self::literal(text.clone())
+    }
+}
+
 /// Convert a `LocalizedString` into a `Prop<String>` suitable for binding
 /// to a widget's text property. If an `I18nManager` is installed on this
 /// thread, the result is `Prop::Bound` around a `Signal<String>` that

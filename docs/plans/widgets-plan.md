@@ -151,9 +151,13 @@ and Qt offers them as `QFoo`.
    Button with icon-only works but wastes MinSize/padding budget and carries
    label-layout overhead. **Low effort.**
 
-2. **CircularProgressIndicator / Spinner** — Animated arc, distinct from
-   linear ProgressBar. For unknown-duration async work. Reuses
-   `AnimationScheduler` and PathAtlas. **Low effort.**
+2. **CircularProgressIndicator / Spinner** — **Shipped** as
+   [Spinner](crates/fern-widgets/src/spinner.rs). Animated arc backed by
+   the shader-driven `AnimatedQuadKind::SpinnerArc` pipeline (~one
+   uniform write + one `draw_indexed` per frame, no `paint()` re-runs).
+   Honours `prefers-reduced-motion` with a static three-quarter arc
+   fallback. Distinct from linear ProgressBar; for unknown-duration
+   async work.
 
 3. **Banner / inline callout** — Persistent inline info/warning/error strip
    (not a toast). Status color + icon + message + optional action buttons.
@@ -302,25 +306,28 @@ overlook in a catalog.
    alignment, optional corner radius and tint color. **Low effort** — the
    underlying texture pipeline exists; this is a thin Widget impl over it.
 
-2. **Charts (2D)** — Stick to the two most universal types in 2D:
-   - **BarChart** — vertical or horizontal bars, single or grouped
-     series, optional value labels, optional axis labels and grid lines.
-     Covers the largest fraction of "show me this number broken down"
-     use cases.
-   - **LineChart** — points connected by polylines, single or multiple
-     series, optional area fill under the line, optional axis labels,
-     grid lines, and hover tooltips on data points. Covers time-series
-     and trend visualization.
+2. **Charts (2D)** — **Shipped** as a dedicated
+   [fern-charts](crates/fern-charts/src/) crate (sits at the same tier as
+   fern-widgets, no dep on widgets). Current catalog:
+   - [BarChart](crates/fern-charts/src/bar_chart.rs) — vertical or
+     horizontal bars, single or grouped series, optional value labels,
+     axis labels, and grid lines.
+   - [LineChart](crates/fern-charts/src/line_chart.rs) — points
+     connected by polylines, single or multiple series, optional area
+     fill, axis labels, grid lines, hover tooltips on data points.
+   - [PieChart](crates/fern-charts/src/pie_chart.rs) — pie + donut
+     variants with a center slot (donut hole content).
 
-   Both rendered via the existing `Path` + `fill_path`/`stroke_path` Canvas
-   API and the PathAtlas. Data model: a simple `ChartSeries<T>` struct
-   carrying labels, values, and color, bound via `Signal` for live
-   updates. **Charts probably belong in their own crate** (`fern-charts`)
-   because the surface is large (axis math, tick generators, tooltip
-   integration, color palettes) and not every consumer needs it.
+   Rendered via the existing `Path` + `fill_path`/`stroke_path` Canvas
+   API. Shared infrastructure: [series.rs](crates/fern-charts/src/series.rs)
+   (`ChartSeries<T>`, Signal-bound), [axis.rs](crates/fern-charts/src/axis.rs)
+   (tick generators), [legend.rs](crates/fern-charts/src/legend.rs),
+   [palette.rs](crates/fern-charts/src/palette.rs),
+   [layout.rs](crates/fern-charts/src/layout.rs). Design + roadmap:
+   [docs/plans/charts-plan.md](docs/plans/charts-plan.md).
 
-   Explicitly **not** in scope: pie/donut, scatter, heatmap, candlestick,
-   radar, sankey, sunburst, treemap. A focused two-chart catalog avoids
+   Explicitly **not** in scope: scatter, heatmap, candlestick, radar,
+   sankey, sunburst, treemap. The focused catalog (bar/line/pie) avoids
    the "tiny matplotlib" trap.
 
 ---
@@ -397,8 +404,10 @@ exhaustive and nothing is forgotten:
 
 ### Widgets that embed a TextField
 
-- **SpinBox / DoubleSpinBox** — `QSpinBox`, `QDoubleSpinBox`. Numeric stepper
-  with up/down buttons and an editable text cell.
+- **SpinBox / DoubleSpinBox** — `QSpinBox`, `QDoubleSpinBox`. **Shipped** as
+  [SpinBox](crates/fern-widgets/src/spin_box.rs) (numeric stepper with
+  up/down buttons and an editable text cell). Demo:
+  [examples/spin_box](examples/spin_box/).
 - **DateEdit / TimeEdit / DateTimeEdit** — `QDateEdit`, `QTimeEdit`,
   `QDateTimeEdit`. Spin-box-style editors for temporal values. The Calendar
   widget (Gap 2 item 6) can ship standalone and plug in as the popover here.
@@ -440,7 +449,8 @@ Listed so they're consciously out of scope, not accidentally forgotten:
 
 **Phase A — Trivial / low-effort wins.** Avatar, **Image**, GroupHeader,
 Chip, IconButton, **SplitButton**, Disclosure triangle,
-CircularProgressIndicator, Banner, Rich Tooltip extension, CommandLinkButton.
+Banner, Rich Tooltip extension, CommandLinkButton.
+(Spinner / CircularProgressIndicator has shipped — see Gap 3 item 2.)
 Each is days, not weeks, and each unlocks real visual polish.
 
 **Phase B — Mid-effort desktop essentials.** GroupBox, FormLayout,
@@ -449,8 +459,9 @@ Balloon notification, ToolBox (as Accordion variant), MasonryLayout.
 
 **Phase C — Large structural work.** TableView + HeaderView + TableModel;
 NavigationSplitView (adaptive multi-pane shell); DockWidget + dock-area
-layout subsystem; **fern-charts crate** (BarChart + LineChart). Each of
-these is a milestone, not a widget, and needs its own design pass before
+layout subsystem. (The **fern-charts crate** — BarChart, LineChart,
+PieChart — has shipped; see Gap 3.6 item 2.) Each remaining item is a
+milestone, not a widget, and needs its own design pass before
 implementation.
 
 **Phase D — Blocked on text input.** Entire Gap 4 list. Scheduled after the

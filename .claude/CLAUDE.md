@@ -28,6 +28,8 @@ cargo run -p rich_text_viewer                  # Rich text viewing
 cargo run -p spin_box                          # Numeric input demo
 cargo run -p tool_box                          # Tool box widget demo
 cargo run -p fern-widgets-previewer            # Widget catalog previewer
+cargo run -p data-grid                          # TableView showcase (1k rows × 6 cols)
+cargo run -p tree-table                         # TreeTable showcase (mock filesystem)
 ```
 
 ## Tools
@@ -64,7 +66,9 @@ Tests are fully headless — no Xvfb, no GPU, no display server needed.
 fern-tokens          Pure data: Theme, Color, TextStyle, SpacingTokens, alignment
 fern-canvas          Canvas API, RenderFrame, Path, Paint, geometry, TextBackend trait
 fern-core            Widget traits, arena, layout, events, focus, state, gestures, overlays
-fern-data            Reactive data models: ListModel, TreeModel, SelectionModel, ListDataSource
+fern-data            Reactive data models: ListModel, TreeModel, SelectionModel, ListDataSource,
+                     SortFilterListModel<T> (sort + filter projection over a flat source),
+                     SortFilterTreeModel<T> (same for trees, with TreeFilterMode strategies)
 fern-settings        Persistent reactive prefs: SettingsStore (dotted-key Signal<T>), SettingsFile<T>,
                      PersistedListModel/PersistedTreeModel, MruList<T: MruEntry>, WindowStateService
 fern-telemetry       Privacy-respecting product analytics built on fern-settings: ConsentStore,
@@ -82,7 +86,8 @@ fern-telemetry-codegen  Proc-macro: `include_telemetry_schema!("events.yaml")` r
 cargo-fern-telemetry-lint  CLI schema-drift linter. Checks expiry, required fields, unused
                      events (declared but not emitted in src/), unknown prop types. Run as
                      `cargo fern-telemetry-lint`. CI mode: `--fail-on-warnings`.
-fern-widgets         ~54 widgets + ~21 layout primitives (Button, ListView, TreeView, MenuBar, Dialog, TextInput, SpinBox, etc.)
+fern-widgets         ~56 widgets + ~21 layout primitives (Button, ListView, TreeView, TableView,
+                     TreeTable, MenuBar, Dialog, TextInput, SpinBox, etc.)
 fern-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
                      as fern-widgets — no dep on widgets. See docs/plans/charts-plan.md.
 fern-text            TextBackend impl via text-typeset (external path dep)
@@ -436,13 +441,13 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal)
 - `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)
 - Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
-- Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`)
+- Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `SortFilterListModel<T>`, `SortFilterTreeModel<T>` with `TreeFilterMode` `HideNonMatching`/`KeepAncestors`/`KeepDescendants`)
 - Settings & persistence (fern-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
 - Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge, SpinBox, SplitButton
 - Containers: Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Tooltip, SplitView, TabWidget, Dialog, Popover, Snackbar, Wizard, Breadcrumb, GroupBox, MessageBox
 - Menus: MenuBar, MenuList, MenuItem, MenuContext (context menu)
 - Chrome: Toolbar, StatusBar, TitleBar, GroupHeader
-- Data-driven: ListView, TreeView, Repeater (backed by fern-data models)
+- Data-driven: ListView, TreeView, Repeater, **TableView** (multi-column, virtualized, sort/filter via `SortFilterListModel`, drag-resize + drag-reorder of columns, pinned Leading/Trailing, cell-level + row-level selection, full keyboard nav with focus ring, edit hooks via `editing_cell_signal` + `on_cell_edit_request`, row drag-drop reorder, `Role::Table > Role::Row > Role::Cell` accessibility), **TreeTable** (hierarchical multi-column, twist-arrow indent, ArrowLeft/Right collapse/expand, `Role::TreeGrid` with per-row `set_level`/`set_expanded`)
 - Text: TextInput (styled single-line), rich text viewer
 
 ### Partial / In Progress
@@ -469,7 +474,9 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Button (reference widget): [crates/fern-widgets/src/button.rs](crates/fern-widgets/src/button.rs)
 - Switcher: [crates/fern-widgets/src/primitives/switcher.rs](crates/fern-widgets/src/primitives/switcher.rs)
 - Layout primitives: [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)
-- Data models: [crates/fern-data/src/](crates/fern-data/src/) (`list_model.rs`, `tree_model.rs`, `selection_model.rs`)
+- Data models: [crates/fern-data/src/](crates/fern-data/src/) (`list_model.rs`, `tree_model.rs`, `selection_model.rs`, `sort_filter_list_model.rs`, `sort_filter_tree_model.rs`)
+- TableView: [crates/fern-widgets/src/table_view.rs](crates/fern-widgets/src/table_view.rs) + submodules at [crates/fern-widgets/src/table_view/](crates/fern-widgets/src/table_view/) (`column.rs`, `selection.rs`, `a11y.rs`, `body.rs`, `header.rs`, `keyboard.rs`, `layout.rs`, `row_navigator.rs`, `tests.rs`). Demo: [examples/data_grid/src/main.rs](examples/data_grid/src/main.rs)
+- TreeTable: [crates/fern-widgets/src/tree_table.rs](crates/fern-widgets/src/tree_table.rs) (reuses table_view's column/header/keyboard modules; adds `TreeNavigator` + `TwistArrow`). Demo: [examples/tree_table/src/main.rs](examples/tree_table/src/main.rs)
 - i18n runtime: [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs), [crates/fern-i18n/src/localized_string.rs](crates/fern-i18n/src/localized_string.rs)
 - i18n macros: [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs)
 - fern! DSL macro: [crates/fern-ui-macros/src/](crates/fern-ui-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/fern-ui/tests/fern_ui/pass/](crates/fern-ui/tests/fern_ui/pass/)
@@ -623,4 +630,4 @@ If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier
 
 Full architecture document: `../fern-ui-perso/fern-ui-architecture.md` (28 sections, covers layout model, scrolling, widget state, reactivity, overlays, DnD, data sources, Canvas API, rendering pipeline, theming, threading, accessibility, window management, testability, i18n)
 
-Additional documentation: [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md), [docs/plans/settings-plan.md](docs/plans/settings-plan.md), [docs/plans/telemetry-plan.md](docs/plans/telemetry-plan.md), [docs/plans/fern-collector-plan.md](docs/plans/fern-collector-plan.md)
+Additional documentation: [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/table-view.md](docs/table-view.md), [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md), [docs/plans/settings-plan.md](docs/plans/settings-plan.md), [docs/plans/telemetry-plan.md](docs/plans/telemetry-plan.md), [docs/plans/fern-collector-plan.md](docs/plans/fern-collector-plan.md)

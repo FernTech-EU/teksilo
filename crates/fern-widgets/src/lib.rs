@@ -48,7 +48,9 @@ pub mod split_button;
 pub mod split_view;
 pub mod status_bar;
 pub mod tab_widget;
+pub mod table_view;
 pub mod tool_box;
+pub mod tree_table;
 pub mod title_bar;
 pub mod toggle;
 pub mod toolbar;
@@ -98,6 +100,11 @@ pub use radio_group::RadioGroup;
 pub use repeater::Repeater;
 pub use scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarMode};
 pub use scroll_bar::{ScrollBar, ScrollBarOrientation};
+pub use table_view::{
+    Alignment as TableAlignment, CellContext, CellSelectionModel, Column, ColumnContext,
+    ColumnResizePolicy, ColumnWidth, EditTrigger, GridLines, PinnedSide, SortDirection,
+    TabTraversal, TableSelectionMode, TableView, TruncationPolicy,
+};
 pub use segmented_control::SegmentedControl;
 pub use shortcut_settings::ShortcutSettings;
 pub use privacy_settings::PrivacySettings;
@@ -116,6 +123,7 @@ pub use text_input::{TextInput, ValidationState};
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};
 pub use toggle::Toggle;
 pub use toolbar::Toolbar;
+pub use tree_table::TreeTable;
 pub use tree_view::TreeView;
 pub use wizard::{Wizard, WizardStep};
 

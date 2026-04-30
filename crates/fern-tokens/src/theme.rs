@@ -23,6 +23,11 @@ pub struct ColorTokens {
     pub surface_pressed: Color,
     pub surface_selected: Color,
     pub surface_selected_inactive: Color,
+    /// Alternating-row background — a subtle hairline tint above
+    /// `surface_content` used for table / list zebra striping. Distinct from
+    /// `surface_sunken`, which is used for scroll-container chrome and is
+    /// noticeably darker than the row contrast TableView wants.
+    pub surface_alt_row: Color,
 
     // ── Text / foreground ───────────────────────────────────────────────────
     pub text_primary: Color,
@@ -126,6 +131,7 @@ impl ColorTokens {
             surface_pressed: Color::from_hex("#DFE1E5"),
             surface_selected: Color::from_hex("#D4F0F5"),
             surface_selected_inactive: Color::from_hex("#EBECF0"),
+            surface_alt_row: Color::from_hex("#F7F8FA"),
 
             // Text — cross-checked against Jewel IntUiLightTheme.kt:
             //   text.normal   = gray( 1) = #000000
@@ -222,6 +228,7 @@ impl ColorTokens {
             surface_pressed: Color::from_hex("#43454A"),
             surface_selected: Color::from_hex("#1A3D47"),
             surface_selected_inactive: Color::from_hex("#393B40"),
+            surface_alt_row: Color::from_hex("#26282E"),
 
             // Text — values cross-checked against the Jewel standalone
             // theme source (IntUiGlobalColors.kt + IntUiDarkTheme.kt).
@@ -384,6 +391,15 @@ impl ColorTokens {
                 bg.lighten(0.10)
             } else {
                 bg.darken(0.08)
+            };
+            // Alt-row tracks the bg with a hairline-tinted lift, matching
+            // the built-in light/dark presets. Slightly stronger in dark mode
+            // because dark backgrounds need more contrast for the eye to
+            // perceive striping.
+            tokens.surface_alt_row = if is_dark {
+                bg.lighten(0.04)
+            } else {
+                bg.darken(0.02)
             };
             // Editor background tracks surface_content (the editor slot).
             // Current-line highlight is a subtle lift off the editor bg.
@@ -560,6 +576,24 @@ mod tests {
         let light = Theme::light_default();
         let dark = Theme::dark_default();
         assert_ne!(light.colors.surface_main, dark.colors.surface_main);
+    }
+
+    #[test]
+    fn alt_row_is_distinct_from_content_in_both_themes() {
+        // TableView / TreeTable zebra striping needs a perceptible delta
+        // between alternating rows and the body background. If a future
+        // refactor accidentally aliases these, regression here.
+        let light = Theme::light_default();
+        let dark = Theme::dark_default();
+        assert_ne!(light.colors.surface_alt_row, light.colors.surface_content);
+        assert_ne!(dark.colors.surface_alt_row, dark.colors.surface_content);
+    }
+
+    #[test]
+    fn alt_row_role_resolves_to_token() {
+        use crate::roles::SurfaceRole;
+        let colors = ColorTokens::light_default();
+        assert_eq!(SurfaceRole::AltRow.resolve(&colors), colors.surface_alt_row);
     }
 
     #[test]

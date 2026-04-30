@@ -97,6 +97,10 @@ pub enum SurfaceRole {
     Selected,
     /// Inactive selected (when the widget isn't focused).
     SelectedInactive,
+    /// Alternating row background — used by `TableView` / `TreeTable` zebra
+    /// striping when `alternating_rows(true)`. Distinct from `Sunken`
+    /// (scroll-container chrome) which is too dark for row striping.
+    AltRow,
     /// Accent fill (primary buttons, toggled checkboxes).
     Accent,
     /// Accent hover.
@@ -144,6 +148,7 @@ impl SurfaceRole {
             SurfaceRole::Pressed => colors.surface_pressed,
             SurfaceRole::Selected => colors.surface_selected,
             SurfaceRole::SelectedInactive => colors.surface_selected_inactive,
+            SurfaceRole::AltRow => colors.surface_alt_row,
             SurfaceRole::Accent => colors.accent,
             SurfaceRole::AccentHover => colors.accent_hover,
             SurfaceRole::AccentPressed => colors.accent_pressed,

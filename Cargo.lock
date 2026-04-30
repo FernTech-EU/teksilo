@@ -899,6 +899,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "data-grid"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
+]
+
+[[package]]
 name = "derive_more"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5120,6 +5127,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "tree-table"
+version = "0.1.0"
+dependencies = [
+ "fern-ui",
 ]
 
 [[package]]

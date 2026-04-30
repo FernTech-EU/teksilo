@@ -216,7 +216,9 @@ impl WidgetTree {
             );
         }
 
-        let anchor_bounds = |id: WidgetId| -> Rect { self.arena.bounds(id) };
+        let anchor_bounds = |id: WidgetId| -> Option<Rect> {
+            self.arena.is_active(id).then(|| self.arena.bounds(id))
+        };
         let viewport = (
             proposal.width.unwrap_or(800.0),
             proposal.height.unwrap_or(600.0),
@@ -248,7 +250,9 @@ impl WidgetTree {
             if let Some(overlay_id) = overlay_id {
                 self.overlay_manager
                     .set_content_bounds(overlay_id, intrinsic);
-                let anchor_bounds = |id: WidgetId| -> Rect { self.arena.bounds(id) };
+                let anchor_bounds = |id: WidgetId| -> Option<Rect> {
+            self.arena.is_active(id).then(|| self.arena.bounds(id))
+        };
                 self.overlay_manager
                     .position_overlays(anchor_bounds, viewport);
             }
