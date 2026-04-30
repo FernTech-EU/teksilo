@@ -394,11 +394,11 @@ fn scope_row(
         .child(
             VStack::new()
                 .spacing(2.0)
-                .child(TextWidget::new_literal(label).style(TextStyleRole::Body))
+                .child(TextWidget::new_literal(label.clone()).style(TextStyleRole::Body))
                 .child(TextWidget::new_literal(description).style(TextStyleRole::Small)),
         )
         .child(Spacer::new())
-        .child(Toggle::new(signal).enabled(enabled))
+        .child(Toggle::new(signal).label_literal(label).enabled(enabled))
 }
 
 fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {
@@ -503,18 +503,21 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                                     count = event_count
                                 )))
                                 .informative_text_literal(format!(
-                                    "Saved to: {}\n\n{details}",
-                                    path.display()
+                                    "{}\n\n{details}",
+                                    tr_widget!(privacy_fetch_saved_to(
+                                        path = path.display().to_string()
+                                    ))
+                                    .resolve_now()
                                 ))
                                 .buttons(MessageBoxButtons::Ok)
                                 .present(ctx);
                             }
                             Err(e) => {
                                 MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                                    .text_literal(format!(
-                                        "Could not write file {}: {e}",
-                                        path.display()
-                                    ))
+                                    .text(tr_widget!(privacy_fetch_write_error(
+                                        path = path.display().to_string(),
+                                        error = e.to_string(),
+                                    )))
                                     .buttons(MessageBoxButtons::Ok)
                                     .present(ctx);
                             }

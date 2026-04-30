@@ -113,6 +113,8 @@ privacy-confirm-withdraw-text = Aucun nouvel événement d'analyse ne sera colle
 
 privacy-fetch-success-title = Vos données sur le serveur
 privacy-fetch-success-text = { $count } événements récupérés pour cette installation.
+privacy-fetch-saved-to = Enregistré dans : { $path }
+privacy-fetch-write-error = Impossible d'écrire le fichier { $path } : { $error }
 privacy-fetch-error-title = Impossible de récupérer vos données
 
 privacy-inspect-title = Inspecter les données envoyées ({ $count } événement(s) en mémoire)

@@ -129,6 +129,8 @@ privacy-confirm-withdraw-text = No further analytics events will be collected fr
 
 privacy-fetch-success-title = Your data on the server
 privacy-fetch-success-text = Fetched { $count } events for this install.
+privacy-fetch-saved-to = Saved to: { $path }
+privacy-fetch-write-error = Could not write file { $path }: { $error }
 privacy-fetch-error-title = Couldn't fetch your data
 
 privacy-inspect-title = Inspect data sent ({ $count } event(s) buffered)
