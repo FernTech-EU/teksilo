@@ -6,10 +6,11 @@ use fern_charts::{
     AxisConfig, BarChart, BarGrouping, ChartDatum, ChartSeries, LegendPosition, LineChart,
     PieChart, PieLabelMode,
 };
+use fern_ui::tokens::HAlignment;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
     Button, ButtonVariant, GroupHeader, HStack, Padding, SegmentedControl, Spacer, Switcher,
-    TextWidget, VStack,
+    Center, TextWidget, VStack,
 };
 
 fn make_series(seed: u32) -> Vec<ChartSeries<String>> {
@@ -99,17 +100,24 @@ fn main() {
                         .legend(true)
                         .legend_position(LegendPosition::Trailing)
                         .center(
-                            VStack::new()
-                                .spacing(0.0)
-                                .child(
-                                    TextWidget::new_literal("Total")
-                                        .style(TextStyleRole::Tiny),
-                                )
-                                .child(
-                                    TextWidget::new_literal("")
-                                        .style(TextStyleRole::BodyBold)
-                                        .bind_text(total_label),
-                                ),
+                            // Wrap the VStack in a Center so the
+                            // "Total / value" pair is centered both
+                            // horizontally AND vertically inside the
+                            // donut hole (VStack alone would top-align).
+                            Center::new().child(
+                                VStack::new()
+                                    .spacing(0.0)
+                                    .alignment(HAlignment::Center)
+                                    .child(
+                                        TextWidget::new_literal("Total")
+                                            .style(TextStyleRole::Tiny),
+                                    )
+                                    .child(
+                                        TextWidget::new_literal("")
+                                            .style(TextStyleRole::BodyBold)
+                                            .bind_text(total_label),
+                                    ),
+                            ),
                         );
 
                     let switcher = Switcher::new(chart_kind.clone())
