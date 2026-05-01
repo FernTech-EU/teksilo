@@ -44,10 +44,10 @@ use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, FontWeight, TextStyle};
 
 use crate::primitives::ImageWidget;
+use crate::primitives::image_mask::{
+    ImageMaskShape, apply_alpha_mask, center_crop_square,
+};
 use crate::primitives::image_widget::ImageFit;
-
-mod mask;
-use mask::MaskShape;
 
 // ─── Public types ──────────────────────────────────────────────────────────
 
@@ -120,22 +120,28 @@ pub enum AvatarCorner {
 type ActionFn = Rc<dyn Fn(&mut EventContext)>;
 
 /// Circular (or rounded / square) user avatar.
+///
+/// Static + reactive fields share the struct: each "content" knob —
+/// `name`, `image`, `alt`, `label`, `presence` — has a static
+/// constructor / setter *and* a `bind_*` setter that takes a signal.
+/// When a signal is bound, it wins; the corresponding static value
+/// is treated as a fallback. Signal-bound rebuilds run on flip
+/// (`BindingLevel::Rebuild`) so the inner ImageWidget / InitialsLeaf
+/// children are recreated with fresh values — exactly the lifecycle
+/// you want for a "logged-out → logged-in" transition.
 pub struct Avatar {
-    /// Initials shown when no image is present, or when `image_visible`
-    /// resolves to false. Always non-empty (`"?"` when source was empty).
+    /// Initials shown when no image is present. Static fallback;
+    /// overridden when `name_signal` is bound. Always non-empty
+    /// (`"?"` when input was empty).
     initials: String,
-    /// Optional override of the a11y name (`label`).
+    /// Optional override of the a11y name. Static fallback for
+    /// `label_signal`.
     label: Option<String>,
-    /// Image alt text (a11y name when in image-mode without label).
+    /// Image alt text. Static fallback for `alt_signal`.
     alt: Option<String>,
-
-    /// Pre-masked image pixels + dimensions, captured in the
-    /// constructor. `None` = pure-initials avatar.
-    image_data: Option<MaskedImage>,
-
-    /// Lazily-applied: if the user changed shape after `with_image`,
-    /// we re-mask on `build()`.
-    image_source_pixels: Option<RawImage>,
+    /// Static image source bytes. `None` = no image at construction.
+    /// Coexists with `image_signal`: signal wins when bound.
+    image_source: Option<RawImage>,
 
     size: AvatarSize,
     shape: AvatarShape,
@@ -153,6 +159,24 @@ pub struct Avatar {
     a11y_hidden: bool,
 
     image_visible: Prop<bool>,
+
+    // ── Dynamic signal overrides (each None ⇒ use the static field) ─
+
+    /// Reactive name. Drives derived initials and the hash seed when
+    /// bound. Bound at `BindingLevel::Rebuild` so the inner children
+    /// are recreated on flip.
+    name_signal: Option<Signal<String>>,
+    /// Reactive image source. `None` value ⇒ initials fallback path.
+    /// `Rc<RasterIcon>` so swap is cheap. Bound at `Rebuild`.
+    image_signal: Option<Signal<Option<Rc<RasterIcon>>>>,
+    /// Reactive alt text. Bound at `AccessibilityOnly` since it only
+    /// affects screen-reader output.
+    alt_signal: Option<Signal<Option<String>>>,
+    /// Reactive label. Bound at `AccessibilityOnly`.
+    label_signal: Option<Signal<Option<String>>>,
+    /// Reactive presence. Bound at `Rebuild` — the dot's colour and
+    /// the a11y description both depend on the presence variant.
+    presence_signal: Option<Signal<Option<AvatarPresence>>>,
 
     /// Optional `has_popup` ARIA hint. Surfaces via `set_has_popup` in
     /// `accessibility()` for the disclosure pattern (e.g. an Avatar
@@ -175,17 +199,11 @@ pub struct Avatar {
 }
 
 #[derive(Clone)]
-struct MaskedImage {
-    pixels: Vec<u8>,
-    side: u32,
-    /// Shape that produced these pixels — used to detect when the user
-    /// has switched shape after construction so we can re-mask.
-    shape: AvatarShape,
-}
-
-#[derive(Clone)]
 struct RawImage {
-    pixels: Vec<u8>,
+    /// `Rc` so rebuilds (theme switch, locale switch, signal flip)
+    /// don't reclone the byte buffer. The Rc identity is the cache
+    /// key for the inner ImageWidget's texture-atlas name.
+    pixels: Rc<Vec<u8>>,
     width: u32,
     height: u32,
 }
@@ -224,7 +242,11 @@ impl Avatar {
     /// [`ImageWidget::from_raw`].
     pub fn from_raw_image(pixels: Vec<u8>, width: u32, height: u32) -> Self {
         let mut a = Self::from_initials("?".to_string());
-        a.image_source_pixels = Some(RawImage { pixels, width, height });
+        a.image_source = Some(RawImage {
+            pixels: Rc::new(pixels),
+            width,
+            height,
+        });
         a
     }
 
@@ -233,8 +255,7 @@ impl Avatar {
             initials,
             label: None,
             alt: None,
-            image_data: None,
-            image_source_pixels: None,
+            image_source: None,
             size: AvatarSize::Medium,
             shape: AvatarShape::Circle,
             background: None,
@@ -246,6 +267,11 @@ impl Avatar {
             seed: None,
             a11y_hidden: false,
             image_visible: Prop::Static(true),
+            name_signal: None,
+            image_signal: None,
+            alt_signal: None,
+            label_signal: None,
+            presence_signal: None,
             has_popup: None,
             expanded_signal: None,
             action: None,
@@ -276,12 +302,10 @@ impl Avatar {
     }
 
     pub fn shape(mut self, shape: AvatarShape) -> Self {
-        if shape != self.shape {
-            self.shape = shape;
-            // Source pixels haven't been masked for the new shape —
-            // invalidate the cache so build() re-masks.
-            self.image_data = None;
-        }
+        // No cache to invalidate — masking now lives on the inner
+        // `ImageWidget`, which is recreated each `build()` with the
+        // current shape.
+        self.shape = shape;
         self
     }
 
@@ -427,6 +451,57 @@ impl Avatar {
         self.expanded_signal = Some(signal);
         self
     }
+
+    // ── Reactive content (bind_*) ─────────────────────────────────────
+
+    /// Bind the user's display name to a signal. The displayed
+    /// initials are auto-derived from the current value
+    /// (`derive_initials`), and the same value is used as the hash
+    /// seed for the background tint. Bound at
+    /// `BindingLevel::Rebuild` so the inner children regenerate on
+    /// flip — the canonical login-flow pattern:
+    ///
+    /// ```ignore
+    /// let user_name: Signal<String> = ctx.signal(String::new());
+    /// Avatar::with_initials_literal("?")        // logged-out fallback
+    ///     .bind_name(user_name.clone())
+    ///     .bind_image(user_avatar_signal)
+    /// ```
+    pub fn bind_name(mut self, signal: Signal<String>) -> Self {
+        self.name_signal = Some(signal);
+        self
+    }
+
+    /// Bind the image source. `None` ⇒ initials fallback. Each
+    /// non-`None` value is masked to the configured `AvatarShape` by
+    /// the inner [`ImageWidget`]. Bound at `BindingLevel::Rebuild`.
+    pub fn bind_image(mut self, signal: Signal<Option<Rc<RasterIcon>>>) -> Self {
+        self.image_signal = Some(signal);
+        self
+    }
+
+    /// Bind the image alt text. Bound at `BindingLevel::AccessibilityOnly`
+    /// — only the screen-reader projection is affected.
+    pub fn bind_alt(mut self, signal: Signal<Option<String>>) -> Self {
+        self.alt_signal = Some(signal);
+        self
+    }
+
+    /// Bind the accessible label. Bound at
+    /// `BindingLevel::AccessibilityOnly`.
+    pub fn bind_label(mut self, signal: Signal<Option<String>>) -> Self {
+        self.label_signal = Some(signal);
+        self
+    }
+
+    /// Bind the presence indicator. `None` hides the dot. Bound at
+    /// `BindingLevel::Rebuild` — the dot's colour and the a11y
+    /// `description` flip together so a rebuild keeps both layers in
+    /// sync.
+    pub fn bind_presence(mut self, signal: Signal<Option<AvatarPresence>>) -> Self {
+        self.presence_signal = Some(signal);
+        self
+    }
 }
 
 impl std::fmt::Debug for Avatar {
@@ -435,7 +510,7 @@ impl std::fmt::Debug for Avatar {
             .field("initials", &self.initials)
             .field("size", &self.size)
             .field("shape", &self.shape)
-            .field("has_image", &self.image_source_pixels.is_some())
+            .field("has_image", &(self.image_source.is_some() || self.image_signal.is_some()))
             .field("clickable", &self.action.is_some())
             .finish()
     }
@@ -549,13 +624,82 @@ fn corner_offset(corner: AvatarCorner) -> (f32, f32) {
     }
 }
 
-fn shape_to_mask(shape: AvatarShape, side: u32, radius_ratio: f32) -> MaskShape {
+fn shape_to_image_mask(shape: AvatarShape, radius_ratio: f32) -> ImageMaskShape {
     match shape {
-        AvatarShape::Circle => MaskShape::Circle,
-        AvatarShape::RoundedSquare => {
-            MaskShape::RoundedSquare(side as f32 * radius_ratio)
+        AvatarShape::Circle => ImageMaskShape::Circle,
+        AvatarShape::RoundedSquare => ImageMaskShape::RoundedSquare(radius_ratio),
+        AvatarShape::Square => ImageMaskShape::None,
+    }
+}
+
+// ─── Reactive accessors — used by paint / accessibility ──────────────────
+
+impl Avatar {
+    /// The displayed initials, taking any bound name signal into
+    /// account. Cheap (a few string ops per call); paint / a11y
+    /// invoke this directly rather than caching.
+    fn current_initials(&self) -> String {
+        match &self.name_signal {
+            Some(sig) => derive_initials(&sig.get()),
+            None => self.initials.clone(),
         }
-        AvatarShape::Square => MaskShape::Square,
+    }
+
+    /// The hash seed for the background tint. When `bind_name` is
+    /// active the seed *is* the name (so two users named "JD" but
+    /// "Jane Doe" vs "Jules Dupont" hash differently). Otherwise it
+    /// falls back to the user-supplied seed or the static initials.
+    fn current_seed(&self) -> String {
+        match &self.name_signal {
+            Some(sig) => sig.get(),
+            None => self
+                .seed
+                .clone()
+                .unwrap_or_else(|| self.initials.clone()),
+        }
+    }
+
+    fn current_alt(&self) -> Option<String> {
+        match &self.alt_signal {
+            Some(sig) => sig.get(),
+            None => self.alt.clone(),
+        }
+    }
+
+    fn current_label(&self) -> Option<String> {
+        match &self.label_signal {
+            Some(sig) => sig.get(),
+            None => self.label.clone(),
+        }
+    }
+
+    fn current_presence(&self) -> Option<AvatarPresence> {
+        match &self.presence_signal {
+            Some(sig) => sig.get(),
+            None => self.presence.clone(),
+        }
+    }
+
+    /// Resolve the image source bytes + dims for the current state.
+    /// `Some` ⇒ image mode (will spawn an `ImageWidget` child);
+    /// `None` ⇒ initials-only mode.
+    fn current_image(&self) -> Option<(Rc<Vec<u8>>, u32, u32)> {
+        if let Some(sig) = &self.image_signal {
+            return sig.get().map(|rc| {
+                (Rc::new(rc.pixels().to_vec()), rc.width(), rc.height())
+            });
+        }
+        self.image_source
+            .as_ref()
+            .map(|raw| (raw.pixels.clone(), raw.width, raw.height))
+    }
+
+    /// Whether the avatar should expose a11y-image-role semantics.
+    fn has_image_now(&self) -> bool {
+        self.image_signal
+            .as_ref()
+            .is_some_and(|sig| sig.get().is_some())
+            || self.image_source.is_some()
     }
 }
 
@@ -563,52 +707,52 @@ fn shape_to_mask(shape: AvatarShape, side: u32, radius_ratio: f32) -> MaskShape 
 
 impl Widget for Avatar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // 1. Apply CPU mask to the source image, if needed.
-        let need_remask = match (&self.image_data, &self.image_source_pixels) {
-            (None, Some(_)) => true,
-            (Some(cached), Some(_)) => cached.shape != self.shape,
-            _ => false,
-        };
-        if need_remask {
-            if let Some(raw) = &self.image_source_pixels {
-                let theme = ctx.theme();
-                let style = theme.components.avatar;
-                let (mut cropped, side) =
-                    mask::center_crop_square(&raw.pixels, raw.width, raw.height);
-                let mask_shape = shape_to_mask(self.shape, side, style.rounded_radius_ratio);
-                mask::apply_alpha_mask(&mut cropped, side, side, mask_shape);
-                self.image_data = Some(MaskedImage {
-                    pixels: cropped,
-                    side,
-                    shape: self.shape,
-                });
-            }
-        }
+        let self_id = ctx.self_id();
+        let theme = ctx.theme();
+        let mask_shape = shape_to_image_mask(self.shape, theme.components.avatar.rounded_radius_ratio);
 
-        // 2. Add child(ren). The activation handler is wired here as
-        //    well so taps bubble up correctly.
+        // 1. Resolve current content state. Each `current_*` reads
+        //    the signal if bound, falling back to the static field.
+        let initials = self.current_initials();
+        let seed = self.current_seed();
+        let alt = self.current_alt();
+        let image_bytes = self.current_image();
+
+        // 2. Build child(ren). The masking lives on `ImageWidget` so
+        //    Avatar doesn't manage pixel buffers itself any more.
         let make_initials_leaf = || InitialsLeaf {
-            initials: self.initials.clone(),
-            seed: self
-                .seed
-                .clone()
-                .unwrap_or_else(|| self.initials.clone()),
+            initials: initials.clone(),
+            seed: seed.clone(),
             background: self.background.clone(),
             foreground: self.foreground.clone(),
         };
+        let make_image_widget = |bytes: Rc<Vec<u8>>, w: u32, h: u32, alt: Option<String>| {
+            let mut img = ImageWidget::from_raw((*bytes).clone(), w, h)
+                .fit(ImageFit::Cover)
+                .mask(mask_shape);
+            if let Some(a) = alt {
+                img = img.alt(a);
+            } else {
+                // Inner ImageWidget is silenced — parent Avatar owns
+                // the canonical Role::Image / Role::Button + name.
+                img = img.a11y_hidden();
+            }
+            img
+        };
+
         let mut children = Vec::new();
-        match (&self.image_data, &self.image_visible) {
-            (Some(img), Prop::Static(true)) => {
-                let id = ctx.add(make_image_widget(img));
+        match (image_bytes, &self.image_visible) {
+            (Some((bytes, w, h)), Prop::Static(true)) => {
+                let id = ctx.add(make_image_widget(bytes, w, h, alt.clone()));
                 children.push(id);
             }
             (Some(_), Prop::Static(false)) => {
-                // Ignored image — initials only.
+                // Image present but explicitly hidden — initials only.
                 let id = ctx.add(make_initials_leaf());
                 children.push(id);
             }
-            (Some(img), Prop::Bound(visible_signal)) => {
-                let img_id = ctx.add(make_image_widget(img));
+            (Some((bytes, w, h)), Prop::Bound(visible_signal)) => {
+                let img_id = ctx.add(make_image_widget(bytes, w, h, alt.clone()));
                 let init_id = ctx.add(make_initials_leaf());
                 let v_clone = visible_signal.clone();
                 ctx.visible_when(img_id, v_clone.clone());
@@ -622,6 +766,25 @@ impl Widget for Avatar {
                 let id = ctx.add(make_initials_leaf());
                 children.push(id);
             }
+        }
+
+        // 3. Wire reactive content signals so flips re-run build().
+        //    Levels picked per the doc on each field.
+        let registry = ctx.binding_registry();
+        if let Some(sig) = &self.name_signal {
+            sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::Rebuild);
+        }
+        if let Some(sig) = &self.image_signal {
+            sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::Rebuild);
+        }
+        if let Some(sig) = &self.presence_signal {
+            sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::Rebuild);
+        }
+        if let Some(sig) = &self.alt_signal {
+            sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::AccessibilityOnly);
+        }
+        if let Some(sig) = &self.label_signal {
+            sig.bind_to(self_id, registry, fern_core::binding::BindingLevel::AccessibilityOnly);
         }
 
         // 3. If clickable, install attached handlers — including the
@@ -720,13 +883,7 @@ impl Widget for Avatar {
         // failed to register — so we always paint it.
         let bg = match &self.background {
             Some(prop) => prop.resolve(theme),
-            None => {
-                let seed = self
-                    .seed
-                    .as_deref()
-                    .unwrap_or(&self.initials);
-                hash_pick_palette_color(seed, theme)
-            }
+            None => hash_pick_palette_color(&self.current_seed(), theme),
         };
 
         // Background fill (always) — circle, rounded-square or square.
@@ -788,9 +945,10 @@ impl Widget for Avatar {
         }
 
         // Presence dot — drawn on top of everything, even the border,
-        // so it remains visible regardless of avatar contents.
-        if let Some(presence) = &self.presence {
-            let color = presence_color(presence, theme);
+        // so it remains visible regardless of avatar contents. Reads
+        // the current presence (signal-bound or static).
+        if let Some(presence) = self.current_presence() {
+            let color = presence_color(&presence, theme);
             let dot_diameter = (bounds.width.min(bounds.height) * style.presence_diameter_ratio)
                 .clamp(style.presence_diameter_min, style.presence_diameter_max);
             let dot_radius = dot_diameter / 2.0;
@@ -822,7 +980,15 @@ impl Widget for Avatar {
         }
 
         let clickable = self.action.is_some();
-        let has_image = self.image_data.is_some() || self.image_source_pixels.is_some();
+        // `current_image()` is the source of truth — a bound image
+        // signal whose value is `None` means "no image right now",
+        // even if a static `with_image` source was also supplied
+        // (signal wins). For role-selection we ask: does the live
+        // state put us in image-mode?
+        let has_image = self.has_image_now();
+        let alt = self.current_alt();
+        let label = self.current_label();
+        let initials = self.current_initials();
 
         if clickable {
             builder.set_role(fern_core::accesskit::Role::Button);
@@ -830,14 +996,12 @@ impl Widget for Avatar {
             // its activation hint. Catch this in dev to prevent silent
             // a11y regressions.
             debug_assert!(
-                self.label.is_some() || self.alt.is_some(),
-                "Avatar::on_activate_fn requires a `.label(\"...\")` (preferred) or `.alt(\"...\")` for screen readers"
+                label.is_some() || alt.is_some(),
+                "Avatar::on_activate_fn requires a `.label(\"...\")` (preferred) or `.alt(\"...\")` (or a `.bind_label(...)` / `.bind_alt(...)`) for screen readers"
             );
-            let name = self
-                .label
-                .clone()
-                .or_else(|| self.alt.clone())
-                .unwrap_or_else(|| self.initials.clone());
+            let name = label
+                .or(alt)
+                .unwrap_or_else(|| initials.clone());
             builder.set_name(name);
             builder.add_action(fern_core::accesskit::Action::Click);
             builder.add_action(fern_core::accesskit::Action::Focus);
@@ -846,26 +1010,21 @@ impl Widget for Avatar {
             // A pure-image avatar without alt text is missing its
             // semantic label — catch in dev (matches `ImageWidget`).
             debug_assert!(
-                self.alt.is_some() || self.label.is_some(),
-                "Avatar::with_image requires a `.alt(\"...\")` for meaningful images, or call `.a11y_hidden()` if decorative"
+                alt.is_some() || label.is_some(),
+                "Avatar::with_image requires a `.alt(\"...\")` (or `.bind_alt(...)`) for meaningful images, or call `.a11y_hidden()` if decorative"
             );
-            let name = self
-                .alt
-                .clone()
-                .or_else(|| self.label.clone())
-                .unwrap_or_else(|| self.initials.clone());
+            let name = alt
+                .or(label)
+                .unwrap_or_else(|| initials.clone());
             builder.set_name(name);
         } else {
             builder.set_role(fern_core::accesskit::Role::Label);
-            let name = self
-                .label
-                .clone()
-                .unwrap_or_else(|| self.initials.clone());
+            let name = label.unwrap_or_else(|| initials.clone());
             builder.set_name(name);
         }
 
-        if let Some(presence) = &self.presence {
-            builder.set_description(presence_label(presence));
+        if let Some(presence) = self.current_presence() {
+            builder.set_description(presence_label(&presence));
         }
 
         // Disclosure-pattern hints. Only meaningful for clickable
@@ -880,17 +1039,6 @@ impl Widget for Avatar {
             builder.set_expanded(signal.get());
         }
     }
-}
-
-fn make_image_widget(img: &MaskedImage) -> ImageWidget {
-    // Always hide the inner ImageWidget from the a11y tree — the
-    // parent Avatar carries the canonical role + name. Without this
-    // shield, screen readers would announce the avatar twice (once
-    // as the parent's `Role::Image` / `Role::Button`, once as the
-    // child `Role::Image`).
-    ImageWidget::from_raw(img.pixels.clone(), img.side, img.side)
-        .fit(ImageFit::Cover)
-        .a11y_hidden()
 }
 
 /// Stroke a focus ring outside the avatar's content bounds.
@@ -1706,16 +1854,225 @@ mod tests {
     }
 
     #[test]
-    fn shape_change_after_image_invalidates_mask() {
+    fn shape_change_after_image_does_not_panic() {
+        // Pre-refactor we cached masked pixels in Avatar; setting a
+        // different shape invalidated the cache. Now masking lives on
+        // ImageWidget, but the test still exercises the builder-time
+        // ordering: setting the shape after `with_image` works.
         let icon = rgba_solid(16, [10, 20, 30, 255]);
         let a = Avatar::with_image(&icon).alt_literal("X");
-        // First build under default (Circle) — masking caches.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let _ = tree.add(a.shape(AvatarShape::Square));
         tree.layout(SizeProposal::exact(32.0, 32.0));
         let _ = tree.render();
-        // Flow assertion: no panic, image emitted.
-        // Switching shape after construction is a builder-time
-        // operation; the cache invalidation runs in `build()`.
+    }
+
+    // ── Dynamic content (bind_*) ──────────────────────────────────────
+
+    #[test]
+    fn bind_name_updates_displayed_initials_on_signal_flip() {
+        use fern_canvas::MockTextBackend;
+        use fern_core::signal::Signal;
+        use std::cell::RefCell;
+        use std::rc::Rc as StdRc;
+        let name = Signal::new(String::new()); // logged-out
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
+        let id = tree.add(
+            Avatar::with_initials_literal("?")
+                .bind_name(name.clone()),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        // Empty name ⇒ derived initials = "?".
+        assert_eq!(tree.accessibility_node(id).name(), Some("?"));
+
+        name.set("Jane Doe".to_string());
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        // After the rebuild, derived initials = "JD".
+        assert_eq!(tree.accessibility_node(id).name(), Some("JD"));
+    }
+
+    #[test]
+    fn bind_image_swap_logged_out_to_logged_in() {
+        // The login-flow scenario from the API doc: start without an
+        // image (initials fallback), then publish a real photo.
+        use fern_canvas::MockTextBackend;
+        use fern_core::signal::Signal;
+        use std::cell::RefCell;
+        use std::rc::Rc as StdRc;
+        let icon = rgba_solid(8, [10, 20, 30, 255]);
+        let image: Signal<Option<Rc<RasterIcon>>> = Signal::new(None);
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
+        let _id = tree.add(
+            Avatar::with_initials_literal("JD")
+                .alt_literal("Jane")
+                .bind_image(image.clone()),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        // Logged-out: no image quad emitted.
+        assert!(
+            tree.render().images.is_empty(),
+            "logged-out avatar must not emit an image quad"
+        );
+
+        // Logged in.
+        image.set(Some(Rc::new(icon)));
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        assert!(
+            !tree.render().images.is_empty(),
+            "logged-in avatar must emit an image quad after the signal flips"
+        );
+
+        // Logged out again.
+        image.set(None);
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        assert!(
+            tree.render().images.is_empty(),
+            "image quad must disappear when the source signal returns to None"
+        );
+    }
+
+    #[test]
+    fn bind_image_signal_wins_over_static_with_image() {
+        // If both are supplied, the bound signal is the source of
+        // truth — `None` ⇒ initials fallback even when a static
+        // image was provided first.
+        use fern_canvas::MockTextBackend;
+        use fern_core::signal::Signal;
+        use std::cell::RefCell;
+        use std::rc::Rc as StdRc;
+        let icon = rgba_solid(8, [10, 20, 30, 255]);
+        let image: Signal<Option<Rc<RasterIcon>>> = Signal::new(None);
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
+        let _id = tree.add(
+            Avatar::with_image(&icon)
+                .alt_literal("anything")
+                .fallback_initials_literal("XX")
+                .bind_image(image.clone()),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        // Signal None overrides the static source — initials only.
+        assert!(tree.render().images.is_empty());
+    }
+
+    #[test]
+    fn bind_alt_updates_a11y_name_on_image_avatar() {
+        use fern_canvas::MockTextBackend;
+        use fern_core::signal::Signal;
+        use std::cell::RefCell;
+        use std::rc::Rc as StdRc;
+        let icon = rgba_solid(8, [10, 20, 30, 255]);
+        let alt = Signal::new(Some("Jane Doe".to_string()));
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
+        let id = tree.add(Avatar::with_image(&icon).bind_alt(alt.clone()));
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        assert_eq!(tree.accessibility_node(id).name(), Some("Jane Doe"));
+
+        alt.set(Some("Jules Dupont".to_string()));
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        assert_eq!(tree.accessibility_node(id).name(), Some("Jules Dupont"));
+    }
+
+    #[test]
+    fn bind_label_updates_a11y_name_on_initials_avatar() {
+        use fern_core::signal::Signal;
+        let label = Signal::new(Some("Profile".to_string()));
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let id = tree.add(
+            Avatar::with_initials_literal("JD").bind_label(label.clone()),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        assert_eq!(tree.accessibility_node(id).name(), Some("Profile"));
+
+        label.set(Some("Settings".to_string()));
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        assert_eq!(tree.accessibility_node(id).name(), Some("Settings"));
+    }
+
+    #[test]
+    fn bind_presence_swap_changes_dot_color_and_a11y_description() {
+        use fern_core::signal::Signal;
+        let presence: Signal<Option<AvatarPresence>> =
+            Signal::new(Some(AvatarPresence::Online));
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                fern_canvas::MockTextBackend::new(),
+            )));
+        let id = tree.add(
+            Avatar::with_initials_literal("JD").bind_presence(presence.clone()),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        let online_color = Theme::light_default().colors.status_success_fg;
+        assert!(
+            shape_colors(&tree.render())
+                .iter()
+                .any(|c| approx_color_eq(*c, online_color)),
+            "Online presence should paint the success colour"
+        );
+        let _ = id;
+
+        // Flip to Busy.
+        presence.set(Some(AvatarPresence::Busy));
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        let busy_color = Theme::light_default().colors.status_error_fg;
+        assert!(
+            shape_colors(&tree.render())
+                .iter()
+                .any(|c| approx_color_eq(*c, busy_color)),
+            "Busy presence should paint the error colour"
+        );
+
+        // Hide.
+        presence.set(None);
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        let frame = tree.render();
+        // No presence dot ⇒ neither status colour is on the frame.
+        assert!(
+            !shape_colors(&frame).iter().any(|c| approx_color_eq(*c, online_color)
+                || approx_color_eq(*c, busy_color)),
+            "presence None must remove the dot from the frame"
+        );
+    }
+
+    #[test]
+    fn bind_name_changes_hash_seed_so_palette_pick_can_change() {
+        // Distinct full names with identical initials produce distinct
+        // palette buckets. After bind_name flips between them, the
+        // bg shape colour must change too.
+        use fern_canvas::MockTextBackend;
+        use fern_core::signal::Signal;
+        use std::cell::RefCell;
+        use std::rc::Rc as StdRc;
+        let name = Signal::new("Jane Doe".to_string());
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(StdRc::new(RefCell::new(MockTextBackend::new())));
+        let _id = tree.add(
+            Avatar::with_initials_literal("?").bind_name(name.clone()),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        let bg_jd = shape_colors(&tree.render())
+            .into_iter()
+            .next()
+            .expect("bg circle is the first Shape");
+
+        name.set("Jules Dupont".to_string());
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        let bg_jd2 = shape_colors(&tree.render())
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_ne!(
+            bg_jd, bg_jd2,
+            "different bound names must hash to different palette buckets"
+        );
     }
 }

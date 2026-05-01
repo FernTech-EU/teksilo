@@ -6,10 +6,13 @@
 //! ratios and defaults to full-color rendering.
 
 use std::borrow::Cow;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use fern_canvas::{Canvas, Rect, RasterIcon, Size, SizeProposal};
+use fern_canvas::{Canvas, RasterIcon, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::widget::{LayoutContext, PaintContext, Widget};
+
+use super::image_mask::{ImageMaskShape, apply_alpha_mask, center_crop_square};
 
 /// How the image is fitted within its layout bounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -65,9 +68,19 @@ impl ImageWidget {
     }
 
     /// Create from raw RGBA pixel data.
+    ///
+    /// Each call gets a unique texture-atlas key (via a process-local
+    /// atomic counter), so two `from_raw` widgets with the same
+    /// dimensions but different bytes don't alias in the renderer's
+    /// pending-image cache. Without this, the first writer per frame
+    /// would silently win and subsequent ones would render the wrong
+    /// pixels — a latent bug fixed alongside the dynamic-image use
+    /// cases that need many short-lived `from_raw` widgets.
     pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self {
+        static NEXT_RAW_ID: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT_RAW_ID.fetch_add(1, Ordering::Relaxed);
         Self {
-            name: format!("_img_raw_{width}x{height}"),
+            name: format!("_img_raw_{id}_{width}x{height}"),
             width,
             height,
             upload_pixels: pixels,
@@ -77,6 +90,45 @@ impl ImageWidget {
             alt: None,
             a11y_hidden: false,
         }
+    }
+
+    /// Apply an anti-aliased alpha mask to the image at construction
+    /// time. The pixels are first centre-cropped to the shorter side
+    /// (so the mask shape is geometrically consistent regardless of
+    /// the source aspect ratio), then their alpha channel is
+    /// modulated by the mask coverage. RGB is preserved.
+    ///
+    /// `Cover` fit is the natural pairing — the masked square fills
+    /// the avatar/thumbnail bounds and the masked-out corners stay
+    /// transparent. `Contain` works but may letterbox. The default
+    /// fit (`Contain`) is left unchanged so callers explicitly pick
+    /// a fit when they apply a mask.
+    ///
+    /// `ImageMaskShape::None` is a no-op. Re-uploading is keyed off a
+    /// fresh per-mask name so the un-masked version of the same
+    /// source doesn't shadow the masked one in the texture atlas.
+    pub fn mask(mut self, shape: ImageMaskShape) -> Self {
+        if matches!(shape, ImageMaskShape::None) {
+            return self;
+        }
+        let (mut cropped, side) =
+            center_crop_square(&self.upload_pixels, self.width, self.height);
+        apply_alpha_mask(&mut cropped, side, side, shape);
+        self.upload_pixels = cropped;
+        self.width = side;
+        self.height = side;
+        // Update the natural display size if the user hadn't pinned
+        // one — they constructed against the original aspect ratio
+        // and the centre-crop has changed both dimensions.
+        if self.display_width.is_none() && self.display_height.is_none() {
+            // No-op: aspect_ratio() will report 1.0 from the new w/h.
+        }
+        // Bump the texture name so the old un-masked entry is
+        // distinct in the per-frame `pending_images` map.
+        static NEXT_MASK_ID: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT_MASK_ID.fetch_add(1, Ordering::Relaxed);
+        self.name = format!("{}_masked_{id}", self.name);
+        self
     }
 
     /// Set the fit mode.
@@ -294,5 +346,67 @@ mod tests {
         tree.layout(SizeProposal::exact(10.0, 10.0));
         let frame = tree.render();
         assert!(!frame.pending_images.is_empty(), "should register pending image");
+    }
+
+    #[test]
+    fn from_raw_unique_name_per_call() {
+        // Two ImageWidgets with identical dimensions but different
+        // bytes used to alias on the per-frame `pending_images` key
+        // (`_img_raw_{w}x{h}`), causing one to silently render the
+        // other's pixels. The atomic-counter-tagged name fixes this.
+        let a = ImageWidget::from_raw(vec![255; 16], 2, 2);
+        let b = ImageWidget::from_raw(vec![0; 16], 2, 2);
+        assert_ne!(a.name, b.name);
+    }
+
+    #[test]
+    fn mask_circle_alpha_zero_at_corners() {
+        // The reusable `.mask(Circle)` modifier — anywhere a photo
+        // needs a circular crop, not just inside Avatar.
+        let icon = RasterIcon::from_raw(vec![255; 32 * 32 * 4], 32, 32);
+        let widget = ImageWidget::from_raw(
+            icon.pixels().to_vec(),
+            icon.width(),
+            icon.height(),
+        )
+        .mask(ImageMaskShape::Circle);
+        // After cropping to a square (already 32×32 here) and
+        // masking, corner pixels have alpha 0.
+        let stride = (widget.width * 4) as usize;
+        let top_left_alpha = widget.upload_pixels[3];
+        let top_right_alpha = widget.upload_pixels[stride - 1];
+        assert_eq!(top_left_alpha, 0);
+        assert_eq!(top_right_alpha, 0);
+        // Centre pixel still opaque.
+        let center_idx = (((widget.height / 2) * widget.width + widget.width / 2) * 4 + 3) as usize;
+        assert_eq!(widget.upload_pixels[center_idx], 255);
+    }
+
+    #[test]
+    fn mask_none_is_passthrough() {
+        let original = vec![123, 45, 67, 200, 8, 9, 10, 200];
+        let widget = ImageWidget::from_raw(original.clone(), 2, 1)
+            .mask(ImageMaskShape::None);
+        assert_eq!(widget.upload_pixels, original);
+    }
+
+    #[test]
+    fn mask_crops_non_square_to_square() {
+        // 8×4 source → centre-cropped to 4×4 inscribed circle.
+        let pixels = vec![255; 8 * 4 * 4];
+        let widget = ImageWidget::from_raw(pixels, 8, 4).mask(ImageMaskShape::Circle);
+        assert_eq!(widget.width, 4);
+        assert_eq!(widget.height, 4);
+    }
+
+    #[test]
+    fn mask_bumps_name_to_avoid_atlas_collision() {
+        // The masked widget must not share a name with the un-masked
+        // version, otherwise the renderer would reuse the un-masked
+        // pixels in the atlas.
+        let icon = RasterIcon::from_raw(vec![255; 16 * 16 * 4], 16, 16);
+        let unmasked = ImageWidget::new(&icon);
+        let masked = ImageWidget::new(&icon).mask(ImageMaskShape::Circle);
+        assert_ne!(unmasked.name, masked.name);
     }
 }
