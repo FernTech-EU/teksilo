@@ -1460,13 +1460,55 @@ the dates when reading.
     hypertable + compression policy, pg_dump + pgBackRest,
     Patroni HA cluster sketch, direct-query examples.
 
-### Sub-phase E — `fern-dashboard` v1  *(not started)*
+### Sub-phase E — `fern-dashboard` v1  *(done 2026-05-01)*
 
-Up next. The framework side (gRPC client, query/fetch/erase
-infrastructure) is fully in place; the dashboard becomes a
-Qleany-managed FernUI desktop application that consumes the
-`Query` service and surfaces it in the four-tab layout in
-"FernUI widget tree" §.
+Shipped. `qleany.yaml` written and `qleany check` passes; six
+backend crates (`common`, `direct_access`, `macros`,
+`collector_queries`, `dashboard_state`, `frontend`) generated and
+committed alongside the hand-written `fern_dashboard_app`.
+`qleany prompt --context` written to `.claude/CLAUDE.md`.
+
+`ICollectorService` and `TonicCollectorService` (bearer auth +
+TLS / mTLS) live in `frontend/src/services/`; cache key includes
+the TLS fingerprint so two `Connection`s with the same hostname
+but different client identities get distinct channels. The
+`MutualTls { client_cert_path, client_key_path }` variant of
+`Connection.tls` is now honoured end-to-end — every Params struct
+(`CountEventsParams`, `EventsOverTimeParams`,
+`ActiveInstallsParams`) and the four positional-arg trait methods
+(`list_products`, `test_connection`, `fetch_install`,
+`erase_install`) carry a `TlsConfigRequest` plumbed from the
+selected `Connection` entity.
+
+`dashboard_state` `load_state` reconstructs both weak FKs
+(serialised as plain entity columns) and **strong-ownership
+junctions**: a second pass calls `set_dashboard_relationship`
+(`Charts`) and `set_root_relationship` (`Connections`,
+`Dashboards`) so a restart restores the on-screen ordering of
+strong children, not just the orphan entities.
+
+`save_state` runs through a 500 ms debouncer
+(`fern_dashboard_app::save_debouncer::SaveDebouncer`): every
+`EntityEvent::*` ping resets the deadline; the worker thread
+serialises after the burst and `flush_now` is called
+synchronously at shutdown after `app_context.shutdown()`. Single
+disk write per drag-burst of edits.
+
+FernUI frontend ships the four-tab layout (Overview / Events /
+Installs / Admin) plus the sidebar with three live pickers
+(Connection, Product, SavedQuery) cascading via a shared
+`DashboardSelection` bundle of signals. Selecting a Connection
+filters Products; selecting a Product writes both the entity id
+**and** the wire-level `product_id` slug, used by every tab in
+place of the legacy `FERN_PRODUCT_ID` env var (kept as a
+fallback). Overview uses `fern_charts::LineChart` for the
+time-series; Events uses `TableView` for the leaderboard.
+Installs replaces the `FERN_INSTALL_ID` env var with an in-app
+`TextInput` (gated behind the `rich-text` feature on `fern-ui`),
+seeded from the env var when set.
+
+Window geometry and theme persist via `fern-settings` /
+`fern-app`'s auto-save wiring.
 
 ### Sub-phase F — production polish  *(not started)*
 
