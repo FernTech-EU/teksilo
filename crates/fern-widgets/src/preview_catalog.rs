@@ -39,10 +39,11 @@ use crate::primitives::{
     VStack,
 };
 use crate::{
-    Accordion, Badge, Breadcrumb, BreadcrumbItem, BuiltInButton, BuiltInButtonSize, Button,
-    ButtonVariant, Card, Checkbox, ComboBox, GroupBox, GroupHeader, Link, ListView, MenuItem,
-    MenuList, Panel, ProgressBar, RadioButton, RadioGroup, ScrollArea, SegmentedControl, Slider,
-    Snackbar, SplitButton, SplitView, StatusBar, TabWidget, Toggle, Toolbar, ToolBox, TreeView,
+    Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, Breadcrumb, BreadcrumbItem,
+    BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Card, Checkbox, ComboBox, GroupBox,
+    GroupHeader, Link, ListView, MenuItem, MenuList, Panel, ProgressBar, RadioButton, RadioGroup,
+    ScrollArea, SegmentedControl, Slider, Snackbar, SplitButton, SplitView, StatusBar, TabWidget,
+    Toggle, Toolbar, ToolBox, TreeView,
 };
 
 // ---------------------------------------------------------------------------
@@ -462,6 +463,165 @@ impl WidgetCatalog for Badge {
     }
 }
 register_widget_catalog_at!("crates/fern-widgets/src/badge.rs", Badge);
+
+// ---------------------------------------------------------------------------
+// Avatar
+// ---------------------------------------------------------------------------
+
+impl WidgetCatalog for Avatar {
+    fn id() -> &'static str {
+        "avatar"
+    }
+    fn group() -> &'static str {
+        "Controls"
+    }
+    fn display_name() -> &'static str {
+        "Avatar"
+    }
+    fn knobs() -> KnobSpec {
+        KnobSpec::new()
+            // Free-form name; initials are derived (`Jane Doe` → `JD`).
+            .text("name", "Name", "Jane Doe")
+            // Optional override for the displayed initials when the
+            // user wants something other than the auto-derived form.
+            .opt_text("initials_override", "Initials override", None)
+            .choice(
+                "size",
+                "Size",
+                &["Small (24)", "Medium (32)", "Large (48)", "XLarge (64)"],
+                1,
+            )
+            .choice(
+                "shape",
+                "Shape",
+                &["Circle", "RoundedSquare", "Square"],
+                0,
+            )
+            .choice(
+                "presence",
+                "Presence",
+                &["None", "Online", "Offline", "Away", "Busy"],
+                0,
+            )
+            .choice(
+                "presence_corner",
+                "Presence corner",
+                &[
+                    "BottomTrailing",
+                    "BottomLeading",
+                    "TopTrailing",
+                    "TopLeading",
+                ],
+                0,
+            )
+            .bool_("border", "Show ring", false)
+            .bool_("clickable", "Clickable", false)
+    }
+    fn variants() -> Vec<PreviewVariant> {
+        vec![
+            PreviewVariant::defaults("default"),
+            PreviewVariant::knobs(
+                "small",
+                KnobOverrides::new().choice("size", 0).text("name", "AB"),
+            ),
+            PreviewVariant::knobs(
+                "large",
+                KnobOverrides::new()
+                    .choice("size", 2)
+                    .text("name", "Sherlock Holmes"),
+            ),
+            PreviewVariant::knobs(
+                "xlarge",
+                KnobOverrides::new()
+                    .choice("size", 3)
+                    .text("name", "Marie Curie"),
+            ),
+            PreviewVariant::knobs(
+                "rounded-square",
+                KnobOverrides::new().choice("shape", 1).text("name", "Project X"),
+            ),
+            PreviewVariant::knobs(
+                "online",
+                KnobOverrides::new().choice("presence", 1),
+            ),
+            PreviewVariant::knobs(
+                "away",
+                KnobOverrides::new().choice("presence", 3),
+            ),
+            PreviewVariant::knobs(
+                "busy",
+                KnobOverrides::new().choice("presence", 4),
+            ),
+            PreviewVariant::knobs(
+                "with-ring",
+                KnobOverrides::new().bool_("border", true),
+            ),
+            PreviewVariant::knobs(
+                "clickable",
+                KnobOverrides::new().bool_("clickable", true),
+            ),
+            PreviewVariant::knobs(
+                "single-letter",
+                KnobOverrides::new().text("name", "Cher"),
+            ),
+            PreviewVariant::knobs(
+                "email-derived",
+                KnobOverrides::new().text("name", "jane.doe@example.com"),
+            ),
+        ]
+    }
+    fn build(_variant: &str, knobs: &KnobValues) -> Box<dyn Widget> {
+        let name = knobs.text("name").get();
+        let size = match knobs.choice("size").get() {
+            0 => AvatarSize::Small,
+            2 => AvatarSize::Large,
+            3 => AvatarSize::XLarge,
+            _ => AvatarSize::Medium,
+        };
+        let shape = match knobs.choice("shape").get() {
+            1 => AvatarShape::RoundedSquare,
+            2 => AvatarShape::Square,
+            _ => AvatarShape::Circle,
+        };
+        let presence = match knobs.choice("presence").get() {
+            1 => Some(AvatarPresence::Online),
+            2 => Some(AvatarPresence::Offline),
+            3 => Some(AvatarPresence::Away),
+            4 => Some(AvatarPresence::Busy),
+            _ => None,
+        };
+        let presence_corner = match knobs.choice("presence_corner").get() {
+            1 => crate::AvatarCorner::BottomLeading,
+            2 => crate::AvatarCorner::TopTrailing,
+            3 => crate::AvatarCorner::TopLeading,
+            _ => crate::AvatarCorner::BottomTrailing,
+        };
+        let border = knobs.bool_("border").get();
+        let clickable = knobs.bool_("clickable").get();
+        let initials_override = knobs.opt_text("initials_override").get();
+
+        let mut a = if let Some(initials) = initials_override {
+            Avatar::with_initials_literal(&initials)
+        } else {
+            Avatar::with_name_literal(&name)
+        }
+        .size(size)
+        .shape(shape)
+        .presence_corner(presence_corner);
+
+        if let Some(p) = presence {
+            a = a.presence(p);
+        }
+        if border {
+            a = a.border(2.0);
+        }
+        if clickable {
+            a = a.label_literal("Open user menu").on_activate_fn(|_ctx| {});
+        }
+        Box::new(a)
+    }
+}
+register_widget_catalog_at!("crates/fern-widgets/src/avatar.rs", Avatar);
 
 // ---------------------------------------------------------------------------
 // Link

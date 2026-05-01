@@ -534,6 +534,72 @@ impl Default for BadgeStyle {
     }
 }
 
+/// Avatar — circular (or rounded/square) user-identity widget.
+///
+/// Sizes follow the IconButton convention of three-step discrete variants
+/// plus an `XLarge` step for profile cards. Initials font sizing scales
+/// with the avatar diameter (Ant Design's "gap" idea); single-character
+/// avatars get the larger ratio so a single letter has visual weight,
+/// two-character avatars use the smaller ratio to fit comfortably.
+///
+/// Presence-dot geometry is expressed as a ratio of the avatar size with
+/// min/max clamps so a 24-px avatar still has a legible dot and a 64-px
+/// one doesn't get an oversized one. The outline width gives the
+/// punched-out look that reads against any underlying surface.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AvatarStyle {
+    pub size_small: f32,
+    pub size_medium: f32,
+    pub size_large: f32,
+    pub size_x_large: f32,
+
+    /// Default border (ring) thickness when `.border()` is called
+    /// without an explicit width override.
+    pub border_default: f32,
+
+    /// Presence dot diameter as a fraction of avatar diameter, with
+    /// hard min/max clamps so the dot stays legible at small sizes
+    /// and proportionate at large sizes.
+    pub presence_diameter_ratio: f32,
+    pub presence_diameter_min: f32,
+    pub presence_diameter_max: f32,
+    /// Outline drawn around the presence dot — punches it visually
+    /// out of the avatar regardless of the avatar background.
+    pub presence_outline_width: f32,
+    /// Inset of the presence dot from the avatar's bounding box edge.
+    pub presence_inset: f32,
+
+    /// Initials font-size as a fraction of avatar diameter.
+    /// `font_ratio_1char` for one-grapheme initials, `font_ratio_2char`
+    /// for two-grapheme.
+    pub font_ratio_1char: f32,
+    pub font_ratio_2char: f32,
+
+    /// Corner-radius ratio for `AvatarShape::RoundedSquare`. 0.5 ⇒
+    /// fully circular, 0.0 ⇒ square corners.
+    pub rounded_radius_ratio: f32,
+}
+
+impl Default for AvatarStyle {
+    fn default() -> Self {
+        Self {
+            size_small: 24.0,
+            size_medium: 32.0,
+            size_large: 48.0,
+            size_x_large: 64.0,
+            border_default: 2.0,
+            presence_diameter_ratio: 0.30,
+            presence_diameter_min: 8.0,
+            presence_diameter_max: 14.0,
+            presence_outline_width: 1.5,
+            presence_inset: 2.0,
+            font_ratio_1char: 0.50,
+            font_ratio_2char: 0.42,
+            rounded_radius_ratio: 0.25,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ProgressBarStyle {
     pub height: f32,
@@ -880,6 +946,7 @@ pub struct ComponentStyles {
     pub tool_box: ToolBoxStyle,
     pub group_box: GroupBoxStyle,
     pub badge: BadgeStyle,
+    pub avatar: AvatarStyle,
     pub progress_bar: ProgressBarStyle,
     pub segmented_control: SegmentedControlStyle,
     pub split_button: SplitButtonStyle,

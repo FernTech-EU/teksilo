@@ -37,15 +37,15 @@
 
 use fern_ui::IntentKind;
 use fern_ui::prelude::*;
-use fern_ui::tokens::{FontWeight, Orientation, TextStyle};
+use fern_ui::tokens::{FontWeight, Orientation, TextStyle, VAlignment};
 use fern_ui::widgets::{
-    Accordion, Badge, BuiltInButton, BuiltInButtonSize, Button, ButtonVariant, Card, CheckState,
-    Checkbox, ComboBox, Divider, EventContextMessageBoxExt, Expand, FixedSize, Grid, GroupBox,
-    GroupHeader, HStack, IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem,
-    MenuList, MessageBox, MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea,
-    SegmentedControl, Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabItem,
-    TabWidget, TextInput, TextWidget, Toggle, Toolbar, ToolBox, ToolBoxItem, TrackSize, VStack,
-    Wrap,
+    Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, BuiltInButton,
+    BuiltInButtonSize, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider,
+    EventContextMessageBoxExt, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
+    IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, MessageBox,
+    MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl,
+    Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabItem, TabWidget,
+    TextInput, TextWidget, Toggle, Toolbar, ToolBox, ToolBoxItem, TrackSize, VStack, Wrap,
 };
 use fern_ui::widgets::tooltip::TooltipContent;
 
@@ -1188,6 +1188,119 @@ impl WidgetCatalog {
                         .child(Badge::new_literal("3").color(TextRole::Error).text_color(Color::WHITE))
                         .child(Badge::new_literal("New").color(TextRole::Success).text_color(Color::WHITE))
                         .child(Badge::new_literal("Beta").color(TextRole::Warning)),
+                )
+                .child(Divider::new())
+                .child(
+                    TextWidget::new_literal("Avatar — sizes (24 / 32 / 48 / 64)")
+                        .style(TextStyleRole::Small)
+                        .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(12.0)
+                        .alignment(VAlignment::Center)
+                        .child(Avatar::with_name_literal("Jane Doe").size(AvatarSize::Small))
+                        .child(Avatar::with_name_literal("Jane Doe").size(AvatarSize::Medium))
+                        .child(Avatar::with_name_literal("Jane Doe").size(AvatarSize::Large))
+                        .child(Avatar::with_name_literal("Jane Doe").size(AvatarSize::XLarge)),
+                )
+                .child(
+                    TextWidget::new_literal("Avatar — shapes")
+                        .style(TextStyleRole::Small)
+                        .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(12.0)
+                        .child(
+                            Avatar::with_name_literal("Project Alpha")
+                                .size(AvatarSize::Large)
+                                .shape(AvatarShape::Circle),
+                        )
+                        .child(
+                            Avatar::with_name_literal("Project Alpha")
+                                .size(AvatarSize::Large)
+                                .shape(AvatarShape::RoundedSquare),
+                        )
+                        .child(
+                            Avatar::with_name_literal("Project Alpha")
+                                .size(AvatarSize::Large)
+                                .shape(AvatarShape::Square),
+                        ),
+                )
+                .child(
+                    TextWidget::new_literal("Avatar — presence indicator (Online / Away / Busy / Offline)")
+                        .style(TextStyleRole::Small)
+                        .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(12.0)
+                        .child(
+                            Avatar::with_name_literal("Sherlock Holmes")
+                                .size(AvatarSize::Large)
+                                .presence(AvatarPresence::Online),
+                        )
+                        .child(
+                            Avatar::with_name_literal("Marie Curie")
+                                .size(AvatarSize::Large)
+                                .presence(AvatarPresence::Away),
+                        )
+                        .child(
+                            Avatar::with_name_literal("Ada Lovelace")
+                                .size(AvatarSize::Large)
+                                .presence(AvatarPresence::Busy),
+                        )
+                        .child(
+                            Avatar::with_name_literal("Nikola Tesla")
+                                .size(AvatarSize::Large)
+                                .presence(AvatarPresence::Offline),
+                        ),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Avatar — distinct seeds pick distinct hash-derived tints",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(Avatar::with_name_literal("Anna García"))
+                        .child(Avatar::with_name_literal("Bob Wong"))
+                        .child(Avatar::with_name_literal("Cher"))
+                        .child(Avatar::with_name_literal("Diego Pereira"))
+                        .child(Avatar::with_name_literal("Eva Schmidt"))
+                        .child(Avatar::with_name_literal("Felix Weber"))
+                        .child(Avatar::with_name_literal("Greta Lin"))
+                        .child(Avatar::with_name_literal("Hassan Ali")),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Avatar — outer ring + clickable trigger (Tab to focus, Enter to activate)",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(12.0)
+                        .alignment(VAlignment::Center)
+                        .child(
+                            Avatar::with_name_literal("Jane Doe")
+                                .size(AvatarSize::Large)
+                                .border(2.0),
+                        )
+                        .child(
+                            Avatar::with_name_literal("Jane Doe")
+                                .size(AvatarSize::Large)
+                                .label_literal("Open user menu")
+                                .on_activate_fn(|_ctx| {
+                                    // The catalog wires no real intent here; in a
+                                    // real app this would `ctx.send_intent(...)`.
+                                }),
+                        ),
                 ),
         )
     }

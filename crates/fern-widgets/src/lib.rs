@@ -1,4 +1,5 @@
 pub mod accordion;
+pub mod avatar;
 pub mod badge;
 pub mod breadcrumb;
 pub mod built_in_button;
@@ -64,6 +65,7 @@ mod preview_catalog;
 pub use tooltip::TooltipWidget;
 
 pub use accordion::Accordion;
+pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use built_in_button::{BuiltInButton, BuiltInButtonSize, BuiltInIcons};

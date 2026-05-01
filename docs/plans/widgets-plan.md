@@ -30,9 +30,10 @@ so they don't appear as gaps:
   [tab_widget.rs](crates/fern-widgets/src/tab_widget.rs) (tab headers + Switcher).
 - **TreeView, ListView, ScrollArea, ScrollBar, SplitView, Dialog, Popover,
   Snackbar, Wizard, MenuBar, MenuItem, MenuList, Breadcrumb, TitleBar, Link,
-  Accordion, Badge, ProgressBar, StatusBar, Toolbar, Card, Panel, Repeater** —
-  all present. ScrollArea/ScrollBar were missing from an earlier inventory
-  pass; they do exist.
+  Accordion, Badge, ProgressBar, StatusBar, Toolbar, Card, Panel, Repeater,
+  Avatar** — all present. ScrollArea/ScrollBar were missing from an earlier
+  inventory pass; they do exist. Avatar (Gap 1) shipped after this document
+  was originally written; details remain in Gap 1 below.
 
 Full primitive set ([primitives/](crates/fern-widgets/src/primitives/)):
 HStack, VStack, ZStack, Grid, Wrap, Center, Expand, AspectRatio, MinSize,
@@ -43,9 +44,30 @@ RectWidget, Divider, Switcher, FocusRing.
 
 ## Gap 1 — Missing from Section 27
 
-- **Avatar** (§27.5) — Circular container with initials (hash-derived color)
-  or image. Trivial once an AvatarStyle slot lands in
-  [components.rs](crates/fern-tokens/src/components.rs). **Low effort.**
+- **Avatar** (§27.5) — **Shipped** as
+  [Avatar](crates/fern-widgets/src/avatar.rs). Circular / rounded-square /
+  square user-identity widget. Image source path uses CPU-side
+  anti-aliased alpha masking at construction time (4× super-sampling)
+  so circular images compose with the existing rect-only `Canvas::set_clip`
+  — no canvas-API change required. Initials path uses the theme's
+  Okabe-Ito `chart_palette` for hash-derived tints (FNV-1a 64), with
+  WCAG-luminance auto-contrast for the text colour. Builder surface
+  covers `with_initials` / `with_name` (auto-derives `"Jane Doe" → JD`,
+  `"jane.doe@x.com" → JD`, Unicode-safe) / `with_image` /
+  `from_raw_image`; four discrete sizes (24/32/48/64) plus
+  `Custom(px)`; three shapes (Circle / RoundedSquare / Square); four
+  presence states (Online / Offline / Away / Busy) plus `Custom` with
+  an a11y label, positionable to any of the four corners; optional
+  outer ring; `image_visible` reactive prop swaps in the initials
+  fallback without a layout shift; and `on_activate_fn` promotes the
+  a11y role to `Role::Button` with `Action::Click`/`Focus` and a
+  `Pointer` cursor. New `AvatarStyle` slot in
+  [components.rs](crates/fern-tokens/src/components.rs). Mask helper
+  factored into [avatar/mask.rs](crates/fern-widgets/src/avatar/mask.rs)
+  for testability. WidgetCatalog entry registered for the previewer
+  (12 named variants). Showcase added to the
+  [widget_catalog](examples/widget_catalog/src/main.rs) display section
+  (sizes × shapes × presence + hash-tint variety + clickable + ring).
 
 Everything else in §27.1–27.9 ships. §27.10 (text editing) is postponed.
 
@@ -447,10 +469,11 @@ Listed so they're consciously out of scope, not accidentally forgotten:
 
 ## Recommended phasing
 
-**Phase A — Trivial / low-effort wins.** Avatar, **Image**, GroupHeader,
+**Phase A — Trivial / low-effort wins.** **Image**, GroupHeader,
 Chip, IconButton, **SplitButton**, Disclosure triangle,
 Banner, Rich Tooltip extension, CommandLinkButton.
-(Spinner / CircularProgressIndicator has shipped — see Gap 3 item 2.)
+(Spinner / CircularProgressIndicator has shipped — see Gap 3 item 2.
+Avatar has shipped — see Gap 1.)
 Each is days, not weeks, and each unlocks real visual polish.
 
 **Phase B — Mid-effort desktop essentials.** GroupBox, FormLayout,

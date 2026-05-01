@@ -14,7 +14,7 @@ pub mod typography;
 pub use alignment::{Alignment, HAlignment, VAlignment};
 pub use color::Color;
 pub use components::{
-    AccordionStyle, BadgeStyle, BreadcrumbStyle, ButtonStyle, CardStyle, ChartStyle,
+    AccordionStyle, AvatarStyle, BadgeStyle, BreadcrumbStyle, ButtonStyle, CardStyle, ChartStyle,
     CheckboxStyle, ComboBoxStyle, ComponentStyles, DialogStyle, DividerStyle, GroupBoxStyle,
     IconButtonStyle, LinkStyle, MenuStyle, NotificationStyle, PanelStyle, PopoverStyle,
     ProgressBarStyle, RadioStyle, ScrollBarStyle, SegmentedControlStyle, SliderStyle,
