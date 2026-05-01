@@ -330,6 +330,27 @@ impl TypesetterBridge {
     pub fn display_scale_factor(&self) -> f32 {
         self.service.scale_factor()
     }
+
+    /// Line height (in logical pixels) of the registry's default
+    /// font + size — `ascent + descent + leading`. Useful for
+    /// widgets that need to size against an intrinsic line height
+    /// before any content has been laid out (e.g.
+    /// `RichTextEditor::min_lines` / `max_lines`).
+    ///
+    /// Returns `0.0` if no default font is registered. Does not
+    /// apply any per-block `line_height_multiplier`.
+    pub fn default_line_height(&self) -> f32 {
+        self.service.default_line_height()
+    }
+
+    /// Line height (in logical pixels) for a specific [`TextStyle`].
+    /// Same calculation as [`default_line_height`](Self::default_line_height)
+    /// but resolves the explicit family / weight / size first.
+    ///
+    /// Returns `0.0` when the style cannot be resolved.
+    pub fn measure_line_height(&self, style: &TextStyle) -> f32 {
+        self.service.measure_line_height(&Self::to_text_format(style))
+    }
 }
 
 impl Default for TypesetterBridge {

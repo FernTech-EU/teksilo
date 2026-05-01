@@ -3091,3 +3091,102 @@ fn format_version_bumps_on_format_only_edits() {
 // hides the real logic from unit tests. Left documented here so a
 // future integration test harness can pick it up.
 
+// ---------------------------------------------------------------------------
+// min_lines / max_lines — intrinsic sizing.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_min_max_lines_preserves_greedy_sizing() {
+    // Regression guard: when neither knob is set, `size_that_fits`
+    // must consume the proposal exactly as before so existing
+    // layouts in apps don't shift.
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let bounds = tree.bounds(id);
+    assert!((bounds.width - 400.0).abs() < 0.5);
+    assert!((bounds.height - 300.0).abs() < 0.5);
+}
+
+#[test]
+fn min_lines_enforces_intrinsic_height_on_empty_doc() {
+    // Empty document with `min_lines(3)`: when the parent proposes
+    // an unbounded height (as a `VStack` does for non-Expand
+    // children), the editor reports `3 × default_line_height`.
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc).min_lines(3);
+    let line_h = {
+        let st = editor.state_handle();
+        let st = st.borrow();
+        st.engine.default_line_height()
+    };
+    assert!(
+        line_h > 0.0,
+        "default_line_height must be non-zero for the embedded font"
+    );
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::with_width(400.0));
+    let bounds = tree.bounds(id);
+    let expected = 3.0 * line_h;
+    assert!(
+        (bounds.height - expected).abs() < 1.0,
+        "expected ~{}px (3 × {:.2}), got {:.2}",
+        expected,
+        line_h,
+        bounds.height
+    );
+}
+
+#[test]
+fn max_lines_caps_intrinsic_height_below_proposal() {
+    // `max_lines(2)` plus an unbounded-height proposal: the editor
+    // reports 2 × line_height (or less when content is shorter),
+    // letting any overflow scroll vertically rather than growing.
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc).max_lines(2);
+    let line_h = {
+        let st = editor.state_handle();
+        let st = st.borrow();
+        st.engine.default_line_height()
+    };
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::with_width(400.0));
+    let bounds = tree.bounds(id);
+    let expected = 2.0 * line_h;
+    assert!(
+        bounds.height <= expected + 0.5,
+        "max_lines(2) must cap at 2 × line_height ({:.2}), got {:.2}",
+        expected,
+        bounds.height
+    );
+}
+
+#[test]
+fn min_and_max_lines_clamp_growth_within_window() {
+    // The classic messenger composer pattern:
+    // `min_lines(1).max_lines(4)` must report a height in
+    // `[1, 4] × line_height` regardless of how much vertical
+    // space the parent has on offer (modeled here by an
+    // unbounded-height proposal).
+    let doc = TextDocument::new();
+    let editor = RichTextEditor::editor(doc).min_lines(1).max_lines(4);
+    let line_h = {
+        let st = editor.state_handle();
+        let st = st.borrow();
+        st.engine.default_line_height()
+    };
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::with_width(400.0));
+    let bounds = tree.bounds(id);
+    assert!(
+        bounds.height >= line_h - 0.5 && bounds.height <= 4.0 * line_h + 0.5,
+        "intrinsic height must land in [1, 4] × line_height, got {:.2}",
+        bounds.height
+    );
+}
+

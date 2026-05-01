@@ -185,6 +185,16 @@ impl RichTextEngine {
         self.flow.content_height()
     }
 
+    /// Line height (in logical pixels) of the shared service's
+    /// default font + size. Useful for widgets that need to size
+    /// themselves against an intrinsic line height before any
+    /// content has been laid out (`RichTextEditor::min_lines` /
+    /// `max_lines`). Returns `0.0` if no default font is registered
+    /// on the shared service.
+    pub fn default_line_height(&self) -> f32 {
+        self.shared.borrow().default_line_height()
+    }
+
     pub fn max_content_width(&self) -> f32 {
         self.flow.max_content_width()
     }

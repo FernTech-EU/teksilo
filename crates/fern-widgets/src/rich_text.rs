@@ -108,6 +108,13 @@ pub struct RichTextEditor {
     /// `default_context_menu_enabled`. Taken out (via `Option::take`)
     /// during `build()` because `Box<dyn Fn>` is not `Clone`.
     custom_context_menu: Option<Box<dyn Fn() -> Box<dyn fern_core::widget::Widget>>>,
+    /// Minimum visible-text height expressed in lines. When set,
+    /// switches `size_that_fits` from greedy (consume the proposal)
+    /// to **intrinsic** sizing — see [`min_lines`](Self::min_lines).
+    min_lines: Option<u32>,
+    /// Maximum visible-text height expressed in lines. Hard-caps
+    /// the intrinsic height — see [`max_lines`](Self::max_lines).
+    max_lines: Option<u32>,
 }
 
 impl std::fmt::Debug for RichTextEditor {
@@ -153,6 +160,8 @@ impl RichTextEditor {
             h_scroll_policy: ScrollPolicy::Auto,
             default_context_menu_enabled: true,
             custom_context_menu: None,
+            min_lines: None,
+            max_lines: None,
         }
     }
 
@@ -214,6 +223,44 @@ impl RichTextEditor {
     pub fn scroll_policy(mut self, policy: ScrollPolicy) -> Self {
         self.v_scroll_policy = policy;
         self.h_scroll_policy = policy;
+        self
+    }
+
+    /// Set a minimum height (in lines of text) for the editor's
+    /// **intrinsic** size.
+    ///
+    /// Setting either `min_lines` or [`max_lines`](Self::max_lines)
+    /// switches the editor from greedy sizing (consume the
+    /// proposal) to intrinsic sizing: `size_that_fits` returns
+    /// `clamp(content_height, min_lines × line_height, max_lines × line_height)`
+    /// for the dimension the parent leaves unspecified. A parent
+    /// like `VStack` proposes unbounded height to non-Expand
+    /// children, so the editor lands at its intrinsic height —
+    /// exactly the messenger-composer / chat-input pattern.
+    ///
+    /// A parent that *forces* the height (e.g. `FixedSize`) wins
+    /// regardless. This is intentional and matches FernUI's
+    /// general layout discipline: parents always have the final
+    /// say on the dimensions they pin.
+    ///
+    /// `min_lines` measures the *visible text area*, not the outer
+    /// widget — `min_lines(1)` reports a height equal to one line
+    /// of text at the typesetter's default font + size, even
+    /// before the document has any content.
+    pub fn min_lines(mut self, n: u32) -> Self {
+        self.min_lines = Some(n);
+        self
+    }
+
+    /// Set a maximum height (in lines of text) for the editor's
+    /// intrinsic size. Past this cap the vertical scroll bar
+    /// absorbs further content growth.
+    ///
+    /// See [`min_lines`](Self::min_lines) for the intrinsic-mode
+    /// switch and the parent-proposal interaction. `max_lines`
+    /// measures the visible text area, not the outer widget.
+    pub fn max_lines(mut self, n: u32) -> Self {
+        self.max_lines = Some(n);
         self
     }
 
@@ -1114,11 +1161,34 @@ impl Widget for RichTextEditor {
     }
 
     fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        // Greedy: consume the full proposal. Intrinsic sizing for
-        // `ScrollPolicy::AlwaysOff` is an M8b refinement.
         let w = proposal.width.unwrap_or(200.0).max(0.0);
-        let h = proposal.height.unwrap_or(100.0).max(0.0);
-        Size::new(w, h)
+
+        // Greedy mode (default, behaviour unchanged): both knobs
+        // unset → consume the proposal exactly as before.
+        if self.min_lines.is_none() && self.max_lines.is_none() {
+            let h = proposal.height.unwrap_or(100.0).max(0.0);
+            return Size::new(w, h);
+        }
+
+        // Intrinsic mode: clamp content height to `[min_h, max_h]`
+        // where each bound is `n * line_height`. The clamp is a
+        // hard cap — we ignore the proposal's height and let the
+        // vertical scroll bar take over past `max_lines`.
+        let st = self.state.borrow();
+        let line_h = st.engine.default_line_height();
+        let content_h = st.engine.content_height();
+        drop(st);
+
+        let min_h = self
+            .min_lines
+            .map(|n| n as f32 * line_h)
+            .unwrap_or(0.0);
+        let max_h = self
+            .max_lines
+            .map(|n| n as f32 * line_h)
+            .unwrap_or(f32::INFINITY);
+        let intrinsic_h = content_h.clamp(min_h, max_h);
+        Size::new(w, intrinsic_h.max(0.0))
     }
 
     fn place_children(
