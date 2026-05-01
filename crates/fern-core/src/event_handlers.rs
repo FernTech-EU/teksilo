@@ -25,6 +25,19 @@ pub(crate) struct EventHandlers {
     pub on_pinch: Option<Box<dyn FnMut(PinchPhase, &mut EventContext)>>,
     pub on_hover: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
     pub on_key: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
+    /// Strict-ancestor-only preview pass for `KeyDown` / `KeyUp` /
+    /// IME events. Fires on every ancestor of the focused widget,
+    /// in root → parent-of-target order, *before* the focused
+    /// widget's `on_key` runs. Returning `EventResponse::Handled`
+    /// consumes the event and stops both the rest of the preview
+    /// walk and the focused widget's `on_key`.
+    ///
+    /// Mirrors how `on_pointer_event` behaves on the pointer side.
+    /// The focused widget itself does NOT see its own
+    /// `on_key_preview` — set `on_key` on the target if you need a
+    /// per-widget hook.
+    pub on_key_preview:
+        Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_focus: Option<Box<dyn FnMut(bool, &mut EventContext)>>,
     pub on_pointer_event: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
     pub on_scroll: Option<Box<dyn FnMut(&WidgetEvent, &mut EventContext) -> EventResponse>>,
@@ -86,6 +99,7 @@ impl EventHandlers {
             on_pinch: None,
             on_hover: None,
             on_key: None,
+            on_key_preview: None,
             on_focus: None,
             on_pointer_event: None,
             on_scroll: None,
@@ -111,6 +125,7 @@ impl EventHandlers {
             || self.on_pinch.is_some()
             || self.on_hover.is_some()
             || self.on_key.is_some()
+            || self.on_key_preview.is_some()
             || self.on_focus.is_some()
             || self.on_pointer_event.is_some()
             || self.on_scroll.is_some()
@@ -133,6 +148,7 @@ impl EventHandlers {
             on_pinch: merge_pinch_handler(self.on_pinch, other.on_pinch),
             on_hover: merge_hover_handler(self.on_hover, other.on_hover),
             on_key: merge_event_handler(self.on_key, other.on_key),
+            on_key_preview: merge_event_handler(self.on_key_preview, other.on_key_preview),
             on_focus: merge_focus_handler(self.on_focus, other.on_focus),
             on_pointer_event: merge_event_handler(self.on_pointer_event, other.on_pointer_event),
             on_scroll: merge_event_handler(self.on_scroll, other.on_scroll),
@@ -312,6 +328,7 @@ impl std::fmt::Debug for EventHandlers {
             .field("on_pinch", &self.on_pinch.is_some())
             .field("on_hover", &self.on_hover.is_some())
             .field("on_key", &self.on_key.is_some())
+            .field("on_key_preview", &self.on_key_preview.is_some())
             .field("on_focus", &self.on_focus.is_some())
             .field("on_pointer_event", &self.on_pointer_event.is_some())
             .field("on_scroll", &self.on_scroll.is_some())

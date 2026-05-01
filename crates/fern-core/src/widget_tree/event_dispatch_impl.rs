@@ -539,10 +539,29 @@ impl WidgetTree {
         ctx: &mut EventContext,
     ) -> Option<EventResponse> {
         match event {
+            // Key + IME events fire `on_key_preview` on each strict
+            // ancestor of the focused widget (root → parent-of-target).
+            // Mirrors how `on_pointer_event` previews on the pointer
+            // side; the focused widget itself does NOT see its own
+            // `on_key_preview` (the dispatch loop builds an ancestors
+            // list that excludes the target, so this is enforced by
+            // the caller, not here).
             WidgetEvent::KeyDown { .. }
             | WidgetEvent::KeyUp { .. }
             | WidgetEvent::ImeComposition { .. }
-            | WidgetEvent::ImeCommit { .. } => None,
+            | WidgetEvent::ImeCommit { .. } => {
+                let has = node.external_handlers.on_key_preview.is_some()
+                    || node.handlers.on_key_preview.is_some();
+                if !has {
+                    return None;
+                }
+                Some(fire_event_handler_both(
+                    &mut node.external_handlers.on_key_preview,
+                    &mut node.handlers.on_key_preview,
+                    event,
+                    ctx,
+                ))
+            }
             _ => {
                 let has = node.external_handlers.on_pointer_event.is_some()
                     || node.handlers.on_pointer_event.is_some();
@@ -1828,6 +1847,177 @@ mod tests {
         tree.dispatch_event(WidgetEvent::ImeCommit {
             text: "あ".to_string(),
         });
+    }
+
+    // ── on_key_preview ──────────────────────────────────────────
+
+    #[test]
+    fn key_preview_consumes_before_focused_on_key() {
+        // root → mid → leaf (focused). Root consumes Enter via
+        // on_key_preview; the leaf's on_key must NOT fire.
+        use crate::event::EventResponse;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let leaf_fired = Rc::new(Cell::new(false));
+        let leaf_flag = leaf_fired.clone();
+        let preview_fired = Rc::new(Cell::new(false));
+        let preview_flag = preview_fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().focusable().on_key(move |event, _c| {
+            // Only count KeyDown so the trailing KeyUp from
+            // press_key doesn't trigger us spuriously.
+            if matches!(event, WidgetEvent::KeyDown { .. }) {
+                leaf_flag.set(true);
+            }
+            EventResponse::Handled
+        }));
+        let mid = tree.add(StackWidget::new().add_child(leaf));
+        let _root = tree.add(StackWidget::new().add_child(mid).on_key_preview(
+            move |event, _c| match event {
+                WidgetEvent::KeyDown {
+                    key: Key::Enter, ..
+                } => {
+                    preview_flag.set(true);
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            },
+        ));
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(leaf);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+
+        assert!(
+            preview_fired.get(),
+            "ancestor on_key_preview must fire for KeyDown on a focused descendant"
+        );
+        assert!(
+            !leaf_fired.get(),
+            "consuming the event in preview must prevent the focused widget's on_key from running"
+        );
+    }
+
+    #[test]
+    fn key_preview_falls_through_when_returning_ignored() {
+        // Same shape; this time the preview returns Ignored, so
+        // the leaf's on_key must still fire.
+        use crate::event::EventResponse;
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let leaf_fired = Rc::new(Cell::new(false));
+        let leaf_flag = leaf_fired.clone();
+        let preview_fired = Rc::new(Cell::new(false));
+        let preview_flag = preview_fired.clone();
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().focusable().on_key(move |_e, _c| {
+            leaf_flag.set(true);
+            EventResponse::Handled
+        }));
+        let mid = tree.add(StackWidget::new().add_child(leaf));
+        let _root = tree.add(
+            StackWidget::new()
+                .add_child(mid)
+                .on_key_preview(move |_event, _c| {
+                    preview_flag.set(true);
+                    EventResponse::Ignored
+                }),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(leaf);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+
+        assert!(preview_fired.get(), "preview must always be invoked");
+        assert!(
+            leaf_fired.get(),
+            "preview returning Ignored must not block the focused widget's on_key"
+        );
+    }
+
+    #[test]
+    fn key_preview_excludes_focused_target_itself() {
+        // Strict-ancestors-only: the focused widget's own
+        // on_key_preview must NOT fire — the preview pass walks
+        // strict ancestors only.
+        use crate::event::EventResponse;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let preview_on_target = Rc::new(Cell::new(false));
+        let pf = preview_on_target.clone();
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(
+            FillWidget::new()
+                .focusable()
+                .on_key_preview(move |_e, _c| {
+                    pf.set(true);
+                    EventResponse::Handled
+                }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(leaf);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+
+        assert!(
+            !preview_on_target.get(),
+            "the focused widget itself must not see its own on_key_preview"
+        );
+    }
+
+    #[test]
+    fn key_preview_root_to_target_order() {
+        // Two ancestors with on_key_preview attached. The outer
+        // (root-side) one must fire first; the closer one (still
+        // ancestor of the focused leaf) fires second.
+        use crate::event::EventResponse;
+        use crate::test_widgets::StackWidget;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let order: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+        let outer_log = order.clone();
+        let inner_log = order.clone();
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().focusable());
+        let inner = tree.add(StackWidget::new().add_child(leaf).on_key_preview(
+            move |event, _c| {
+                if matches!(event, WidgetEvent::KeyDown { .. }) {
+                    inner_log.borrow_mut().push("inner");
+                }
+                EventResponse::Ignored
+            },
+        ));
+        let _outer = tree.add(StackWidget::new().add_child(inner).on_key_preview(
+            move |event, _c| {
+                if matches!(event, WidgetEvent::KeyDown { .. }) {
+                    outer_log.borrow_mut().push("outer");
+                }
+                EventResponse::Ignored
+            },
+        ));
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(leaf);
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            text: None,
+        });
+
+        assert_eq!(
+            *order.borrow(),
+            vec!["outer", "inner"],
+            "preview must walk root → parent-of-target"
+        );
     }
 
     #[test]

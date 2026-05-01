@@ -92,6 +92,18 @@ impl HandlerSet {
         self
     }
 
+    /// Set the strict-ancestor key preview handler. Fires on every
+    /// ancestor of the focused widget (root → parent-of-target)
+    /// before the focused widget's `on_key` runs. Return
+    /// `EventResponse::Handled` to consume the event.
+    pub fn on_key_preview(
+        mut self,
+        f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
+    ) -> Self {
+        self.handlers.on_key_preview = Some(Box::new(f));
+        self
+    }
+
     /// Set the on_drag handler (gesture-based drag). The closure receives
     /// a [`DragPhase`] per architecture §28.3 — `Started`, then zero or
     /// more `Moved`, then `Ended`.
@@ -339,6 +351,16 @@ impl<W: Widget> WidgetWithHandlers<W> {
         f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
     ) -> Self {
         self.handler_set.handlers.on_key = Some(Box::new(f));
+        self
+    }
+
+    /// Set the strict-ancestor key preview handler. See
+    /// [`HandlerSet::on_key_preview`].
+    pub fn on_key_preview(
+        mut self,
+        f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_key_preview = Some(Box::new(f));
         self
     }
 
@@ -697,6 +719,14 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_key(f)
+    }
+
+    /// Strict-ancestor key preview. See [`HandlerSet::on_key_preview`].
+    fn on_key_preview(
+        self,
+        f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_key_preview(f)
     }
 
     fn on_pointer_event(
