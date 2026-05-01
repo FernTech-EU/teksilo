@@ -354,6 +354,35 @@ impl Widget for SplitButton {
         });
         self.interaction = interaction.clone();
 
+        // Subtree hover signal — the framework writes `true` whenever the
+        // pointer is over a strict descendant of the row container (main
+        // region, divider, or chevron region). Replaces per-region
+        // `on_hover` handlers with a single `hover_within` binding on the
+        // row HStack below.
+        let hovered_signal = ctx.signal(false);
+        ctx.effect(&hovered_signal, {
+            let interaction = interaction.clone();
+            move |entered| {
+                if !enabled {
+                    return;
+                }
+                // Pressed / Focused / Disabled are owned by on_tap, on_key,
+                // and on_focus; only flip the ambient Idle <-> Hovered pair.
+                match interaction.get() {
+                    InteractionState::Pressed
+                    | InteractionState::Focused
+                    | InteractionState::Disabled => {}
+                    _ => {
+                        interaction.set(if *entered {
+                            InteractionState::Hovered
+                        } else {
+                            InteractionState::Idle
+                        });
+                    }
+                }
+            }
+        });
+
         // ---- Derived reactive roles ----
         let bg_role = interaction.map(move |s| resolve_bg_role(style, *s));
         let text_role = interaction.map(move |s| resolve_text_role(style, *s));
@@ -401,8 +430,6 @@ impl Widget for SplitButton {
         let main_region = {
             let actions_for_tap = actions_rc.clone();
             let selected_for_tap = selected.clone();
-            let int_for_tap = interaction.clone();
-            let int_for_hover = interaction.clone();
             MinSize::new(sb_style.min_width, sb_style.height)
                 .child_id(main_content_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
@@ -413,17 +440,6 @@ impl Widget for SplitButton {
                     if let Some(Some(action)) = actions_for_tap.get(idx) {
                         action(ctx);
                     }
-                    int_for_tap.set(InteractionState::Hovered);
-                })
-                .on_hover(move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
-                    int_for_hover.set(if entered {
-                        InteractionState::Hovered
-                    } else {
-                        InteractionState::Idle
-                    });
                 })
                 .cursor(CursorIcon::Pointer)
         };
@@ -459,7 +475,6 @@ impl Widget for SplitButton {
 
         let chevron_region = {
             let int_for_tap = interaction.clone();
-            let int_for_hover = interaction.clone();
             FixedSize::new()
                 .bind_width(sb_style.chevron_width)
                 .bind_height(sb_style.height)
@@ -492,16 +507,6 @@ impl Widget for SplitButton {
                         ctx.request_focus(menu_id);
                     }
                 })
-                .on_hover(move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        return;
-                    }
-                    int_for_hover.set(if entered {
-                        InteractionState::Hovered
-                    } else {
-                        InteractionState::Idle
-                    });
-                })
                 .cursor(CursorIcon::Pointer)
         };
         let chevron_region_id = ctx.add(chevron_region);
@@ -524,12 +529,16 @@ impl Widget for SplitButton {
         }
 
         // ---- Row: main | divider | chevron ----
+        // `hover_within` writes `hovered_signal` whenever the pointer is
+        // over a strict descendant of this HStack — i.e. main_region,
+        // divider, or chevron_region — driving the unified Hovered halo.
         let row_id = ctx.add(
             HStack::new()
                 .spacing(0.0)
                 .add_child(main_region_id)
                 .add_child(divider_id)
-                .add_child(chevron_region_id),
+                .add_child(chevron_region_id)
+                .hover_within(hovered_signal),
         );
 
         // Border width reacts to focus state — thickens to the

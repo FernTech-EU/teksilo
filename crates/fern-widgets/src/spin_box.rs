@@ -102,7 +102,6 @@ use fern_core::widget_id::WidgetId;
 use fern_text::SharedTypesetter;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextStyle};
 
-use crate::button::InteractionState;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::text_input_field::TextInputField;
 use crate::primitives::{
@@ -242,7 +241,13 @@ pub struct SpinBox<T: SpinValue> {
 
     // ── Internal state (set during build) ───────────────────────────
     text_signal: Signal<String>,
-    interaction: Signal<InteractionState>,
+    /// Tracks whether any descendant of the SpinBox root holds focus —
+    /// in practice, the inner `TextInputField`. Driven by
+    /// `WidgetBuilder::focus_within` on the root frame; replaces the
+    /// previous multi-state `InteractionState` signal that was piped
+    /// in/out of the field via `interaction_signal()`. The outer SpinBox
+    /// only ever cared about Focused vs not.
+    focused: Signal<bool>,
     can_step_up: Signal<bool>,
     can_step_down: Signal<bool>,
     /// Cached horizontal cap in pixels, resolved from `width_policy`
@@ -303,7 +308,7 @@ impl<T: SpinValue> SpinBox<T> {
             value_from_text: None,
             on_value_changed: None,
             text_signal: Signal::new(String::new()),
-            interaction: Signal::new(InteractionState::Idle),
+            focused: Signal::new(false),
             can_step_up: Signal::new(true),
             can_step_down: Signal::new(true),
             pixel_cap: None,
@@ -555,7 +560,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let text_signal = self.text_signal.clone();
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
-            let interaction = self.interaction.clone();
+            let focused = self.focused.clone();
             let can_up = self.can_step_up.clone();
             let can_down = self.can_step_down.clone();
             let min_cap = min;
@@ -564,7 +569,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 // Update the can-step signals any time the value
                 // changes so the buttons and a11y reflect whether
                 // further stepping is possible under clamp mode.
-                let is_focused = interaction.get() == InteractionState::Focused;
+                let is_focused = focused.get();
                 if wrap_mode == WrapMode::Wrap {
                     can_up.set(true);
                     can_down.set(true);
@@ -748,7 +753,6 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             .read_only(read_only)
             .placeholder(self.placeholder.clone())
             .text_height(text_area_height)
-            .interaction_signal(self.interaction.clone())
             .char_filter(T::is_valid_input_char);
         // Suffix wiring:
         //   • plain static suffix              → `.suffix(..)` (no signal)
@@ -781,32 +785,29 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 };
                 // Seed from the current state.
                 {
-                    let current_focused =
-                        self.interaction.get() == InteractionState::Focused;
+                    let current_focused = self.focused.get();
                     suffix_live.set(resolve(self.value.get(), current_focused));
                 }
                 // Observe value.
                 {
                     let suffix_live = suffix_live.clone();
-                    let interaction = self.interaction.clone();
+                    let focused = self.focused.clone();
                     let resolve = resolve.clone();
                     ctx.effect(&self.value, move |v| {
-                        let focused =
-                            interaction.get() == InteractionState::Focused;
-                        let next = resolve(*v, focused);
+                        let is_focused = focused.get();
+                        let next = resolve(*v, is_focused);
                         if suffix_live.get() != next {
                             suffix_live.set(next);
                         }
                     });
                 }
-                // Observe interaction.
+                // Observe focus.
                 {
                     let suffix_live = suffix_live.clone();
                     let value_signal = self.value.clone();
                     let resolve = resolve.clone();
-                    ctx.effect(&self.interaction, move |state| {
-                        let focused = *state == InteractionState::Focused;
-                        let next = resolve(value_signal.get(), focused);
+                    ctx.effect(&self.focused, move |is_focused| {
+                        let next = resolve(value_signal.get(), *is_focused);
                         if suffix_live.get() != next {
                             suffix_live.set(next);
                         }
@@ -832,15 +833,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // Also: when the field gains focus, show the raw editable
         // text instead of any `special_value_text`. TextInputField
         // itself doesn't know about our formatter so we bind a
-        // secondary effect on its interaction signal.
+        // secondary effect on the SpinBox's focus_within signal.
         {
-            let interaction_for_focus_text = self.interaction.clone();
+            let focused_for_text = self.focused.clone();
             let text_signal = self.text_signal.clone();
             let value_signal = self.value.clone();
             let text_from_value = text_from_value.clone();
             let min_cap = min;
-            ctx.effect(&interaction_for_focus_text, move |state| {
-                if *state == InteractionState::Focused {
+            ctx.effect(&focused_for_text, move |is_focused| {
+                if *is_focused {
                     // On focus, swap any special_value_text out for
                     // the plain formatted number so the user can
                     // edit it with the keyboard.
@@ -945,16 +946,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // extra envelope space and clash with row layouts that
         // expect the widget to report its visual footprint as its
         // full size).
-        // Border role tracks interaction state; the paint-time resolver
-        // swaps in the right color against the current theme on every
-        // pass, so theme switches refresh for free.
-        let border_role = self.interaction.map(|state| match *state {
-            InteractionState::Focused => BorderRole::Focused,
-            _ => BorderRole::Default,
+        // Border role tracks the SpinBox's focus_within signal; the
+        // paint-time resolver swaps in the right color against the
+        // current theme on every pass, so theme switches refresh for
+        // free.
+        let border_role = self.focused.map(|f| {
+            if *f { BorderRole::Focused } else { BorderRole::Default }
         });
-        let border_width_signal = self.interaction.map(move |state| match *state {
-            InteractionState::Focused => focus_ring_width,
-            _ => field_border_width,
+        let border_width_signal = self.focused.map(move |f| {
+            if *f { focus_ring_width } else { field_border_width }
         });
         let bg = RectWidget::new()
             .background(SurfaceRole::Content)
@@ -1037,6 +1037,13 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let field_id_for_access = field_id;
 
         let handlers = HandlerSet::new()
+            // The SpinBox is not itself focusable — focus lands inside the
+            // inner TextInputField. `focus_within` writes `true` whenever
+            // any descendant (in practice, the field) holds focus, driving
+            // the unified outer focus ring + the suffix / text-formatting
+            // effects that previously read an `interaction_signal` piped
+            // out of the field.
+            .focus_within(self.focused.clone())
             .on_key(move |event, ctx| {
                 if !enabled || read_only {
                     return EventResponse::Ignored;
@@ -1053,7 +1060,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 }
             })
             .on_scroll({
-                let interaction = self.interaction.clone();
+                let focused = self.focused.clone();
                 move |event, ctx| {
                     if !enabled || read_only || wheel_mode == WheelMode::Disabled {
                         return EventResponse::Ignored;
@@ -1062,9 +1069,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     // inner field currently holds focus. `Hover` is
                     // the natural fallthrough — scroll events reach
                     // the widget only when the pointer is over it.
-                    if wheel_mode == WheelMode::Focused
-                        && interaction.get() != InteractionState::Focused
-                    {
+                    if wheel_mode == WheelMode::Focused && !focused.get() {
                         return EventResponse::Ignored;
                     }
                     let WidgetEvent::Scroll { delta, .. } = event else {
@@ -1112,10 +1117,6 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         );
 
         ctx.apply_self_handlers(handlers);
-
-        if !enabled {
-            self.interaction.set(InteractionState::Disabled);
-        }
 
         vec![root_id]
     }
