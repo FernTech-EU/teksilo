@@ -35,7 +35,7 @@ use fern_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::color_prop::ColorProp;
-use fern_core::signal::Prop;
+use fern_core::signal::{Prop, Signal};
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement,
 };
@@ -154,10 +154,24 @@ pub struct Avatar {
 
     image_visible: Prop<bool>,
 
+    /// Optional `has_popup` ARIA hint. Surfaces via `set_has_popup` in
+    /// `accessibility()` for the disclosure pattern (e.g. an Avatar
+    /// that opens a user-menu Popover declares `HasPopup::Menu`).
+    has_popup: Option<fern_core::accesskit::HasPopup>,
+    /// Optional signal reporting whether the linked popup is currently
+    /// visible. Surfaces via `set_expanded` in `accessibility()`. Only
+    /// meaningful alongside `has_popup`.
+    expanded_signal: Option<Signal<bool>>,
+
     /// Activation handler. Stored as `Rc<dyn Fn>` so it survives
     /// rebuilds (theme/locale switches re-run `build()` and would
     /// otherwise drop a `Box<dyn Fn>` after the first take).
     action: Option<ActionFn>,
+
+    /// Focus state — set in `build()` for clickable avatars only.
+    /// Drives the focus ring stroke in `paint()`. `None` when the
+    /// avatar isn't focusable (no `on_activate_fn`).
+    focused: Option<Signal<bool>>,
 }
 
 #[derive(Clone)]
@@ -232,7 +246,10 @@ impl Avatar {
             seed: None,
             a11y_hidden: false,
             image_visible: Prop::Static(true),
+            has_popup: None,
+            expanded_signal: None,
             action: None,
+            focused: None,
         }
     }
 
@@ -387,6 +404,27 @@ impl Avatar {
     /// `Pointer` on hover.
     pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.action = Some(Rc::new(f));
+        self
+    }
+
+    /// Declare that this avatar is a disclosure trigger for a popup
+    /// (typically `HasPopup::Menu` for a user-menu trigger). Surfaces
+    /// via `set_has_popup` in the a11y node so screen readers
+    /// announce the avatar as "menu button" / "has popup". Only takes
+    /// effect when paired with `.on_activate_fn(...)` — without an
+    /// activation handler the avatar isn't a trigger.
+    pub fn has_popup(mut self, kind: fern_core::accesskit::HasPopup) -> Self {
+        self.has_popup = Some(kind);
+        self
+    }
+
+    /// Bind a signal reporting whether this avatar's popup is
+    /// currently visible. The wrapping Popover / overlay manager owns
+    /// the signal and flips it on show / dismiss; Avatar reads it in
+    /// `accessibility()` to publish `set_expanded`. Only meaningful
+    /// alongside `.has_popup(...)`.
+    pub fn expanded_when(mut self, signal: Signal<bool>) -> Self {
+        self.expanded_signal = Some(signal);
         self
     }
 }
@@ -586,8 +624,22 @@ impl Widget for Avatar {
             }
         }
 
-        // 3. If clickable, install attached handlers.
+        // 3. If clickable, install attached handlers — including the
+        //    `on_focus` that drives the focus-ring repaint.
         if let Some(action) = self.action.clone() {
+            let focused = ctx.signal(false);
+            // Bind so the a11y / paint pipeline re-runs when focus
+            // state flips.
+            let self_id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            focused.bind_to(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
+            self.focused = Some(focused.clone());
+            let focus_for_handler = focused.clone();
+
             let action_for_tap = action.clone();
             let action_for_key = action.clone();
             let action_for_access = action;
@@ -595,6 +647,7 @@ impl Widget for Avatar {
                 .on_tap(move |_pos, ctx| action_for_tap(ctx))
                 .focusable(true)
                 .cursor(CursorIcon::Pointer)
+                .on_focus(move |gained, _ctx| focus_for_handler.set(gained))
                 .on_key(move |event, ctx| {
                     use fern_core::event::{EventResponse, Key, WidgetEvent};
                     match event {
@@ -618,6 +671,18 @@ impl Widget for Avatar {
                     }
                 });
             ctx.apply_self_handlers(handlers);
+        }
+
+        // 4. Wire `expanded_signal` for a11y refresh on flip — same
+        //    pattern as Button's disclosure trigger.
+        if let Some(ref expanded_signal) = self.expanded_signal {
+            let self_id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            expanded_signal.bind_to(
+                self_id,
+                registry,
+                fern_core::binding::BindingLevel::RepaintOnly,
+            );
         }
 
         children
@@ -703,6 +768,25 @@ impl Widget for Avatar {
             );
         }
 
+        // Focus ring — drawn outside the avatar bounds with the
+        // theme's gap + width tokens, in `colors.focus_ring`. Only
+        // rendered when the avatar is keyboard-focused (signal set
+        // by `on_focus`). Hugs the configured shape so a square
+        // avatar gets a square ring, etc.
+        if let Some(focused) = &self.focused
+            && focused.get()
+        {
+            paint_focus_ring(
+                canvas,
+                bounds,
+                self.shape,
+                style.rounded_radius_ratio,
+                theme.shape.focus_ring_offset,
+                theme.shape.focus_ring_width,
+                theme.colors.focus_ring,
+            );
+        }
+
         // Presence dot — drawn on top of everything, even the border,
         // so it remains visible regardless of avatar contents.
         if let Some(presence) = &self.presence {
@@ -783,6 +867,18 @@ impl Widget for Avatar {
         if let Some(presence) = &self.presence {
             builder.set_description(presence_label(presence));
         }
+
+        // Disclosure-pattern hints. Only meaningful for clickable
+        // avatars — but harmless to surface unconditionally for the
+        // image / label paths in case a wrapper widget is supplying
+        // them (e.g. an external state machine that drives a popup
+        // alongside an Avatar that isn't itself the trigger).
+        if let Some(kind) = self.has_popup {
+            builder.set_has_popup(kind);
+        }
+        if let Some(ref signal) = self.expanded_signal {
+            builder.set_expanded(signal.get());
+        }
     }
 }
 
@@ -795,6 +891,60 @@ fn make_image_widget(img: &MaskedImage) -> ImageWidget {
     ImageWidget::from_raw(img.pixels.clone(), img.side, img.side)
         .fit(ImageFit::Cover)
         .a11y_hidden()
+}
+
+/// Stroke a focus ring outside the avatar's content bounds.
+///
+/// `offset` is the gap between the avatar edge and the inner edge of
+/// the ring; `width` is the stroke thickness. The visible ring lives
+/// in the rect `bounds.outset(offset + width / 2.0)` — i.e. the
+/// stroke straddles the line `offset + width / 2` outside the bounds.
+fn paint_focus_ring(
+    canvas: &mut Canvas,
+    bounds: Rect,
+    shape: AvatarShape,
+    rounded_radius_ratio: f32,
+    offset: f32,
+    width: f32,
+    color: Color,
+) {
+    use fern_canvas::{Paint, StrokeStyle};
+    let outset = offset + width / 2.0;
+    let outer = Rect::new(
+        bounds.x - outset,
+        bounds.y - outset,
+        bounds.width + outset * 2.0,
+        bounds.height + outset * 2.0,
+    );
+    match shape {
+        AvatarShape::Circle => {
+            let radius = outer.width.min(outer.height) / 2.0;
+            let center = Point::new(
+                outer.x + outer.width / 2.0,
+                outer.y + outer.height / 2.0,
+            );
+            canvas.stroke_circle(center, radius, Paint::from(color), StrokeStyle::solid(width));
+        }
+        AvatarShape::RoundedSquare => {
+            // Grow the corner radius by the outset so the ring
+            // remains visually concentric with the avatar's curve.
+            let r = bounds.width.min(bounds.height) * rounded_radius_ratio + outset;
+            canvas.stroke_rounded_rect(
+                outer,
+                CornerRadius::uniform(r),
+                color,
+                StrokeStyle::solid(width),
+            );
+        }
+        AvatarShape::Square => {
+            canvas.stroke_rounded_rect(
+                outer,
+                CornerRadius::uniform(0.0),
+                color,
+                StrokeStyle::solid(width),
+            );
+        }
+    }
 }
 
 fn paint_border(
@@ -1411,6 +1561,136 @@ mod tests {
     }
 
     // ── accessibility for image avatars: inner ImageWidget is silenced ─
+
+    // ── disclosure pattern (has_popup / expanded_when) ────────────────
+
+    #[test]
+    fn expanded_when_signal_reflects_in_a11y() {
+        use fern_core::signal::Signal;
+        let open = Signal::new(false);
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                fern_canvas::MockTextBackend::new(),
+            )));
+        let id = tree.add(
+            Avatar::with_initials_literal("JD")
+                .label_literal("Open user menu")
+                .has_popup(fern_core::accesskit::HasPopup::Menu)
+                .expanded_when(open.clone())
+                .on_activate_fn(|_ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        // Closed.
+        assert!(!tree.accessibility_node(id).is_expanded());
+
+        // Flip — the binding registered in build() must dirty-mark
+        // this node so the next a11y query sees the new value.
+        open.set(true);
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        assert!(tree.accessibility_node(id).is_expanded());
+    }
+
+    #[test]
+    fn has_popup_without_clickable_still_compiles() {
+        // Non-clickable avatars can still declare `has_popup` —
+        // builder is a no-op functionally without an action handler,
+        // but we want `accessibility()` to safely surface it for
+        // wrappers that supply external state.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let id = tree.add(
+            Avatar::with_initials_literal("JD")
+                .has_popup(fern_core::accesskit::HasPopup::Menu),
+        );
+        tree.layout(SizeProposal::exact(32.0, 32.0));
+        // Role stays Label since there's no on_activate_fn.
+        assert_eq!(
+            tree.accessibility_node(id).role(),
+            fern_core::accesskit::Role::Label
+        );
+    }
+
+    // ── focus ring ────────────────────────────────────────────────────
+
+    #[test]
+    fn focus_ring_only_paints_when_focused() {
+        // Synthesize the same bookkeeping as build() does for a
+        // clickable avatar, then drive the focus signal directly.
+        use fern_core::signal::Signal;
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                fern_canvas::MockTextBackend::new(),
+            )));
+        let id = tree.add(
+            Avatar::with_initials_literal("JD")
+                .label_literal("Open user menu")
+                .on_activate_fn(|_ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(64.0, 64.0));
+        let unfocused_shapes = tree.render().shapes.len();
+
+        // Programmatically set the avatar as focused. The framework's
+        // public way to do this in tests:
+        tree.focus(id);
+        tree.layout(SizeProposal::exact(64.0, 64.0));
+        let focused_shapes = tree.render().shapes.len();
+
+        assert_eq!(
+            focused_shapes,
+            unfocused_shapes + 1,
+            "focused avatar should emit one extra Shape (the focus ring stroke)"
+        );
+    }
+
+    #[test]
+    fn focus_ring_uses_theme_focus_ring_color() {
+        use fern_core::signal::Signal;
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                fern_canvas::MockTextBackend::new(),
+            )));
+        let id = tree.add(
+            Avatar::with_initials_literal("JD")
+                .label_literal("Click")
+                .on_activate_fn(|_ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(64.0, 64.0));
+        tree.focus(id);
+        tree.layout(SizeProposal::exact(64.0, 64.0));
+        let frame = tree.render();
+        let target = Theme::light_default().colors.focus_ring;
+        assert!(
+            shape_colors(&frame).iter().any(|c| approx_color_eq(*c, target)),
+            "expected at least one Shape painted with the theme's focus_ring colour"
+        );
+    }
+
+    #[test]
+    fn non_clickable_avatar_has_no_focus_ring() {
+        // A pure Label avatar isn't focusable; it can't acquire focus,
+        // and even if focus_ring drawing tried to fire, the `focused`
+        // signal would be `None` and the branch is skipped.
+        let mut tree = WidgetTree::new()
+            .with_theme(Theme::light_default())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                fern_canvas::MockTextBackend::new(),
+            )));
+        let id = tree.add(Avatar::with_initials_literal("JD"));
+        tree.layout(SizeProposal::exact(64.0, 64.0));
+        let baseline = tree.render().shapes.len();
+        // Even if some test harness wrongly tried to focus a
+        // non-focusable widget, the avatar's paint must NOT add a
+        // focus-ring shape.
+        tree.focus(id);
+        tree.layout(SizeProposal::exact(64.0, 64.0));
+        assert_eq!(
+            tree.render().shapes.len(),
+            baseline,
+            "non-clickable avatar must never draw a focus ring"
+        );
+    }
 
     #[test]
     fn image_avatar_announces_alt_on_parent() {
