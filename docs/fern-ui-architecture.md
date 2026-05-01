@@ -387,9 +387,9 @@ The event system answers two questions: how does input reach the widget that sho
 
 Platform input from winit is translated into high-level `WidgetEvent` variants and routed through the widget tree in two passes:
 
-**Preview pass:** root → target. Ancestors get a chance to intercept events before the target sees them — a `MenuList` overlay swallowing Arrow keys before any menu item sees them, a modal scrim discarding pointer events outside the modal.
+**Preview pass:** root → strict ancestors of the target. Ancestors get a chance to intercept events before the target sees them — a `MenuList` overlay swallowing Arrow keys before any menu item sees them, a modal scrim discarding pointer events outside the modal, a messenger composer claiming Enter before its embedded `RichTextEditor` inserts a newline. Two attached handlers participate: `on_pointer_event` for pointer/scroll events, and `on_key_preview` for keyboard and IME events. The walk is **strict ancestors only** — the target's own handler does not fire during preview; it fires in the bubble pass instead, so a widget never sees the same event twice.
 
-**Bubble pass:** target → root. The standard dispatch path — the target handles first; unhandled events walk up the parent chain until something returns `EventResponse::Handled` or the root is reached.
+**Bubble pass:** target → root. The standard dispatch path — the target handles first; unhandled events walk up the parent chain until something returns `EventResponse::Handled` or the root is reached. `on_tap`, `on_key`, `on_focus`, `on_hover`, and the rest of the per-event-type attached handlers all run during bubble.
 
 Pointer events target the deepest hit via hit testing against layout bounds. Keyboard events target the focused widget. AccessKit action requests target their stated node directly. Scroll events hit-test at the pointer and bubble to the nearest handler (a ScrollArea ancestor, typically).
 
@@ -469,6 +469,25 @@ The tree maintains a single `focused: Option<WidgetId>`. Tab / Shift-Tab cycles 
 Focus carries a **focus origin** — `Keyboard`, `Pointer`, or `Programmatic` — that widgets can observe to paint a focus ring only on keyboard focus by default (Int UI style). `FocusGained` / `FocusLost` events dispatch to the widget via `on_focus(gained: bool, ctx)`.
 
 Programmatic focus transfer is a single call: `ctx.request_focus(id)` from any handler. `first_focusable_descendant(id)` is used by modal openers to land focus on the primary action button. Focus changes synthesize a `ScrollIntoView` event that bubbles to the nearest clipping ancestor so tab-focusing an offscreen widget slides it into view. When dormant subtrees reactivate, focus is restored to the previously focused widget within that subtree.
+
+#### 9.3.1 Subtree state signals — `focus_within` and `hover_within`
+
+Many composite widgets need to react when *any* widget inside their subtree has focus or hover, not just the widget itself. A `Panel` wrapping a chat composer wants its border to glow whenever the embedded `RichTextEditor` *or* the "Send" button is focused. A `SpinBox` wants a single focus halo around the trio of text field plus increment / decrement buttons. A `ListView` row wants a different visual when an inline cell editor inside it is focused.
+
+The framework exposes two builder methods on `WidgetBuilder` (and on `HandlerSet`) for this:
+
+```rust
+.focus_within(Signal<bool>)   // true ⇔ focused widget is a strict descendant
+.hover_within(Signal<bool>)   // true ⇔ hovered widget is a strict descendant
+```
+
+The user owns the signal — the framework writes `true` whenever a strict descendant gains focus / hover, and `false` when one loses it. Bind a border color or shadow to a derived signal to drive the visual change without writing per-child `on_focus` plumbing.
+
+**Strict ancestors only.** A widget that *is* itself focused does not see its own `focus_within` flip to `true`. Combining `.focusable(true).focus_within(sig)` on the same node leaves `sig` at `false` while the node itself is focused — the signal exclusively reports the descendant state. Use `on_focus` if you need both behaviours on the same widget.
+
+**All paths covered.** The framework writes the signals on every focus / hover change: explicit `tree.focus(id)`, Tab cycling, pointer-driven focus, `PointerMove` hover transitions, `destroy_subtree` of the focused or hovered widget, dormancy-induced focus clearing in overlays, and rebuild-time revalidation when the focused / hovered widget vanishes.
+
+**Lifecycle.** The signal handle lives on the arena node alongside `visible_state` / `enabled_state` and persists across the widget's own rebuilds — the user binds it once at construction; the framework maintains it for the widget's lifetime. Destroying the widget drops the signal slot.
 
 ### 9.4 Backend Events: Direct Subscription via the EventSource Trait
 
@@ -3683,6 +3702,56 @@ Milestone 8 is significantly larger than other milestones because of the editor'
 Both stages share the same module structure (`fern-widgets/src/rich_text/`) with files for `lib.rs` (the `RichTextEditor` type and its two public constructors), `policy.rs` (the `CommandFilter`, `CaretPolicy`, `AccessibilityRole`, `ClipboardPolicy` types and the two preset bundles), `frame_loop.rs` (the per-frame effect logic), `paint.rs` (the four-pass render frame walker), `hit_test.rs` (region dispatch), and `keyboard.rs` (the keyboard handler, which consults the command filter before dispatching to the cursor). The M8a stage produces a usable read-only widget; the M8b stage adds the editor preset without modifying any file from M8a — it only extends `policy.rs` with the editable bundle and adds editor-only methods to `keyboard.rs`.
 
 The Godot reference at github.com/jacquetc/godot-rich-text is the working implementation of this same design in a different framework. It is approximately 2,100 lines for the editor and 780 lines for the viewer, with another 580 lines of shared bridge/input/fonts code. In the Godot implementation, the editor and viewer are two separate classes because GDScript has no clean mechanism for a type with multiple named constructors that bundle different behavior. FernUI's Rust implementation collapses the two into one type with two constructors; the overall line count is similar (~3,500 lines), but the split between "shared" and "editor-specific" is cleaner because the policy types mediate the interface rather than inheritance.
+
+#### 27.10.17 Intrinsic sizing — `min_lines` and `max_lines`
+
+By default, `RichTextEditor::size_that_fits` is **greedy** — it consumes whatever proposal the parent hands it. This is the right behaviour for a writer-IDE pane that fills its panel and grows with the window. It is the wrong behaviour for embedded composers (chat input, comment box, search refinement) where the editor should size itself to its content up to a small visible cap, and let the vertical scroll bar absorb anything past that cap.
+
+The two builder methods `.min_lines(u32)` and `.max_lines(u32)` switch the editor into **intrinsic** sizing mode:
+
+```rust
+RichTextEditor::editor(doc).min_lines(1).max_lines(4)   // messenger composer
+RichTextEditor::editor(doc).min_lines(3)                // form field, comfortable height
+RichTextEditor::read_only(doc).max_lines(8)             // help-doc viewer with cap
+```
+
+When either knob is set, `size_that_fits` returns
+`clamp(content_height, min_lines × line_height, max_lines × line_height)`
+for whichever dimension the parent leaves unspecified. Defaults: `min_lines = 0`, `max_lines = ∞`. The line height comes from the typesetter's default font (`TypesetterBridge::default_line_height`, computed as `ascent + descent + leading`), so a `min_lines(3)` editor reports three line heights even when the document is empty and there is no laid-out content yet.
+
+**Visible-text semantics, not outer height.** Both knobs measure the visible *text area*. `min_lines(4)` means "show four lines of text," not "be four line-heights tall overall." The editor's own internal padding (currently zero — text bounds match widget bounds) stacks on top.
+
+**Parent always wins on pinned dimensions.** The framework's layout discipline is that a parent's `Some(proposal_height)` overrides a child's `size_that_fits` return value (see [`layout_impl.rs:355-357`](../crates/fern-core/src/widget_tree/layout_impl.rs#L355-L357)). `min_lines` / `max_lines` therefore take effect when the parent leaves height unspecified — `VStack` proposing unbounded height to its non-Expand children is the prototypical case, which is exactly the messenger-composer pattern. A parent that *forces* the height (`FixedSize::height(...)`, a row in a flex container with explicit allocation) still wins. This is intentional and matches FernUI's general parent-has-final-say policy.
+
+**Composer recipe.** A messenger-style composer combines four primitives:
+
+```rust
+let halo = ctx.signal(false);
+let composer_panel = Panel::new()
+    .focus_within(halo.clone())                       // §9.3.1
+    .child(
+        VStack::new()
+            .child(
+                RichTextEditor::editor(doc)
+                    .min_lines(1)
+                    .max_lines(4),                    // this section
+            )
+            .child(send_button),
+    )
+    .on_key_preview(|event, ctx| {                    // §9.1
+        match event {
+            WidgetEvent::KeyDown { key: Key::Enter, modifiers, .. }
+                if !modifiers.shift() =>
+            {
+                ctx.send_intent(SendMessage);
+                EventResponse::Handled
+            }
+            _ => EventResponse::Ignored,
+        }
+    });
+```
+
+The halo (driven by `halo.map(|f| if f { focus_color } else { border_color })`) glows while focus is anywhere inside the composer. Enter sends; Shift+Enter falls through to the editor's own `on_key`, which inserts a newline. The editor grows from one to four lines, then the vertical scroll bar takes over.
 
 ---
 

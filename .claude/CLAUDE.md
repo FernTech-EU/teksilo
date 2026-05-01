@@ -253,8 +253,10 @@ Plan: [/home/cyril/.claude/plans/animations-are-difficulty-use-fluttering-pizza.
 
 ## Event System (V2 Attached Handlers)
 
-- **Preview pass** (root → target) + **Bubble pass** (target → root) — unchanged structure
-- **Attached handlers** replace monolithic `event()`: `.on_tap()`, `.on_hover()`, `.on_key()`, `.on_focus()`, `.on_scroll()`, `.on_pointer_event()`, `.on_access_action()`
+- **Preview pass** (root → strict ancestors of target) + **Bubble pass** (target → root)
+- **Attached handlers** replace monolithic `event()`: `.on_tap()`, `.on_hover()`, `.on_key()`, `.on_key_preview()`, `.on_focus()`, `.on_scroll()`, `.on_pointer_event()`, `.on_access_action()`
+- `.on_key_preview()` runs during the preview pass for KeyDown/KeyUp/IME — strict ancestors only, so the focused widget never sees its own preview. Use for ancestors that need to claim chords before a focused inner widget consumes them (a messenger composer claiming Enter, a Dialog claiming Esc, a ListView claiming arrow keys). Shortcuts still resolve first; `on_key_preview` cannot override a registered shortcut.
+- `.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)` — framework writes `true` whenever the focused / hovered widget is a **strict descendant** of this node. Drives unified halos around composite widgets (SpinBox, SplitButton, ComboBox, messenger composer panel, GroupBox sections). Strict-ancestors-only: a widget's own focus/hover does **not** flip its own `_within` signal — combine with `on_focus`/`on_hover` if you need both.
 - Handlers attached via `WidgetBuilder` trait (blanket impl) or `HandlerSet` in `build()`
 - Framework auto-wires gesture recognizers from handler types (on_tap → TapRecognizer)
 - `EventHandlers` struct on `WidgetNode` stores closures, dispatched by framework
@@ -441,6 +443,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal)
 - `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)
 - Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
+- Ancestor key intercept (`.on_key_preview`) and subtree state signals (`.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)`) — strict-ancestors-only, see Event System above
 - Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `SortFilterListModel<T>`, `SortFilterTreeModel<T>` with `TreeFilterMode` `HideNonMatching`/`KeepAncestors`/`KeepDescendants`)
 - Settings & persistence (fern-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
 - Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge, SpinBox, SplitButton
@@ -448,7 +451,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Menus: MenuBar, MenuList, MenuItem, MenuContext (context menu)
 - Chrome: Toolbar, StatusBar, TitleBar, GroupHeader
 - Data-driven: ListView, TreeView, Repeater, **TableView** (multi-column, virtualized, sort/filter via `SortFilterListModel`, drag-resize + drag-reorder of columns, pinned Leading/Trailing, cell-level + row-level selection, full keyboard nav with focus ring, edit hooks via `editing_cell_signal` + `on_cell_edit_request`, row drag-drop reorder, `Role::Table > Role::Row > Role::Cell` accessibility), **TreeTable** (hierarchical multi-column, twist-arrow indent, ArrowLeft/Right collapse/expand, `Role::TreeGrid` with per-row `set_level`/`set_expanded`)
-- Text: TextInput (styled single-line), rich text viewer
+- Text: TextInput (styled single-line), rich text viewer; `RichTextEditor::editor` / `read_only` accept `.min_lines(n)` / `.max_lines(n)` for intrinsic-mode sizing (greedy by default; intrinsic when either knob is set, clamping `content_height` to `[min, max] × default_line_height` — the messenger-composer pattern)
 
 ### Partial / In Progress
 

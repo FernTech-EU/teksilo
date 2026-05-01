@@ -451,6 +451,32 @@ Rebind and editing a chord) would leave focus pointing at a dead id,
 making subsequent global shortcuts look dead until the user clicked
 elsewhere.
 
+### Interaction with `on_key_preview`
+
+A KeyDown event flows through three stages, in this order:
+
+1. **Shortcut resolution.** `ShortcutRegistry::resolve` is consulted
+   *before* any widget dispatch. If the chord matches an enabled
+   shortcut whose scope contains the focused widget, the registry
+   activates the shortcut's intent and returns — the key event is
+   consumed.
+2. **Ancestor key preview.** If no shortcut matched, the framework
+   walks the focused widget's strict ancestors root → parent-of-target,
+   firing `on_key_preview` on each. Returning `EventResponse::Handled`
+   consumes the event.
+3. **Focused widget bubble.** If preview returned `Ignored` for every
+   ancestor, the focused widget's own `on_key` runs, then the event
+   bubbles to ancestors via their `on_key` slots.
+
+**Implication: shortcuts always win over `on_key_preview`.** An
+ancestor that wants to override a registered shortcut should *also*
+register a shortcut (with `enabled_when` gating which one fires when
+both are eligible) — `on_key_preview` cannot stop a shortcut because
+shortcuts are resolved first. Use `on_key_preview` for chords *not*
+in the registry: a messenger composer claiming Enter that nobody
+registered as a shortcut, a list view consuming arrow keys that no
+ancestor declared.
+
 ---
 
 ## End-to-end skeleton
