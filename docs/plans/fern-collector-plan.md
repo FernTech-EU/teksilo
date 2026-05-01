@@ -1510,12 +1510,52 @@ seeded from the env var when set.
 Window geometry and theme persist via `fern-settings` /
 `fern-app`'s auto-save wiring.
 
-### Sub-phase F — production polish  *(not started)*
+### Sub-phase F — production polish  *(done 2026-05-01)*
 
-Backups + restore docs (partial — covered for both DBs above),
-multi-instance HA (sketches in deploy docs; full deploy guides
-TBD), Prometheus `/metrics` endpoint, schema drift detector,
-rate limiting per product, CI integration.
+- **Prometheus `/metrics` endpoint.** `--metrics-bind <addr>` spins
+  up a separate HTTP listener (via `metrics-exporter-prometheus`)
+  alongside the gRPC port. Counters: `events_ingested_total`,
+  `events_rejected_total{reason,product_id}`,
+  `events_schema_check_total{outcome,product_id}` (`first_seen` /
+  `match` / `higher` / `lower`),
+  `queries_processed_total{rpc,product_id,result}`. Process must be
+  scraped per-instance; aggregate in PromQL.
+
+- **Per-product schema drift detector.** New `product_schemas` table
+  in `tokens.sqlite` tracks the highest seen `EventBatch.schema_version`
+  per product. On ingest the server records the observation and
+  classifies it as `FirstSeen` / `Match` / `Higher` / `Lower`;
+  permissive by design (lower-version batches still ingest, just
+  emit a `lower` counter + warn log). Operators alert on
+  `events_schema_check_total{outcome="lower"}` to catch
+  out-of-date clients without blocking rolling upgrades.
+
+- **Per-product rate limiting.** `--rate-limit-events-per-second N`
+  enables a token-bucket keyed on `product_id` (via `governor`). A
+  noisy product can't starve neighbours. Exhausted batches return
+  an `IngestAck` with `rejection_reason = "per-product rate limit
+  exceeded"` so the client backs off; same code path increments
+  `events_rejected_total{reason="rate_limited"}`.
+
+- **Backup + restore runbook**
+  ([`docs/operating-backup.md`](operating-backup.md)) — Parquet via
+  `rsync` + SQLite `.backup`; ClickHouse `BACKUP` / `RESTORE`;
+  Postgres+Timescale via pgBackRest. Verifies restores via the
+  `events_schema_check_total` counter.
+
+- **Multi-instance HA guide** ([`docs/operating-ha.md`](operating-ha.md))
+  — three deployment shapes (single VPS / VPS+warm-spare /
+  3-node ClickHouse or Postgres+Patroni). Includes load-balancer
+  notes (gRPC bidi stream needs L4 or L7 with stickiness),
+  per-product rate-limiter caveats (per-process bucket; either
+  stick by token or scale the limit by N).
+
+- **CI** ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))
+  — `cargo build` and `cargo test` on push and PR; `qleany check`
+  for manifest validity; `qleany list files --modified --all-natures`
+  fails the build on hand-edits to generated code; `.claude/CLAUDE.md`
+  freshness gate (must equal `qleany prompt --context`); `cargo fmt`
+  and `cargo clippy -D warnings`.
 
 ## References
 
