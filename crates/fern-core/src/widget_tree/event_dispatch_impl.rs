@@ -414,6 +414,7 @@ impl WidgetTree {
         let target = self.hit_test(position);
 
         if target != self.hovered {
+            let previously_hovered = self.hovered;
             if let Some(old) = self.hovered {
                 self.dispatch_to_widget(old, &WidgetEvent::PointerLeave, &mut *ops);
                 self.tooltip_pointer_leave(old, &mut *ops);
@@ -423,6 +424,7 @@ impl WidgetTree {
                 self.tooltip_pointer_enter(new);
             }
             self.hovered = target;
+            self.update_hover_within_signals(previously_hovered, target);
         }
 
         if let Some(target) = target {

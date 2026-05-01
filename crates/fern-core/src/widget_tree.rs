@@ -1021,8 +1021,10 @@ impl WidgetTree {
         if let Some(id) = self.focused
             && !self.arena.is_active(id)
         {
+            let old = self.focused;
             self.focused = None;
             self.focus_origin = None;
+            self.update_focus_within_signals(old, None);
         }
         if self.focused.is_none() {
             self.focus_origin = None;
@@ -1030,7 +1032,9 @@ impl WidgetTree {
         if let Some(id) = self.hovered
             && !self.arena.is_active(id)
         {
+            let old = self.hovered;
             self.hovered = None;
+            self.update_hover_within_signals(old, None);
         }
         // Pointer capture anchored at a destroyed widget would otherwise
         // swallow every subsequent Move/Up — dispatch_to_widget rejects
@@ -1206,11 +1210,15 @@ impl WidgetTree {
         // so later dispatch doesn't anchor intent walks at a dead id
         // (which would silently swallow the intent).
         if self.focused == Some(widget_id) {
+            let old = self.focused;
             self.focused = None;
             self.focus_origin = None;
+            self.update_focus_within_signals(old, None);
         }
         if self.hovered == Some(widget_id) {
+            let old = self.hovered;
             self.hovered = None;
+            self.update_hover_within_signals(old, None);
         }
         self.arena.destroy(widget_id);
     }
@@ -1622,6 +1630,12 @@ impl WidgetTree {
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
                         }
+                        if let Some(sig) = handler_set.focus_within {
+                            node.focus_within_signal = Some(sig);
+                        }
+                        if let Some(sig) = handler_set.hover_within {
+                            node.hover_within_signal = Some(sig);
+                        }
                     }
                 } else {
                     self.arena.restore_widget(id, widget_box);
@@ -1710,6 +1724,12 @@ impl WidgetTree {
                         node.node_cursor = handler_set.cursor;
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
+                        }
+                        if let Some(sig) = handler_set.focus_within {
+                            node.focus_within_signal = Some(sig);
+                        }
+                        if let Some(sig) = handler_set.hover_within {
+                            node.hover_within_signal = Some(sig);
                         }
                     }
                 } else {

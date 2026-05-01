@@ -3,7 +3,7 @@ use slotmap::SlotMap;
 use crate::environment::ThemeOverride;
 use crate::event_handlers::EventHandlers;
 use crate::event_source::{SubscriptionHandle, SubscriptionId};
-use crate::signal::{ObserverHandle, Prop};
+use crate::signal::{ObserverHandle, Prop, Signal};
 use crate::widget::{CursorIcon, Widget};
 use crate::widget_id::WidgetId;
 use fern_canvas::RenderFrame;
@@ -65,6 +65,17 @@ pub struct WidgetNode {
     pub(crate) theme_override: Option<ThemeOverride>,
     pub(crate) visible_state: Option<Prop<bool>>,
     pub(crate) enabled_state: Option<Prop<bool>>,
+    /// User-bound signal that the framework sets to `true` whenever
+    /// the focused widget is a strict descendant of this node, and
+    /// `false` otherwise. Used by `Panel` / `Card` / composite
+    /// widgets that want a unified focus halo without per-child
+    /// `on_focus` plumbing. See `WidgetBuilder::focus_within`.
+    pub(crate) focus_within_signal: Option<Signal<bool>>,
+    /// User-bound signal that the framework sets to `true` whenever
+    /// the hovered widget is a strict descendant of this node.
+    /// Symmetric to `focus_within_signal`. See
+    /// `WidgetBuilder::hover_within`.
+    pub(crate) hover_within_signal: Option<Signal<bool>>,
     pub(crate) alignment_override: Option<fern_tokens::Alignment>,
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
@@ -203,6 +214,8 @@ impl WidgetArena {
             theme_override: None,
             visible_state: None,
             enabled_state: None,
+            focus_within_signal: None,
+            hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
             opacity_prop: None,
@@ -254,6 +267,8 @@ impl WidgetArena {
             theme_override: None,
             visible_state: None,
             enabled_state: None,
+            focus_within_signal: None,
+            hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
             opacity_prop: None,
@@ -560,6 +575,12 @@ impl WidgetArena {
             }
             if handler_set.context_menu_factory.is_some() {
                 node.context_menu_factory = handler_set.context_menu_factory;
+            }
+            if let Some(sig) = handler_set.focus_within {
+                node.focus_within_signal = Some(sig);
+            }
+            if let Some(sig) = handler_set.hover_within {
+                node.hover_within_signal = Some(sig);
             }
         }
     }

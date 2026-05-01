@@ -20,6 +20,7 @@ impl WidgetTree {
         if self.focused == Some(id) {
             return;
         }
+        let previously_focused = self.focused;
         if let Some(old) = self.focused {
             let old_overlay = self.overlay_ancestor_for_widget(old);
             let new_overlay = self.overlay_ancestor_for_widget(id);
@@ -39,6 +40,7 @@ impl WidgetTree {
         self.focused = Some(id);
         self.focus_origin = Some(origin);
         self.a11y_dirty = true;
+        self.update_focus_within_signals(previously_focused, Some(id));
         self.dispatch_to_widget(id, &WidgetEvent::FocusGained { origin }, &mut *ops);
         // Focus-driven tooltip machinery: close any previously-shown
         // focus-promoted rich tooltip whose scope no longer contains
@@ -273,6 +275,80 @@ impl WidgetTree {
             }
         }
     }
+
+    /// Build the chain of strict ancestors of `id` (i.e. starting at
+    /// the parent of `id`, walking up to a root). Returns an empty
+    /// vector when `id` is `None` or has no parent. Used by the
+    /// `focus_within` / `hover_within` chain-diff helpers.
+    pub(super) fn strict_ancestors_of(&self, id: Option<WidgetId>) -> Vec<WidgetId> {
+        let mut chain = Vec::new();
+        if let Some(start) = id {
+            let mut current = self.arena.parent(start);
+            while let Some(parent) = current {
+                chain.push(parent);
+                current = self.arena.parent(parent);
+            }
+        }
+        chain
+    }
+
+    /// Update every `focus_within_signal` whose owning node moved
+    /// in or out of the focused widget's strict-ancestor chain
+    /// between `old` and `new`. Strict ancestors only — the
+    /// focused widget's own signal (if any) is never written.
+    pub(crate) fn update_focus_within_signals(
+        &mut self,
+        old: Option<WidgetId>,
+        new: Option<WidgetId>,
+    ) {
+        let old_chain = self.strict_ancestors_of(old);
+        let new_chain = self.strict_ancestors_of(new);
+        // Nodes leaving the chain → false.
+        for &id in &old_chain {
+            if !new_chain.contains(&id)
+                && let Some(node) = self.arena.get(id)
+                && let Some(sig) = node.focus_within_signal.clone()
+            {
+                sig.set(false);
+            }
+        }
+        // Nodes entering the chain → true.
+        for &id in &new_chain {
+            if !old_chain.contains(&id)
+                && let Some(node) = self.arena.get(id)
+                && let Some(sig) = node.focus_within_signal.clone()
+            {
+                sig.set(true);
+            }
+        }
+    }
+
+    /// Mirror of [`update_focus_within_signals`](Self::update_focus_within_signals)
+    /// for the hovered chain.
+    pub(crate) fn update_hover_within_signals(
+        &mut self,
+        old: Option<WidgetId>,
+        new: Option<WidgetId>,
+    ) {
+        let old_chain = self.strict_ancestors_of(old);
+        let new_chain = self.strict_ancestors_of(new);
+        for &id in &old_chain {
+            if !new_chain.contains(&id)
+                && let Some(node) = self.arena.get(id)
+                && let Some(sig) = node.hover_within_signal.clone()
+            {
+                sig.set(false);
+            }
+        }
+        for &id in &new_chain {
+            if !old_chain.contains(&id)
+                && let Some(node) = self.arena.get(id)
+                && let Some(sig) = node.hover_within_signal.clone()
+            {
+                sig.set(true);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -474,6 +550,159 @@ mod tests {
             tree.focused(),
             Some(a),
             "locale switch must not clobber focus"
+        );
+    }
+
+    // ── focus_within / hover_within ─────────────────────────────
+
+    #[test]
+    fn focus_within_flips_when_descendant_takes_focus() {
+        use crate::signal::Signal;
+        use crate::test_widgets::StackWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        let halo = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().focusable());
+        let mid = tree.add(StackWidget::new().add_child(leaf));
+        let _outer = tree.add(
+            StackWidget::new()
+                .add_child(mid)
+                .focus_within(halo.clone()),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(!halo.get(), "no focus yet → signal is false");
+
+        tree.focus(leaf);
+        assert!(halo.get(), "leaf now focused, outer is its strict ancestor");
+    }
+
+    #[test]
+    fn focus_within_strict_ancestors_only() {
+        // A widget that is itself focused must NOT see its own
+        // focus_within signal flipped to true.
+        use crate::signal::Signal;
+        use crate::widget_builder::WidgetBuilder;
+
+        let halo = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let widget = tree
+            .add(FillWidget::new().focusable().focus_within(halo.clone()));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(widget);
+
+        assert!(
+            !halo.get(),
+            "focusing the widget itself must not set its own focus_within"
+        );
+    }
+
+    #[test]
+    fn focus_within_diff_across_siblings() {
+        // Tree: root → mid_a [sig_a] → leaf_a, root → mid_b [sig_b] → leaf_b.
+        // Move focus from leaf_a to leaf_b: sig_a → false, sig_b → true.
+        use crate::signal::Signal;
+        use crate::test_widgets::StackWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        let sig_a = Signal::new(false);
+        let sig_b = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let leaf_a = tree.add(FillWidget::new().focusable());
+        let leaf_b = tree.add(FillWidget::new().focusable());
+        let mid_a = tree
+            .add(StackWidget::new().add_child(leaf_a).focus_within(sig_a.clone()));
+        let mid_b = tree
+            .add(StackWidget::new().add_child(leaf_b).focus_within(sig_b.clone()));
+        let _root = tree.add(StackWidget::new().add_child(mid_a).add_child(mid_b));
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(leaf_a);
+        assert!(sig_a.get(), "sig_a true after focusing leaf_a");
+        assert!(!sig_b.get(), "sig_b false: leaf_a is not its descendant");
+
+        tree.focus(leaf_b);
+        assert!(!sig_a.get(), "sig_a flipped to false on focus move");
+        assert!(sig_b.get(), "sig_b flipped to true on focus move");
+    }
+
+    #[test]
+    fn focus_within_clears_when_focused_widget_destroyed() {
+        use crate::signal::Signal;
+        use crate::test_widgets::StackWidget;
+        use crate::widget_builder::WidgetBuilder;
+
+        let halo = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new().focusable());
+        let _outer = tree.add(
+            StackWidget::new()
+                .add_child(leaf)
+                .focus_within(halo.clone()),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.focus(leaf);
+        assert!(halo.get());
+
+        tree.destroy_subtree(leaf);
+        assert!(
+            !halo.get(),
+            "destroying the focused widget must clear focus_within on its ancestors"
+        );
+    }
+
+    #[test]
+    fn hover_within_flips_via_pointer_move() {
+        use crate::signal::Signal;
+        use crate::test_widgets::StackWidget;
+        use crate::widget_builder::WidgetBuilder;
+        use fern_canvas::Point;
+
+        let glow = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new());
+        let _outer = tree.add(
+            StackWidget::new()
+                .add_child(leaf)
+                .hover_within(glow.clone()),
+        );
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(!glow.get());
+
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert!(glow.get(), "pointer over leaf → outer.hover_within = true");
+
+        tree.pointer_move(Point::new(500.0, 500.0));
+        assert!(
+            !glow.get(),
+            "pointer moves outside the tree → hover_within clears"
+        );
+    }
+
+    #[test]
+    fn hover_within_strict_ancestors_only() {
+        use crate::signal::Signal;
+        use crate::widget_builder::WidgetBuilder;
+        use fern_canvas::Point;
+
+        let glow = Signal::new(false);
+
+        let mut tree = WidgetTree::new();
+        let _w = tree.add(FillWidget::new().hover_within(glow.clone()));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.pointer_move(Point::new(50.0, 25.0));
+
+        assert!(
+            !glow.get(),
+            "hovering the widget itself must not set its own hover_within"
         );
     }
 }

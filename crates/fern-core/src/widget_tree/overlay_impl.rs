@@ -818,15 +818,19 @@ impl WidgetTree {
                     .focused
                     .is_some_and(|current| self.is_descendant_of(current, id))
                 {
+                    let old = self.focused;
                     self.focused = None;
                     self.focus_origin = None;
+                    self.update_focus_within_signals(old, None);
                 }
             }
 
             self.arena.set_dormant(id);
 
             if hovered_in_subtree.is_some() {
+                let old = self.hovered;
                 self.hovered = None;
+                self.update_hover_within_signals(old, None);
             }
         }
         if !content_ids.is_empty() {

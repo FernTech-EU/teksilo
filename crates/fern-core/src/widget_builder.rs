@@ -29,6 +29,14 @@ pub struct HandlerSet {
     pub(crate) cursor: Option<CursorIcon>,
     pub(crate) clips_children: Option<bool>,
     pub(crate) context_menu_factory: Option<ContextMenuFactory>,
+    /// User-bound signal that the framework writes whenever the
+    /// focused widget is a strict descendant of this node. See
+    /// [`HandlerSet::focus_within`].
+    pub(crate) focus_within: Option<crate::signal::Signal<bool>>,
+    /// User-bound signal that the framework writes whenever the
+    /// hovered widget is a strict descendant of this node. See
+    /// [`HandlerSet::hover_within`].
+    pub(crate) hover_within: Option<crate::signal::Signal<bool>>,
 }
 
 impl HandlerSet {
@@ -41,6 +49,8 @@ impl HandlerSet {
             cursor: None,
             clips_children: None,
             context_menu_factory: None,
+            focus_within: None,
+            hover_within: None,
         }
     }
 
@@ -197,6 +207,29 @@ impl HandlerSet {
     /// Set the clips_children flag.
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.clips_children = Some(clips);
+        self
+    }
+
+    /// Bind a user-owned [`Signal<bool>`] that the framework will set
+    /// to `true` whenever the focused widget is a *strict descendant*
+    /// of this node, and `false` otherwise. Useful for unified focus
+    /// halos around composite widgets (a chat composer that highlights
+    /// when its `RichTextEditor` or "Send" button is focused, a
+    /// `Panel` wrapping a `SpinBox`, etc).
+    ///
+    /// Strict-ancestors only — a widget that *is* itself focused does
+    /// not also see its own `focus_within` signal flipped to `true`.
+    /// Combine with `on_focus` if you want both behaviours.
+    pub fn focus_within(mut self, signal: crate::signal::Signal<bool>) -> Self {
+        self.focus_within = Some(signal);
+        self
+    }
+
+    /// Bind a user-owned [`Signal<bool>`] that the framework will set
+    /// to `true` whenever the hovered widget is a *strict descendant*
+    /// of this node. Symmetric to [`focus_within`](Self::focus_within).
+    pub fn hover_within(mut self, signal: crate::signal::Signal<bool>) -> Self {
+        self.hover_within = Some(signal);
         self
     }
 
@@ -437,6 +470,20 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     pub fn context_menu(mut self, factory: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
         self.handler_set.context_menu_factory = Some(Box::new(factory));
+        self
+    }
+
+    /// Bind a `Signal<bool>` the framework writes when a strict
+    /// descendant has focus. See [`HandlerSet::focus_within`].
+    pub fn focus_within(mut self, signal: crate::signal::Signal<bool>) -> Self {
+        self.handler_set.focus_within = Some(signal);
+        self
+    }
+
+    /// Bind a `Signal<bool>` the framework writes when a strict
+    /// descendant is hovered. See [`HandlerSet::hover_within`].
+    pub fn hover_within(mut self, signal: crate::signal::Signal<bool>) -> Self {
+        self.handler_set.hover_within = Some(signal);
         self
     }
 
@@ -778,6 +825,18 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         factory: impl Fn() -> Box<dyn Widget> + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).context_menu(factory)
+    }
+
+    /// Bind a `Signal<bool>` the framework writes when a strict
+    /// descendant has focus. See [`HandlerSet::focus_within`].
+    fn focus_within(self, signal: crate::signal::Signal<bool>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).focus_within(signal)
+    }
+
+    /// Bind a `Signal<bool>` the framework writes when a strict
+    /// descendant is hovered. See [`HandlerSet::hover_within`].
+    fn hover_within(self, signal: crate::signal::Signal<bool>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).hover_within(signal)
     }
 
     fn on_drag_hover(
