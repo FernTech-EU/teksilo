@@ -47,7 +47,8 @@ impl Widget for Shape {
 fn main() {
     let s: Shape = fern!(
         Shape {
-            padding: 8.0, color: 0xFF0000
+            padding: 8.0
+            color: 0xFF0000
             border: 0x00FF00, 2.0
         }
     );

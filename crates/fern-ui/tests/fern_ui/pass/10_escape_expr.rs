@@ -52,8 +52,7 @@ fn build(ctx: &mut BuildContext) -> WidgetId {
     let external = ctx.add(Leaf::new());
     // #{ external } at body position -> .add_child(external)
     // #{ external } at slot position -> .header_id(external)
-    fern!(ctx =>
-        Holder {
+    fern!(ctx => Holder {
             header: #{ external }
             #{ external }
         }

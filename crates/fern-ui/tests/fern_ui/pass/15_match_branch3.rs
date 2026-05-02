@@ -76,8 +76,7 @@ fn render(state: State) -> Holder {
             match state {
                 State::Loading => Spinner,
                 State::Loaded(data) => DataView(data.clone()),
-                State::Error(msg) => ErrorBanner(msg.clone()),
-            }
+                State::Error(msg) => ErrorBanner(msg.clone()
         }
     )
 }

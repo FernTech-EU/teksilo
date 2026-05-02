@@ -24,8 +24,7 @@ impl Widget for Leaf {
 }
 
 fn build(ctx: &mut BuildContext) -> WidgetId {
-    fern!(ctx =>
-        fern_ui::widgets::primitives::VStack {
+    fern!(ctx => fern_ui::widgets::primitives::VStack {
             on_tap: move |_, _ctx| { /* handler */ }
             spacing: 12.0
             Leaf

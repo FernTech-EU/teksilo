@@ -55,8 +55,7 @@ impl Widget for Stack {
 }
 
 fn build(ctx: &mut BuildContext) -> WidgetId {
-    fern!(ctx =>
-        Stack {
+    fern!(ctx => Stack {
             open_btn = Button("Open")
             Button("Close")
             linked_to: open_btn

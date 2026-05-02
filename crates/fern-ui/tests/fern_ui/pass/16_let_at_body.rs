@@ -58,8 +58,12 @@ fn main() {
         Stack {
             let prefix = "Hello, ";
             let accent_color = accent;
-            Label(format!("{}world", prefix)) { color: accent_color }
-            Label(format!("{}friend", prefix)) { color: accent_color }
+            Label(format!("{}world", prefix)) {
+                color: accent_color
+            }
+            Label(format!("{}friend", prefix)) {
+                color: accent_color
+            }
         }
     );
     let labels = s.labels.borrow();

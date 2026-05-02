@@ -74,13 +74,19 @@ fn main() {
             let body_color = accent >> 1;
 
             rust {
-                // Simulates a ctx.effect registration from §7.7.
-                probe.set(probe.get() + 1);
-            }
+                    // Simulates a ctx.effect registration from §7.7.
+                    probe.set(probe.get() + 1);
+                }
 
-            Text("Heading") { color: heading_color }
-            Text("Body paragraph") { color: body_color }
-            Text("Trailing") { color: body_color }
+            Text("Heading") {
+                color: heading_color
+            }
+            Text("Body paragraph") {
+                color: body_color
+            }
+            Text("Trailing") {
+                color: body_color
+            }
         }
     );
 

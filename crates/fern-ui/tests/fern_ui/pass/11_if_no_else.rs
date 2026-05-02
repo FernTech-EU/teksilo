@@ -58,8 +58,8 @@ fn main() {
 
     let s_present: StackLike = fern!(
         StackLike {
-            if is_logged_in { Banner("profile") }
-            if is_error { Banner("error") }
+            if is_logged_in { Banner("profile"
+            if is_error { Banner("error"
         }
     );
     assert_eq!(*s_present.visible.borrow(), vec!["present"]);

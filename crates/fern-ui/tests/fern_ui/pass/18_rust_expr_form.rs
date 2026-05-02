@@ -47,9 +47,9 @@ fn main() {
         Holder {
             Marker("head")
             rust {
-                let tag = if true { "middle" } else { "other" };
-                Marker::new(tag)
-            }
+                    let tag = if true { "middle" } else { "other" };
+                    Marker::new(tag)
+                }
             Marker("tail")
         }
     );

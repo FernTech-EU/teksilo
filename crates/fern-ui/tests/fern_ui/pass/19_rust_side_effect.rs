@@ -53,9 +53,9 @@ fn main() {
         Container {
             Tag("before")
             rust {
-                probe.set(probe.get() + 1);
-                probe.set(probe.get() + 10);
-            }
+                    probe.set(probe.get() + 1);
+                    probe.set(probe.get() + 10);
+                }
             Tag("after")
         }
     );

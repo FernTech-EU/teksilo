@@ -54,7 +54,9 @@ impl Widget for TabLike {
 fn main() {
     let t: TabLike = fern!(
         TabLike {
-            tab_literal: "Overview", Page("overview body") { label: "a" }
+            tab_literal: "Overview", Page("overview body") {
+                label: "a"
+            }
             tab_literal: "Inspector", Page("inspector body")
         }
     );

@@ -78,8 +78,7 @@ fn main() {
             for item in items.into_iter() {
                 let id = item.id;
                 let title = item.title.clone();
-                ListItem(title) { tag: id }
-            }
+                ListItem(title) { tag: id
             ListItem("tail".to_string())
         }
     );

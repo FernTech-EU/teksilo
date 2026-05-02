@@ -125,8 +125,7 @@ impl Widget for CardShell {
 }
 
 fn build(ctx: &mut BuildContext) -> WidgetId {
-    fern!(ctx =>
-        CardShell {
+    fern!(ctx => CardShell {
             header: title = TextLike("Manuscript Title") {
                 style: 1
             }

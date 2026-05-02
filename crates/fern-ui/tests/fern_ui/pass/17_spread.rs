@@ -46,8 +46,7 @@ impl Widget for Stack {
 
 fn build(ctx: &mut BuildContext) -> WidgetId {
     let plugin_widgets: Vec<WidgetId> = (0..3).map(|_| ctx.add(Leaf)).collect();
-    fern!(ctx =>
-        Stack {
+    fern!(ctx => Stack {
             Leaf
             ..plugin_widgets
             Leaf

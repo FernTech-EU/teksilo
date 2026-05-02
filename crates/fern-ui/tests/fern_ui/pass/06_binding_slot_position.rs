@@ -52,8 +52,7 @@ impl Widget for CardWithIds {
 }
 
 fn build(ctx: &mut BuildContext) -> WidgetId {
-    fern!(ctx =>
-        CardWithIds {
+    fern!(ctx => CardWithIds {
             header: title = TextLike("Manuscript")
             content: TextLike("body")
         }

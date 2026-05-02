@@ -380,54 +380,52 @@ impl Widget for WidgetCatalog {
         let r_builtin = self.builtin_fern(ctx, &theme, &sigs);
         let r_text_input = self.text_input_fern(ctx, &theme, &sigs);
 
-        let right_content_col = fern!(ctx =>
-            VStack {
+        let right_content_col = fern!(ctx => VStack {
                 spacing: 24.0
                 add_child: r_palette
-                Divider { }
+                Divider
                 add_child: r_primitives
-                Divider { }
+                Divider
                 add_child: r_layout
-                Divider { }
+                Divider
                 add_child: r_controls
-                Divider { }
+                Divider
                 add_child: r_display
-                Divider { }
+                Divider
                 add_child: r_text_overflow
-                Divider { }
+                Divider
                 add_child: r_containers
-                Divider { }
+                Divider
                 add_child: r_nav
-                Divider { }
+                Divider
                 add_child: r_rich_tooltips
-                Divider { }
+                Divider
                 add_child: r_message_box
-                Divider { }
+                Divider
                 add_child: r_menus
-                Divider { }
+                Divider
                 add_child: r_image
-                Divider { }
+                Divider
                 add_child: r_builtin
-                Divider { }
+                Divider
                 add_child: r_text_input
             }
         );
         let right_padded = ctx.add(Padding::uniform(24.0).child_id(right_content_col));
         let right_scroll = ctx.add(ScrollArea::from_id(right_padded));
-        let right_root = fern!(ctx =>
-            VStack {
+        let right_root = fern!(ctx => VStack {
                 Toolbar {
                     HStack {
                         TextWidget::new_literal("Widget Catalog 🦊 fern!") {
                             style: TextStyleRole::BodyBold
                             color: TextRole::Primary
                         }
-                        Spacer { }
+                        Spacer
                         Button::new_literal("Toggle Dark Mode") {
                             style: ButtonVariant::Regular
                             on_activate_fn: |ctx| {
-                                ctx.send_intent(CatalogIntent::ToggleDarkMode);
-                            }
+                                    ctx.send_intent(CatalogIntent::ToggleDarkMode);
+                                }
                         }
                     }
                 }
@@ -2173,8 +2171,7 @@ impl WidgetCatalog {
     // =========================================================================
 
     fn palette_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 12.0
                 TextWidget::new_literal("Theme Palette") {
                     style: TextStyleRole::BodyBold
@@ -2186,11 +2183,11 @@ impl WidgetCatalog {
                 }
                 Grid {
                     columns: vec![
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                    ]
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                        ]
                     column_gap: 12.0
                     row_gap: 12.0
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
@@ -2234,7 +2231,7 @@ impl WidgetCatalog {
                             style: TextStyleRole::Body
                             color: TextRole::OnAccent
                         }
-                        Spacer { }
+                        Spacer
                         TextWidget::new_literal("text_on_accent on accent") {
                             style: TextStyleRole::Tiny
                             color: TextRole::OnAccent
@@ -2296,7 +2293,7 @@ impl WidgetCatalog {
                                         corner_radius: 0.0
                                         border_width: 0.0
                                         padding: 0.0
-                                        Spacer { }
+                                        Spacer
                                     }
                                 }
                             }
@@ -2307,11 +2304,11 @@ impl WidgetCatalog {
                 }
                 Grid {
                     columns: vec![
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                    ]
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                        ]
                     column_gap: 12.0
                     row_gap: 12.0
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
@@ -2327,8 +2324,7 @@ impl WidgetCatalog {
     }
 
     fn primitives_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Primitives") {
                     style: TextStyleRole::BodyBold
@@ -2346,7 +2342,7 @@ impl WidgetCatalog {
                             style: TextStyleRole::Tiny
                             color: TextRole::Secondary
                         }
-                        Divider { }
+                        Divider
                     }
                     HStack {
                         spacing: 4.0
@@ -2377,17 +2373,22 @@ impl WidgetCatalog {
                 }
                 HStack {
                     spacing: 12.0
-                    IconWidget::checkmark(24.0) { color: TextRole::Accent }
-                    IconWidget::chevron_down(24.0) { color: SurfaceRole::AccentSubtle }
-                    IconWidget::chevron_right(24.0) { color: TextRole::Error }
+                    IconWidget::checkmark(24.0) {
+                        color: TextRole::Accent
+                    }
+                    IconWidget::chevron_down(24.0) {
+                        color: SurfaceRole::AccentSubtle
+                    }
+                    IconWidget::chevron_right(24.0) {
+                        color: TextRole::Error
+                    }
                 }
             }
         )
     }
 
     fn layout_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Layout Primitives") {
                     style: TextStyleRole::BodyBold
@@ -2399,10 +2400,10 @@ impl WidgetCatalog {
                 }
                 Grid {
                     columns: vec![
-                        TrackSize::Fixed(80.0),
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(2.0),
-                    ]
+                            TrackSize::Fixed(80.0),
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(2.0),
+                        ]
                     rows: vec![TrackSize::Auto, TrackSize::Auto]
                     column_gap: 8.0
                     row_gap: 8.0
@@ -2439,8 +2440,7 @@ impl WidgetCatalog {
         let star_icon = fern_ui::res!("resources/icons/star.png");
         let clock_icon = fern_ui::res!("resources/icons/clock.webp");
 
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 12.0
                 TextWidget::new_literal("Form Controls") {
                     style: TextStyleRole::BodyBold
@@ -2563,19 +2563,23 @@ impl WidgetCatalog {
                             style: ButtonVariant::Regular
                         }
                         SplitButton {
-                            item: MenuItem::new_literal("Run") { on_activate_fn: |_| println!("Run") }
-                            item: MenuItem::new_literal("Debug") { on_activate_fn: |_| println!("Debug") }
+                            item: MenuItem::new_literal("Run") {
+                                on_activate_fn: |_| println!("Run")
+                            }
+                            item: MenuItem::new_literal("Debug") {
+                                on_activate_fn: |_| println!("Debug")
+                            }
                             enabled: false
                         }
                     }
                 }
-                Divider { }
+                Divider
                 Grid {
                     columns: vec![
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                        TrackSize::Fractional(1.0),
-                    ]
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                            TrackSize::Fractional(1.0),
+                        ]
                     column_gap: 16.0
                     rows: vec![TrackSize::Auto]
                     VStack {
@@ -2648,7 +2652,7 @@ impl WidgetCatalog {
                         }
                     }
                 }
-                Divider { }
+                Divider
                 TextWidget::new_literal("Slider") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
@@ -2690,22 +2694,18 @@ impl WidgetCatalog {
                         }
                     }
                 }
-                Divider { }
+                Divider
                 TextWidget::new_literal("SegmentedControl") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
-                SegmentedControl(
-                    vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()],
-                    sigs.segment_selected.clone()
-                )
+                SegmentedControl(vec!["Day".into(), "Week".into(), "Month".into(), "Year".into()], sigs.segment_selected.clone())
             }
         )
     }
 
     fn display_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Display Widgets") {
                     style: TextStyleRole::BodyBold
@@ -2753,7 +2753,7 @@ impl WidgetCatalog {
                         }
                     }
                 }
-                Divider { }
+                Divider
                 TextWidget::new_literal("Badge") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
@@ -2791,8 +2791,7 @@ impl WidgetCatalog {
         const LONG_TITLE: &str =
             "A somewhat verbose section title that almost certainly will not fit";
 
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Text overflow") {
                     style: TextStyleRole::BodyBold
@@ -2858,8 +2857,7 @@ impl WidgetCatalog {
     }
 
     fn containers_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Containers") {
                     style: TextStyleRole::BodyBold
@@ -2881,7 +2879,7 @@ impl WidgetCatalog {
                         color: TextRole::Secondary
                     }
                 }
-                Divider { }
+                Divider
                 TextWidget::new_literal("Accordion") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
@@ -2898,18 +2896,18 @@ impl WidgetCatalog {
                         color: TextRole::Primary
                     }
                 }
-                Divider { }
+                Divider
                 TextWidget::new_literal("ToolBox") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
                 let disabled_tool_box_item = ToolBoxItem::new_literal(
-                    "Build tasks (disabled)",
-                    Panel::new().padding(12.0).child(
-                        TextWidget::new_literal("Disabled item — never activates."),
-                    ),
-                )
-                .enabled(false);
+                        "Build tasks (disabled)",
+                        Panel::new().padding(12.0).child(
+                            TextWidget::new_literal("Disabled item — never activates."),
+                        ),
+                    )
+                    .enabled(false);
                 ToolBox(sigs.tool_box_selected.clone()) {
                     item_literal: "Outline", Panel {
                         padding: 12.0
@@ -2930,7 +2928,7 @@ impl WidgetCatalog {
                     }
                     add: disabled_tool_box_item
                 }
-                Divider { }
+                Divider
                 TextWidget::new_literal("GroupBox") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
@@ -2952,9 +2950,7 @@ impl WidgetCatalog {
                     checkable: sigs.group_box_notifications_on.clone()
                     child: VStack {
                         spacing: 4.0
-                        TextWidget::new_literal(
-                            "Uncheck the title to disable this whole subtree.",
-                        ) {
+                        TextWidget::new_literal("Uncheck the title to disable this whole subtree.") {
                             style: TextStyleRole::Body
                             color: TextRole::Primary
                         }
@@ -2968,8 +2964,7 @@ impl WidgetCatalog {
     }
 
     fn nav_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Navigation") {
                     style: TextStyleRole::BodyBold
@@ -2990,12 +2985,10 @@ impl WidgetCatalog {
                                     style: TextStyleRole::BodyBold
                                     color: TextRole::Primary
                                 }
-                                TextWidget::new_literal(
-                                    "TabWidget is a retained container with dormant panes: \
-                                     only the active tab is built, inactive panes keep \
-                                     their state but don't receive layout or paint until \
-                                     they're re-activated."
-                                ) {
+                                TextWidget::new_literal("TabWidget is a retained container with dormant panes: \
+                                                 only the active tab is built, inactive panes keep \
+                                                 their state but don't receive layout or paint until \
+                                                 they're re-activated.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3015,11 +3008,9 @@ impl WidgetCatalog {
                                     style: TextStyleRole::BodyBold
                                     color: TextRole::Primary
                                 }
-                                TextWidget::new_literal(
-                                    "Press Tab to move focus into the tab strip, then \
-                                     Arrow Left / Arrow Right to switch between tabs. \
-                                     Disabled tabs are skipped by keyboard navigation."
-                                ) {
+                                TextWidget::new_literal("Press Tab to move focus into the tab strip, then \
+                                                 Arrow Left / Arrow Right to switch between tabs. \
+                                                 Disabled tabs are skipped by keyboard navigation.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
@@ -3033,26 +3024,21 @@ impl WidgetCatalog {
                                     style: TextStyleRole::BodyBold
                                     color: TextRole::Primary
                                 }
-                                TextWidget::new_literal(
-                                    "Int UI tabs: flat headers, no rounded corners, no \
-                                     borders. The selected tab is marked only by a 3 dp \
-                                     accent underline at its bottom edge, which \
-                                     overpaints the tab bar's own 1 dp separator."
-                                ) {
+                                TextWidget::new_literal("Int UI tabs: flat headers, no rounded corners, no \
+                                                 borders. The selected tab is marked only by a 3 dp \
+                                                 accent underline at its bottom edge, which \
+                                                 overpaints the tab bar's own 1 dp separator.") {
                                     style: TextStyleRole::Body
                                     color: TextRole::Primary
                                 }
                             }
                         }
-                        tab_item: TabItem::new_literal(
-                            "Disabled",
-                            Panel::new().padding(16.0).child(
-                                TextWidget::new_literal(
-                                    "Disabled panes are still listed in the tab bar but \
-                                     cannot be activated by click or keyboard."
-                                ).style(TextStyleRole::Body).color(TextRole::Primary)
-                            )
-                        ) {
+                        tab_item: TabItem::new_literal("Disabled", Panel::new().padding(16.0).child(
+                                            TextWidget::new_literal(
+                                                "Disabled panes are still listed in the tab bar but \
+                                                 cannot be activated by click or keyboard."
+                                            ).style(TextStyleRole::Body).color(TextRole::Primary)
+                                        )) {
                             enabled: false
                         }
                         trailing_slot: Button::new_literal("More") {
@@ -3085,25 +3071,28 @@ impl WidgetCatalog {
         theme: &Theme,
         _sigs: &Signals,
     ) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Rich Tooltips") {
                     style: TextStyleRole::BodyBold
                     color: TextRole::Primary
                 }
-                TextWidget::new_literal(
-                    "Hover the buttons below. Inline `[label](:key)` links \
-                     open nested tooltips; `https://` links open in the browser."
-                ) {
+                TextWidget::new_literal("Hover the buttons below. Inline `[label](:key)` links \
+                                 open nested tooltips; `https://` links open in the browser.") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
                 HStack {
                     spacing: 12.0
-                    Button::new_literal("Save As…") { rich_tooltip: "save-as" }
-                    Button::new_literal("Autosave info") { rich_tooltip: "autosave" }
-                    Button::new_literal("Compile") { rich_tooltip: "compile" }
+                    Button::new_literal("Save As…") {
+                        rich_tooltip: "save-as"
+                    }
+                    Button::new_literal("Autosave info") {
+                        rich_tooltip: "autosave"
+                    }
+                    Button::new_literal("Compile") {
+                        rich_tooltip: "compile"
+                    }
                 }
             }
         )
@@ -3115,16 +3104,13 @@ impl WidgetCatalog {
         _theme: &Theme,
         _sigs: &Signals,
     ) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("MessageBox") {
                     style: TextStyleRole::BodyBold
                     color: TextRole::Primary
                 }
-                TextWidget::new_literal(
-                    "QMessageBox-style alert dialog: severity icon + title + 3-level text + standard button row, with Enter → default, Escape → escape button. Critical severity disables click-outside dismiss."
-                ) {
+                TextWidget::new_literal("QMessageBox-style alert dialog: severity icon + title + 3-level text + standard button row, with Enter → default, Escape → escape button. Critical severity disables click-outside dismiss.") {
                     style: TextStyleRole::Small
                     color: TextRole::Secondary
                 }
@@ -3133,59 +3119,59 @@ impl WidgetCatalog {
                     Button::new_literal("Information") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                            ctx.present_message_box(
-                                MessageBox::information_literal("Build complete")
-                                    .text_literal("13 files compiled in 2.4 s.")
-                                    .buttons(MessageBoxButtons::Ok),
-                            );
-                        }
+                                ctx.present_message_box(
+                                    MessageBox::information_literal("Build complete")
+                                        .text_literal("13 files compiled in 2.4 s.")
+                                        .buttons(MessageBoxButtons::Ok),
+                                );
+                            }
                     }
                     Button::new_literal("Question") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                            ctx.present_message_box(
-                                MessageBox::question_literal("Enable analytics?")
-                                    .text_literal("Send anonymous usage data to help improve FernUI.")
-                                    .buttons(MessageBoxButtons::YesNo)
-                                    .default_button(StandardButton::No),
-                            );
-                        }
+                                ctx.present_message_box(
+                                    MessageBox::question_literal("Enable analytics?")
+                                        .text_literal("Send anonymous usage data to help improve FernUI.")
+                                        .buttons(MessageBoxButtons::YesNo)
+                                        .default_button(StandardButton::No),
+                                );
+                            }
                     }
                     Button::new_literal("Warning") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                            ctx.present_message_box(
-                                MessageBox::warning_literal("Unsaved changes")
-                                    .text_literal("report.skrib has unsaved changes.")
-                                    .informative_text_literal("Save before closing?")
-                                    .buttons(MessageBoxButtons::SaveDiscardCancel)
-                                    .default_button(StandardButton::Save)
-                                    .escape_button(StandardButton::Cancel),
-                            );
-                        }
+                                ctx.present_message_box(
+                                    MessageBox::warning_literal("Unsaved changes")
+                                        .text_literal("report.skrib has unsaved changes.")
+                                        .informative_text_literal("Save before closing?")
+                                        .buttons(MessageBoxButtons::SaveDiscardCancel)
+                                        .default_button(StandardButton::Save)
+                                        .escape_button(StandardButton::Cancel),
+                                );
+                            }
                     }
                     Button::new_literal("Critical") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                            ctx.present_message_box(
-                                MessageBox::critical_literal("Could not open file")
-                                    .text_literal("Insufficient permissions.")
-                                    .detailed_text_literal("open() returned EACCES (errno 13).")
-                                    .buttons(MessageBoxButtons::RetryIgnoreAbort)
-                                    .default_button(StandardButton::Retry),
-                            );
-                        }
+                                ctx.present_message_box(
+                                    MessageBox::critical_literal("Could not open file")
+                                        .text_literal("Insufficient permissions.")
+                                        .detailed_text_literal("open() returned EACCES (errno 13).")
+                                        .buttons(MessageBoxButtons::RetryIgnoreAbort)
+                                        .default_button(StandardButton::Retry),
+                                );
+                            }
                     }
                     Button::new_literal("With 'Don't show again'") {
                         style: ButtonVariant::Regular
                         on_activate_fn: |ctx| {
-                            ctx.present_message_box(
-                                MessageBox::information_literal("Welcome")
-                                    .text_literal("First-time message.")
-                                    .show_again_checkbox_literal("Don't show this again")
-                                    .buttons(MessageBoxButtons::Ok),
-                            );
-                        }
+                                ctx.present_message_box(
+                                    MessageBox::information_literal("Welcome")
+                                        .text_literal("First-time message.")
+                                        .show_again_checkbox_literal("Don't show this again")
+                                        .buttons(MessageBoxButtons::Ok),
+                                );
+                            }
                     }
                 }
             }
@@ -3193,8 +3179,7 @@ impl WidgetCatalog {
     }
 
     fn menus_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Menus & Dropdowns") {
                     style: TextStyleRole::BodyBold
@@ -3206,10 +3191,7 @@ impl WidgetCatalog {
                 }
                 HStack {
                     spacing: 16.0
-                    ComboBox(
-                        vec!["Apple", "Banana", "Cherry", "Date", "Elderberry"],
-                        sigs.combo_selected.clone()
-                    ) {
+                    ComboBox(vec!["Apple", "Banana", "Cherry", "Date", "Elderberry"], sigs.combo_selected.clone()) {
                         placeholder: "Select a fruit..."
                     }
                 }
@@ -3222,13 +3204,13 @@ impl WidgetCatalog {
                     corner_radius: 8.0
                     padding: 16.0
                     context_menu: || Box::new(
-                        MenuList::new()
-                            .item(MenuItem::new_literal("Cut").on_activate_fn(|_| println!("Cut")).shortcut_label("Ctrl+X"))
-                            .item(MenuItem::new_literal("Copy").on_activate_fn(|_| println!("Copy")).shortcut_label("Ctrl+C"))
-                            .item(MenuItem::new_literal("Paste").on_activate_fn(|_| println!("Paste")).shortcut_label("Ctrl+V"))
-                            .separator()
-                            .item(MenuItem::new_literal("Disabled item").enabled(false))
-                    )
+                            MenuList::new()
+                                .item(MenuItem::new_literal("Cut").on_activate_fn(|_| println!("Cut")).shortcut_label("Ctrl+X"))
+                                .item(MenuItem::new_literal("Copy").on_activate_fn(|_| println!("Copy")).shortcut_label("Ctrl+C"))
+                                .item(MenuItem::new_literal("Paste").on_activate_fn(|_| println!("Paste")).shortcut_label("Ctrl+V"))
+                                .separator()
+                                .item(MenuItem::new_literal("Disabled item").enabled(false))
+                        )
                     TextWidget::new_literal("Right-click here for a context menu") {
                         style: TextStyleRole::Body
                         color: TextRole::Primary
@@ -3241,8 +3223,7 @@ impl WidgetCatalog {
     fn image_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
         let tree_img = fern_ui::res!("resources/icons/tree.webp");
 
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Image Widget") {
                     style: TextStyleRole::BodyBold
@@ -3270,8 +3251,7 @@ impl WidgetCatalog {
             }
         });
 
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Built-in Buttons") {
                     style: TextStyleRole::BodyBold
@@ -3283,12 +3263,24 @@ impl WidgetCatalog {
                 }
                 HStack {
                     spacing: 4.0
-                    BuiltInButton::browse() { on_activate_fn: |_| println!("Save") }
-                    BuiltInButton::expand() { on_activate_fn: |_| println!("Save") }
-                    BuiltInButton::search() { on_activate_fn: |_| println!("Save") }
-                    BuiltInButton::copy()   { on_activate_fn: |_| println!("Copy") }
-                    BuiltInButton::clear()  { on_activate_fn: |_| println!("Save") }
-                    BuiltInButton::add()    { on_activate_fn: |_| println!("Save") }
+                    BuiltInButton::browse() {
+                        on_activate_fn: |_| println!("Save")
+                    }
+                    BuiltInButton::expand() {
+                        on_activate_fn: |_| println!("Save")
+                    }
+                    BuiltInButton::search() {
+                        on_activate_fn: |_| println!("Save")
+                    }
+                    BuiltInButton::copy() {
+                        on_activate_fn: |_| println!("Copy")
+                    }
+                    BuiltInButton::clear() {
+                        on_activate_fn: |_| println!("Save")
+                    }
+                    BuiltInButton::add() {
+                        on_activate_fn: |_| println!("Save")
+                    }
                 }
                 TextWidget::new_literal("Visibility toggle") {
                     style: TextStyleRole::Small
@@ -3313,7 +3305,9 @@ impl WidgetCatalog {
                         size: BuiltInButtonSize::Compact
                         on_activate_fn: |_| println!("Save")
                     }
-                    BuiltInButton::search() { on_activate_fn: |_| println!("Save") }
+                    BuiltInButton::search() {
+                        on_activate_fn: |_| println!("Save")
+                    }
                     BuiltInButton::search() {
                         size: BuiltInButtonSize::Large
                         on_activate_fn: |_| println!("Save")
@@ -3325,8 +3319,12 @@ impl WidgetCatalog {
                 }
                 HStack {
                     spacing: 4.0
-                    BuiltInButton::browse() { enabled: false }
-                    BuiltInButton::clear()  { enabled: false }
+                    BuiltInButton::browse() {
+                        enabled: false
+                    }
+                    BuiltInButton::clear() {
+                        enabled: false
+                    }
                 }
                 TextWidget::new_literal("Custom icon") {
                     style: TextStyleRole::Small
@@ -3341,8 +3339,7 @@ impl WidgetCatalog {
     }
 
     fn text_input_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-        fern!(ctx =>
-            VStack {
+        fern!(ctx => VStack {
                 spacing: 8.0
                 TextWidget::new_literal("Text Input") {
                     style: TextStyleRole::BodyBold
@@ -3355,12 +3352,16 @@ impl WidgetCatalog {
                 TextInput(sigs.search_text.clone()) {
                     placeholder: "Search..."
                     show_clear_button: true
-                    leading_slot: IconWidget::checkmark(14.0) { color: TextRole::Secondary }
+                    leading_slot: IconWidget::checkmark(14.0) {
+                        color: TextRole::Secondary
+                    }
                 }
                 TextInput(sigs.username_text.clone()) {
                     placeholder: "Username"
                     label: "Username"
-                    trailing_slot: BuiltInButton::browse() { on_activate_fn: |_| println!("Save") }
+                    trailing_slot: BuiltInButton::browse() {
+                        on_activate_fn: |_| println!("Save")
+                    }
                 }
                 TextInput(sigs.readonly_text.clone()) {
                     read_only: true
