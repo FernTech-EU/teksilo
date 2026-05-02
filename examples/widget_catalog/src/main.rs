@@ -38,6 +38,7 @@
 use fern_ui::IntentKind;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{FontWeight, Orientation, TextStyle, VAlignment};
+use fern_ui::widgets::tooltip::TooltipContent;
 use fern_ui::widgets::{
     Accordion, Avatar, AvatarPresence, AvatarShape, AvatarSize, Badge, BuiltInButton,
     BuiltInButtonSize, Button, ButtonVariant, Card, CheckState, Checkbox, ComboBox, Divider,
@@ -45,9 +46,8 @@ use fern_ui::widgets::{
     IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, MessageBox,
     MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl,
     Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabItem, TabWidget,
-    TextInput, TextWidget, Toggle, Toolbar, ToolBox, ToolBoxItem, TrackSize, VStack, Wrap,
+    TextInput, TextWidget, Toggle, ToolBox, ToolBoxItem, Toolbar, TrackSize, VStack, Wrap,
 };
-use fern_ui::widgets::tooltip::TooltipContent;
 
 // ---------------------------------------------------------------------------
 // Application intents
@@ -140,11 +140,13 @@ fn surface_swatch(
                 .border_width(1.0)
                 .corner_radius(4.0)
                 .padding(10.0)
-                .child(MaxSize::new(f32::INFINITY, 44.0).child(
-                    TextWidget::new_literal(name)
-                        .style(TextStyleRole::Small)
-                        .color(text_color),
-                )),
+                .child(
+                    MaxSize::new(f32::INFINITY, 44.0).child(
+                        TextWidget::new_literal(name)
+                            .style(TextStyleRole::Small)
+                            .color(text_color),
+                    ),
+                ),
         )
         .child(
             TextWidget::new_literal(text_role)
@@ -183,13 +185,11 @@ fn editor_line(theme: &Theme, line_no: &str, code: &str) -> HStack {
     HStack::new()
         .spacing(12.0)
         .child(
-            FixedSize::new()
-                .bind_width(24.0_f32)
-                .child(
-                    TextWidget::new_literal(line_no)
-                        .style(TextStyleRole::Mono)
-                        .color(TextRole::EditorGutterFg),
-                ),
+            FixedSize::new().bind_width(24.0_f32).child(
+                TextWidget::new_literal(line_no)
+                    .style(TextStyleRole::Mono)
+                    .color(TextRole::EditorGutterFg),
+            ),
         )
         .child(
             TextWidget::new_literal(code)
@@ -213,11 +213,13 @@ fn editor_swatch(
                 .border_width(1.0)
                 .corner_radius(4.0)
                 .padding(10.0)
-                .child(MaxSize::new(f32::INFINITY, 44.0).child(
-                    TextWidget::new_literal("Aa Bb 123")
-                        .style(TextStyleRole::Mono)
-                        .color(sample_color),
-                )),
+                .child(
+                    MaxSize::new(f32::INFINITY, 44.0).child(
+                        TextWidget::new_literal("Aa Bb 123")
+                            .style(TextStyleRole::Mono)
+                            .color(sample_color),
+                    ),
+                ),
         )
         .child(
             TextWidget::new_literal(name)
@@ -268,8 +270,8 @@ impl Widget for WidgetCatalog {
 
         let is_dark = ctx.signal(false);
         let is_dark_for_action = is_dark.clone();
-        ctx.register_action(
-            Action::new("catalog.toggle_dark_mode").on_invoke(move |_intent, ctx| {
+        ctx.register_action(Action::new("catalog.toggle_dark_mode").on_invoke(
+            move |_intent, ctx| {
                 let dark = !is_dark_for_action.get();
                 is_dark_for_action.set(dark);
                 ctx.set_theme(if dark {
@@ -277,8 +279,8 @@ impl Widget for WidgetCatalog {
                 } else {
                     Theme::light_default()
                 });
-            }),
-        );
+            },
+        ));
 
         // ============================ LEFT PANE (builder) ============================
         let palette_section = self.palette_builder(ctx, &theme, &sigs);
@@ -461,7 +463,8 @@ impl Widget for WidgetCatalog {
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }.into()
+        }
+        .into()
     }
 }
 
@@ -471,7 +474,6 @@ impl Widget for WidgetCatalog {
 
 impl WidgetCatalog {
     fn palette_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         let surfaces_grid = ctx.add(
             Grid::new()
                 .columns(vec![
@@ -483,14 +485,62 @@ impl WidgetCatalog {
                 .column_gap(12.0)
                 .row_gap(12.0)
                 .rows(vec![TrackSize::Auto, TrackSize::Auto])
-                .child(surface_swatch(theme, SurfaceRole::Main, "surface_main", "text_primary", TextRole::Primary))
-                .child(surface_swatch(theme, SurfaceRole::Content, "surface_content", "text_primary", TextRole::Primary))
-                .child(surface_swatch(theme, SurfaceRole::Raised, "surface_raised", "text_primary", TextRole::Primary))
-                .child(surface_swatch(theme, SurfaceRole::Sunken, "surface_sunken", "text_secondary", TextRole::Secondary))
-                .child(surface_swatch(theme, SurfaceRole::Hover, "surface_hover", "text_primary", TextRole::Primary))
-                .child(surface_swatch(theme, SurfaceRole::Pressed, "surface_pressed", "text_primary", TextRole::Primary))
-                .child(surface_swatch(theme, SurfaceRole::Selected, "surface_selected", "selection_text_active", Color::WHITE))
-                .child(surface_swatch(theme, SurfaceRole::SelectedInactive, "surface_selected_inactive", "selection_text_inactive", TextRole::Primary)),
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::Main,
+                    "surface_main",
+                    "text_primary",
+                    TextRole::Primary,
+                ))
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::Content,
+                    "surface_content",
+                    "text_primary",
+                    TextRole::Primary,
+                ))
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::Raised,
+                    "surface_raised",
+                    "text_primary",
+                    TextRole::Primary,
+                ))
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::Sunken,
+                    "surface_sunken",
+                    "text_secondary",
+                    TextRole::Secondary,
+                ))
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::Hover,
+                    "surface_hover",
+                    "text_primary",
+                    TextRole::Primary,
+                ))
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::Pressed,
+                    "surface_pressed",
+                    "text_primary",
+                    TextRole::Primary,
+                ))
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::Selected,
+                    "surface_selected",
+                    "selection_text_active",
+                    Color::WHITE,
+                ))
+                .child(surface_swatch(
+                    theme,
+                    SurfaceRole::SelectedInactive,
+                    "surface_selected_inactive",
+                    "selection_text_inactive",
+                    TextRole::Primary,
+                )),
         );
 
         let text_samples = ctx.add(
@@ -503,13 +553,48 @@ impl WidgetCatalog {
                 .child(
                     VStack::new()
                         .spacing(6.0)
-                        .child(text_sample(theme, "text_primary", TextRole::Primary, "body, main labels"))
-                        .child(text_sample(theme, "text_secondary", TextRole::Secondary, "hints, captions, placeholders"))
-                        .child(text_sample(theme, "text_disabled", TextRole::Disabled, "disabled labels"))
-                        .child(text_sample(theme, "text_link", TextRole::Link, "hyperlinks"))
-                        .child(text_sample(theme, "text_error", TextRole::Error, "validation errors"))
-                        .child(text_sample(theme, "text_warning", TextRole::Warning, "validation warnings"))
-                        .child(text_sample(theme, "text_success", TextRole::Success, "success messages")),
+                        .child(text_sample(
+                            theme,
+                            "text_primary",
+                            TextRole::Primary,
+                            "body, main labels",
+                        ))
+                        .child(text_sample(
+                            theme,
+                            "text_secondary",
+                            TextRole::Secondary,
+                            "hints, captions, placeholders",
+                        ))
+                        .child(text_sample(
+                            theme,
+                            "text_disabled",
+                            TextRole::Disabled,
+                            "disabled labels",
+                        ))
+                        .child(text_sample(
+                            theme,
+                            "text_link",
+                            TextRole::Link,
+                            "hyperlinks",
+                        ))
+                        .child(text_sample(
+                            theme,
+                            "text_error",
+                            TextRole::Error,
+                            "validation errors",
+                        ))
+                        .child(text_sample(
+                            theme,
+                            "text_warning",
+                            TextRole::Warning,
+                            "validation warnings",
+                        ))
+                        .child(text_sample(
+                            theme,
+                            "text_success",
+                            TextRole::Success,
+                            "success messages",
+                        )),
                 ),
         );
 
@@ -539,13 +624,11 @@ impl WidgetCatalog {
             HStack::new()
                 .spacing(12.0)
                 .child(
-                    FixedSize::new()
-                        .bind_width(24.0_f32)
-                        .child(
-                            TextWidget::new_literal("2")
-                                .style(TextStyleRole::Mono)
-                                .color(TextRole::EditorGutterFg),
-                        ),
+                    FixedSize::new().bind_width(24.0_f32).child(
+                        TextWidget::new_literal("2")
+                            .style(TextStyleRole::Mono)
+                            .color(TextRole::EditorGutterFg),
+                    ),
                 )
                 .child(
                     TextWidget::new_literal("    let ")
@@ -622,12 +705,42 @@ impl WidgetCatalog {
                 .column_gap(12.0)
                 .row_gap(12.0)
                 .rows(vec![TrackSize::Auto, TrackSize::Auto])
-                .child(editor_swatch(theme, SurfaceRole::EditorBg, "editor_bg", TextRole::EditorFg))
-                .child(editor_swatch(theme, TextRole::EditorFg, "editor_fg", SurfaceRole::EditorBg))
-                .child(editor_swatch(theme, SurfaceRole::EditorCaret, "editor_caret", SurfaceRole::EditorBg))
-                .child(editor_swatch(theme, SurfaceRole::EditorCurrentLineBg, "editor_current_line_bg", TextRole::EditorFg))
-                .child(editor_swatch(theme, TextRole::EditorGutterFg, "editor_gutter_fg", SurfaceRole::EditorBg))
-                .child(editor_swatch(theme, SurfaceRole::EditorSelectionBg, "editor_selection_bg", TextRole::EditorFg)),
+                .child(editor_swatch(
+                    theme,
+                    SurfaceRole::EditorBg,
+                    "editor_bg",
+                    TextRole::EditorFg,
+                ))
+                .child(editor_swatch(
+                    theme,
+                    TextRole::EditorFg,
+                    "editor_fg",
+                    SurfaceRole::EditorBg,
+                ))
+                .child(editor_swatch(
+                    theme,
+                    SurfaceRole::EditorCaret,
+                    "editor_caret",
+                    SurfaceRole::EditorBg,
+                ))
+                .child(editor_swatch(
+                    theme,
+                    SurfaceRole::EditorCurrentLineBg,
+                    "editor_current_line_bg",
+                    TextRole::EditorFg,
+                ))
+                .child(editor_swatch(
+                    theme,
+                    TextRole::EditorGutterFg,
+                    "editor_gutter_fg",
+                    SurfaceRole::EditorBg,
+                ))
+                .child(editor_swatch(
+                    theme,
+                    SurfaceRole::EditorSelectionBg,
+                    "editor_selection_bg",
+                    TextRole::EditorFg,
+                )),
         );
 
         ctx.add(
@@ -661,8 +774,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn primitives_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
+    fn primitives_builder(
+        &self,
+        ctx: &mut BuildContext,
+        theme: &Theme,
+        _sigs: &Signals,
+    ) -> WidgetId {
         let div_row = ctx.add(
             HStack::new()
                 .spacing(16.0)
@@ -730,7 +847,6 @@ impl WidgetCatalog {
     }
 
     fn layout_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -783,7 +899,6 @@ impl WidgetCatalog {
     }
 
     fn controls_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         let buttons_row = ctx.add(
             HStack::new()
                 .spacing(8.0)
@@ -844,13 +959,19 @@ impl WidgetCatalog {
                 )
                 .child(
                     Button::new_literal("Star")
-                        .icon(IconWidget::from_raster(star_icon, 24.0), IconLocation::Leading)
+                        .icon(
+                            IconWidget::from_raster(star_icon, 24.0),
+                            IconLocation::Leading,
+                        )
                         .style(ButtonVariant::Regular)
                         .on_activate_fn(|_| println!("Save")),
                 )
                 .child(
                     Button::new_literal("Clock")
-                        .icon(IconWidget::from_raster(clock_icon, 24.0), IconLocation::Leading)
+                        .icon(
+                            IconWidget::from_raster(clock_icon, 24.0),
+                            IconLocation::Leading,
+                        )
                         .style(ButtonVariant::Regular)
                         .on_activate_fn(|_| println!("Cancel")),
                 )
@@ -1041,7 +1162,10 @@ impl WidgetCatalog {
                                 .style(TextStyleRole::Tiny)
                                 .color(TextRole::Secondary),
                         )
-                        .child(Slider::new(sigs.slider_disabled_state.clone(), 0.0, 100.0).enabled(false)),
+                        .child(
+                            Slider::new(sigs.slider_disabled_state.clone(), 0.0, 100.0)
+                                .enabled(false),
+                        ),
                 )
                 .child(
                     VStack::new()
@@ -1133,7 +1257,6 @@ impl WidgetCatalog {
     }
 
     fn display_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         let pb_vert = ctx.add(
             ProgressBar::new(0.7)
                 .orientation(Orientation::Vertical)
@@ -1205,8 +1328,16 @@ impl WidgetCatalog {
                     HStack::new()
                         .spacing(8.0)
                         .child(Badge::new_literal("Default"))
-                        .child(Badge::new_literal("3").color(TextRole::Error).text_color(Color::WHITE))
-                        .child(Badge::new_literal("New").color(TextRole::Success).text_color(Color::WHITE))
+                        .child(
+                            Badge::new_literal("3")
+                                .color(TextRole::Error)
+                                .text_color(Color::WHITE),
+                        )
+                        .child(
+                            Badge::new_literal("New")
+                                .color(TextRole::Success)
+                                .text_color(Color::WHITE),
+                        )
                         .child(Badge::new_literal("Beta").color(TextRole::Warning)),
                 )
                 .child(Divider::new())
@@ -1249,9 +1380,11 @@ impl WidgetCatalog {
                         ),
                 )
                 .child(
-                    TextWidget::new_literal("Avatar — presence indicator (Online / Away / Busy / Offline)")
-                        .style(TextStyleRole::Small)
-                        .color(TextRole::Secondary),
+                    TextWidget::new_literal(
+                        "Avatar — presence indicator (Online / Away / Busy / Offline)",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1325,8 +1458,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn text_overflow_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
+    fn text_overflow_builder(
+        &self,
+        ctx: &mut BuildContext,
+        theme: &Theme,
+        _sigs: &Signals,
+    ) -> WidgetId {
         const LOREM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing \
                              elit. Sed do eiusmod tempor incididunt ut labore \
                              et dolore magna aliqua. Ut enim ad minim veniam, \
@@ -1404,8 +1541,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn containers_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
+    fn containers_builder(
+        &self,
+        ctx: &mut BuildContext,
+        theme: &Theme,
+        sigs: &Signals,
+    ) -> WidgetId {
         let acc_content1 = ctx.add(
             TextWidget::new_literal("This content is revealed with an animated expand.")
                 .style(TextStyleRole::Body)
@@ -1438,9 +1579,11 @@ impl WidgetCatalog {
                                 .color(TextRole::Secondary),
                         )
                         .content(
-                            TextWidget::new_literal("Card content with shadow and themed background.")
-                                .style(TextStyleRole::Body)
-                                .color(TextRole::Primary),
+                            TextWidget::new_literal(
+                                "Card content with shadow and themed background.",
+                            )
+                            .style(TextStyleRole::Body)
+                            .color(TextRole::Primary),
                         )
                         .footer(
                             TextWidget::new_literal("Footer text")
@@ -1496,9 +1639,9 @@ impl WidgetCatalog {
                         .add(
                             ToolBoxItem::new_literal(
                                 "Build tasks (disabled)",
-                                Panel::new().padding(12.0).child(
-                                    TextWidget::new_literal("Disabled item — never activates."),
-                                ),
+                                Panel::new().padding(12.0).child(TextWidget::new_literal(
+                                    "Disabled item — never activates.",
+                                )),
                             )
                             .enabled(false),
                         ),
@@ -1548,7 +1691,6 @@ impl WidgetCatalog {
     }
 
     fn nav_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         let tabs = ctx.add(
             TabWidget::new(sigs.tabs_selected.clone())
                 .tab_literal(
@@ -1643,11 +1785,7 @@ impl WidgetCatalog {
                         .on_activate_fn(|_| println!("LinkClicked")),
                 ),
         );
-        let tabs_block = ctx.add(
-            FixedSize::new()
-                .bind_height(240.0_f32)
-                .child_id(tabs),
-        );
+        let tabs_block = ctx.add(FixedSize::new().bind_height(240.0_f32).child_id(tabs));
 
         ctx.add(
             VStack::new()
@@ -1684,8 +1822,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn rich_tooltips_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
+    fn rich_tooltips_builder(
+        &self,
+        ctx: &mut BuildContext,
+        theme: &Theme,
+        _sigs: &Signals,
+    ) -> WidgetId {
         ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -1705,23 +1847,19 @@ impl WidgetCatalog {
                 .child(
                     HStack::new()
                         .spacing(12.0)
-                        .child(
-                            Button::new_literal("Save As…")
-                                .rich_tooltip("save-as"),
-                        )
-                        .child(
-                            Button::new_literal("Autosave info")
-                                .rich_tooltip("autosave"),
-                        )
-                        .child(
-                            Button::new_literal("Compile")
-                                .rich_tooltip("compile"),
-                        ),
+                        .child(Button::new_literal("Save As…").rich_tooltip("save-as"))
+                        .child(Button::new_literal("Autosave info").rich_tooltip("autosave"))
+                        .child(Button::new_literal("Compile").rich_tooltip("compile")),
                 ),
         )
     }
 
-    fn message_box_builder(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn message_box_builder(
+        &self,
+        ctx: &mut BuildContext,
+        _theme: &Theme,
+        _sigs: &Signals,
+    ) -> WidgetId {
         // Each trigger presents a MessageBox exercising one severity +
         // preset combination. The primary comprehensive demo lives in
         // examples/dialogs_and_popovers; this section exists so the
@@ -1808,7 +1946,6 @@ impl WidgetCatalog {
     }
 
     fn menus_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -1873,7 +2010,6 @@ impl WidgetCatalog {
     }
 
     fn image_builder(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         let tree_img = fern_ui::res!("resources/icons/tree.webp");
         ctx.add(
             VStack::new()
@@ -1898,10 +2034,13 @@ impl WidgetCatalog {
     }
 
     fn builtin_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
-        let vis_label = sigs
-            .visibility_signal
-            .map(|v| if *v { "Visible".to_string() } else { "Hidden".to_string() });
+        let vis_label = sigs.visibility_signal.map(|v| {
+            if *v {
+                "Visible".to_string()
+            } else {
+                "Hidden".to_string()
+            }
+        });
 
         ctx.add(
             VStack::new()
@@ -1912,9 +2051,11 @@ impl WidgetCatalog {
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal("Predefined (browse, expand, search, copy, clear, add)")
-                        .style(TextStyleRole::Small)
-                        .color(TextRole::Secondary),
+                    TextWidget::new_literal(
+                        "Predefined (browse, expand, search, copy, clear, add)",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
                 )
                 .child(
                     HStack::new()
@@ -1934,7 +2075,9 @@ impl WidgetCatalog {
                 .child(
                     HStack::new()
                         .spacing(8.0)
-                        .child(BuiltInButton::visibility_toggle(sigs.visibility_signal.clone()))
+                        .child(BuiltInButton::visibility_toggle(
+                            sigs.visibility_signal.clone(),
+                        ))
                         .child(
                             TextWidget::new_literal("Hidden")
                                 .bind_text(vis_label)
@@ -1986,8 +2129,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn text_input_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
+    fn text_input_builder(
+        &self,
+        ctx: &mut BuildContext,
+        theme: &Theme,
+        sigs: &Signals,
+    ) -> WidgetId {
         ctx.add(
             VStack::new()
                 .spacing(8.0)
@@ -1997,17 +2144,17 @@ impl WidgetCatalog {
                         .color(TextRole::Primary),
                 )
                 .child(
-                    TextWidget::new_literal("Single-line text editing with placeholder, clear button, slots")
-                        .style(TextStyleRole::Small)
-                        .color(TextRole::Secondary),
+                    TextWidget::new_literal(
+                        "Single-line text editing with placeholder, clear button, slots",
+                    )
+                    .style(TextStyleRole::Small)
+                    .color(TextRole::Secondary),
                 )
                 .child(
                     TextInput::new(sigs.search_text.clone())
                         .placeholder("Search...")
                         .show_clear_button(true)
-                        .leading_slot(
-                            IconWidget::checkmark(14.0).color(TextRole::Secondary),
-                        ),
+                        .leading_slot(IconWidget::checkmark(14.0).color(TextRole::Secondary)),
                 )
                 .child(
                     TextInput::new(sigs.username_text.clone())
@@ -2017,10 +2164,7 @@ impl WidgetCatalog {
                             BuiltInButton::browse().on_activate_fn(|_| println!("Save")),
                         ),
                 )
-                .child(
-                    TextInput::new(sigs.readonly_text.clone())
-                        .read_only(true),
-                ),
+                .child(TextInput::new(sigs.readonly_text.clone()).read_only(true)),
         )
     }
 
@@ -2029,7 +2173,6 @@ impl WidgetCatalog {
     // =========================================================================
 
     fn palette_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 12.0
@@ -2184,7 +2327,6 @@ impl WidgetCatalog {
     }
 
     fn primitives_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -2244,7 +2386,6 @@ impl WidgetCatalog {
     }
 
     fn layout_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -2293,7 +2434,6 @@ impl WidgetCatalog {
     }
 
     fn controls_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         let save_icon = fern_ui::res!("resources/icons/save.svg");
         let home_icon = fern_ui::res!("resources/icons/home.svg");
         let star_icon = fern_ui::res!("resources/icons/star.png");
@@ -2418,7 +2558,7 @@ impl WidgetCatalog {
                             item: MenuItem::new_literal("Save As…") {
                                 on_activate_fn: |_| println!("SaveAs")
                                 tooltip_literal: "Save the current file under a new name"
-                            } 
+                            }
                             tooltip_literal: "Save (main action stays pinned)"
                             style: ButtonVariant::Regular
                         }
@@ -2543,11 +2683,10 @@ impl WidgetCatalog {
                             style: TextStyleRole::Tiny
                             color: TextRole::Secondary
                         }
-                        slider_vert = Slider(sigs.slider_v_value.clone(), 0.0, 1.0) {
-                            orientation: Orientation::Vertical
-                        }
                         MaxSize(f32::MAX, 120.0) {
-                            child_id: slider_vert
+                            Slider(sigs.slider_v_value.clone(), 0.0, 1.0) {
+                                orientation: Orientation::Vertical
+                            }
                         }
                     }
                 }
@@ -2565,7 +2704,6 @@ impl WidgetCatalog {
     }
 
     fn display_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -2607,12 +2745,11 @@ impl WidgetCatalog {
                             style: TextStyleRole::Tiny
                             color: TextRole::Secondary
                         }
-                        pb_vert = ProgressBar(0.7) {
-                            orientation: Orientation::Vertical
-                            thickness: 8.0
-                        }
                         MaxSize(f32::MAX, 80.0) {
-                            child_id: pb_vert
+                            ProgressBar(0.7) {
+                                orientation: Orientation::Vertical
+                                thickness: 8.0
+                            }
                         }
                     }
                 }
@@ -2640,8 +2777,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn text_overflow_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
+    fn text_overflow_fern(
+        &self,
+        ctx: &mut BuildContext,
+        theme: &Theme,
+        _sigs: &Signals,
+    ) -> WidgetId {
         const LOREM: &str = "Lorem ipsum dolor sit amet, consectetur adipiscing \
                              elit. Sed do eiusmod tempor incididunt ut labore \
                              et dolore magna aliqua. Ut enim ad minim veniam, \
@@ -2717,7 +2858,6 @@ impl WidgetCatalog {
     }
 
     fn containers_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -2735,7 +2875,7 @@ impl WidgetCatalog {
                         color: TextRole::Secondary
                     }
                     content: (TextWidget::new_literal("Card content with shadow and themed background.").style(TextStyleRole::Body).color(TextRole::Primary))
-                    
+
                     footer: TextWidget::new_literal("Footer text") {
                         style: TextStyleRole::Tiny
                         color: TextRole::Secondary
@@ -2828,7 +2968,6 @@ impl WidgetCatalog {
     }
 
     fn nav_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -2940,8 +3079,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn rich_tooltips_fern(&self, ctx: &mut BuildContext, theme: &Theme, _sigs: &Signals) -> WidgetId {
-
+    fn rich_tooltips_fern(
+        &self,
+        ctx: &mut BuildContext,
+        theme: &Theme,
+        _sigs: &Signals,
+    ) -> WidgetId {
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -2966,7 +3109,12 @@ impl WidgetCatalog {
         )
     }
 
-    fn message_box_fern(&self, ctx: &mut BuildContext, _theme: &Theme, _sigs: &Signals) -> WidgetId {
+    fn message_box_fern(
+        &self,
+        ctx: &mut BuildContext,
+        _theme: &Theme,
+        _sigs: &Signals,
+    ) -> WidgetId {
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -3045,7 +3193,6 @@ impl WidgetCatalog {
     }
 
     fn menus_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -3115,10 +3262,13 @@ impl WidgetCatalog {
     }
 
     fn builtin_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
-        let vis_label = sigs
-            .visibility_signal
-            .map(|v| if *v { "Visible".to_string() } else { "Hidden".to_string() });
+        let vis_label = sigs.visibility_signal.map(|v| {
+            if *v {
+                "Visible".to_string()
+            } else {
+                "Hidden".to_string()
+            }
+        });
 
         fern!(ctx =>
             VStack {
@@ -3191,7 +3341,6 @@ impl WidgetCatalog {
     }
 
     fn text_input_fern(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
-
         fern!(ctx =>
             VStack {
                 spacing: 8.0
@@ -3231,12 +3380,9 @@ fn main() {
         .register_tooltips(vec![
             TooltipContent::new(
                 "save-as",
-                LocalizedString::literal(
-                    "Save the current file under a new name",
-                ),
+                LocalizedString::literal("Save the current file under a new name"),
             )
             .with_shortcut_label("Ctrl+Shift+S"),
-
             TooltipContent::new(
                 "autosave",
                 LocalizedString::literal(
@@ -3249,7 +3395,6 @@ fn main() {
                 "Autosave uses **debounced writes** so bursts of edits \
                  only hit disk once. Disable it in [Preferences](:prefs-general).",
             )),
-
             TooltipContent::new(
                 "autosave-details",
                 LocalizedString::literal(
@@ -3257,7 +3402,6 @@ fn main() {
                      to disk after typing pauses for 500ms.",
                 ),
             ),
-
             TooltipContent::new(
                 "prefs-general",
                 LocalizedString::literal(
@@ -3265,7 +3409,6 @@ fn main() {
                      change its interval.",
                 ),
             ),
-
             TooltipContent::new(
                 "compile",
                 LocalizedString::literal(
@@ -3437,10 +3580,7 @@ mod tests {
         shared_glyphs.sort();
         eprintln!("shared glyph colors (present in both light and dark):");
         for cc in &shared_glyphs {
-            eprintln!(
-                "  #{:02X}{:02X}{:02X}{:02X}",
-                cc[0], cc[1], cc[2], cc[3]
-            );
+            eprintln!("  #{:02X}{:02X}{:02X}{:02X}", cc[0], cc[1], cc[2], cc[3]);
         }
 
         eprintln!("widget-catalog theme switch coverage:");
@@ -3465,8 +3605,7 @@ mod tests {
         // switching visibly changes SOMETHING in the catalog. If both palettes
         // were identical, this test would fail and flag a regression.
         assert!(
-            light_shape_palette != dark_shape_palette
-                || light_glyph_palette != dark_glyph_palette,
+            light_shape_palette != dark_shape_palette || light_glyph_palette != dark_glyph_palette,
             "theme switch must change either shape or glyph palette"
         );
     }
@@ -3774,8 +3913,7 @@ mod tests {
             TEST_HEIGHT,
             tree.theme().colors.surface_main.to_array(),
         );
-        let pixels =
-            test_support::read_texture_rgba(&device, &queue, &texture, 1600, TEST_HEIGHT);
+        let pixels = test_support::read_texture_rgba(&device, &queue, &texture, 1600, TEST_HEIGHT);
 
         for label in ["Rust", "A1", "Standard"] {
             let id = tree
