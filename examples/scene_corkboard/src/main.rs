@@ -1,10 +1,10 @@
-//! `scene-corkboard` — Phase 2 demo of `fern-scene`.
+//! `scene-corkboard` — Phase 3 demo of `fern-scene`.
 //!
 //! Renders a 3×3 grid of story cards on a fern-scene `SceneView`. Each
 //! card is a real heavyweight widget — `Panel { VStack { TextWidget,
 //! TextWidget } }` — placed at a fixed scene-coordinate rectangle.
 //!
-//! Phase 1 + 2 exercises:
+//! Phase 1 + 2 + 3 exercises:
 //!
 //! - `Scene::add_widget` round-trip (heavyweight widgets at scene
 //!   rects).
@@ -28,6 +28,15 @@
 //! - **Reduced motion** — at build time SceneView captures
 //!   `BuildContext::prefers_reduced_motion()`; when set, scroll
 //!   handlers `set` the pan signals directly instead of animating.
+//! - **Spatial index + viewport culling** — every `Scene` carries a
+//!   `GridHashIndex` (default cell size 256 px). `place_children`
+//!   queries the visible scene region and collapses off-screen
+//!   children to zero size, so layout / paint walks short-circuit
+//!   on them. The 9-card demo is too small to demonstrate this
+//!   visibly, but the same machinery scales to thousands of items;
+//!   see `crates/fern-scene/src/view.rs::tests::off_screen_items_*`
+//!   and `crates/fern-scene/src/index.rs::tests` for the
+//!   correctness pins.
 //!
 //! Phase 6 will add drag-to-move, marquee select, and group-move on
 //! the same demo.
@@ -90,7 +99,7 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Scene Corkboard (Phase 2: pan/zoom)")
+                .title("FernUI — Scene Corkboard (Phase 3: pan/zoom + cull)")
                 .size(900, 600)
                 .root(|tree, _state| tree.add(build_corkboard())),
         )

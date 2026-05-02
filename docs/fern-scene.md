@@ -36,8 +36,8 @@ not yet implemented.
 |-------|------|--------|
 | 0 | Transform-aware hit-test in fern-core | ✅ landed |
 | 1 | `Scene` + `SceneView` + free positioning | ✅ landed |
-| 2 | View transform, pan/zoom/rotate, gestures, inertial fling | ✅ this doc |
-| 3 | `SpatialIndex` trait + `GridHashIndex` + viewport culling | not yet |
+| 2 | View transform, pan/zoom/rotate, gestures, inertial fling | ✅ landed |
+| 3 | `SpatialIndex` trait + `GridHashIndex` + viewport culling | ✅ this doc |
 | 4 | `SceneItem` trait + lightweight built-ins | not yet |
 | 5a / 5b | Visual-default a11y / a11y-shaping tools | not yet |
 | 6 | Selection, marquee, drag-to-move | not yet |
@@ -207,6 +207,80 @@ later phase. Pinch + the imperative `zoom_to` cover the gap for
 trackpad and programmatic zoom; mouse-only users will get a
 keyboard `+` / `-` zoom binding once Phase 5a's keyboard navigation
 lands.
+
+### Spatial index + viewport culling (Phase 3)
+
+`Scene` carries a [`SpatialIndex`](https://docs.rs/fern-scene/0.1.0/fern_scene/index/trait.SpatialIndex.html)
+keyed by [`ItemId`] and AABB scene rectangles. Mutators
+(`add_widget`, `move_item`, `remove`) update the index in lockstep
+with `entries`, so `Scene::items_in_rect` and `SceneView`'s
+viewport-cull both run in `O(visible)` instead of `O(N)`.
+
+Default index is [`GridHashIndex`] with `cell_size = 256` logical
+pixels — see `crates/fern-scene/src/index.rs` for the bucketing
+math. Custom configurations land via `Scene::with_index`:
+
+```rust
+use fern_scene::{GridHashIndex, Scene};
+
+// Tighter cell size for dense scenes with small (~64-px) items.
+let scene = Scene::with_index(Box::new(GridHashIndex::new(96.0)));
+```
+
+The trait contract allows the index to return cell fan-out false
+positives — items in cells the query rect overlaps but whose AABB
+doesn't actually intersect. `Scene::items_in_rect` filters those out
+with an exact-AABB check before returning, so callers get a clean
+hit list. `SpatialIndex::query` is unchecked and faster for cull-
+style queries that don't need exact intersection.
+
+**SceneView's `place_children`** queries the visible scene region
+on every layout pass:
+
+1. Compute the SceneView's local viewport rect:
+   `(0, 0, bounds.width, bounds.height)`.
+2. Inverse the current view transform; apply to that viewport rect
+   to get the visible region in scene coordinates.
+3. Query `Scene::items_in_rect(visible_region)` → set of visible
+   `ItemId`s.
+4. For each child, look up its `ItemId` via `widget_to_item` (`O(1)`
+   reverse map), fetch its `scene_rect` from the scene index
+   (`O(1)`), and either place it at full scene-coord size or
+   collapse it to `Size::ZERO`.
+
+A culled child stays at its canonical `scene_rect.origin` —
+focus-follow / scroll-into-view machinery sees the same coordinate
+whether the child is visible or not. Only the size goes to zero,
+which short-circuits the recursive layout walk under that child
+and skips its paint entirely. The widget itself stays materialised
+in the arena (full focus / keyboard / animation state intact);
+true demand-load is Phase 4 territory once the lightweight tier
+lands.
+
+The four pan/zoom/rotation signals are bound at `BindingLevel::
+Relayout` on the SceneView's own node so any change re-runs
+`place_children` on the SceneView's subtree — without that, a pan
+or zoom would only repaint the *currently visible* children and
+items the cull collapsed to zero would stay collapsed even when
+the new view brings them into view. The Repaint binding from
+`set_transform` is kept in addition; it's what dirties the
+renderer's transform stack so the visible paint moves with the
+transform.
+
+Known limitation (Phase 7 polish): a SceneView positioned at
+`bounds.origin ≠ (0, 0)` by its parent — i.e. nested inside a
+non-trivial layout — has approximate culling because the
+view-transform composition doesn't yet account for the parent's
+offset. Items near the cull boundary may flicker on/off as the
+view animates. Root-level SceneView (the only configuration the
+corkboard demo and tests use) is exact.
+
+Tests pin: index correctness via brute-force cross-check on a
+deterministic random layout, false-positive narrowing,
+multi-cell deduplication, off-screen-children-collapse,
+pan-uncovers, zoom-uncovers, and a 1000-insert + 1000-query perf
+microbench. See `crates/fern-scene/src/index.rs::tests` and
+`crates/fern-scene/src/view.rs::tests::off_screen_items_*`.
 
 ### Free positioning
 

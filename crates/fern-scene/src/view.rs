@@ -41,10 +41,11 @@
 //! - Phase 5 layers a11y on top.
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal, Transform2D, Vec2};
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use fern_core::gesture::PinchPhase;
@@ -76,6 +77,12 @@ pub struct SceneView {
     /// rebuilds — subsequent `build` calls just return the cached
     /// widget ids.
     materialized: HashMap<ItemId, WidgetId>,
+    /// Reverse lookup populated alongside `materialized` so the
+    /// per-frame `place_children` cull resolves
+    /// `WidgetId → ItemId` in `O(1)`. Without it, scaling the demo
+    /// to 5,000 cards would burn a full frame's budget on the
+    /// per-child entry scan.
+    widget_to_item: HashMap<WidgetId, ItemId>,
     /// Fallback size when the parent's `SizeProposal` is unspecified
     /// on either axis.
     default_size: Size,
@@ -105,6 +112,7 @@ impl SceneView {
         Self {
             scene,
             materialized: HashMap::new(),
+            widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
             last_viewport: Cell::new(Size::new(800.0, 600.0)),
             pan_x: Signal::new_animated(0.0),
@@ -263,12 +271,15 @@ impl SceneView {
 impl Widget for SceneView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Materialise pending widgets (drained the first time, idempotent
-        // afterwards). Same logic as Phase 1.
+        // afterwards). Phase 3 also keeps the reverse lookup
+        // `widget_to_item` in sync so place_children's cull is `O(1)`
+        // per child instead of scanning the entries vec.
         let mut child_ids = Vec::with_capacity(self.scene.entries.len());
         for entry in self.scene.entries.iter_mut() {
             if let Some(widget) = entry.pending_widget.take() {
                 let wid = ctx.add_boxed(widget);
                 self.materialized.insert(entry.id, wid);
+                self.widget_to_item.insert(wid, entry.id);
                 child_ids.push(wid);
             } else if let Some(wid) = self.materialized.get(&entry.id).copied() {
                 child_ids.push(wid);
@@ -283,6 +294,27 @@ impl Widget for SceneView {
         ctx.register_animated_signal(&self.pan_y);
         ctx.register_animated_signal(&self.zoom);
         ctx.register_animated_signal(&self.rotation);
+
+        // Phase 3: bind the four signals at Relayout on this node so
+        // `place_children` re-runs and the viewport-cull set is
+        // recomputed when pan/zoom/rotation change. The Repaint
+        // binding from `set_transform` below is kept in addition;
+        // it's what dirties the renderer's transform stack so
+        // already-laid-out children re-paint at their new visual
+        // positions.  Without this Relayout binding, a `pan` or
+        // `zoom` change would only repaint the *currently visible*
+        // children — items the cull collapsed to zero would stay
+        // collapsed even if the new view brings them into view.
+        let registry = ctx.binding_registry();
+        let self_id_for_relayout = ctx.self_id();
+        self.pan_x
+            .bind_to(self_id_for_relayout, registry, BindingLevel::Relayout);
+        self.pan_y
+            .bind_to(self_id_for_relayout, registry, BindingLevel::Relayout);
+        self.zoom
+            .bind_to(self_id_for_relayout, registry, BindingLevel::Relayout);
+        self.rotation
+            .bind_to(self_id_for_relayout, registry, BindingLevel::Relayout);
 
         // Derive the view transform as a single Signal<Transform2D>
         // and bind it as a `set_transform` scope on this widget. The
@@ -398,14 +430,35 @@ impl Widget for SceneView {
         // parent-local coordinates anchored at the SceneView's bounds
         // origin. The view transform (pan/zoom/rotation) is applied
         // by the render walker as a `set_transform` scope around the
-        // entire subtree, so we keep placement logic transform-free
-        // — Phase 0's transform-aware hit-test routes through the
-        // same scope automatically.
+        // entire subtree, so placement itself stays transform-free —
+        // Phase 0's transform-aware hit-test routes through the same
+        // scope automatically.
+        //
+        // Phase 3 cull: compute the visible scene-coord region by
+        // inverse-transforming the SceneView's local viewport rect,
+        // then collapse the size of any child whose `scene_rect`
+        // doesn't intersect it. The placement's `origin` stays at
+        // its canonical position so any focus-follow / scroll-into-
+        // view machinery sees the same coordinates as before; only
+        // the size goes to zero, which short-circuits the recursive
+        // layout walk under that child and skips its paint
+        // entirely. Heavyweight children stay materialised — true
+        // demand-load is Phase 4 territory once the lightweight
+        // tier is in place.
+        let visible_ids = self.compute_visible_ids(bounds);
         for placement in children.iter_mut() {
-            if let Some(rect) = self.scene_rect_for(placement.id) {
-                placement.origin = Point::new(bounds.x + rect.x, bounds.y + rect.y);
-                placement.size = Size::new(rect.width, rect.height);
-            }
+            let Some(&item_id) = self.widget_to_item.get(&placement.id) else {
+                continue;
+            };
+            let Some(rect) = self.scene.scene_rect(item_id) else {
+                continue;
+            };
+            placement.origin = Point::new(bounds.x + rect.x, bounds.y + rect.y);
+            placement.size = if visible_ids.contains(&item_id) {
+                Size::new(rect.width, rect.height)
+            } else {
+                Size::ZERO
+            };
         }
     }
 
@@ -415,18 +468,27 @@ impl Widget for SceneView {
 }
 
 impl SceneView {
-    /// O(N) scan over `scene.entries` matching against
-    /// `self.materialized`. Acceptable in Phase 1/2 (handful of items);
-    /// Phase 3's spatial index removes this from the hot path
-    /// entirely (only viewport-intersecting items reach
-    /// `place_children`).
-    fn scene_rect_for(&self, widget_id: WidgetId) -> Option<Rect> {
-        for entry in &self.scene.entries {
-            if self.materialized.get(&entry.id) == Some(&widget_id) {
-                return Some(entry.scene_rect);
-            }
+    /// The scene-coord region currently inside the viewport, given
+    /// the view transform's current value. Used by `place_children`
+    /// to decide which items to lay out at full size and which to
+    /// collapse to zero. Falls back to the raw viewport if the view
+    /// transform is degenerate (zoom = 0).
+    fn visible_scene_region(&self, bounds: Rect) -> Rect {
+        let viewport_local = Rect::new(0.0, 0.0, bounds.width, bounds.height);
+        // Phase 2 known limitation: the view-transform composition
+        // doesn't account for `bounds.origin ≠ (0, 0)` — culling for
+        // a SceneView nested inside a non-zero parent layout is
+        // approximate. Documented in `docs/fern-scene.md` as a
+        // Phase 7 polish item.
+        match self.view_transform().inverse() {
+            Some(inv) => inv.apply_rect(viewport_local),
+            None => viewport_local,
         }
-        None
+    }
+
+    fn compute_visible_ids(&self, bounds: Rect) -> HashSet<ItemId> {
+        let region = self.visible_scene_region(bounds);
+        self.scene.items_in_rect(region).into_iter().collect()
     }
 }
 
@@ -860,6 +922,138 @@ mod tests {
         assert!(view.pan_x.animation_target().is_none());
         assert!(view.pan_y.animation_target().is_none());
         assert!(!tree.has_active_animations());
+    }
+
+    // -- Phase 3 viewport culling --------------------------------------
+
+    #[test]
+    fn off_screen_items_are_culled_to_zero_size() {
+        // The headline Phase 3 test: a SceneView at 800×600 with one
+        // item inside the viewport and one item far outside. The
+        // off-screen item's bounds collapse to zero so the layout/
+        // paint walks short-circuit on it.
+        let mut scene = Scene::new();
+        let inside = scene.add_widget(FillWidget::new(), Rect::new(50.0, 50.0, 100.0, 100.0));
+        let outside = scene.add_widget(
+            FillWidget::new(),
+            Rect::new(5_000.0, 5_000.0, 100.0, 100.0),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let view = view_handle(&tree, view_id);
+        let inside_widget = view.widget_id_for(inside).unwrap();
+        let outside_widget = view.widget_id_for(outside).unwrap();
+
+        let inside_bounds = tree.bounds(inside_widget);
+        let outside_bounds = tree.bounds(outside_widget);
+        assert_eq!(inside_bounds, Rect::new(50.0, 50.0, 100.0, 100.0));
+        assert_eq!(
+            outside_bounds.width, 0.0,
+            "off-screen item must have zero width"
+        );
+        assert_eq!(
+            outside_bounds.height, 0.0,
+            "off-screen item must have zero height"
+        );
+    }
+
+    #[test]
+    fn pan_brings_culled_items_back_into_view() {
+        // Items outside the initial viewport collapse to zero; pan
+        // the view to cover them and they should pop back to full
+        // size on the next layout.
+        let mut scene = Scene::new();
+        let far_right =
+            scene.add_widget(FillWidget::new(), Rect::new(2_000.0, 50.0, 100.0, 100.0));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let view = view_handle(&tree, view_id);
+        let far_widget = view.widget_id_for(far_right).unwrap();
+        // Before pan: far_right is outside the viewport, culled to
+        // zero.
+        assert_eq!(tree.bounds(far_widget).width, 0.0);
+
+        // Pan to bring it into view: pan_x = 1900 means scene-coord
+        // 2000 lands at screen 100, well within the 800-px viewport.
+        // (Pan is animated; snap directly via `set_pan` so the test
+        // doesn't have to drive the scheduler for this case.)
+        view.set_pan(Vec2::new(-1900.0, 0.0));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let view = view_handle(&tree, view_id);
+        let bounds = tree.bounds(view.widget_id_for(far_right).unwrap());
+        assert_eq!(
+            bounds,
+            Rect::new(2_000.0, 50.0, 100.0, 100.0),
+            "panned-to item should be re-inflated to its full scene_rect"
+        );
+    }
+
+    #[test]
+    fn cull_uses_scene_rect_origin_as_anchor_even_when_culled() {
+        // Even when collapsed to zero size, the culled child's
+        // origin stays at its canonical scene-rect position. This
+        // means focus-follow / scroll-into-view machinery sees a
+        // consistent coordinate even for off-screen items.
+        let mut scene = Scene::new();
+        let id = scene.add_widget(FillWidget::new(), Rect::new(10_000.0, 5_000.0, 80.0, 80.0));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let view = view_handle(&tree, view_id);
+        let widget = view.widget_id_for(id).unwrap();
+        let bounds = tree.bounds(widget);
+        assert_eq!(bounds.x, 10_000.0);
+        assert_eq!(bounds.y, 5_000.0);
+        assert_eq!(bounds.width, 0.0);
+        assert_eq!(bounds.height, 0.0);
+    }
+
+    #[test]
+    fn zoom_changes_culling_set() {
+        // At zoom 1, an item far from the viewport is culled.
+        // Zooming way out (small zoom = wide visible region) should
+        // bring it back into the visible set.
+        let mut scene = Scene::new();
+        let far = scene.add_widget(FillWidget::new(), Rect::new(2_000.0, 0.0, 50.0, 50.0));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene).min_zoom(0.05));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let view = view_handle(&tree, view_id);
+        let far_widget = view.widget_id_for(far).unwrap();
+        assert_eq!(tree.bounds(far_widget).width, 0.0);
+
+        // Zoom out to 0.1× — the visible scene region is 8000 px
+        // wide, well past the item at x=2000.
+        view.set_zoom(0.1);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let view = view_handle(&tree, view_id);
+        assert!(
+            tree.bounds(view.widget_id_for(far).unwrap()).width > 0.0,
+            "zooming out must un-cull off-screen items"
+        );
+    }
+
+    #[test]
+    fn empty_scene_culling_is_a_no_op() {
+        // Trivial — empty scene, trivial cull. Pins that the empty
+        // case doesn't panic on the inverse-transform / index query
+        // path.
+        let scene = Scene::new();
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert!(tree.children(view_id).is_empty());
     }
 
     #[test]

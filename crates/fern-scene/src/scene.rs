@@ -1,8 +1,13 @@
 //! The [`Scene`] data model — items + scene-rect placement, queryable
-//! by rectangle. Phase 1 stores items in a flat `Vec` and resolves
-//! `items_in_rect` via a brute-force scan; Phase 3 adds a pluggable
-//! `SpatialIndex` (grid-hash MVP, R-tree later) without API churn.
+//! by rectangle. Phase 3 routes queries through a pluggable
+//! [`SpatialIndex`] (grid-hash by default — see [`GridHashIndex`]),
+//! and mirrors all mutations into it so `items_in_rect` and the
+//! viewport-cull path in [`SceneView`](crate::SceneView) are both
+//! `O(visible)` instead of `O(N)`.
 
+use std::collections::HashMap;
+
+use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::ItemId;
 use fern_canvas::Rect;
 use fern_core::widget::Widget;
@@ -18,25 +23,48 @@ pub(crate) struct SceneEntry {
     pub(crate) pending_widget: Option<Box<dyn Widget>>,
 }
 
-/// The data model behind a `SceneView`: a flat collection of items at
-/// scene coordinates. The Scene itself does no rendering or layout —
-/// it's a passive container the view reads from at build / place /
-/// paint time.
+/// The data model behind a `SceneView`: a collection of items at
+/// scene coordinates plus a [`SpatialIndex`] for fast rectangular
+/// queries. The Scene itself does no rendering or layout — it's a
+/// passive container the view reads from at build / place / paint
+/// time.
 ///
-/// In Phase 1 only [`Scene::add_widget`] is exercised. The other
-/// mutators (`move_item`, `remove`) and the query method
-/// (`items_in_rect`) are wired up so later phases can lean on them
-/// without API churn — but full runtime mutation (mutate-after-build)
-/// is deferred to Phase 6.
+/// All mutators (`add_widget`, `move_item`, `remove`) update the
+/// index in lockstep, so `items_in_rect` and SceneView's viewport-
+/// cull path are both `O(visible)` instead of `O(N)`. Insertion
+/// order is preserved by `entries` and exposed via [`Scene::ids`].
+///
+/// Full runtime mutation (mutate-after-`build`) is deferred to
+/// Phase 6 — this Phase 3 surface assumes scenes are built up
+/// before being handed to a `SceneView`.
 pub struct Scene {
     pub(crate) entries: Vec<SceneEntry>,
+    /// `ItemId` → index into `entries` for O(1) `scene_rect` lookup.
+    /// Maintained in lockstep with `entries`; rebuilt on `remove` to
+    /// keep indices accurate after the `retain`-driven shift.
+    entry_index: HashMap<ItemId, usize>,
+    index: Box<dyn SpatialIndex>,
 }
 
 impl Scene {
-    /// An empty scene.
+    /// An empty scene with the default [`GridHashIndex`].
     pub fn new() -> Self {
+        Self::with_index(Box::new(GridHashIndex::default()))
+    }
+
+    /// An empty scene with a custom [`SpatialIndex`]. Use this to
+    /// pre-tune `cell_size` for scenes with unusual item density, or
+    /// to swap in an alternative index implementation (Phase 7 will
+    /// ship an R-tree under the same trait).
+    ///
+    /// ```ignore
+    /// let scene = Scene::with_index(Box::new(GridHashIndex::new(128.0)));
+    /// ```
+    pub fn with_index(index: Box<dyn SpatialIndex>) -> Self {
         Self {
             entries: Vec::new(),
+            entry_index: HashMap::new(),
+            index,
         }
     }
 
@@ -48,48 +76,72 @@ impl Scene {
     /// unchanged.
     pub fn add_widget<W: Widget + 'static>(&mut self, widget: W, scene_rect: Rect) -> ItemId {
         let id = ItemId::next();
+        let pos = self.entries.len();
         self.entries.push(SceneEntry {
             id,
             scene_rect,
             pending_widget: Some(Box::new(widget)),
         });
+        self.entry_index.insert(id, pos);
+        self.index.insert(id, scene_rect);
         id
     }
 
     /// Update an item's scene rectangle. No-op if the id isn't in the
-    /// scene. Phase 1 mutation: takes effect on the next layout pass
-    /// (after SceneView has been built once); Phase 6 wires this to
-    /// drag-to-move and the spatial index.
+    /// scene. The spatial index is re-bucketed in lockstep so future
+    /// `items_in_rect` queries see the new bounds.
     pub fn move_item(&mut self, id: ItemId, new_bounds: Rect) {
-        if let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) {
-            entry.scene_rect = new_bounds;
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].scene_rect = new_bounds;
+            self.index.insert(id, new_bounds);
         }
     }
 
     /// Remove an item by id. No-op if the id isn't in the scene.
-    /// Phase 1 only really makes sense before SceneView has been built;
-    /// post-build removal is Phase 6.
     pub fn remove(&mut self, id: ItemId) {
+        let prev_len = self.entries.len();
         self.entries.retain(|e| e.id != id);
+        if self.entries.len() != prev_len {
+            // Rebuild the index since `retain` shifted positions.
+            self.entry_index.clear();
+            for (pos, entry) in self.entries.iter().enumerate() {
+                self.entry_index.insert(entry.id, pos);
+            }
+        }
+        self.index.remove(id);
     }
 
-    /// All items whose `scene_rect` intersects the query rectangle, in
-    /// insertion order. Brute-force `O(N)` scan in Phase 1; replaced
-    /// by a `SpatialIndex::query` lookup in Phase 3.
+    /// All items whose `scene_rect` intersects the query rectangle.
+    /// Backed by the spatial index — `O(visible)` after a Phase 3
+    /// rebuild of the bucketing on insert/move/remove.
+    ///
+    /// The result is narrowed to exact-AABB intersections (the index
+    /// may return cell-fan-out false-positives that don't actually
+    /// intersect; Scene filters those out so callers get a clean
+    /// hit list).
     pub fn items_in_rect(&self, scene_rect: Rect) -> Vec<ItemId> {
-        self.entries
-            .iter()
-            .filter(|e| rects_intersect(e.scene_rect, scene_rect))
-            .map(|e| e.id)
+        let candidates = self.index.query(scene_rect);
+        // Narrow phase — the spatial-index doc explicitly allows cell
+        // fan-out false-positives. We resolve to exact AABB here so
+        // the public API gives the strict mathematical answer.
+        candidates
+            .into_iter()
+            .filter(|id| {
+                self.entries
+                    .iter()
+                    .find(|e| e.id == *id)
+                    .map(|e| rects_intersect(e.scene_rect, scene_rect))
+                    .unwrap_or(false)
+            })
             .collect()
     }
 
     /// Read an item's current scene rectangle. Returns `None` if the
-    /// id isn't in the scene.
+    /// id isn't in the scene. O(1) via the entry index.
     pub fn scene_rect(&self, id: ItemId) -> Option<Rect> {
-        self.entries
-            .iter()
-            .find(|e| e.id == id)
+        self.entry_index
+            .get(&id)
+            .and_then(|&pos| self.entries.get(pos))
             .map(|e| e.scene_rect)
     }
 
@@ -107,6 +159,12 @@ impl Scene {
     pub fn ids(&self) -> Vec<ItemId> {
         self.entries.iter().map(|e| e.id).collect()
     }
+
+    /// Borrow the spatial index. Useful for diagnostics and tests
+    /// that want to verify an item was bucketed.
+    pub fn index(&self) -> &dyn SpatialIndex {
+        &*self.index
+    }
 }
 
 impl Default for Scene {
@@ -119,15 +177,15 @@ impl std::fmt::Debug for Scene {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Scene")
             .field("len", &self.entries.len())
+            .field("index", &self.index)
             .finish_non_exhaustive()
     }
 }
 
 /// Standard half-open AABB intersection: two rects intersect iff their
-/// projections overlap on both axes. Inlined here in Phase 1; will
-/// likely move to `fern-canvas` once the spatial index in Phase 3
-/// needs the same predicate.
-fn rects_intersect(a: Rect, b: Rect) -> bool {
+/// projections overlap on both axes. Used by `Scene::items_in_rect`'s
+/// narrow phase and by `SceneView`'s viewport cull.
+pub(crate) fn rects_intersect(a: Rect, b: Rect) -> bool {
     a.x < b.x + b.width
         && b.x < a.x + a.width
         && a.y < b.y + b.height

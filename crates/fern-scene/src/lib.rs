@@ -43,11 +43,13 @@
 //! tree.add(view);
 //! ```
 
+pub mod index;
 pub mod item;
 pub mod scene;
 pub mod transform;
 pub mod view;
 
+pub use index::{GridHashIndex, SpatialIndex};
 pub use item::ItemId;
 pub use scene::Scene;
 pub use view::SceneView;
