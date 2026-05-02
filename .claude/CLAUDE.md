@@ -387,7 +387,7 @@ field.access_described_by(error_message_id);
 
 **Action callbacks.** `.access_action(action, callback)` advertises the action AND registers the callback. The dispatcher routes AT-invoked actions through `WidgetEvent::AccessAction` to the callback, layered on top of any user-installed `.on_access_action(...)` (both fire). Custom actions (SwiftUI `accessibilityAction(named:)`) use `accesskit::ActionData::CustomAction(idx)` and route by index in declaration order.
 
-Reference: [crates/fern-core/src/widget_builder.rs](crates/fern-core/src/widget_builder.rs) (`AccessibilityOverrides`, `AccessSubtreeMode`, `.access_*` methods); [crates/fern-core/src/widget_tree/accessibility_impl.rs](crates/fern-core/src/widget_tree/accessibility_impl.rs) (walker integration, `merge_descendants_into`).
+Full reference: [docs/accessibility-overrides.md](docs/accessibility-overrides.md). Implementation: [crates/fern-core/src/widget_builder.rs](crates/fern-core/src/widget_builder.rs) (`AccessibilityOverrides`, `AccessSubtreeMode`, `.access_*` methods); [crates/fern-core/src/widget_tree/accessibility_impl.rs](crates/fern-core/src/widget_tree/accessibility_impl.rs) (walker integration, `merge_descendants_into`).
 
 ## Actions, Intents & Shortcuts
 
@@ -760,4 +760,4 @@ If the app uses persistence, chain `.app_paths(...)` (or `.application(qualifier
 
 Full architecture document: `../fern-ui-perso/fern-ui-architecture.md` (28 sections, covers layout model, scrolling, widget state, reactivity, overlays, DnD, data sources, Canvas API, rendering pipeline, theming, threading, accessibility, window management, testability, i18n)
 
-Additional documentation: [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/table-view.md](docs/table-view.md), [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md), [docs/plans/settings-plan.md](docs/plans/settings-plan.md), [docs/plans/telemetry-plan.md](docs/plans/telemetry-plan.md), [docs/plans/fern-collector-plan.md](docs/plans/fern-collector-plan.md)
+Additional documentation: [docs/accessibility-overrides.md](docs/accessibility-overrides.md), [docs/settings.md](docs/settings.md), [docs/drag-and-drop.md](docs/drag-and-drop.md), [docs/title-bar.md](docs/title-bar.md), [docs/multi-window.md](docs/multi-window.md), [docs/idle-and-animation.md](docs/idle-and-animation.md), [docs/telemetry.md](docs/telemetry.md), [docs/table-view.md](docs/table-view.md), [docs/plans/previewer-plan.md](docs/plans/previewer-plan.md), [docs/plans/settings-plan.md](docs/plans/settings-plan.md), [docs/plans/telemetry-plan.md](docs/plans/telemetry-plan.md), [docs/plans/fern-collector-plan.md](docs/plans/fern-collector-plan.md)
