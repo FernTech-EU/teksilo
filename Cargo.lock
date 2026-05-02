@@ -1324,6 +1324,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fern-fmt-lsp"
+version = "0.1.0"
+dependencies = [
+ "fern-fmt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fern-i18n"
 version = "0.1.0"
 dependencies = [

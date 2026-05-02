@@ -56,6 +56,7 @@ fern-i18n = { path = "crates/fern-i18n", version = "0.1.0" }
 fern-i18n-macros = { path = "crates/fern-i18n-macros", version = "0.1.0" }
 cargo-fern-fmt = { path = "crates/cargo-fern-fmt", version = "0.1.0" }
 fern-fmt = { path = "crates/fern-fmt", version = "0.1.0" }
+fern-fmt-lsp = { path = "crates/fern-fmt-lsp", version = "0.1.0" }
 fern-parse = { path = "crates/fern-parse", version = "0.1.0" }
 fern-ui-macros = { path = "crates/fern-ui-macros", version = "0.1.0" }
 fern-text = { path = "crates/fern-text", version = "0.1.0" }

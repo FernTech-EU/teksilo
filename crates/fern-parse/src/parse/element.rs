@@ -46,9 +46,11 @@ pub(crate) fn parse_element(input: ParseStream) -> Result<FernElement> {
         .unwrap_or(false);
 
     // Optional positional args in `(...)`.
+    let mut args_close: Option<Span> = None;
     let args: Vec<Expr> = if input.peek(token::Paren) {
         let content;
-        let _paren = syn::parenthesized!(content in input);
+        let paren = syn::parenthesized!(content in input);
+        args_close = Some(paren.span.close());
         let punct: Punctuated<Expr, Token![,]> = Punctuated::parse_terminated(&content)?;
         punct.into_iter().collect()
     } else {
@@ -56,9 +58,11 @@ pub(crate) fn parse_element(input: ParseStream) -> Result<FernElement> {
     };
 
     // Optional body in `{...}`.
+    let mut body_close: Option<Span> = None;
     let body = if input.peek(token::Brace) {
         let content;
-        let _brace = syn::braced!(content in input);
+        let brace = syn::braced!(content in input);
+        body_close = Some(brace.span.close());
         parse_body(&content)?
     } else {
         Vec::new()
@@ -88,5 +92,7 @@ pub(crate) fn parse_element(input: ParseStream) -> Result<FernElement> {
         args,
         body,
         head_span,
+        args_close,
+        body_close,
     })
 }

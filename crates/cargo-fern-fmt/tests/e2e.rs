@@ -151,6 +151,27 @@ fn missing_path_errors() {
     assert!(stderr.contains("path not found"));
 }
 
+#[cfg(unix)]
+#[test]
+fn preserves_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = TempDir::new().unwrap();
+    let f = tmp.path().join("f.rs");
+    write(
+        &f,
+        "fn build() { fern!(VStack { spacing: 8.0 Button(\"ok\") }); }\n",
+    );
+    // Set a distinctive mode that differs from NamedTempFile's default
+    // 0600 — using 0644 (typical .rs file mode).
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let out = run(&["f.rs"], tmp.path());
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+
+    let mode = std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o644, "expected 0644, got {mode:o}");
+}
+
 #[test]
 fn formats_multiple_files_recursively() {
     let tmp = TempDir::new().unwrap();

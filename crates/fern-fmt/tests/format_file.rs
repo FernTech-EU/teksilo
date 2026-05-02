@@ -57,6 +57,31 @@ fn nested_macro_invocations_only_format_fern() {
 }
 
 #[test]
+fn crlf_input_produces_crlf_output() {
+    let src = "fn build() {\r\n    fern!(VStack { spacing: 8.0 Button(\"ok\") });\r\n}\r\n";
+    let out = fmt(src);
+    // The output is multi-line, so it must contain newlines. Every
+    // newline should be \r\n; no bare \n should remain.
+    assert!(out.contains("\r\n"), "got:\n{out:?}");
+    let bare_lf = out
+        .as_bytes()
+        .windows(2)
+        .filter(|w| w[1] == b'\n' && w[0] != b'\r')
+        .count();
+    assert_eq!(
+        bare_lf, 0,
+        "expected no bare LFs in CRLF output, got:\n{out:?}"
+    );
+}
+
+#[test]
+fn lf_input_stays_lf() {
+    let src = "fn build() {\n    fern!(VStack { spacing: 8.0 Button(\"ok\") });\n}\n";
+    let out = fmt(src);
+    assert!(!out.contains('\r'), "expected pure LF output, got:\n{out:?}");
+}
+
+#[test]
 fn idempotent_at_file_level() {
     let src = "fn build() {\n    fern!(VStack { Button(\"ok\") });\n}\n";
     let once = fmt(src);

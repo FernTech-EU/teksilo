@@ -38,6 +38,16 @@ pub struct FernElement {
     /// Span of the type path's first segment — used for error reporting
     /// on constructor typos.
     pub head_span: Span,
+    /// Span of the closing `)` after the args, if the user wrote any
+    /// args parens (including empty `()`). `None` when no arg parens
+    /// were written. Consumers (e.g. the formatter) use this to find
+    /// the exact byte offset just past the args.
+    pub args_close: Option<Span>,
+    /// Span of the closing `}` of the body, if the user wrote any body
+    /// braces (including empty `{}`). `None` when no body braces were
+    /// written. Consumers use this to find the exact end of the body
+    /// for trivia attribution.
+    pub body_close: Option<Span>,
 }
 
 /// One item in an element's body block.

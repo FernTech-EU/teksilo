@@ -148,7 +148,7 @@ impl<'a> Printer<'a> {
 
         // Header: type path + args.
         self.write(&path_text(self.source, &e.type_path));
-        if !e.args.is_empty() {
+        if let Some(close) = e.args_close {
             self.write("(");
             for (i, arg) in e.args.iter().enumerate() {
                 if i > 0 {
@@ -157,13 +157,21 @@ impl<'a> Printer<'a> {
                 self.write(&verbatim_slice(self.source, &arg.to_token_stream()));
             }
             self.write(")");
-            // Advance cursor past the args.
-            if let Some(end) = ts_end(&token_stream_of(&e.args)) {
-                self.cursor = self.cursor.max(end + 1); // +1 to step past the close paren
-            }
+            // Advance cursor exactly past the closing `)`.
+            self.cursor = self.cursor.max(close.byte_range().end);
         }
 
+        // Treat element as bodyless (no `{}`) if the user didn't write
+        // braces. An empty `{}` in source still has body_close = Some(...)
+        // and the body items vec is empty — we collapse to bodyless form
+        // unconditionally because the two are semantically identical.
         if e.body.is_empty() {
+            // If there were body braces but no items, advance cursor past
+            // the closing `}` so trailing trivia inside the empty body
+            // doesn't get re-emitted later.
+            if let Some(close) = e.body_close {
+                self.cursor = self.cursor.max(close.byte_range().end);
+            }
             return;
         }
 
@@ -185,17 +193,12 @@ impl<'a> Printer<'a> {
             }
         }
 
-        // Drain trivia between last item and the closing brace.
-        // We don't know the closing brace's exact offset — approximate
-        // by the max sub-token end of the last body item, plus a generous
-        // tail scan that any remaining trivia INSIDE the body (before
-        // close) gets emitted here.
-        if let Some(last) = e.body.last() {
-            let body_end_approx = item_byte_range(last).end;
-            // Peek ahead through any trivia that sits between the last
-            // body item's end and the closing brace.
-            self.drain_trivia_until(body_end_approx + 256.min(self.source.len() - body_end_approx.min(self.source.len())));
+        // Drain any trivia between the last body item and the closing
+        // `}`, anchored on the exact close-brace span from the IR.
+        if let Some(close) = e.body_close {
+            self.drain_trivia_until(close.byte_range().start);
             self.trim_trailing_blank();
+            self.cursor = self.cursor.max(close.byte_range().end);
         }
 
         self.indent -= 1;
@@ -365,14 +368,6 @@ fn verbatim_slice(source: &str, ts: &TokenStream) -> String {
         Some(r) => source[r].to_string(),
         None => String::new(),
     }
-}
-
-fn token_stream_of(args: &[syn::Expr]) -> TokenStream {
-    let mut ts = TokenStream::new();
-    for a in args {
-        a.to_tokens(&mut ts);
-    }
-    ts
 }
 
 fn path_text(source: &str, path: &syn::Path) -> String {

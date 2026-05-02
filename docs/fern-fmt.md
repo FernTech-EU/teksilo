@@ -180,7 +180,9 @@ let new_source = format_file(&source_text, &cfg)?;
 ```
 
 Both functions are pure: they take a `&str` and return a `String`.
-There's no I/O at the library level.
+There's no I/O at the library level. `format_file` detects the host
+file's line ending convention (LF or CRLF) and applies it to every
+newline the formatter emits, so a CRLF file round-trips as CRLF.
 
 `FmtConfig` is empty in v1 — every invocation produces canonical
 output. Style knobs may be added later; defaults will not change for
@@ -188,9 +190,72 @@ existing invocations.
 
 ---
 
+## Editor integration (LSP)
+
+The [fern-fmt-lsp](../crates/fern-fmt-lsp/) crate ships a minimal
+Language Server Protocol server that wraps the formatter. Install:
+
+```sh
+cargo install --path crates/fern-fmt-lsp
+```
+
+The server speaks JSON-RPC over stdio and advertises a single
+capability: `documentFormattingProvider`. Wire it into your editor
+as a *secondary* formatter for Rust files (`rust-analyzer` stays
+your primary).
+
+### Helix
+
+```toml
+# ~/.config/helix/languages.toml
+[language-server.fern-fmt-lsp]
+command = "fern-fmt-lsp"
+
+[[language]]
+name = "rust"
+language-servers = [{ name = "rust-analyzer" }, { name = "fern-fmt-lsp" }]
+```
+
+### VS Code
+
+Use a generic LSP client extension (e.g. *Generic LSP Client* by
+llllvvuu) or write a tiny extension that registers `fern-fmt-lsp` for
+`rust` documents. With format-on-save enabled, every save runs
+`textDocument/formatting`.
+
+### Neovim (`nvim-lspconfig`)
+
+```lua
+local configs = require('lspconfig.configs')
+configs.fern_fmt_lsp = {
+  default_config = {
+    cmd = { 'fern-fmt-lsp' },
+    filetypes = { 'rust' },
+    root_dir = require('lspconfig.util').root_pattern('Cargo.toml'),
+    settings = {},
+  },
+}
+require('lspconfig').fern_fmt_lsp.setup{}
+```
+
+### Behavior
+
+- On every `textDocument/formatting` request, the server runs
+  `fern_fmt::format_file` on the buffer contents and returns either an
+  empty edit list (already canonical) or a single full-document
+  `TextEdit` (entire buffer replaced with formatted output).
+- A parse error in the host file or in any `fern!` body is treated as
+  "leave it alone" — the server returns empty edits, mirroring how
+  `rustfmt` behaves on save when Rust source is mid-edit.
+- Document sync is full (mode 1): every change resends the whole
+  text. Cheaper than maintaining incremental-diff state for a
+  format-only server.
+
+---
+
 ## Architecture
 
-Three crates, layered:
+Four crates, layered:
 
 - **[fern-parse](../crates/fern-parse/)** — parser and IR for the
   `fern!` DSL. Extracted from `fern-ui-macros` so non-proc-macro
@@ -199,12 +264,15 @@ Three crates, layered:
   crate. The proc-macro crate now depends on it.
 - **[fern-fmt](../crates/fern-fmt/)** — pure formatter library.
   Pretty-printer, byte-range trivia scanner, host-file `fern!`-macro
-  visitor.
+  visitor, LF/CRLF detection.
 - **[cargo-fern-fmt](../crates/cargo-fern-fmt/)** — CLI binary. File
   walker, in-place rewriter with atomic writes, `--check` mode.
+- **[fern-fmt-lsp](../crates/fern-fmt-lsp/)** — LSP server binary.
+  Hand-rolled JSON-RPC over stdio (no tokio); thin wrapper around
+  `format_file`.
 
-The CLI has no fern! grammar knowledge — all parsing and printing
-happens in the library crates.
+The CLI and LSP have no `fern!` grammar knowledge — all parsing and
+printing happens in the library crates.
 
 ---
 
@@ -222,9 +290,6 @@ happens in the library crates.
   root element on the same line, even if the user wrote them across
   lines. Multi-line preambles aren't a documented form anywhere; the
   formatter standardizes on the joined shape.
-- **No editor integration** in v1. The library API is shaped to
-  support an LSP server later (a `format_block(&str)` boundary is all
-  rust-analyzer needs), but no LSP plumbing is shipped.
 - **No configurable rules**. Indent width, brace style, and reflow
   thresholds are fixed. Configurability may come in a later version
   through `FmtConfig`.

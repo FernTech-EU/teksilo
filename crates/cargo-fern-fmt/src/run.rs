@@ -170,9 +170,24 @@ fn process_one(
 
 fn write_atomic(path: &Path, content: &str) -> Result<(), ProcessError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    // Snapshot the source's permissions before we replace the file.
+    // `NamedTempFile::persist` uses the temp file's mode (0600 on Unix
+    // by default) for the destination after rename, which silently
+    // tightens permissions on a previously world-readable .rs file.
+    // Re-apply the snapshot after persist to leave mode untouched.
+    let original_perms = std::fs::metadata(path).ok().map(|m| m.permissions());
+
     let mut tmp = NamedTempFile::new_in(parent)?;
     tmp.as_file_mut().write_all(content.as_bytes())?;
     tmp.as_file_mut().sync_all()?;
     tmp.persist(path)?;
+
+    if let Some(perms) = original_perms {
+        // A failure here means the file was rewritten with the wrong
+        // mode but the content is correct — ignore quietly. The user
+        // can chmod by hand if it matters; reporting it would create
+        // noise on every run.
+        let _ = std::fs::set_permissions(path, perms);
+    }
     Ok(())
 }

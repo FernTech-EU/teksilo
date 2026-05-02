@@ -67,7 +67,10 @@ pub fn format_block(source: &str, _config: &FmtConfig) -> Result<String, FmtErro
 ///
 /// `source` is the full Rust source text. The returned string is the
 /// same source with each `fern!` macro body replaced by its formatted
-/// form. Source outside `fern!` blocks is byte-for-byte unchanged.
+/// form. Source outside `fern!` blocks is byte-for-byte unchanged. The
+/// host file's line ending convention (LF or CRLF) is detected from
+/// the first newline in source and applied to every newline the
+/// formatter emits, so a CRLF file round-trips as CRLF.
 pub fn format_file(source: &str, config: &FmtConfig) -> Result<String, FmtError> {
     let file = syn::parse_file(source).map_err(FmtError::HostParse)?;
     let macros = visit::find_fern_macros(source, &file);
@@ -75,6 +78,8 @@ pub fn format_file(source: &str, config: &FmtConfig) -> Result<String, FmtError>
     if macros.is_empty() {
         return Ok(source.to_string());
     }
+
+    let line_ending = detect_line_ending(source);
 
     // Apply edits from end to start so earlier byte offsets remain valid.
     let mut edits: Vec<visit::FernMacroEdit> = macros;
@@ -85,16 +90,52 @@ pub fn format_file(source: &str, config: &FmtConfig) -> Result<String, FmtError>
         let body_src = &source[edit.body_range.clone()];
         let formatted = format_block(body_src, config)?;
         let reindented = reindent_block(&formatted, edit.base_indent);
-        out.replace_range(edit.body_range, &reindented);
+        let with_endings = match line_ending {
+            LineEnding::Lf => reindented,
+            LineEnding::Crlf => normalize_to_crlf(&reindented),
+        };
+        out.replace_range(edit.body_range, &with_endings);
     }
     Ok(out)
 }
 
-/// Re-indent a formatted block so it lines up with the column where the
-/// macro body started in the host file. The formatter emits with column 0
-/// indents internally; this shifts every line (except the first) by
-/// `base_indent` spaces so the closing `)` of the macro call lands at a
-/// sensible column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineEnding {
+    Lf,
+    Crlf,
+}
+
+/// Inspect the first `\n` in `source`. If it's preceded by `\r`, the
+/// file uses CRLF; otherwise LF. Files with no newline default to LF.
+fn detect_line_ending(source: &str) -> LineEnding {
+    match source.find('\n') {
+        Some(idx) if idx > 0 && source.as_bytes()[idx - 1] == b'\r' => LineEnding::Crlf,
+        _ => LineEnding::Lf,
+    }
+}
+
+/// Replace bare `\n` (not already preceded by `\r`) with `\r\n`.
+/// Idempotent — already-CRLF input passes through unchanged.
+fn normalize_to_crlf(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + s.matches('\n').count());
+    let mut prev = '\0';
+    for c in s.chars() {
+        if c == '\n' && prev != '\r' {
+            out.push('\r');
+        }
+        out.push(c);
+        prev = c;
+    }
+    out
+}
+
+/// Re-indent a formatted block so its outermost `}` lands at the same
+/// column the user already had in source (see
+/// [`visit::observed_body_indent`]). The formatter emits with column-0
+/// indents internally; this shifts every line except the first by
+/// `base_indent` spaces. Newlines emitted by the formatter remain
+/// `\n`-only — line-ending normalization (LF↔CRLF) is the caller's
+/// responsibility.
 fn reindent_block(body: &str, base_indent: usize) -> String {
     if base_indent == 0 || !body.contains('\n') {
         return body.to_string();
