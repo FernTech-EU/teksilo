@@ -231,6 +231,23 @@ impl<'a> BuildContext<'a> {
         self.tree.set_opacity(id, opacity);
     }
 
+    /// Bind a 2D affine transform to a widget. The render walker emits
+    /// `PushTransform(value)` before painting the widget's subtree and
+    /// `PopTransform` afterwards, so the transform composes onto the
+    /// renderer's stack with any ancestor transform scopes and with
+    /// the widget's own canvas-level transforms. Bound at `RepaintOnly`:
+    /// visual-only transforms never trigger relayout. Used by `Scale`
+    /// and `Rotate`; reflow-driving wrappers (e.g. `Scale::reflow(true)`)
+    /// must additionally bind their driver signal to themselves at
+    /// `Relayout` to make layout track the value.
+    pub fn set_transform(
+        &mut self,
+        id: WidgetId,
+        transform: impl Into<crate::signal::Prop<fern_canvas::Transform2D>>,
+    ) {
+        self.tree.set_transform(id, transform);
+    }
+
     /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.enabled_when(id, state);

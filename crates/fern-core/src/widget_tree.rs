@@ -1822,6 +1822,33 @@ impl WidgetTree {
         }
     }
 
+    /// Bind a 2D affine transform to a widget. The render walker emits
+    /// `PushTransform(value)` before painting the widget's subtree and
+    /// `PopTransform` afterwards; the renderer composes the transform
+    /// onto its stack so nested wrappers and widget-internal canvas
+    /// transforms compose correctly. Bound at `Repaint` level: visual-
+    /// only transforms never trigger relayout. Wrappers that want the
+    /// transform's *value change* to also drive layout (e.g.
+    /// `Scale::reflow(true)`) must additionally bind the *driver*
+    /// signal to themselves at `Relayout` level — the transform prop
+    /// itself stays at Repaint. Pass a `Transform2D`, `Signal<Transform2D>`,
+    /// or `Prop<Transform2D>`.
+    pub fn set_transform(
+        &mut self,
+        id: WidgetId,
+        transform: impl Into<crate::signal::Prop<fern_canvas::Transform2D>>,
+    ) {
+        let prop = transform.into();
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        if let Some(node) = self.arena.get_mut(id) {
+            node.transform_prop = Some(prop);
+        }
+    }
+
     /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
     /// When false, the widget and its entire subtree ignore all events but remain
     /// visible. Focus traversal skips disabled subtrees and AccessKit marks their

@@ -220,6 +220,16 @@ Application:
 - `.to_or_snap(&signal, target)` — one-shot tween that snaps under
   `prefers-reduced-motion`. Use this for almost all UI transitions.
 
+**Per-node paint scopes** (the engine primitives wrappers build on):
+`BuildContext::set_opacity`, `set_clips_children`, and `set_transform`
+each attach a Prop to a node; the render walker emits a matching
+push/pop pair (`SetOpacity`/`RestoreOpacity`, `SetClip`/`ClearClip`,
+`PushTransform`/`PopTransform`) around the subtree. The renderer
+maintains a stack per scope. `SetTransform` is *compose-with-stack-top*
+semantics — a widget's canvas-local transforms (canvas.translate/scale/
+rotate) compose with any ancestor transform scope instead of clobbering
+it.
+
 **Animated wrapper widgets** (live in [crates/fern-widgets/src/animations/](crates/fern-widgets/src/animations/), re-exported flat from `fern_ui::widgets`):
 
 - `Collapse { expanded: Signal<bool>, child }` — wraps a child and animates
@@ -259,6 +269,18 @@ Application:
   `MotionTokens::duration_slow`, 4 cycles). Invalid-input feedback.
   Layout-stable, clips. Reduced motion: trigger is a no-op. See
   [crates/fern-widgets/src/animations/shake.rs](crates/fern-widgets/src/animations/shake.rs).
+- `Scale::new(visible).child(w)` — uniform 2D visual scale 0↔1 driven
+  by `Prop<bool>`. Built on `BuildContext::set_transform` (a node-level
+  transform scope, parallel to `set_opacity`). Default: visual-only
+  (slot stays at natural size, only the visual scales around the
+  origin). `.reflow(true)` switches to layout-driving mode where the
+  slot itself shrinks (siblings reflow); pair with `.origin(ScaleOrigin::TopLeading)`
+  for the "card removal" pattern. See [crates/fern-widgets/src/animations/scale.rs](crates/fern-widgets/src/animations/scale.rs).
+- `Rotate::new(angle_signal).child(w)` — rotates a child subtree by
+  `angle: Prop<f32>` (radians). No internal animation; caller drives
+  the angle signal and pairs with `Signal::animate_to` for animated
+  rotations. Layout-stable. Use for chevrons, dial controls, rotation
+  feedback. See [crates/fern-widgets/src/animations/rotate.rs](crates/fern-widgets/src/animations/rotate.rs).
 - `Spinner::new(size)` — circular-arc loading indicator backed by the
   shader-driven `AnimatedQuadKind::SpinnerArc` pipeline (~one uniform
   write + one `draw_indexed` per frame, no `paint()` re-runs). Honours

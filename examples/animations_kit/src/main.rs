@@ -22,9 +22,9 @@ use std::time::Duration;
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonVariant, Card, Collapse, Crossfade, Cycle, Divider, Fade, FixedSize, HStack,
-    Padding, Panel, ProgressBar, Pulse, RectWidget, ScrollArea, Shake, Slide, SlideEdge, Spinner,
-    SmoothSize, TextWidget, Toggle, VStack,
+    Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Fade, FixedSize,
+    HStack, Padding, Panel, ProgressBar, Pulse, RectWidget, Rotate, Scale, ScaleOrigin, ScrollArea,
+    Shake, Slide, SlideEdge, SmoothSize, Spinner, TextWidget, Toggle, VStack, ZStack,
 };
 
 fn main() {
@@ -60,6 +60,9 @@ fn build_kit(
     let crossfade_key = Signal::new(0_u32);
     let slide_visible = Signal::new(false);
     let shake_trigger = Signal::new(0_u32);
+    let scale_visible = Signal::new(true);
+    let scale_reflow_visible = Signal::new(true);
+    let rotate_angle = Signal::new_animated(0.0_f32);
 
     VStack::new()
         .spacing(20.0)
@@ -262,6 +265,96 @@ fn build_kit(
                             shake_trigger.set(shake_trigger.get() + 1);
                         }),
                 ),
+        )
+        .child(Divider::new())
+        .child(section_header("Scale (visual-only)"))
+        .child(caption(
+            "Visual scale 0↔1 around the slot center via BuildContext::set_transform. \
+             Wrapper bounds stay at natural — siblings don't reflow. Use for overlay enter/exit \
+             and 'boop' feedback on a Card.",
+        ))
+        .child(toggle_button("Toggle Scale", scale_visible.clone()))
+        .child(
+            Scale::new(scale_visible).child(
+                Card::new().content(TextWidget::new_literal(
+                    "I shrink/grow visually around my center.",
+                )),
+            ),
+        )
+        .child(Divider::new())
+        .child(section_header("Scale (reflow)"))
+        .child(caption(
+            "Scale with .reflow(true) — the slot itself shrinks, siblings reflow inward. \
+             Use TopLeading origin so the visual stays anchored as the slot collapses. \
+             The 'card disappears by shrinking' pattern.",
+        ))
+        .child(toggle_button("Toggle Card", scale_reflow_visible.clone()))
+        .child(
+            HStack::new()
+                .spacing(8.0)
+                .child(TextWidget::new_literal("Before:"))
+                .child(
+                    Scale::new(scale_reflow_visible)
+                        .reflow(true)
+                        .origin(ScaleOrigin::TopLeading)
+                        .child(Card::new().content(TextWidget::new_literal("removable card"))),
+                )
+                .child(TextWidget::new_literal(":After")),
+        )
+        .child(Divider::new())
+        .child(section_header("Rotate"))
+        .child(caption(
+            "Bind any Signal<f32> of radians to rotate a child subtree. No internal animation; \
+             pair with animate_to for animated rotations. The 80×80 square below rotates around \
+             its center — the small black dot marks the expected pivot.",
+        ))
+        .child(
+            // Side-by-side: rotating-cube-with-pivot-dot, then button.
+            HStack::new()
+                .spacing(20.0)
+                .child(
+                    // 80×80 ZStack: rotating cube on the bottom layer,
+                    // a 6×6 black reference dot centered on top. If
+                    // Rotate's pivot matches the slot center, the cube
+                    // rotates around the dot.
+                    FixedSize::new()
+                        .bind_width(80.0)
+                        .bind_height(80.0)
+                        .child(
+                            ZStack::new()
+                                .child(
+                                    Rotate::new(rotate_angle.clone()).child(
+                                        RectWidget::new()
+                                            .background(Color::from_rgb(0.30, 0.55, 0.85)),
+                                    ),
+                                )
+                                .child(
+                                    Center::new().child(
+                                        FixedSize::new()
+                                            .bind_width(6.0)
+                                            .bind_height(6.0)
+                                            .child(
+                                                RectWidget::new().background(
+                                                    Color::from_rgb(0.0, 0.0, 0.0),
+                                                ),
+                                            ),
+                                    ),
+                                ),
+                        ),
+                )
+                .child({
+                    let angle = rotate_angle.clone();
+                    Button::new_literal("Rotate 90°")
+                        .style(ButtonVariant::Regular)
+                        .on_activate_fn(move |_| {
+                            let target = angle.get() + std::f32::consts::FRAC_PI_2;
+                            angle.animate_to(
+                                target,
+                                Duration::from_millis(400),
+                                fern_ui::tokens::Easing::EaseOut,
+                            );
+                        })
+                }),
         )
 }
 

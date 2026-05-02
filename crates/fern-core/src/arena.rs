@@ -90,6 +90,19 @@ pub struct WidgetNode {
     /// (the default for almost every widget). The `Fade` widget sets
     /// this on its own node to drive an animated visibility tween.
     pub(crate) opacity_prop: Option<Prop<f32>>,
+    /// Optional 2D affine transform applied to this widget's entire
+    /// subtree during paint. The render walker emits
+    /// `PushTransform(value)` before walking the widget's own paint
+    /// and children, then `PopTransform` afterwards — the renderer
+    /// composes it onto its transform stack so nested wrappers and
+    /// widget-internal canvas transforms compose correctly. Bound at
+    /// `Repaint` level by default (visual-only); a wrapper that wants
+    /// the transform to drive layout (e.g. `Scale::reflow(true)`)
+    /// must additionally bind its driver signal at `Relayout`.
+    /// `None` means "no transform scope" (the default for almost every
+    /// widget). The `Scale` and `Rotate` widgets set this on their own
+    /// node.
+    pub(crate) transform_prop: Option<Prop<fern_canvas::Transform2D>>,
     /// Cached paint output for this widget (excludes children).
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
@@ -217,6 +230,7 @@ impl WidgetArena {
             alignment_override: None,
             clips_children: false,
             opacity_prop: None,
+            transform_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
@@ -269,6 +283,7 @@ impl WidgetArena {
             alignment_override: None,
             clips_children: false,
             opacity_prop: None,
+            transform_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),

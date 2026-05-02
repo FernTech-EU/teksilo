@@ -112,6 +112,7 @@ impl RenderFrame {
         let mut clip_depth: i32 = 0;
         let mut opacity_depth: i32 = 0;
         let mut blend_depth: i32 = 0;
+        let mut transform_depth: i32 = 0;
         for (i, cmd) in self.draw_order.iter().enumerate() {
             match cmd {
                 DrawCommand::SetClip(_) => clip_depth += 1,
@@ -138,6 +139,14 @@ impl RenderFrame {
                         "RenderFrame: RestoreBlendMode without matching SetBlendMode at draw_order[{i}]"
                     );
                 }
+                DrawCommand::PushTransform(_) => transform_depth += 1,
+                DrawCommand::PopTransform => {
+                    transform_depth -= 1;
+                    debug_assert!(
+                        transform_depth >= 0,
+                        "RenderFrame: PopTransform without matching PushTransform at draw_order[{i}]"
+                    );
+                }
                 _ => {}
             }
         }
@@ -152,6 +161,10 @@ impl RenderFrame {
         debug_assert!(
             blend_depth == 0,
             "RenderFrame: {blend_depth} unmatched SetBlendMode(s) without RestoreBlendMode"
+        );
+        debug_assert!(
+            transform_depth == 0,
+            "RenderFrame: {transform_depth} unmatched PushTransform(s) without PopTransform"
         );
     }
 }
@@ -357,7 +370,22 @@ pub enum DrawCommand {
     RestoreOpacity,
     SetBlendMode(BlendMode),
     RestoreBlendMode,
+    /// Set the renderer's current transform. **Composes** with the
+    /// top of the renderer's transform stack: the new current is
+    /// `stack_top.compose(t)`. For widgets not under any
+    /// `PushTransform` scope the stack is `[identity]`, so this
+    /// behaves as "set absolute" — backwards compatible.
     SetTransform(Transform2D),
+    /// Push a new transform onto the renderer's transform stack.
+    /// The new top becomes `prev_top.compose(t)`, and that becomes
+    /// the renderer's `current_transform` until the matching
+    /// [`DrawCommand::PopTransform`]. Emitted by the render walker
+    /// around a subtree whose root has a `transform_prop` set.
+    PushTransform(Transform2D),
+    /// Pop the renderer's transform stack, restoring the previous
+    /// top as the new `current_transform`. Must be paired with a
+    /// [`DrawCommand::PushTransform`].
+    PopTransform,
 }
 
 /// An animated quad to render with one of the shader-animation pipelines.

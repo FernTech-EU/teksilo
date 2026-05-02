@@ -358,7 +358,12 @@ impl Renderer {
             let mut current_blend = fern_canvas::BlendMode::Normal;
             let _ = current_blend; // used to track state for future pipeline switching
 
-            // Transform stack — applied CPU-side to pixel positions before NDC conversion
+            // Transform stack — applied CPU-side to pixel positions before NDC conversion.
+            // The stack tracks subtree-level transforms pushed by the render walker
+            // (`PushTransform` / `PopTransform`); `current_transform` is always the
+            // top of the stack composed with whatever the most recent `SetTransform`
+            // command set within the current scope.
+            let mut transform_stack: Vec<Transform2D> = vec![Transform2D::IDENTITY];
             let mut current_transform = Transform2D::IDENTITY;
 
             // --- Batched rendering ---
@@ -961,7 +966,90 @@ impl Renderer {
                             index_binding
                         );
                         quad_source = None;
-                        current_transform = *t;
+                        // Widgets author transforms in logical pixels, but
+                        // vertices arrive pre-multiplied by scale_factor (HiDPI
+                        // device pixels). Scale the translation column so the
+                        // pivot lands at the same physical point in either
+                        // coordinate space.
+                        let device_t = Transform2D {
+                            m: [
+                                t.m[0], t.m[1], t.m[2], t.m[3],
+                                t.m[4] * scale_factor, t.m[5] * scale_factor,
+                            ],
+                        };
+                        // Compose with the current transform-stack top so a
+                        // widget's canvas-local transform respects any wrapper
+                        // transform pushed by the render walker. With an
+                        // identity stack top this is identical to the old
+                        // "absolute" semantics — backwards compatible for any
+                        // widget not under a transform scope.
+                        let stack_top = transform_stack
+                            .last()
+                            .copied()
+                            .unwrap_or(Transform2D::IDENTITY);
+                        current_transform = device_t.then(&stack_top);
+                    }
+                    fern_canvas::DrawCommand::PushTransform(t) => {
+                        flush_all!(
+                            pass,
+                            &self.queue,
+                            self.streams,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source,
+                            index_binding
+                        );
+                        quad_source = None;
+                        // See SetTransform: scale the translation column to
+                        // device pixels before composing.
+                        let device_t = Transform2D {
+                            m: [
+                                t.m[0], t.m[1], t.m[2], t.m[3],
+                                t.m[4] * scale_factor, t.m[5] * scale_factor,
+                            ],
+                        };
+                        let prev_top = transform_stack
+                            .last()
+                            .copied()
+                            .unwrap_or(Transform2D::IDENTITY);
+                        let new_top = device_t.then(&prev_top);
+                        transform_stack.push(new_top);
+                        current_transform = new_top;
+                    }
+                    fern_canvas::DrawCommand::PopTransform => {
+                        flush_all!(
+                            pass,
+                            &self.queue,
+                            self.streams,
+                            &self.rect_pipeline,
+                            &self.sdf_pipeline,
+                            &self.quad_pipeline,
+                            &self.shadow_pipeline,
+                            rect_batch,
+                            sdf_batch,
+                            quad_batch,
+                            shadow_batch,
+                            self.atlas_texture,
+                            self.path_atlas_texture,
+                            quad_source,
+                            index_binding
+                        );
+                        quad_source = None;
+                        if transform_stack.len() > 1 {
+                            transform_stack.pop();
+                        }
+                        current_transform = transform_stack
+                            .last()
+                            .copied()
+                            .unwrap_or(Transform2D::IDENTITY);
                     }
                 }
             }

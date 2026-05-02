@@ -197,6 +197,23 @@ fn paint_widget_cached(
             .push(fern_canvas::DrawCommand::SetOpacity(o));
     }
 
+    // Optional transform scope — wraps both this widget's own paint
+    // and its children's paint. The renderer composes the pushed
+    // transform onto its stack so widget-internal canvas transforms
+    // (canvas.translate / scale / rotate) compose with this wrapper
+    // transform instead of clobbering it. Skip the push entirely when
+    // the transform is identity — saves a flush on every wrapper that
+    // happens to be at its rest pose.
+    let node = arena.get(id).unwrap();
+    let transform = node.transform_prop.as_ref().map(|p| p.get());
+    let push_transform = transform
+        .filter(|t| *t != fern_canvas::Transform2D::IDENTITY);
+    if let Some(t) = push_transform {
+        frame
+            .draw_order
+            .push(fern_canvas::DrawCommand::PushTransform(t));
+    }
+
     let node = arena.get(id).unwrap();
     let needs_paint = node.dirty.needs_paint;
 
@@ -286,6 +303,12 @@ fn paint_widget_cached(
 
     if clips {
         frame.draw_order.push(fern_canvas::DrawCommand::ClearClip);
+    }
+
+    if push_transform.is_some() {
+        frame
+            .draw_order
+            .push(fern_canvas::DrawCommand::PopTransform);
     }
 
     if opacity.is_some() {
@@ -545,6 +568,100 @@ mod tests {
                 .any(|s| s.color == Color::RED.to_array()),
             "fully-transparent subtree should not paint its descendants"
         );
+    }
+
+    #[test]
+    fn transform_prop_emits_push_and_pop_around_subtree() {
+        // A widget with transform_prop = Some(Static(scale(2))) wraps
+        // both its own paint AND its children's paint inside a
+        // PushTransform / PopTransform pair, mirroring the opacity
+        // pattern.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        let _child = tree.add_child(parent, FillWidget::new().background(Color::RED));
+        let scale_2x = fern_canvas::Transform2D::scale(2.0, 2.0);
+        tree.set_transform(parent, scale_2x);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let mut push_count = 0;
+        let mut pop_count = 0;
+        let mut push_value = None;
+        for cmd in &frame.draw_order {
+            match cmd {
+                fern_canvas::DrawCommand::PushTransform(t) => {
+                    push_count += 1;
+                    push_value = Some(*t);
+                }
+                fern_canvas::DrawCommand::PopTransform => pop_count += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(push_count, 1, "draw_order = {:?}", frame.draw_order);
+        assert_eq!(pop_count, 1);
+        assert_eq!(push_value, Some(scale_2x));
+    }
+
+    #[test]
+    fn identity_transform_prop_skipped() {
+        // transform_prop = Some(Static(IDENTITY)) is a no-op — the
+        // walker should NOT emit a PushTransform / PopTransform pair
+        // for the rest pose. Saves a flush per identity wrapper per
+        // frame (Scale at full visibility, Rotate at angle=0).
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.set_transform(parent, fern_canvas::Transform2D::IDENTITY);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        for cmd in &frame.draw_order {
+            assert!(
+                !matches!(
+                    cmd,
+                    fern_canvas::DrawCommand::PushTransform(_)
+                        | fern_canvas::DrawCommand::PopTransform
+                ),
+                "identity transform must not emit a push/pop scope"
+            );
+        }
+    }
+
+    #[test]
+    fn transform_scope_paint_order_opacity_outer_transform_inner() {
+        // When both opacity_prop AND transform_prop are set on the
+        // same node, the framework's contract is opacity OUTER and
+        // transform INNER. This pins down the order so future
+        // refactors don't silently flip composability.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.set_opacity(parent, 0.7_f32);
+        tree.set_transform(parent, fern_canvas::Transform2D::scale(2.0, 2.0));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        // Find the indices of each command kind.
+        let mut set_opacity_idx = None;
+        let mut push_transform_idx = None;
+        let mut pop_transform_idx = None;
+        let mut restore_opacity_idx = None;
+        for (i, cmd) in frame.draw_order.iter().enumerate() {
+            match cmd {
+                fern_canvas::DrawCommand::SetOpacity(_) => set_opacity_idx = Some(i),
+                fern_canvas::DrawCommand::PushTransform(_) => push_transform_idx = Some(i),
+                fern_canvas::DrawCommand::PopTransform => pop_transform_idx = Some(i),
+                fern_canvas::DrawCommand::RestoreOpacity => restore_opacity_idx = Some(i),
+                _ => {}
+            }
+        }
+        let so = set_opacity_idx.expect("SetOpacity emitted");
+        let pt = push_transform_idx.expect("PushTransform emitted");
+        let popt = pop_transform_idx.expect("PopTransform emitted");
+        let ro = restore_opacity_idx.expect("RestoreOpacity emitted");
+        assert!(so < pt, "opacity must open before transform: {so} < {pt}");
+        assert!(pt < popt, "transform push must precede its pop");
+        assert!(popt < ro, "transform must close before opacity: {popt} < {ro}");
     }
 
     #[test]
