@@ -385,15 +385,22 @@ pub enum DrawCommand {
     RestoreBlendMode,
     /// Set the renderer's current transform. **Composes** with the
     /// top of the renderer's transform stack: the new current is
-    /// `stack_top.compose(t)`. For widgets not under any
-    /// `PushTransform` scope the stack is `[identity]`, so this
-    /// behaves as "set absolute" — backwards compatible.
+    /// `t.then(stack_top)` — the supplied transform is applied to a
+    /// local point *first*, then the stack's outer ancestors compose
+    /// outward. For widgets not under any `PushTransform` scope the
+    /// stack is `[identity]`, so this behaves as "set absolute" —
+    /// backwards compatible.
     SetTransform(Transform2D),
     /// Push a new transform onto the renderer's transform stack.
-    /// The new top becomes `prev_top.compose(t)`, and that becomes
-    /// the renderer's `current_transform` until the matching
+    /// The new top becomes `t.then(prev_top)` — the deepest (innermost)
+    /// `t` applies to a pre-transform local point first, then outer
+    /// ancestors compose outward. That becomes the renderer's
+    /// `current_transform` until the matching
     /// [`DrawCommand::PopTransform`]. Emitted by the render walker
-    /// around a subtree whose root has a `transform_prop` set.
+    /// around a subtree whose root has a `transform_prop` set. See
+    /// `WidgetArena::effective_transform` in `fern-core` for the
+    /// composition mirrored on the arena side (used by hit-testing
+    /// and a11y bounds projection).
     PushTransform(Transform2D),
     /// Pop the renderer's transform stack, restoring the previous
     /// top as the new `current_transform`. Must be paired with a

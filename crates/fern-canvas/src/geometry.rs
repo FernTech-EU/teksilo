@@ -268,6 +268,28 @@ impl Transform2D {
     pub fn is_identity(&self) -> bool {
         *self == Self::IDENTITY
     }
+
+    /// Inverse of the affine transform, or `None` if the linear part is
+    /// singular (determinant zero — a degenerate scale that collapses an
+    /// axis). Used by hit-testing to map a screen-space point back into a
+    /// transformed widget's pre-transform bounds.
+    pub fn inverse(&self) -> Option<Transform2D> {
+        let [a, b, c, d, tx, ty] = self.m;
+        let det = a * d - c * b;
+        if det == 0.0 || !det.is_finite() {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        let ia = d * inv_det;
+        let ib = -b * inv_det;
+        let ic = -c * inv_det;
+        let id = a * inv_det;
+        let itx = (c * ty - d * tx) * inv_det;
+        let ity = (b * tx - a * ty) * inv_det;
+        Some(Transform2D {
+            m: [ia, ib, ic, id, itx, ity],
+        })
+    }
 }
 
 impl Default for Transform2D {
@@ -425,6 +447,60 @@ mod tests {
         assert!((r.y - 220.0).abs() < 1e-5);
         assert!((r.width - 30.0).abs() < 1e-5);
         assert!((r.height - 40.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn transform_inverse_identity() {
+        let t = Transform2D::IDENTITY;
+        assert_eq!(t.inverse().unwrap(), Transform2D::IDENTITY);
+    }
+
+    #[test]
+    fn transform_inverse_translate_roundtrip() {
+        let t = Transform2D::translate(10.0, 20.0);
+        let inv = t.inverse().unwrap();
+        let p = Point::new(3.0, 4.0);
+        let q = inv.apply_point(t.apply_point(p));
+        assert!((q.x - p.x).abs() < 1e-5);
+        assert!((q.y - p.y).abs() < 1e-5);
+    }
+
+    #[test]
+    fn transform_inverse_scale_roundtrip() {
+        let t = Transform2D::scale(2.0, 3.0);
+        let inv = t.inverse().unwrap();
+        let p = Point::new(5.0, 7.0);
+        let q = inv.apply_point(t.apply_point(p));
+        assert!((q.x - p.x).abs() < 1e-5);
+        assert!((q.y - p.y).abs() < 1e-5);
+    }
+
+    #[test]
+    fn transform_inverse_rotation_roundtrip() {
+        let t = Transform2D::rotate(std::f32::consts::FRAC_PI_3);
+        let inv = t.inverse().unwrap();
+        let p = Point::new(1.0, 2.0);
+        let q = inv.apply_point(t.apply_point(p));
+        assert!((q.x - p.x).abs() < 1e-4);
+        assert!((q.y - p.y).abs() < 1e-4);
+    }
+
+    #[test]
+    fn transform_inverse_compose_roundtrip() {
+        // (translate then scale).inverse() should map any point back to itself.
+        let t = Transform2D::translate(50.0, 0.0).then(&Transform2D::scale(2.0, 2.0));
+        let inv = t.inverse().unwrap();
+        let p = Point::new(7.5, -3.0);
+        let q = inv.apply_point(t.apply_point(p));
+        assert!((q.x - p.x).abs() < 1e-4);
+        assert!((q.y - p.y).abs() < 1e-4);
+    }
+
+    #[test]
+    fn transform_inverse_singular_returns_none() {
+        // Scale by 0 collapses an axis: not invertible.
+        let t = Transform2D::scale(0.0, 1.0);
+        assert!(t.inverse().is_none());
     }
 
     #[test]
