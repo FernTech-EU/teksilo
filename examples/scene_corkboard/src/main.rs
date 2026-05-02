@@ -1,21 +1,36 @@
-//! `scene-corkboard` — Phase 1 demo of `fern-scene`.
+//! `scene-corkboard` — Phase 2 demo of `fern-scene`.
 //!
 //! Renders a 3×3 grid of story cards on a fern-scene `SceneView`. Each
 //! card is a real heavyweight widget — `Panel { VStack { TextWidget,
 //! TextWidget } }` — placed at a fixed scene-coordinate rectangle.
 //!
-//! This Phase 1 example exercises:
+//! Phase 1 + 2 exercises:
 //!
 //! - `Scene::add_widget` round-trip (heavyweight widgets at scene
 //!   rects).
-//! - `SceneView` placement (parent-local origin = bounds.origin +
-//!   scene_rect.origin under identity view transform).
-//! - Real interactivity through fern-scene — clicks on card titles
-//!   focus, keyboard navigation works between cards.
+//! - `SceneView` placement (each child at scene_rect under the view
+//!   transform; identity at rest).
+//! - Real interactivity — clicks on cards focus, keyboard navigation
+//!   works between cards.
+//! - **View transform** — pan / zoom / rotate as four animated
+//!   `Signal<f32>`s composed into a `set_transform` scope on the
+//!   viewport. The cards stay at their scene coordinates; the
+//!   transform applies on top.
+//! - **Trackpad two-finger pan** — `ScrollDelta::Pixels` events
+//!   animate the pan signals via `Easing::EaseOut`. Trackpad
+//!   momentum after release arrives as more `Pixels` events,
+//!   producing inertial fling for free.
+//! - **Mouse wheel pan** — `ScrollDelta::Lines` events scaled by
+//!   `line_height` (default 16 px / notch).
+//! - **Pinch-to-zoom** — OS trackpad pinch (`PinchPhase::Changed`)
+//!   adjusts zoom + pan together so the scene point under the
+//!   gesture center stays put.
+//! - **Reduced motion** — at build time SceneView captures
+//!   `BuildContext::prefers_reduced_motion()`; when set, scroll
+//!   handlers `set` the pan signals directly instead of animating.
 //!
-//! Phase 2 will add pan/zoom (the cards stay where they are; the view
-//! transforms). Phase 6 will add drag-to-move, marquee select, and
-//! group-move.
+//! Phase 6 will add drag-to-move, marquee select, and group-move on
+//! the same demo.
 //!
 //! Run with: `cargo run -p scene-corkboard`
 
@@ -75,7 +90,7 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Scene Corkboard (Phase 1)")
+                .title("FernUI — Scene Corkboard (Phase 2: pan/zoom)")
                 .size(900, 600)
                 .root(|tree, _state| tree.add(build_corkboard())),
         )

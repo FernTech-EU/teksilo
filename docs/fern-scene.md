@@ -35,15 +35,15 @@ not yet implemented.
 | Phase | What | Status |
 |-------|------|--------|
 | 0 | Transform-aware hit-test in fern-core | ✅ landed |
-| 1 | `Scene` + `SceneView` + free positioning | ✅ this doc |
-| 2 | View transform, pan/zoom/rotate, gestures, inertial fling | not yet |
+| 1 | `Scene` + `SceneView` + free positioning | ✅ landed |
+| 2 | View transform, pan/zoom/rotate, gestures, inertial fling | ✅ this doc |
 | 3 | `SpatialIndex` trait + `GridHashIndex` + viewport culling | not yet |
 | 4 | `SceneItem` trait + lightweight built-ins | not yet |
 | 5a / 5b | Visual-default a11y / a11y-shaping tools | not yet |
 | 6 | Selection, marquee, drag-to-move | not yet |
 | 7 | Polish + R-tree alternative + mini-map | not yet |
 
-## Phase 1 surface
+## Phase 1 + 2 surface
 
 ```rust
 use fern_scene::{ItemId, Scene, SceneView};
@@ -64,11 +64,16 @@ fn build_corkboard() -> SceneView {
     // …more cards…
 
     SceneView::new(scene)
+        .min_zoom(0.25)
+        .max_zoom(4.0)
 }
 ```
 
 Working demo: [`examples/scene_corkboard/`](../examples/scene_corkboard/src/main.rs).
-Run with `cargo run -p scene-corkboard`.
+Run with `cargo run -p scene-corkboard`. From Phase 2 the demo is
+pannable (two-finger trackpad / mouse wheel), zoomable (pinch on
+trackpad), and inertial fling on release works automatically through
+the platform's momentum events.
 
 ## Concepts
 
@@ -103,27 +108,105 @@ The viewport widget. Wraps a `Scene`, materialises its widgets into
 the arena on `build`, and places them at their `scene_rect`s in
 `place_children`.
 
-Phase 1 surface:
+Surface:
 
 - `SceneView::new(scene)` — wrap a Scene.
 - `SceneView::default_size(w, h)` — size used when the parent
   `SizeProposal` is unspecified on either axis. Defaults to 800×600.
+- `SceneView::min_zoom(v)` / `max_zoom(v)` — clamp range applied to
+  every programmatic and gesture-driven zoom change. Defaults: 0.1×
+  to 10×.
+- `SceneView::line_height(px)` — logical pixels of pan per
+  `ScrollDelta::Lines` notch (mouse wheel). Defaults to 16, matching
+  `ScrollArea`.
 - `SceneView::scene()` / `scene_mut()` — borrow the underlying Scene.
 - `SceneView::widget_id_for(item_id) -> Option<WidgetId>` — resolve
   an item's materialised widget id (after the first layout pass).
+- `SceneView::pan() -> Vec2` / `zoom() -> f32` / `rotation() -> f32` —
+  read the current view-transform state.
+- `SceneView::view_transform() -> Transform2D` — the composed view
+  transform (the same one the render walker has on its stack while
+  painting this view's subtree).
+- `SceneView::pan_to(target, duration)` / `zoom_to(target, duration)` /
+  `rotate_to(target, duration)` — animate to a value via
+  `Easing::EaseOut`.
+- `SceneView::set_pan(target)` / `set_zoom(target)` — snap without
+  animating.
+- `SceneView::fit_to_content()` — animate pan + zoom so the
+  bounding box of all scene items fits the current viewport with a
+  small margin. Resets rotation. No-op for an empty scene.
+- `SceneView::scene_content_bounds() -> Option<Rect>` — the
+  axis-aligned bounding box of all scene items.
+- `SceneView::viewport_size() -> Size` — most recent viewport size
+  observed during layout.
 
 The `Widget` impl:
 
 - `build` drains `pending_widget` from each entry (first build) or
-  returns the cached widget ids (subsequent rebuilds).
-- `layout_response` is greedy: it accepts the parent's proposal,
-  falling back to `default_size` on unspecified axes.
+  returns the cached widget ids (subsequent rebuilds), then registers
+  the four animated signals with the scheduler, derives a
+  `Signal<Transform2D>` from them, binds it via
+  `BuildContext::set_transform` on the SceneView itself, and wires
+  the `on_scroll` and `on_pinch` handlers via `apply_self_handlers`.
+- `layout_response` is greedy and caches the resolved viewport size.
 - `place_children` plants each child at `bounds.origin +
-  scene_rect.origin` with the scene rect's size — i.e. scene-coord
-  (0,0) is anchored to the SceneView's bounds origin.
-- The view transform is identity in Phase 1; Phase 2 layers a
-  `set_transform` scope driven by animated `pan_x`/`pan_y`/`zoom`/
-  `rotation` signals on top of the same placement code.
+  scene_rect.origin` — transform-free. The view transform is the
+  `set_transform` scope; the render walker pushes it around the
+  whole subtree, and Phase 0's transform-aware hit-test routes
+  pointer events through the same scope.
+
+### View transform model
+
+The view is composed from four `Signal<f32>`s (kept separate so each
+animates independently with the right epsilon — sub-pixel pan,
+sub-perceptual log-multiplier zoom, sub-degree rotation):
+
+- `pan_x` / `pan_y` — viewport offset in logical pixels.
+- `zoom` — multiplicative scale around the scene's origin.
+- `rotation` — radians, around the scene's origin.
+
+Composition (see `transform.rs::compose_view`): scale → rotate →
+translate. Concretely, `compose_view(pan, zoom, rot).apply_point(p)` =
+`(R_rot ∘ S_zoom)(p) + pan`. Composition order matches the
+renderer's stack semantic (`device_t.then(prev_top)`, deepest-first),
+so the same single transform fed into `set_transform` produces the
+expected visual.
+
+Pinch-to-zoom-around-pointer uses
+`transform.rs::anchor_pan_for_pinch`, which solves for a new pan
+that keeps the scene point under the gesture center invariant when
+the zoom or rotation changes.
+
+### Gestures
+
+Wired automatically by `SceneView::build`:
+
+- **Trackpad two-finger pan / wheel pan** — `WidgetEvent::Scroll`
+  with `ScrollDelta::Pixels { x, y }` (trackpad) animates pan via
+  `Easing::EaseOut` over `~120 ms`. `ScrollDelta::Lines` (mouse
+  wheel) is multiplied by `line_height` first.
+- **Inertial fling** — winit forwards trackpad momentum after
+  release as further `ScrollDelta::Pixels` events. The same
+  `animate_to` pipeline absorbs them, producing smooth fling
+  without a custom recognizer.
+- **Pinch zoom** — OS trackpad pinch (`PinchPhase::Changed { center,
+  scale, rotation }`) feeds `scale` into the zoom signal (clamped to
+  `[min_zoom, max_zoom]`) and `rotation` into the rotation signal.
+  The pan is re-anchored so the scene point under the gesture
+  center stays put. Pinch is set synchronously each frame — no
+  tween, since it's a continuous user-driven gesture.
+- **Reduced motion** — at build time, `SceneView` captures
+  `BuildContext::prefers_reduced_motion()`. When set, the scroll
+  handler `set`s the pan signals directly instead of
+  `animate_to`-ing them. Pinch is already instantaneous.
+
+`Ctrl-wheel zoom` is intentionally absent in Phase 2 because
+`WidgetEvent::Scroll` does not currently carry a `Modifiers` field.
+Adding one is straightforward but cross-cutting; deferred to a
+later phase. Pinch + the imperative `zoom_to` cover the gap for
+trackpad and programmatic zoom; mouse-only users will get a
+keyboard `+` / `-` zoom binding once Phase 5a's keyboard navigation
+lands.
 
 ### Free positioning
 
@@ -156,12 +239,39 @@ Phases 5a and 5b. See
 
 ## Idle compliance
 
-Phase 1 has no animation surface of its own — there's no pan/zoom yet,
-no inertial fling, no looping items. Once a SceneView has been built
-and laid out, the framework's standard idle gates apply unchanged.
-Phase 2 introduces the four animated signals (`pan_x`/`pan_y`/`zoom`/
-`rotation`) and documents the per-axis epsilon and reduced-motion
-behaviour here.
+The four view-transform signals are animated `Signal<f32>`s registered
+with the framework's scheduler, so the four idle gates apply for free:
+
+1. **Per-widget paint-epoch visibility.** A SceneView that's been
+   scrolled off-screen (e.g. inside a parent ScrollArea or in a
+   minimised window) stops getting `paint()` walks; the scheduler
+   pauses all looping animations whose owner widget is off-screen
+   for one frame.
+2. **Per-window active flag.** When the window loses focus, the
+   scheduler is a no-op until focus returns. Pan/zoom in flight at
+   that moment is rebased — its perceived progress doesn't jump.
+3. **Pixel-stable epsilon.** Each `animate_to` skips `signal.set()`
+   when the delta is below the framework's default epsilon
+   (effectively sub-pixel for `f32` values typical of pan/zoom).
+4. **Drop-cancel.** When the SceneView is destroyed, the scheduler
+   drops its registrations.
+
+In practice this means: at rest (no scroll, no pinch, no in-flight
+`animate_to`), the loop sleeps with `ControlFlow::Wait`. Inertial
+fling is finite-duration via `animate_to(...EaseOut)`, so the loop
+goes quiet automatically when the tween lands.
+
+The unit tests pin this: see
+`crates/fern-scene/src/view.rs::tests::idle_drain_zero_frames_at_rest`
+and `idle_drain_returns_after_pan_animation_completes`.
+
+Per-axis epsilon tuning (Phase 2 default uses the framework's
+generic epsilon; finer-grained per-signal epsilon via
+`Signal::try_animate_with_options` is a Phase 7 polish item):
+
+- pan: 0.5 logical pixels (sub-pixel — invisible).
+- zoom: ~0.001 in log2 space (~0.07% multiplicative).
+- rotation: ~1e-3 rad (~0.057°).
 
 ## See also
 
