@@ -37,6 +37,19 @@ pub fn compose_view(pan: Vec2, zoom: f32, rotation_radians: f32) -> Transform2D 
 /// and a new scale, and the user expects the content under that
 /// center to stay put.
 ///
+/// `bounds_origin` is the SceneView's screen-space position (the
+/// `bounds.origin` value the parent layout chose for it). The view
+/// transform that's actually on the renderer's stack folds this in
+/// so a child at scene (sx, sy) lands at
+/// `(bounds.x + zoom*sx + pan.x, bounds.y + zoom*sy + pan.y)`. The
+/// pinch math has to use the same composition to map the screen-
+/// space gesture center back to a scene-coord anchor; the returned
+/// pan is the raw `pan` value to store in the signal — the
+/// composition will add `bounds_origin` back in at draw time.
+///
+/// For root SceneView (`bounds_origin = (0, 0)`) the math reduces
+/// to the simpler "pan + zoom around scene origin" form.
+///
 /// Returns `None` if the old view transform is degenerate (zoom 0,
 /// for example). In that case the caller should leave pan unchanged
 /// or reset it.
@@ -47,15 +60,20 @@ pub fn anchor_pan_for_pinch(
     old_rotation: f32,
     new_zoom: f32,
     new_rotation: f32,
+    bounds_origin: Vec2,
 ) -> Option<Vec2> {
-    let old_view = compose_view(old_pan, old_zoom, old_rotation);
+    let old_effective_pan = Vec2::new(old_pan.x + bounds_origin.x, old_pan.y + bounds_origin.y);
+    let old_view = compose_view(old_effective_pan, old_zoom, old_rotation);
     let inverse = old_view.inverse()?;
     let scene_anchor = inverse.apply_point(screen_anchor);
     let projection_no_pan = compose_view(Vec2::ZERO, new_zoom, new_rotation);
     let projected = projection_no_pan.apply_point(scene_anchor);
+    // Effective pan that places `scene_anchor` under
+    // `screen_anchor` post-zoom/rotation, minus the bounds_origin
+    // baked into the composition.
     Some(Vec2::new(
-        screen_anchor.x - projected.x,
-        screen_anchor.y - projected.y,
+        screen_anchor.x - projected.x - bounds_origin.x,
+        screen_anchor.y - projected.y - bounds_origin.y,
     ))
 }
 
@@ -88,18 +106,19 @@ mod tests {
 
     #[test]
     fn anchor_pan_keeps_pointer_invariant_under_zoom() {
-        // Initial state: identity view.
+        // Root SceneView (bounds_origin = 0). Initial state: identity
+        // view. Zoom by 2× around the gesture center; the scene
+        // point under that center must still project to the center
+        // afterward.
         let center = Point::new(200.0, 100.0);
         let old_pan = Vec2::ZERO;
         let scene_under_center = Point::new(200.0, 100.0); // identity → same
 
-        // Zoom by 2× around the gesture center.
-        let new_pan = anchor_pan_for_pinch(center, old_pan, 1.0, 0.0, 2.0, 0.0).unwrap();
+        let new_pan =
+            anchor_pan_for_pinch(center, old_pan, 1.0, 0.0, 2.0, 0.0, Vec2::ZERO).unwrap();
         let new_view = compose_view(new_pan, 2.0, 0.0);
         let new_screen = new_view.apply_point(scene_under_center);
 
-        // The scene point under the gesture center must still project
-        // to the gesture center after zoom.
         assert!((new_screen.x - center.x).abs() < 1e-3);
         assert!((new_screen.y - center.y).abs() < 1e-3);
     }
@@ -111,12 +130,46 @@ mod tests {
         let center = Point::new(200.0, 100.0);
         let old_pan = Vec2::new(50.0, 0.0);
 
-        // Zoom to 0.5×; the scene point at (150, 100) should still
-        // project under (200, 100).
-        let new_pan = anchor_pan_for_pinch(center, old_pan, 1.0, 0.0, 0.5, 0.0).unwrap();
+        let new_pan =
+            anchor_pan_for_pinch(center, old_pan, 1.0, 0.0, 0.5, 0.0, Vec2::ZERO).unwrap();
         let new_view = compose_view(new_pan, 0.5, 0.0);
         let projected = new_view.apply_point(Point::new(150.0, 100.0));
         assert!((projected.x - center.x).abs() < 1e-3);
         assert!((projected.y - center.y).abs() < 1e-3);
+    }
+
+    #[test]
+    fn anchor_pan_handles_non_zero_bounds_origin() {
+        // SceneView positioned at parent-local (100, 50) — i.e.
+        // bounds_origin = (100, 50). Pan = 0, zoom = 1. Identity-ish
+        // view: scene-coord (sx, sy) lands at screen (100+sx, 50+sy).
+        //
+        // Pinch at screen (300, 150). Scene point under that center
+        // = (300 - 100, 150 - 50) = (200, 100).
+        //
+        // Zoom to 2× around (300, 150). After zoom, scene (200, 100)
+        // must still project to (300, 150).
+        let center = Point::new(300.0, 150.0);
+        let bounds_origin = Vec2::new(100.0, 50.0);
+        let old_pan = Vec2::ZERO;
+        let new_pan =
+            anchor_pan_for_pinch(center, old_pan, 1.0, 0.0, 2.0, 0.0, bounds_origin).unwrap();
+
+        let new_effective_pan =
+            Vec2::new(new_pan.x + bounds_origin.x, new_pan.y + bounds_origin.y);
+        let new_view = compose_view(new_effective_pan, 2.0, 0.0);
+        let projected = new_view.apply_point(Point::new(200.0, 100.0));
+        assert!(
+            (projected.x - center.x).abs() < 1e-3,
+            "projected x = {}, expected {}",
+            projected.x,
+            center.x
+        );
+        assert!(
+            (projected.y - center.y).abs() < 1e-3,
+            "projected y = {}, expected {}",
+            projected.y,
+            center.y
+        );
     }
 }

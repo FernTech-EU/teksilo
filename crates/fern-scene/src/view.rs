@@ -50,7 +50,7 @@ use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use fern_core::gesture::PinchPhase;
 use fern_core::signal::Signal;
-use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::Easing;
@@ -83,6 +83,14 @@ pub struct SceneView {
     /// to 5,000 cards would burn a full frame's budget on the
     /// per-child entry scan.
     widget_to_item: HashMap<WidgetId, ItemId>,
+    /// Live mirror of `bounds.origin` (the SceneView's screen-space
+    /// position as decided by its parent layout). Updated in
+    /// `place_children` and folded into the view-transform composition
+    /// so a SceneView positioned at a non-zero parent offset still
+    /// places its children correctly under pan / zoom / rotation.
+    /// Without this, zoom would multiply `bounds.origin` and the
+    /// content would visually drift away from the viewport.
+    bounds_origin_signal: Signal<Vec2>,
     /// Fallback size when the parent's `SizeProposal` is unspecified
     /// on either axis.
     default_size: Size,
@@ -119,6 +127,7 @@ impl SceneView {
             pan_y: Signal::new_animated(0.0),
             zoom: Signal::new_animated(1.0),
             rotation: Signal::new_animated(0.0),
+            bounds_origin_signal: Signal::new(Vec2::ZERO),
             min_zoom: DEFAULT_MIN_ZOOM,
             max_zoom: DEFAULT_MAX_ZOOM,
             pan_anim_duration: DEFAULT_PAN_DURATION,
@@ -189,10 +198,19 @@ impl SceneView {
         self.rotation.get()
     }
 
-    /// The composed view transform that the render walker has on its
-    /// stack while painting this view's subtree.
+    /// The composed view transform the render walker has on its
+    /// stack while painting this view's subtree. Includes the
+    /// `bounds.origin` offset captured during the last
+    /// `place_children` call, so this is the exact transform
+    /// applied to scene-coord points by the renderer.
     pub fn view_transform(&self) -> Transform2D {
-        compose_view(self.pan(), self.zoom.get(), self.rotation.get())
+        let pan = self.pan();
+        let bo = self.bounds_origin_signal.get();
+        compose_view(
+            Vec2::new(pan.x + bo.x, pan.y + bo.y),
+            self.zoom.get(),
+            self.rotation.get(),
+        )
     }
 
     /// Animate pan to `target` over `duration`. Bounded by
@@ -276,13 +294,21 @@ impl Widget for SceneView {
         // per child instead of scanning the entries vec.
         let mut child_ids = Vec::with_capacity(self.scene.entries.len());
         for entry in self.scene.entries.iter_mut() {
-            if let Some(widget) = entry.pending_widget.take() {
-                let wid = ctx.add_boxed(widget);
-                self.materialized.insert(entry.id, wid);
-                self.widget_to_item.insert(wid, entry.id);
-                child_ids.push(wid);
-            } else if let Some(wid) = self.materialized.get(&entry.id).copied() {
-                child_ids.push(wid);
+            match &mut entry.kind {
+                crate::scene::SceneEntryKind::Widget { pending } => {
+                    if let Some(widget) = pending.take() {
+                        let wid = ctx.add_boxed(widget);
+                        self.materialized.insert(entry.id, wid);
+                        self.widget_to_item.insert(wid, entry.id);
+                        child_ids.push(wid);
+                    } else if let Some(wid) = self.materialized.get(&entry.id).copied() {
+                        child_ids.push(wid);
+                    }
+                }
+                crate::scene::SceneEntryKind::Item(_) => {
+                    // Lightweight items don't go in the arena. They're
+                    // painted from `SceneView::paint` directly.
+                }
             }
         }
 
@@ -319,14 +345,26 @@ impl Widget for SceneView {
         // Derive the view transform as a single Signal<Transform2D>
         // and bind it as a `set_transform` scope on this widget. The
         // render walker pushes this around our entire subtree.
+        //
+        // The composition folds `bounds.origin` into the final
+        // translate so a SceneView placed at a non-zero parent
+        // offset still maps scene-coord (sx, sy) to screen
+        // (bounds.x + zoom*sx + pan.x, bounds.y + zoom*sy + pan.y).
+        // Without folding `bounds.origin` in, zoom would multiply
+        // the parent offset and the content would drift away from
+        // the viewport when zoomed.
         let pan_x = self.pan_x.clone();
         let pan_y = self.pan_y.clone();
         let zoom = self.zoom.clone();
         let rotation = self.rotation.clone();
+        let bounds_origin = self.bounds_origin_signal.clone();
         let view_transform = pan_x
             .zip3(&pan_y, &zoom)
             .zip(&rotation)
-            .map(|((px, py, z), r)| compose_view(Vec2::new(*px, *py), *z, *r));
+            .zip(&bounds_origin)
+            .map(|(((px, py, z), r), bo)| {
+                compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
+            });
         let self_id = ctx.self_id();
         ctx.set_transform(self_id, view_transform);
 
@@ -376,6 +414,7 @@ impl Widget for SceneView {
             let pan_y = self.pan_y.clone();
             let zoom = self.zoom.clone();
             let rotation = self.rotation.clone();
+            let bounds_origin_for_pinch = self.bounds_origin_signal.clone();
             handlers = handlers.on_pinch(move |phase, _ctx| {
                 let PinchPhase::Changed {
                     center,
@@ -393,8 +432,11 @@ impl Widget for SceneView {
                 let z_new = (z_old * scale).clamp(min_zoom, max_zoom);
                 let r_new = r_old + rotation_delta;
                 let pan_old = Vec2::new(pan_x.get(), pan_y.get());
-                let new_pan = anchor_pan_for_pinch(center, pan_old, z_old, r_old, z_new, r_new)
-                    .unwrap_or(pan_old);
+                let bo = bounds_origin_for_pinch.get();
+                let new_pan = anchor_pan_for_pinch(
+                    center, pan_old, z_old, r_old, z_new, r_new, bo,
+                )
+                .unwrap_or(pan_old);
                 // Pinch is a continuous, user-driven gesture — set
                 // directly so each frame's update lands without
                 // queuing a tween. Idle gates still apply: at rest
@@ -414,7 +456,11 @@ impl Widget for SceneView {
 
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         let size = proposal.resolve(self.default_size.width, self.default_size.height);
-        // Cache for `fit_to_content` and friends.
+        // Cache for `fit_to_content` and friends. `bounds_origin` is
+        // refreshed in `place_children`, which runs whenever the
+        // SceneView has at least one child — i.e. always in real
+        // apps, since an empty SceneView doesn't render anything to
+        // interact with.
         self.last_viewport.set(size);
         LayoutResponse::rigid(size)
     }
@@ -426,25 +472,35 @@ impl Widget for SceneView {
         children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        // Place each child at its scene-coord rectangle, expressed in
-        // parent-local coordinates anchored at the SceneView's bounds
-        // origin. The view transform (pan/zoom/rotation) is applied
-        // by the render walker as a `set_transform` scope around the
-        // entire subtree, so placement itself stays transform-free —
+        // Mirror the parent's choice of `bounds.origin` into a signal
+        // so the derived view-transform picks it up. The signal is
+        // bound at `BindingLevel::RepaintOnly` via `set_transform`,
+        // so changes only trigger repaint — never relayout — which
+        // keeps idle behaviour intact when the SceneView is at rest.
+        let new_origin = Vec2::new(bounds.x, bounds.y);
+        if self.bounds_origin_signal.get() != new_origin {
+            self.bounds_origin_signal.set(new_origin);
+        }
+
+        // Place each child at its **pure scene coordinate** — not
+        // offset by `bounds.origin`. The renderer's transform stack
+        // composes `bounds.origin` in via the view transform's final
+        // translate, so a child at scene (sx, sy) lands visually at
+        // (bounds.x + zoom*sx + pan.x, bounds.y + zoom*sy + pan.y).
         // Phase 0's transform-aware hit-test routes through the same
         // scope automatically.
         //
         // Phase 3 cull: compute the visible scene-coord region by
-        // inverse-transforming the SceneView's local viewport rect,
+        // inverse-transforming the SceneView's screen-space rect,
         // then collapse the size of any child whose `scene_rect`
         // doesn't intersect it. The placement's `origin` stays at
-        // its canonical position so any focus-follow / scroll-into-
-        // view machinery sees the same coordinates as before; only
-        // the size goes to zero, which short-circuits the recursive
-        // layout walk under that child and skips its paint
-        // entirely. Heavyweight children stay materialised — true
-        // demand-load is Phase 4 territory once the lightweight
-        // tier is in place.
+        // its canonical scene-coord position (so focus-follow /
+        // scroll-into-view see consistent coordinates whether or not
+        // the child is visible); only `size` flips to zero, which
+        // short-circuits the recursive layout walk under that child
+        // and skips its paint entirely. Heavyweight children stay
+        // materialised — true demand-load is Phase 4 territory once
+        // the lightweight tier is in place.
         let visible_ids = self.compute_visible_ids(bounds);
         for placement in children.iter_mut() {
             let Some(&item_id) = self.widget_to_item.get(&placement.id) else {
@@ -453,13 +509,53 @@ impl Widget for SceneView {
             let Some(rect) = self.scene.scene_rect(item_id) else {
                 continue;
             };
-            placement.origin = Point::new(bounds.x + rect.x, bounds.y + rect.y);
+            placement.origin = Point::new(rect.x, rect.y);
             placement.size = if visible_ids.contains(&item_id) {
                 Size::new(rect.width, rect.height)
             } else {
                 Size::ZERO
             };
         }
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {
+        // The SceneView's `set_transform` scope wraps both this paint
+        // call and the children walk, so any `canvas.fill_*` /
+        // `canvas.stroke_*` / `canvas.draw_*` call we make here lands
+        // through the same view-transform projection as the heavyweight
+        // children. We pass scene-coord rects directly — the renderer
+        // composes pan / zoom / rotation / bounds-origin on top.
+        //
+        // Lightweight items paint *before* heavyweight children. The
+        // render walker invokes the parent's paint first, then descends
+        // into children. That's exactly what we want for the
+        // background-furniture use case (connector lines, tiled grids,
+        // decorations) — items render under the cards.
+        let region = self.visible_scene_region(bounds);
+        let view_transform = self.view_transform();
+        let item_ctx = crate::item::SceneItemPaintContext {
+            view_transform,
+            dirty_scene_rect: Some(region),
+        };
+        // `items_in_rect` returns both widget and item entries that
+        // intersect the visible region. We filter to the lightweight
+        // tier here — heavyweights are painted by the arena walker via
+        // their own widget paint methods.
+        for id in self.scene.items_in_rect(region) {
+            if let Some(item) = self.scene.item(id) {
+                item.paint(canvas, &item_ctx);
+            }
+        }
+    }
+
+    fn clips_children(&self) -> bool {
+        // Scene items can extend beyond the SceneView's screen bounds
+        // (a connector line whose source/target are outside the
+        // viewport, a tiled background grid). Without clipping, those
+        // bleed past the SceneView's rectangle. Heavyweight children
+        // are already culled in `place_children` via collapse-to-zero;
+        // the clip is the lightweight-tier equivalent.
+        true
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -471,18 +567,21 @@ impl SceneView {
     /// The scene-coord region currently inside the viewport, given
     /// the view transform's current value. Used by `place_children`
     /// to decide which items to lay out at full size and which to
-    /// collapse to zero. Falls back to the raw viewport if the view
-    /// transform is degenerate (zoom = 0).
+    /// collapse to zero. Falls back to a degenerate-but-non-empty
+    /// rect at the SceneView's screen position when the view
+    /// transform is singular (zoom = 0); zero zoom collapses
+    /// everything visually anyway, so the cull fallback is a
+    /// safe-by-default choice.
     fn visible_scene_region(&self, bounds: Rect) -> Rect {
-        let viewport_local = Rect::new(0.0, 0.0, bounds.width, bounds.height);
-        // Phase 2 known limitation: the view-transform composition
-        // doesn't account for `bounds.origin ≠ (0, 0)` — culling for
-        // a SceneView nested inside a non-zero parent layout is
-        // approximate. Documented in `docs/fern-scene.md` as a
-        // Phase 7 polish item.
+        // The view transform now folds in `bounds.origin`, so to find
+        // the visible scene region we inverse-apply against the
+        // SceneView's full screen-space rect (origin and size).
+        // Works correctly for both root SceneView (`bounds.origin =
+        // (0, 0)`) and nested SceneView at a non-zero parent offset.
+        let viewport_screen = Rect::new(bounds.x, bounds.y, bounds.width, bounds.height);
         match self.view_transform().inverse() {
-            Some(inv) => inv.apply_rect(viewport_local),
-            None => viewport_local,
+            Some(inv) => inv.apply_rect(viewport_screen),
+            None => Rect::ZERO,
         }
     }
 
@@ -1045,6 +1144,129 @@ mod tests {
     }
 
     #[test]
+    fn non_root_scene_view_places_children_at_scene_coords_and_culls_correctly() {
+        // SceneView nested inside a non-zero-origin parent (a Padding
+        // wrapper that pushes it to (40, 40)). Verify:
+        //   1. Children are placed at *pure scene_rect* in the
+        //      arena (not offset by bounds.origin).
+        //   2. The view transform folds in `bounds.origin` so the
+        //      visual position of scene-coord (sx, sy) is
+        //      (40 + zoom*sx + pan.x, 40 + zoom*sy + pan.y).
+        //   3. Culling uses the screen-space SceneView rect so
+        //      items in the visible scene region survive while
+        //      far-off ones collapse.
+        use fern_widgets::primitives::Padding;
+
+        let mut scene = Scene::new();
+        let inside = scene.add_widget(FillWidget::new(), Rect::new(10.0, 20.0, 100.0, 50.0));
+        let outside =
+            scene.add_widget(FillWidget::new(), Rect::new(5_000.0, 5_000.0, 50.0, 50.0));
+
+        let mut tree = WidgetTree::new();
+        let view = SceneView::new(scene);
+        // Padding(40, 40, 40, 40) shifts the SceneView's bounds.origin
+        // to (40, 40) within the 800×600 root layout.
+        let root_id = tree.add(Padding::uniform(40.0_f32).child(view));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // The SceneView should be the only child of the Padding.
+        let view_id = tree.children(root_id)[0];
+        let view = tree
+            .widget_as_any(view_id)
+            .and_then(|a| a.downcast_ref::<SceneView>())
+            .expect("nested view downcast");
+
+        // After layout, the SceneView's bounds_origin signal mirrors
+        // the parent's chosen position (40, 40).
+        assert_eq!(
+            view.view_transform().apply_point(Point::new(0.0, 0.0)),
+            Point::new(40.0, 40.0),
+            "scene origin should land at SceneView's bounds origin under identity view"
+        );
+
+        // The visible item's arena bounds = pure scene_rect (no
+        // bounds.origin offset, since the renderer adds it via
+        // set_transform at paint time).
+        let inside_widget = view.widget_id_for(inside).unwrap();
+        assert_eq!(
+            tree.bounds(inside_widget),
+            Rect::new(10.0, 20.0, 100.0, 50.0),
+            "child placed at pure scene_rect"
+        );
+        // Visual position via view_transform = bounds.origin + scene_rect.origin
+        // (zoom = 1, pan = 0, rotation = 0).
+        let visual_origin = view
+            .view_transform()
+            .apply_point(Point::new(10.0, 20.0));
+        assert!(
+            (visual_origin.x - 50.0).abs() < 1e-3,
+            "visual x = bounds.x + scene.x = 40 + 10 = 50 (got {})",
+            visual_origin.x
+        );
+        assert!((visual_origin.y - 60.0).abs() < 1e-3);
+
+        // Off-screen item culled to zero size despite the non-root
+        // bounds.origin.
+        let outside_widget = view.widget_id_for(outside).unwrap();
+        let outside_bounds = tree.bounds(outside_widget);
+        assert_eq!(outside_bounds.width, 0.0);
+        assert_eq!(outside_bounds.height, 0.0);
+    }
+
+    #[test]
+    fn non_root_pinch_keeps_scene_under_gesture_center_invariant() {
+        // The bounds-origin fix to `anchor_pan_for_pinch` means that
+        // even when the SceneView is positioned at a non-zero parent
+        // offset, pinch-to-zoom keeps the scene point under the
+        // gesture center anchored to that center after zoom.
+        //
+        // The scene needs at least one item so `place_children`
+        // actually runs and refreshes `bounds_origin_signal` — an
+        // empty SceneView has no children for the framework to
+        // walk past `place_children`, so its bounds origin would
+        // stay at the `Vec2::ZERO` initial (a documented edge case
+        // for empty scenes that real apps never hit).
+        use fern_widgets::primitives::Padding;
+
+        let mut scene = Scene::new();
+        scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
+        let mut tree = WidgetTree::new();
+        let view = SceneView::new(scene);
+        let root_id = tree.add(Padding::uniform(50.0_f32).child(view));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let view_id = tree.children(root_id)[0];
+
+        // Move the pointer onto the SceneView and dispatch a pinch.
+        // Gesture center at screen (200, 150). The SceneView is at
+        // bounds.origin = (50, 50), so the scene point under the
+        // center is (200 - 50, 150 - 50) = (150, 100) at zoom 1.
+        tree.pointer_move(Point::new(200.0, 150.0));
+        tree.dispatch_event(WidgetEvent::Gesture {
+            gesture: fern_core::gesture::GestureEvent::PinchChanged {
+                center: Point::new(200.0, 150.0),
+                scale: 2.0,
+                rotation: 0.0,
+            },
+        });
+
+        let view = tree
+            .widget_as_any(view_id)
+            .and_then(|a| a.downcast_ref::<SceneView>())
+            .expect("downcast");
+        // After zoom, scene (150, 100) must still project to
+        // screen (200, 150).
+        let projected = view
+            .view_transform()
+            .apply_point(Point::new(150.0, 100.0));
+        assert!(
+            (projected.x - 200.0).abs() < 1e-2,
+            "projected x = {}, expected 200",
+            projected.x
+        );
+        assert!((projected.y - 150.0).abs() < 1e-2);
+    }
+
+    #[test]
     fn empty_scene_culling_is_a_no_op() {
         // Trivial — empty scene, trivial cull. Pins that the empty
         // case doesn't panic on the inverse-transform / index query
@@ -1081,5 +1303,98 @@ mod tests {
             },
         });
         assert!((view_handle(&tree, view_id).zoom() - 1.0).abs() < 1e-3);
+    }
+
+    // -- Phase 4 lightweight items ---------------------------------------
+
+    #[test]
+    fn scene_view_paints_visible_lightweight_items() {
+        // Scene with a lightweight RectItem inside the viewport and
+        // another well outside it. After `tree.render()`, exactly one
+        // DecorationRect lands in the frame — the off-screen item is
+        // culled before paint by `items_in_rect`.
+        use crate::items::RectItem;
+        use fern_tokens::Color;
+
+        let mut scene = Scene::new();
+        let _on_screen = scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+        );
+        let _off_screen = scene.add_item(
+            RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::BLUE),
+        );
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let frame = tree.render();
+        // Single visible filled item ⇒ exactly one decoration.
+        // (FillWidget paints nothing; SceneView paints no chrome of
+        // its own; the off-screen item is culled.)
+        assert_eq!(
+            frame.decorations.len(),
+            1,
+            "visible RectItem must emit exactly one DecorationRect, off-screen item must be culled"
+        );
+        assert_eq!(frame.decorations[0].color, Color::RED.to_array());
+    }
+
+    #[test]
+    fn scene_view_culls_all_off_screen_lightweight_items() {
+        // Both items off-screen → zero decorations from the
+        // lightweight tier.
+        use crate::items::RectItem;
+        use fern_tokens::Color;
+
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::RED),
+        );
+        scene.add_item(
+            RectItem::new(Rect::new(-5_000.0, -5_000.0, 20.0, 20.0)).fill(Color::BLUE),
+        );
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let frame = tree.render();
+        assert!(frame.decorations.is_empty());
+    }
+
+    #[test]
+    fn scene_view_paints_no_items_when_scene_is_widget_only() {
+        // Heavyweight-only scene: SceneView::paint walks `items_in_rect`
+        // but `Scene::item(id)` returns None for widgets, so no extra
+        // draw commands are emitted from the lightweight tier.
+        // Verifies the kind-filtering in paint and avoids a
+        // double-paint of widget bounds via the scene path.
+        let mut scene = Scene::new();
+        scene.add_widget(FillWidget::new(), Rect::new(10.0, 10.0, 20.0, 20.0));
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let frame = tree.render();
+        // FillWidget paints nothing of its own; the scene contains
+        // only widgets (no SceneItems); the SceneView itself doesn't
+        // draw any background. Therefore the frame has no
+        // decoration / shape / glyph / path entries at all.
+        assert!(frame.decorations.is_empty());
+        assert!(frame.paths.is_empty());
+        assert!(frame.shapes.is_empty());
+    }
+
+    #[test]
+    fn scene_view_clips_children_so_items_dont_leak() {
+        // SceneView::clips_children() returns true. Without a clip,
+        // a path-item whose stroke extends past the viewport would
+        // bleed past the SceneView's screen rect. The clip is what
+        // contains the lightweight tier visually.
+        let scene = Scene::new();
+        let view = SceneView::new(scene);
+        assert!(
+            Widget::clips_children(&view),
+            "SceneView must clip its subtree so light items don't bleed past bounds"
+        );
     }
 }

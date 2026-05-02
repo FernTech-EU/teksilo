@@ -37,8 +37,8 @@ not yet implemented.
 | 0 | Transform-aware hit-test in fern-core | ✅ landed |
 | 1 | `Scene` + `SceneView` + free positioning | ✅ landed |
 | 2 | View transform, pan/zoom/rotate, gestures, inertial fling | ✅ landed |
-| 3 | `SpatialIndex` trait + `GridHashIndex` + viewport culling | ✅ this doc |
-| 4 | `SceneItem` trait + lightweight built-ins | not yet |
+| 3 | `SpatialIndex` trait + `GridHashIndex` + viewport culling | ✅ landed |
+| 4 | `SceneItem` trait + lightweight built-ins | ✅ this doc |
 | 5a / 5b | Visual-default a11y / a11y-shaping tools | not yet |
 | 6 | Selection, marquee, drag-to-move | not yet |
 | 7 | Polish + R-tree alternative + mini-map | not yet |
@@ -267,20 +267,37 @@ the new view brings them into view. The Repaint binding from
 renderer's transform stack so the visible paint moves with the
 transform.
 
-Known limitation (Phase 7 polish): a SceneView positioned at
-`bounds.origin ≠ (0, 0)` by its parent — i.e. nested inside a
-non-trivial layout — has approximate culling because the
-view-transform composition doesn't yet account for the parent's
-offset. Items near the cull boundary may flicker on/off as the
-view animates. Root-level SceneView (the only configuration the
-corkboard demo and tests use) is exact.
-
 Tests pin: index correctness via brute-force cross-check on a
 deterministic random layout, false-positive narrowing,
 multi-cell deduplication, off-screen-children-collapse,
-pan-uncovers, zoom-uncovers, and a 1000-insert + 1000-query perf
+pan-uncovers, zoom-uncovers, non-root SceneView placement and
+pinch invariance, and a 1000-insert + 1000-query perf
 microbench. See `crates/fern-scene/src/index.rs::tests` and
-`crates/fern-scene/src/view.rs::tests::off_screen_items_*`.
+`crates/fern-scene/src/view.rs::tests::off_screen_items_*` /
+`non_root_*`.
+
+### Non-root SceneView
+
+A SceneView placed at a non-zero parent-layout offset — e.g.
+nested inside a `Padding` or laid out below a header bar — works
+correctly: scene-coord (sx, sy) lands at screen
+`(bounds.x + zoom*sx + pan.x, bounds.y + zoom*sy + pan.y)`. The
+view-transform composition folds in `bounds.origin` (mirrored
+into a `bounds_origin_signal` from `place_children`) so the
+renderer's transform stack and the cull math both stay correct
+under nesting. Pinch-to-zoom around a gesture center also works
+under nesting — `transform::anchor_pan_for_pinch` takes a
+`bounds_origin` parameter and projects the screen-space gesture
+center back to a scene-coord anchor through the full composition.
+
+One narrow edge case: a SceneView with **zero scene items** in a
+non-root parent has `bounds_origin_signal` stuck at its initial
+`Vec2::ZERO` because the framework only calls `place_children`
+when there are children to place. In practice this doesn't
+matter — an empty SceneView is invisible anyway — and it self-
+heals as soon as the first item is added. Adding a single
+`Scene::add_widget` call is enough to make `place_children` run
+and refresh the signal.
 
 ### Free positioning
 
@@ -295,6 +312,102 @@ A child's `scene_rect` is independent of its parents' transforms or
 sizes; it's a fixed coordinate in the scene's own coordinate system.
 Pan/zoom (Phase 2) doesn't change scene rects — it changes the view
 transform applied on top.
+
+### Lightweight items (Phase 4)
+
+`SceneItem` is the lightweight tier — paint/bounds/hit-test only, no
+arena overhead. Use it for the "background furniture" of a scene
+(connector lines, tile patterns, decorative shapes) where thousands
+of items need to render cheaply. Heavyweight `Widget`s and
+lightweight `SceneItem`s coexist in the same `Scene`, share the same
+spatial index, and project through the same view transform.
+
+```rust
+use fern_scene::{PathItem, RectItem, Scene};
+use fern_ui::canvas::{Path, Point, Rect};
+use fern_tokens::Color;
+
+let mut scene = Scene::new();
+
+// Background tile cell — the spatial index buckets it just like a
+// heavyweight widget; off-screen tiles are culled before paint.
+scene.add_item(
+    RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0))
+        .stroke(Color::new(0.85, 0.85, 0.88, 0.6), 1.0),
+);
+
+// Connector polyline between two scene points.
+let mut path = Path::new();
+path.move_to(Point::new(220.0, 90.0))
+    .line_to(Point::new(260.0, 90.0))
+    .line_to(Point::new(260.0, 230.0))
+    .line_to(Point::new(300.0, 230.0));
+scene.add_item(
+    PathItem::new(path, Rect::new(220.0, 90.0, 80.0, 140.0))
+        .stroke(Color::new(0.4, 0.55, 0.85, 0.9), 2.0),
+);
+
+scene.add_widget(my_card_widget(), Rect::new(32.0, 32.0, 220.0, 140.0));
+```
+
+Built-ins:
+
+- `RectItem` — filled / stroked rectangle. Use for backgrounds, tile
+  patterns, simple decorations.
+- `PathItem` — arbitrary vector path with fill / stroke. The
+  "connector line between cards" workhorse. Caller supplies the
+  AABB at construction (the path's extent is known to the caller
+  — automating that adds cost the spatial index already pays for).
+- `ImageItem` — a raster image at a scene-coord rectangle.
+  References the image by name; register the bytes with the canvas
+  before the first frame.
+- `TextItem` — unstyled text at a scene-coord position. Phase 4
+  ships the minimal version; `TextWidget` placed via `add_widget`
+  remains the right choice for anything needing styling, line
+  measurement, or i18n.
+- `GroupItem` — a logical-only container. Paints nothing; exists so
+  Phase 5b can declare AT-shape (Acts → Scenes etc.) without a
+  visual counterpart.
+
+Authoring custom items: implement `SceneItem` directly. The trait is
+deliberately tiny:
+
+```rust
+pub trait SceneItem: std::fmt::Debug + Send + 'static {
+    fn bounds_in_scene(&self) -> Rect;
+    fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext);
+    fn hit_test(&self, scene_point: Point) -> bool { /* default: AABB contain */ }
+    fn label(&self) -> Option<&str> { None }
+}
+```
+
+`SceneItemPaintContext::view_transform` is the same matrix the
+renderer's transform stack already has applied — exposed so an item
+that wants to draw at a non-transformed scale (a pixel-aligned 1px
+border, a screen-aligned label) can apply the inverse manually.
+`dirty_scene_rect` is the visible scene region; an item whose
+`bounds_in_scene` doesn't intersect can skip drawing entirely (the
+viewport cull does this filtering before `paint` runs, so the hint
+is purely for items whose bounds are larger than their actual mark
+— think a giant transparent tile cluster).
+
+**Paint order.** Lightweight items paint *under* heavyweight
+children — the render walker calls `SceneView::paint` first, then
+descends into widget children. This is the right default for
+backgrounds and connectors. Phase 6+ will introduce explicit z-order
+once apps need fine control.
+
+**Spatial index.** `Scene::add_item` re-uses the same index as
+`Scene::add_widget`. `move_item` / `remove` work the same way. The
+SceneView paint walk calls `Scene::items_in_rect(visible_region)`
+and filters to the lightweight kind — heavyweights paint themselves
+through the arena walker as usual.
+
+**Clipping.** `SceneView::clips_children()` returns `true` so
+lightweight items whose bounds extend past the viewport's screen
+rect don't bleed onto siblings. Heavyweight cull (collapse-to-zero
+in `place_children`) still happens too — the clip is the
+lightweight-tier equivalent.
 
 ## Accessibility (Phase 1)
 

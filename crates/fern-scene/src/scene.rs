@@ -8,19 +8,31 @@
 use std::collections::HashMap;
 
 use crate::index::{GridHashIndex, SpatialIndex};
-use crate::item::ItemId;
+use crate::item::{ItemId, SceneItem};
 use fern_canvas::Rect;
 use fern_core::widget::Widget;
 
-/// A single entry in a [`Scene`]. Phase 1 carries only the heavyweight
-/// (widget) variant. Phase 4 adds the lightweight `SceneItem` variant.
+/// A single entry in a [`Scene`]. The two variants reflect the two
+/// content tiers: heavyweight `Widget`s consumed into the arena at
+/// build time, and lightweight `SceneItem`s that live in the scene
+/// permanently and are painted directly from `SceneView::paint`.
 pub(crate) struct SceneEntry {
     pub(crate) id: ItemId,
     pub(crate) scene_rect: Rect,
-    /// The widget to materialize into the arena. `Some` until
-    /// [`SceneView::build`](crate::view::SceneView) consumes it via
-    /// `BuildContext::add_boxed`; `None` afterwards.
-    pub(crate) pending_widget: Option<Box<dyn Widget>>,
+    pub(crate) kind: SceneEntryKind,
+}
+
+pub(crate) enum SceneEntryKind {
+    /// A heavyweight `Widget` to materialise into the arena. `Some`
+    /// until [`SceneView::build`](crate::view::SceneView) consumes
+    /// it via `BuildContext::add_boxed`; `None` afterwards.
+    Widget {
+        pending: Option<Box<dyn Widget>>,
+    },
+    /// A lightweight `SceneItem`. Stays in the scene permanently —
+    /// `SceneView::paint` walks visible items each frame and calls
+    /// `item.paint` with the canvas.
+    Item(Box<dyn SceneItem>),
 }
 
 /// The data model behind a `SceneView`: a collection of items at
@@ -80,11 +92,50 @@ impl Scene {
         self.entries.push(SceneEntry {
             id,
             scene_rect,
-            pending_widget: Some(Box::new(widget)),
+            kind: SceneEntryKind::Widget {
+                pending: Some(Box::new(widget)),
+            },
         });
         self.entry_index.insert(id, pos);
         self.index.insert(id, scene_rect);
         id
+    }
+
+    /// Place a lightweight [`SceneItem`] in the scene. Returns the
+    /// [`ItemId`] used to address it later (move, remove, query). The
+    /// item is **not** added to the arena — it has no widget id, no
+    /// focus, no per-item event handling. `SceneView::paint` walks
+    /// visible items each frame and calls `item.paint` with the
+    /// canvas. Use this tier for the "background furniture" of a
+    /// scene — connector lines, tile patterns, decorations — where
+    /// thousands of items need to render cheaply.
+    ///
+    /// The item's `bounds_in_scene()` is captured at insertion time
+    /// for the spatial index. If the item changes its bounds later,
+    /// call [`Scene::move_item`] with the new rect to re-bucket it.
+    pub fn add_item<I: SceneItem + 'static>(&mut self, item: I) -> ItemId {
+        let scene_rect = item.bounds_in_scene();
+        let id = ItemId::next();
+        let pos = self.entries.len();
+        self.entries.push(SceneEntry {
+            id,
+            scene_rect,
+            kind: SceneEntryKind::Item(Box::new(item)),
+        });
+        self.entry_index.insert(id, pos);
+        self.index.insert(id, scene_rect);
+        id
+    }
+
+    /// Borrow a lightweight [`SceneItem`] by id. Returns `None` if the
+    /// id is unknown or refers to a heavyweight widget entry.
+    /// `SceneView::paint` uses this to walk the visible-item set.
+    pub fn item(&self, id: ItemId) -> Option<&dyn SceneItem> {
+        let pos = *self.entry_index.get(&id)?;
+        match &self.entries.get(pos)?.kind {
+            SceneEntryKind::Item(item) => Some(item.as_ref()),
+            SceneEntryKind::Widget { .. } => None,
+        }
     }
 
     /// Update an item's scene rectangle. No-op if the id isn't in the
@@ -290,6 +341,47 @@ mod tests {
 
         let empty = scene.items_in_rect(Rect::new(500.0, 500.0, 1.0, 1.0));
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn add_item_round_trip_and_index_bucketed() {
+        use crate::items::RectItem;
+        use fern_tokens::Color;
+
+        let mut scene = Scene::new();
+        let r = Rect::new(10.0, 20.0, 30.0, 40.0);
+        let id = scene.add_item(RectItem::new(r).fill(Color::RED));
+        assert_eq!(scene.scene_rect(id), Some(r));
+        // Lightweight item participates in spatial-index queries the
+        // same way heavyweight widgets do.
+        let hits = scene.items_in_rect(Rect::new(0.0, 0.0, 100.0, 100.0));
+        assert!(hits.contains(&id));
+    }
+
+    #[test]
+    fn item_accessor_returns_lightweight_only() {
+        use crate::items::RectItem;
+
+        let mut scene = Scene::new();
+        let widget_id = scene.add_widget(FillWidget::new(), Rect::ZERO);
+        let item_id = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        // Lightweight id resolves; heavyweight id returns None — the
+        // `item()` accessor is the lightweight-tier-only door.
+        assert!(scene.item(item_id).is_some());
+        assert!(scene.item(widget_id).is_none());
+    }
+
+    #[test]
+    fn move_item_updates_lightweight_bucket() {
+        use crate::items::RectItem;
+
+        let mut scene = Scene::new();
+        let id = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        scene.move_item(id, Rect::new(500.0, 500.0, 10.0, 10.0));
+        let near_origin = scene.items_in_rect(Rect::new(0.0, 0.0, 50.0, 50.0));
+        assert!(!near_origin.contains(&id));
+        let near_far = scene.items_in_rect(Rect::new(490.0, 490.0, 30.0, 30.0));
+        assert!(near_far.contains(&id));
     }
 
     #[test]

@@ -1,10 +1,23 @@
-//! `scene-corkboard` — Phase 3 demo of `fern-scene`.
+//! `scene-corkboard` — Phase 4 demo of `fern-scene`.
 //!
 //! Renders a 3×3 grid of story cards on a fern-scene `SceneView`. Each
 //! card is a real heavyweight widget — `Panel { VStack { TextWidget,
-//! TextWidget } }` — placed at a fixed scene-coordinate rectangle.
+//! TextWidget } }` — placed at a fixed scene-coordinate rectangle. The
+//! cards sit on top of a **lightweight** background grid (`RectItem`)
+//! and are stitched together by **lightweight** connector lines
+//! (`PathItem`) tracing the reading-order through the story beats.
 //!
-//! Phase 1 + 2 + 3 exercises:
+//! Phase 4 mixes the two content tiers under one `SceneView`:
+//!
+//! - **Heavyweight** cards (real widgets, focus + keyboard + a11y).
+//! - **Lightweight** items (RectItem cells, PathItem connectors)
+//!   painted from `SceneView::paint` without arena overhead.
+//! - **Same view transform** projects both tiers identically — pan /
+//!   zoom / pinch keep the connector lines glued to the card edges.
+//! - **Same spatial index** culls both tiers — off-screen connectors
+//!   never enter the paint walk.
+//!
+//! Phase 1 + 2 + 3 exercises (still in effect):
 //!
 //! - `Scene::add_widget` round-trip (heavyweight widgets at scene
 //!   rects).
@@ -43,8 +56,8 @@
 //!
 //! Run with: `cargo run -p scene-corkboard`
 
-use fern_scene::{Scene, SceneView};
-use fern_ui::canvas::Rect;
+use fern_scene::{PathItem, RectItem, Scene, SceneView};
+use fern_ui::canvas::{Path, Point, Rect};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{Panel, TextWidget, VStack};
 
@@ -77,21 +90,82 @@ fn build_card(title: &str, body: &str) -> impl Widget + 'static {
     )
 }
 
+fn card_rect(index: usize) -> Rect {
+    let row = (index / CARDS_PER_ROW) as f32;
+    let col = (index % CARDS_PER_ROW) as f32;
+    let x = SCENE_MARGIN + col * (CARD_WIDTH + CARD_GAP);
+    let y = SCENE_MARGIN + row * (CARD_HEIGHT + CARD_GAP);
+    Rect::new(x, y, CARD_WIDTH, CARD_HEIGHT)
+}
+
+fn scene_size() -> (f32, f32) {
+    let width = SCENE_MARGIN * 2.0
+        + CARDS_PER_ROW as f32 * CARD_WIDTH
+        + (CARDS_PER_ROW - 1) as f32 * CARD_GAP;
+    let height = SCENE_MARGIN * 2.0
+        + ROWS as f32 * CARD_HEIGHT
+        + (ROWS - 1) as f32 * CARD_GAP;
+    (width, height)
+}
+
 fn build_corkboard() -> SceneView {
     let mut scene = Scene::new();
-    for (i, (title, body)) in CARDS.iter().enumerate() {
-        let row = (i / CARDS_PER_ROW) as f32;
-        let col = (i % CARDS_PER_ROW) as f32;
-        let x = SCENE_MARGIN + col * (CARD_WIDTH + CARD_GAP);
-        let y = SCENE_MARGIN + row * (CARD_HEIGHT + CARD_GAP);
-        scene.add_widget(build_card(title, body), Rect::new(x, y, CARD_WIDTH, CARD_HEIGHT));
+
+    // Background tile grid (Phase 4 lightweight tier). One RectItem
+    // per cell — they share the spatial index with the cards and are
+    // culled by viewport just like heavyweight children.
+    let (scene_width, scene_height) = scene_size();
+    let tile = 40.0_f32;
+    let cols = (scene_width / tile).ceil() as i32;
+    let rows = (scene_height / tile).ceil() as i32;
+    let grid_color = Color::new(0.85, 0.85, 0.88, 0.6);
+    for r in 0..rows {
+        for c in 0..cols {
+            // Draw only the cell border to keep the tile pattern airy.
+            let cell = Rect::new(c as f32 * tile, r as f32 * tile, tile, tile);
+            scene.add_item(RectItem::new(cell).stroke(grid_color, 1.0));
+        }
     }
 
-    // Total scene size for a sensible default viewport.
-    let width = SCENE_MARGIN * 2.0 + CARDS_PER_ROW as f32 * CARD_WIDTH
-        + (CARDS_PER_ROW - 1) as f32 * CARD_GAP;
-    let height = SCENE_MARGIN * 2.0 + ROWS as f32 * CARD_HEIGHT + (ROWS - 1) as f32 * CARD_GAP;
-    SceneView::new(scene).default_size(width, height)
+    // Heavyweight cards.
+    let mut card_rects = Vec::with_capacity(CARDS.len());
+    for (i, (title, body)) in CARDS.iter().enumerate() {
+        let r = card_rect(i);
+        scene.add_widget(build_card(title, body), r);
+        card_rects.push(r);
+    }
+
+    // Connector lines wiring each card to the next in reading order
+    // (Phase 4 lightweight tier — PathItem). The path runs from the
+    // trailing-mid of card N to the leading-mid of card N+1, with a
+    // gentle horizontal-then-vertical bend so cards on different rows
+    // get a step-shaped connector.
+    let connector_color = Color::new(0.40, 0.55, 0.85, 0.9);
+    for pair in card_rects.windows(2) {
+        let a = pair[0];
+        let b = pair[1];
+        let from = Point::new(a.x + a.width, a.y + a.height * 0.5);
+        let to = Point::new(b.x, b.y + b.height * 0.5);
+        let mid_x = (from.x + to.x) * 0.5;
+        let mut path = Path::new();
+        path.move_to(from)
+            .line_to(Point::new(mid_x, from.y))
+            .line_to(Point::new(mid_x, to.y))
+            .line_to(to);
+        // AABB enclosing the connector — used by the spatial index
+        // for culling. Padded by stroke half-width so partial
+        // intersections aren't dropped at the viewport edge.
+        let stroke_w = 2.0_f32;
+        let pad = stroke_w * 0.5;
+        let min_x = from.x.min(to.x).min(mid_x) - pad;
+        let max_x = from.x.max(to.x).max(mid_x) + pad;
+        let min_y = from.y.min(to.y) - pad;
+        let max_y = from.y.max(to.y) + pad;
+        let bounds = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
+        scene.add_item(PathItem::new(path, bounds).stroke(connector_color, stroke_w));
+    }
+
+    SceneView::new(scene).default_size(scene_width, scene_height)
 }
 
 fn main() {
@@ -99,7 +173,7 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Scene Corkboard (Phase 3: pan/zoom + cull)")
+                .title("FernUI — Scene Corkboard (Phase 4: light items + cards)")
                 .size(900, 600)
                 .root(|tree, _state| tree.add(build_corkboard())),
         )
