@@ -856,9 +856,14 @@ impl WidgetCatalog {
                 )
                 // Icon-only buttons need explicit accessibility metadata —
                 // their drawn glyph is meaningless to screen readers. Demo
-                // of the new builder-level overrides:
+                // of the builder-level overrides:
                 //   .access_label_literal       — what AT software announces
-                //   .access_keyboard_shortcut   — surfaced as "Ctrl+S" on the node
+                //   .access_shortcut_literal    — pre-formatted chord, when
+                //                                 the binding is NOT routed
+                //                                 through the Shortcut system
+                //   .access_shortcut_id         — bind to a registered
+                //                                 Shortcut; the announcement
+                //                                 tracks user rebinds
                 //   .access_has_popup           — flags the chevron as a disclosure
                 .child(
                     Button::new_literal("Save")
@@ -866,7 +871,13 @@ impl WidgetCatalog {
                         .style(ButtonVariant::Flat)
                         .on_activate_fn(|_| println!("Save"))
                         .access_label_literal("Save")
-                        .access_keyboard_shortcut("Ctrl+S"),
+                        // The literal variant — fine for demos with no
+                        // registered shortcut. In production, prefer
+                        // `.access_shortcut_id("app.save")` paired with
+                        // a `Shortcut::new("app.save").primary(...)`
+                        // registration so a user rebind via the
+                        // settings UI also retitles the AT announcement.
+                        .access_shortcut_literal("Ctrl+S"),
                 )
                 .child(
                     Button::new_literal("")
@@ -2364,7 +2375,7 @@ impl WidgetCatalog {
                             style: ButtonVariant::Flat
                             on_activate_fn: |_| println!("Save")
                             access_label_literal: "Save"
-                            access_keyboard_shortcut: "Ctrl+S"
+                            access_shortcut_literal: "Ctrl+S"
                         }
                         Button::new_literal("") {
                             icon: IconWidget::chevron_down(16.0), IconLocation::IconOnly

@@ -72,7 +72,18 @@ pub struct AccessibilityOverrides {
     pub labelled_by: Vec<WidgetId>,
     pub live: Option<accesskit::Live>,
     pub aria_current: Option<accesskit::AriaCurrent>,
-    pub keyboard_shortcut: Option<String>,
+    /// Pre-formatted shortcut announcement string (e.g. `"Ctrl+S"`).
+    /// Used by `access_shortcut_literal`. For chords routed through a
+    /// `Shortcut` registration, prefer `access_shortcut_id` (stored
+    /// in `shortcut_id`) so the announcement tracks rebinds.
+    pub shortcut: Option<String>,
+    /// Registered shortcut id (e.g. `"app.save"`). The accessibility
+    /// walker resolves the current keystroke from
+    /// `WidgetTree::shortcut_registry()` at AT-build time and writes
+    /// the formatted string to `Node::keyboard_shortcut`. Refreshes
+    /// automatically when the user rebinds (the registry's `version`
+    /// signal triggers a re-sync).
+    pub shortcut_id: Option<String>,
     pub has_popup: Option<accesskit::HasPopup>,
     pub orientation: Option<accesskit::Orientation>,
 
@@ -117,6 +128,8 @@ impl std::fmt::Debug for AccessibilityOverrides {
             .field("hidden", &self.hidden)
             .field("disabled", &self.disabled)
             .field("identifier", &self.identifier)
+            .field("shortcut", &self.shortcut)
+            .field("shortcut_id", &self.shortcut_id)
             .field("controls_len", &self.controls.len())
             .field("described_by_len", &self.described_by.len())
             .field("labelled_by_len", &self.labelled_by.len())
@@ -175,9 +188,12 @@ impl AccessibilityOverrides {
         if let Some(c) = self.aria_current {
             b.set_aria_current(c);
         }
-        if let Some(ref s) = self.keyboard_shortcut {
+        if let Some(ref s) = self.shortcut {
             b.set_keyboard_shortcut(s.clone());
         }
+        // `shortcut_id` resolution happens in the accessibility tree
+        // walker (where the `ShortcutRegistry` is reachable) — see
+        // `accessibility_impl::build_accessibility_recursive`.
         if let Some(p) = self.has_popup {
             b.set_has_popup(p);
         }
@@ -890,9 +906,29 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    /// Override the announced keyboard shortcut (e.g. `"Ctrl+S"`).
-    pub fn access_keyboard_shortcut(mut self, shortcut: impl Into<String>) -> Self {
-        self.handler_set.access_mut().keyboard_shortcut = Some(shortcut.into());
+    /// Pre-formatted shortcut announcement (e.g. `"Ctrl+S"`). Used for
+    /// chords NOT routed through the `Shortcut` system — platform-native
+    /// keys, app-internal hotkeys not exposed to user rebinding. For
+    /// `Shortcut`-registered chords prefer
+    /// [`access_shortcut_id`](Self::access_shortcut_id), which tracks
+    /// rebinds automatically.
+    pub fn access_shortcut_literal(mut self, shortcut: impl Into<String>) -> Self {
+        self.handler_set.access_mut().shortcut = Some(shortcut.into());
+        self
+    }
+
+    /// Bind the announced shortcut to a registered `Shortcut` id (the
+    /// same id you pass to `Shortcut::new("app.save")`). The
+    /// accessibility tree walker resolves the current keystroke from
+    /// `WidgetTree::shortcut_registry()` at AT-build time, formats it
+    /// via `KeyStroke::Display` (`"Ctrl+S"`), and writes it to
+    /// `Node::keyboard_shortcut`. Auto-refreshes on rebind.
+    ///
+    /// If the registry has no entry for `id` (no widget registered the
+    /// shortcut yet), the announcement is omitted — same fallback as
+    /// `MenuItem::for_shortcut(...)`.
+    pub fn access_shortcut_id(mut self, id: impl Into<String>) -> Self {
+        self.handler_set.access_mut().shortcut_id = Some(id.into());
         self
     }
 
@@ -1454,11 +1490,15 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).access_current(current)
     }
 
-    fn access_keyboard_shortcut(
+    fn access_shortcut_literal(
         self,
         shortcut: impl Into<String>,
     ) -> WidgetWithHandlers<Self> {
-        WidgetWithHandlers::new(self).access_keyboard_shortcut(shortcut)
+        WidgetWithHandlers::new(self).access_shortcut_literal(shortcut)
+    }
+
+    fn access_shortcut_id(self, id: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_shortcut_id(id)
     }
 
     fn access_has_popup(self, kind: accesskit::HasPopup) -> WidgetWithHandlers<Self> {

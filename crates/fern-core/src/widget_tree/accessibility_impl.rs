@@ -8,6 +8,19 @@ impl WidgetTree {
     /// the result to the `accesskit_winit::Adapter`.
     /// Caches the result and only rebuilds when layout has changed.
     pub fn sync_accessibility(&mut self) -> accesskit::TreeUpdate {
+        // Shortcut registry rebinds bump
+        // `ShortcutRegistry::version()`. The `access_shortcut_id`
+        // resolution in the walker reads the live registry, so any
+        // rebind must invalidate the AT-tree cache too — otherwise
+        // a rebind would not surface in the announced shortcut
+        // until something else dirties the tree (a layout, a focus
+        // change, …). Cheap: one u64 compare per `sync_accessibility`.
+        let current_shortcut_version = self.shortcut_registry.version().get();
+        if current_shortcut_version != self.last_synced_shortcut_version {
+            self.a11y_dirty = true;
+            self.last_synced_shortcut_version = current_shortcut_version;
+        }
+
         if !self.a11y_dirty
             && let Some(cached) = &self.cached_a11y
         {
@@ -144,6 +157,20 @@ impl WidgetTree {
         // and append on relationship lists.
         if let Some(ov) = node.access_overrides.as_deref() {
             ov.apply(&mut builder);
+            // `access_shortcut_id` resolution happens here in the
+            // walker (not in `apply()`) because the override struct
+            // can't reach the tree's `ShortcutRegistry`. Same
+            // mechanism as `MenuItem::for_shortcut(...)` — look up
+            // the effective primary keystroke and announce it via
+            // `KeyStroke`'s `Display` impl. Falls back silently if
+            // the id has no registered default.
+            if let Some(ref id) = ov.shortcut_id {
+                if let Some(eff) = self.shortcut_registry.effective(id) {
+                    if let Some(ks) = eff.primary {
+                        builder.set_keyboard_shortcut(ks.to_string());
+                    }
+                }
+            }
         }
 
         let subtree_mode = node.access_subtree;
@@ -251,6 +278,15 @@ impl WidgetTree {
         node.widget.accessibility(&mut builder);
         if let Some(ov) = node.access_overrides.as_deref() {
             ov.apply(&mut builder);
+            // Resolve `access_shortcut_id` against the live registry —
+            // see the matching block in `build_accessibility_recursive`.
+            if let Some(ref sid) = ov.shortcut_id {
+                if let Some(eff) = self.shortcut_registry.effective(sid) {
+                    if let Some(ks) = eff.primary {
+                        builder.set_keyboard_shortcut(ks.to_string());
+                    }
+                }
+            }
         }
         if node.access_subtree == AccessSubtreeMode::Merge {
             merge_descendants_into(&mut builder, id, &self.arena);
@@ -938,15 +974,57 @@ mod tests {
         assert_eq!(node.author_id(), Some("save-button"));
     }
 
-    // Test 7
+    // Test 7a — literal shortcut variant
     #[test]
-    fn access_keyboard_shortcut_set() {
+    fn access_shortcut_literal_set() {
         let mut tree = WidgetTree::new();
-        let id = tree.add(ClickableWidget.access_keyboard_shortcut("Ctrl+S"));
+        let id = tree.add(ClickableWidget.access_shortcut_literal("Ctrl+S"));
         tree.layout(SizeProposal::exact(50.0, 50.0));
         let update = tree.sync_accessibility();
         let node = find_node(&update, id).unwrap();
         assert_eq!(node.keyboard_shortcut(), Some("Ctrl+S"));
+    }
+
+    // Test 7b — id-based shortcut resolves through ShortcutRegistry,
+    // including auto-refresh on rebind.
+    #[test]
+    fn access_shortcut_id_resolves_and_tracks_rebinds() {
+        use crate::event::Key;
+        use crate::shortcut::{KeyStroke, Shortcut};
+
+        let mut tree = WidgetTree::new();
+        tree.shortcut_registry_mut().register(
+            Shortcut::new("app.save")
+                .name("Save")
+                .primary(KeyStroke::ctrl(Key::S))
+                .build(),
+        );
+        let id = tree.add(ClickableWidget.access_shortcut_id("app.save"));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        // Initial registration: AT announces the default keystroke.
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+S"));
+
+        // Simulate a user rebind: the AT announcement should track it.
+        tree.shortcut_registry_mut()
+            .rebind_primary("app.save", Some(KeyStroke::ctrl(Key::Q)));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+Q"));
+    }
+
+    // Test 7c — silently omits the announcement when the id has no
+    // registered default. Same fallback behavior as `MenuItem::for_shortcut`.
+    #[test]
+    fn access_shortcut_id_unknown_id_omits_announcement() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ClickableWidget.access_shortcut_id("never.registered"));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.keyboard_shortcut(), None);
     }
 
     // Test 8

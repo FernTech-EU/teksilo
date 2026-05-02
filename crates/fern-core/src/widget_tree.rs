@@ -126,6 +126,12 @@ pub struct WidgetTree {
     cached_a11y: Option<accesskit::TreeUpdate>,
     /// Whether the accessibility tree needs rebuilding (set when layout runs).
     a11y_dirty: bool,
+    /// Snapshot of `shortcut_registry.version()` at the last
+    /// `sync_accessibility` call. When the live version differs the
+    /// AT cache is dirtied, so widgets that bound their announced
+    /// shortcut via `access_shortcut_id(id)` track user rebinds
+    /// without any explicit signaling from the settings UI.
+    last_synced_shortcut_version: u64,
     /// Reverse map from synthetic (widget-emitted) AccessKit NodeIds
     /// to the WidgetId that owns them. Rebuilt on every full
     /// accessibility walk. `handle_accessibility_actions` uses this
@@ -297,6 +303,7 @@ impl WidgetTree {
             paint_epoch: 0,
             cached_a11y: None,
             a11y_dirty: true,
+            last_synced_shortcut_version: 0,
             synthetic_parent_map: std::collections::HashMap::new(),
             cached_frame: None,
             pointer_captured_by: None,
