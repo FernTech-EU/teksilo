@@ -821,7 +821,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 let child_size = ctx
@@ -830,7 +830,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 Size::new(child_size.width.max(120.0), child_size.height.max(36.0))
             }
             None => proposal.resolve(120.0, 36.0),
-        }
+        }.into()
     }
 
     fn place_children(

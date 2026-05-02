@@ -61,12 +61,12 @@ fn snackbar_a11y_name_resolves_via_framework_bundle() {
     #[derive(Debug)]
     struct Noop;
     impl Widget for Noop {
-        fn size_that_fits(
+        fn layout_response(
             &self,
             proposal: SizeProposal,
             _ctx: &LayoutContext,
-        ) -> Size {
-            proposal.resolve(40.0, 20.0)
+        ) -> fern_core::widget::LayoutResponse {
+            proposal.resolve(40.0, 20.0).into()
         }
     }
 

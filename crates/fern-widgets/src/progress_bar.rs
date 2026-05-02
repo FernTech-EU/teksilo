@@ -207,7 +207,7 @@ impl Widget for ProgressBar {
         vec![]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.orientation {
             Orientation::Horizontal => {
                 let width = proposal.width.unwrap_or(100.0);
@@ -217,7 +217,7 @@ impl Widget for ProgressBar {
                 let height = proposal.height.unwrap_or(100.0);
                 Size::new(self.thickness, height)
             }
-        }
+        }.into()
     }
 
     fn place_children(

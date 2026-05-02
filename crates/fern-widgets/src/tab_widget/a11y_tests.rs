@@ -18,12 +18,12 @@ use fern_core::accesskit;
 struct FixedLeaf;
 
 impl Widget for FixedLeaf {
-    fn size_that_fits(
+    fn layout_response(
         &self,
         _proposal: SizeProposal,
         _ctx: &fern_core::LayoutContext,
-    ) -> fern_canvas::Size {
-        fern_canvas::Size::new(120.0, 48.0)
+    ) -> fern_core::widget::LayoutResponse {
+        fern_canvas::Size::new(120.0, 48.0).into()
     }
 }
 

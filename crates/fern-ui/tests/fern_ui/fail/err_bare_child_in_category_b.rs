@@ -12,8 +12,8 @@ impl Card {
     }
 }
 impl Widget for Card {
-    fn size_that_fits(&self, p: SizeProposal, _: &LayoutContext) -> Size {
-        p.resolve(0.0, 0.0)
+    fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        p.resolve(0.0, 0.0).into()
     }
 }
 
@@ -27,8 +27,8 @@ impl TextWidget {
     }
 }
 impl Widget for TextWidget {
-    fn size_that_fits(&self, p: SizeProposal, _: &LayoutContext) -> Size {
-        p.resolve(0.0, 0.0)
+    fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        p.resolve(0.0, 0.0).into()
     }
 }
 

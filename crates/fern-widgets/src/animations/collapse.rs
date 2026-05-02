@@ -123,9 +123,9 @@ impl Widget for Collapse {
         vec![child_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let Some(child_id) = self.child_id else {
-            return proposal.resolve(0.0, 0.0);
+            return (proposal.resolve(0.0, 0.0)).into();
         };
         // Ask the child for its size against the *unmodified* proposal.
         // We never propose a clipped height — that would let text
@@ -151,7 +151,7 @@ impl Widget for Collapse {
         } else {
             natural.width
         };
-        Size::new(width, natural.height * progress)
+        Size::new(width, natural.height * progress).into()
     }
 
     fn place_children(

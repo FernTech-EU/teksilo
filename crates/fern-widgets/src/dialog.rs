@@ -114,7 +114,7 @@ impl Widget for ModalContainer {
         self.children()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let pad = self.resolved_padding(ctx.theme);
         let min_w = self.resolved_min_width(ctx.theme);
         let inset = pad * 2.0;
@@ -131,7 +131,7 @@ impl Widget for ModalContainer {
             })
             .unwrap_or_else(|| proposal.resolve(240.0, 120.0));
 
-        Size::new((content.width + inset).max(min_w), content.height + inset)
+        Size::new((content.width + inset).max(min_w), content.height + inset).into()
     }
 
     fn place_children(
@@ -331,10 +331,10 @@ impl Widget for DialogContent {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -633,10 +633,10 @@ impl Widget for Dialog {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(140.0, 40.0))
+            .unwrap_or_else(|| proposal.resolve(140.0, 40.0)).into()
     }
 
     fn place_children(
@@ -672,8 +672,8 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

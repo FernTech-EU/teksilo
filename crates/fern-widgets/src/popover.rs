@@ -121,7 +121,7 @@ impl Widget for PopoverSurface {
         self.children()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let inset = SURFACE_PADDING * 2.0;
         let (caret_top, caret_bottom) = self.caret_insets();
         self.content_id
@@ -142,7 +142,7 @@ impl Widget for PopoverSurface {
                     size.height + inset + caret_top + caret_bottom,
                 )
             })
-            .unwrap_or_else(|| proposal.resolve(200.0, 80.0))
+            .unwrap_or_else(|| proposal.resolve(200.0, 80.0)).into()
     }
 
     fn place_children(
@@ -551,10 +551,10 @@ impl Widget for Popover {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(120.0, 40.0))
+            .unwrap_or_else(|| proposal.resolve(120.0, 40.0)).into()
     }
 
     fn place_children(
@@ -589,8 +589,8 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

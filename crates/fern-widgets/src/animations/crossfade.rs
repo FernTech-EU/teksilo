@@ -148,10 +148,10 @@ impl<K: Eq + Clone + 'static> Widget for Crossfade<K> {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -268,8 +268,8 @@ mod tests {
         #[derive(Debug)]
         struct Sized(f32);
         impl Widget for Sized {
-            fn size_that_fits(&self, _p: SizeProposal, _c: &LayoutContext) -> Size {
-                Size::new(40.0, self.0)
+            fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> fern_core::widget::LayoutResponse {
+                Size::new(40.0, self.0).into()
             }
         }
 

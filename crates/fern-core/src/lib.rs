@@ -73,7 +73,8 @@ pub use animation_builder::AnimationSpec;
 pub use signal::{ObserverHandle, Prop, Signal, SignalAccessError};
 pub use binding::{BindingLevel, BindingRegistry};
 pub use widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
+    WidgetPlacement,
 };
 pub use widget_builder::{HandlerSet, WidgetBuilder, WidgetWithHandlers};
 pub use widget_builder_branching::{

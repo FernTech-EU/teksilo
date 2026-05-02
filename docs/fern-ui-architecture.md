@@ -89,21 +89,43 @@ FernUI builds on established crates rather than reinventing solved problems.
 
 ## 2. Layout Model
 
-FernUI uses a SwiftUI-style layout negotiation protocol. Layout is a two-phase conversation between parent and child: the parent proposes a size, the child responds with the size it actually wants, and the parent places the child at a specific position.
+FernUI uses a SwiftUI-style layout negotiation protocol. Layout is a two-phase conversation between parent and child: the parent proposes a size, the child responds with the size it actually wants (and a flex weight), and the parent places the child at a specific position.
 
 The `Widget` trait expresses this as two methods:
 
 ```rust
 trait Widget {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse;
     fn place_children(&self, bounds: Rect, proposal: SizeProposal,
                       children: &mut [WidgetPlacement], ctx: &LayoutContext);
 }
+
+pub struct LayoutResponse { pub size: Size, pub flex: f32 }
 ```
+
+The child's response carries both the size it wants (a floor the parent must honor) and a flex weight that tells the parent how to share leftover space. Most widgets just return a `Size` — `From<Size>` wraps it as a rigid response with `flex = 0`. Flex-bearing widgets (`Spacer`, `Expand`) construct `LayoutResponse::flexible(size, flex)`.
 
 Each layout container (VStack, HStack, ZStack, Grid) implements these two methods differently. No global constraint solver, no flexbox algorithm — just recursive negotiation. This composes naturally: a custom widget is a layout container. Leading/Trailing semantics (rather than Left/Right) ensure automatic RTL mirroring when the locale's `LayoutDirection` is right-to-left.
 
 Layout operates entirely in logical pixels. The scale factor is applied at the rendering boundary, not during layout.
+
+### 2.0 Flex Distribution and Slack
+
+`HStack` / `VStack` distribute leftover space — the **slack** — among children using a single rule:
+
+```text
+slack = bounds.main_axis - Σ wanted_main_axis - Σ spacing
+final_main_i = wanted_i + (flex_i / Σ flex) × slack       (when Σ flex > 0)
+```
+
+Flex is a **weight on slack distribution**, not an override of what the child asked for. A child with `flex = 0` receives exactly its wanted size (the rigid case). A child with `flex > 0` receives its wanted size plus a share of the slack proportional to its weight. There is no `is_spacer` boolean, no special-case branch — the protocol is uniform.
+
+This makes ratio layouts first-class. `[Expand::flex(1), Expand::flex(2)]` in 300 px splits 100 / 200 because both Expands report `wanted = 0` and the slack is divided 1 : 2.
+
+Two flex-basis modes mirror the CSS distinction:
+
+- **Zero basis (default)** — `Expand::flex(n)` reports `wanted = 0` on the flex axis, so the wrapped child's natural size does not enter the rigid pool. Slack is split purely by flex weight, giving clean ratio splits regardless of content.
+- **Auto basis** — `Expand::flex(n).respect_intrinsic()` reports the wrapped child's natural size as a floor; slack is added on top. Use this when the wrapper sits inside an unconstrained parent (e.g. an outer `VStack` with `height = None`), where zero-basis would let the child overflow because there's no bound to share.
 
 ### 2.1 Alignment
 
@@ -127,23 +149,23 @@ Container-level alignment applies to all children uniformly. When one child need
 
 ### 2.4 Spacer
 
-A `Spacer` is a layout utility widget whose `size_that_fits` claims all available space on the container's primary axis. Placing a Spacer before a widget in an HStack pushes the widget to the trailing edge. Placing Spacers on both sides centers the widget. Placing a Spacer after pushes the widget to the leading edge. This is the standard SwiftUI idiom for controlling position without explicit alignment parameters.
+A `Spacer` is a layout utility widget that returns `LayoutResponse::flexible(Size::new(min_length, min_length), 1.0)`. It reports a `min_length` floor on the main axis (default 0) and a flex weight of 1, so the parent stack hands it a share of the leftover slack. Placing a Spacer before a widget in an HStack pushes the widget to the trailing edge. Placing Spacers on both sides centers the widget. Placing a Spacer after pushes the widget to the leading edge. This is the standard SwiftUI idiom for controlling position without explicit alignment parameters.
 
 ### 2.5 Expand, FixedSize, and Size Constraints
 
 Alignment only matters when a widget is smaller than the space available. Several layout modifier widgets control how much space a widget claims.
 
-`Expand` tells the layout system that a widget should claim all available space on one or both axes. An expanded widget's content is positioned within the expanded bounds according to a `content_alignment` parameter. `expand_horizontal()` and `expand_vertical()` expand on a single axis.
+`Expand` tells the layout system that a widget should claim space on one or both axes and stretch its child to fill it. By default it returns `flex = 1.0`, so a stack parent gives it leftover slack. Use `.flex(n)` to change the ratio (e.g. 1:2 by pairing `flex(1)` with `flex(2)`). Use `.respect_intrinsic()` to switch from zero-basis (the default, which gives clean ratios) to auto-basis (the wrapped child's natural size acts as a floor — useful in unconstrained parents). Use `.align_child(Alignment::X)` to opt out of fill and align the child at its natural size. `Expand::horizontal()` and `Expand::vertical()` participate on a single axis only.
 
 `FixedSize` prevents a widget from expanding beyond its natural size, even when the parent offers more space. This is useful for widgets that should not stretch (an icon inside an HStack where other children expand).
 
-`MinSize` enforces a minimum dimension. The widget's `size_that_fits` response is clamped to be at least the specified minimum. This is how buttons enforce the minimum touch target size — the button's composed subtree includes a `MinSize::new(48.0, 48.0)` wrapper rather than overriding sizing on the composite.
+`MinSize` enforces a minimum dimension. The widget's `layout_response` response is clamped to be at least the specified minimum. This is how buttons enforce the minimum touch target size — the button's composed subtree includes a `MinSize::new(48.0, 48.0)` wrapper rather than overriding sizing on the composite.
 
-`MaxSize` enforces a maximum dimension. The widget's `size_that_fits` response is clamped to be at most the specified maximum. Useful for constraining content width (a text editor that should not exceed 600 pixels wide).
+`MaxSize` enforces a maximum dimension. The widget's `layout_response` response is clamped to be at most the specified maximum. Useful for constraining content width (a text editor that should not exceed 600 pixels wide).
 
-`Center` is a convenience wrapper equivalent to a ZStack with `Alignment::center` — it centers its single child within the available space.
+`Center` is sugar for `Expand::new().align_child(Alignment::CENTER)` — it claims the available space (via the same flex weight as Expand) and aligns its single child at its natural size.
 
-All of these are layout utility widgets in `fern-widgets`. They implement the `Widget` trait's `size_that_fits` and `place_children` methods, wrapping a single child. They require no special framework support — they are ordinary widgets that compose naturally with the layout negotiation protocol.
+All of these are layout utility widgets in `fern-widgets`. They implement the `Widget` trait's `layout_response` and `place_children` methods, wrapping a single child. They require no special framework support — they are ordinary widgets that compose naturally with the layout negotiation protocol.
 
 ### 2.6 Dynamic Sizing and Binding Levels
 
@@ -153,11 +175,11 @@ Some property changes affect only a widget's visual appearance (a color change).
 
 **Relayout-level bindings** (`bind_text`, `bind_width`, `bind_height`, `bind_min_width`, `bind_max_height`) mark the widget for relayout when the bound state changes. The layout pass reruns on the affected subtree, and the dirty flag propagates upward to ancestors because a child's size change may affect its parent's size, which may affect the grandparent's size, and so on. Propagation stops at an ancestor whose own size is not affected by its children (for example, a `FixedSize` wrapper with a static width).
 
-The classification is determined by the primitive widget's binding method implementation, not by the consumer. A `TextWidget` implementor knows that `bind_text` is relayout-level because changing the text changes the widget's `size_that_fits` result. A composite widget author or application developer does not need to think about this distinction — they call `bind_text(state)` and the framework handles the rest.
+The classification is determined by the primitive widget's binding method implementation, not by the consumer. A `TextWidget` implementor knows that `bind_text` is relayout-level because changing the text changes the widget's `layout_response` result. A composite widget author or application developer does not need to think about this distinction — they call `bind_text(state)` and the framework handles the rest.
 
 **Layout utility widgets with dynamic constraints.** The size constraint widgets (`MinSize`, `MaxSize`, `FixedSize`) accept state bindings for their constraint values, enabling dynamic resizing from application state changes, user-driven splitter interactions, or animation ticks. `FixedSize::bind_width(state)` registers a relayout-level binding — when the state changes, the widget's constraint changes, triggering relayout of the affected subtree.
 
-**Relayout propagation.** When a widget is marked for relayout, the framework marks the widget and all its ancestors up to the root as needing relayout. During the layout pass, it starts from the highest dirty ancestor and works downward, re-running `size_that_fits` and `place_children` for each dirty node. Clean subtrees are skipped. This is the same incremental layout approach used by web browsers and by Qt's layout system. A relayout always implies a repaint for the affected widgets.
+**Relayout propagation.** When a widget is marked for relayout, the framework marks the widget and all its ancestors up to the root as needing relayout. During the layout pass, it starts from the highest dirty ancestor and works downward, re-running `layout_response` and `place_children` for each dirty node. Clean subtrees are skipped. This is the same incremental layout approach used by web browsers and by Qt's layout system. A relayout always implies a repaint for the affected widgets.
 
 **Use cases for dynamic sizing.** A collapsible panel animates between zero height and its natural height by driving a `Signal<f32>` bound to a `FixedSize::bind_height`. A splitter pane resizes two adjacent panels by driving their width constraints from the splitter's drag position. A sidebar width set from user preferences reads from a persistent `Signal<f32>`. An expand/collapse animation drives a height constraint over multiple frames via the animation system.
 
@@ -171,7 +193,7 @@ Scrolling is designed to require minimal changes to the framework. The scroll of
 
 ### 3.1 Layout: Unbounded Proposals and Offset Placement
 
-A scroll area participates in layout like any other container widget. In `size_that_fits`, it claims the space its parent offers — this becomes the viewport size. In `place_children`, it proposes an unbounded size on the scroll axis to its content child. For a vertical scroll area, the content receives `SizeProposal { width: Some(viewport_width), height: None }` — "use the viewport width, but be as tall as you need." The content child responds with its natural height (potentially thousands of logical pixels).
+A scroll area participates in layout like any other container widget. In `layout_response`, it claims the space its parent offers — this becomes the viewport size. In `place_children`, it proposes an unbounded size on the scroll axis to its content child. For a vertical scroll area, the content receives `SizeProposal { width: Some(viewport_width), height: None }` — "use the viewport width, but be as tall as you need." The content child responds with its natural height (potentially thousands of logical pixels).
 
 The scroll area then positions its content child at `(viewport.x, viewport.y - scroll_offset.y)`. This encodes the scroll offset as a position offset within the normal placement system. No special coordinate transformation infrastructure is needed — the existing `place_children` / `WidgetPlacement` mechanism handles it. The recursive layout function processes the content child and its descendants with the offset origin, and all bounds stored in the arena end up in correct screen-space positions.
 
@@ -259,7 +281,7 @@ The framework processes the tree through well-defined passes (event, layout, acc
 
 ## 5. Widget Extensibility
 
-> **V1 (superseded).** The original design split extensibility in two. A `CompositeWidget` trait described *what a widget is made of* via `fn build(&self, ctx) -> WidgetId`, deliberately omitted any sizing override, and delegated layout to its composed subtree. A separate `Widget` trait described *how a widget paints itself* via `paint()`, with the full layout surface (`size_that_fits`, `place_children`) for widgets with no pre-existing visual equivalent — color pickers, node graphs, the RichTextEditor.
+> **V1 (superseded).** The original design split extensibility in two. A `CompositeWidget` trait described *what a widget is made of* via `fn build(&self, ctx) -> WidgetId`, deliberately omitted any sizing override, and delegated layout to its composed subtree. A separate `Widget` trait described *how a widget paints itself* via `paint()`, with the full layout surface (`layout_response`, `place_children`) for widgets with no pre-existing visual equivalent — color pickers, node graphs, the RichTextEditor.
 >
 > The split forced authors to *choose at definition time* between composition and custom paint. Real widgets regularly want both (a Card that composes children but paints its own background; a ScrollArea that composes children but clips them with a scissor rect), which pushed the framework into a compatibility adapter and widgets into awkward indirection. The `CompositeWidget::build(&self)` signature — immutable receiver — also forced every stateful composite into the `RefCell<Option<State<T>>>` pattern so mutation-needing event handlers could reach state created in `build`.
 >
@@ -2307,13 +2329,13 @@ The `Theme` struct aggregates six token categories: `colors`, `layout`, `typogra
 
 **MotionTokens** defines animation durations and easing curves consumed by the animation system and by time-dependent UI behaviors (tooltip delay, cursor blink rate).
 
-**ComponentStyles** holds per-widget style structs — button padding, menu item geometry, scrollbar thickness, dialog insets, and similar widget-specific values that do not belong in a generic cross-cutting scale. Widgets read their own component style inside `size_that_fits` and `paint`.
+**ComponentStyles** holds per-widget style structs — button padding, menu item geometry, scrollbar thickness, dialog insets, and similar widget-specific values that do not belong in a generic cross-cutting scale. Widgets read their own component style inside `layout_response` and `paint`.
 
 ### 19.3 Theme Storage and Access
 
 The theme is held by the `WidgetTree` as two parallel handles: a plain `Theme` (the resolved tree-level value) and a reactive `Signal<Theme>` that widgets subscribe to. Both are updated in lockstep by `set_theme`. The tree is the single source of truth; `fern-app`'s `WindowManager` forwards application-level theme changes into each window's tree.
 
-Widgets access the theme at three times through their context objects. `LayoutContext::theme` is read during `size_that_fits` and `place_children` for spacing, typography, and shape values. `PaintContext::theme` is read during `paint` for colors, corner radii, border widths, shadows, and text styles. `BuildContext::theme_signal` returns the reactive handle and is the preferred access path for any widget that needs theme values after `build` — derived signals built from `theme_signal` stay live across theme switches automatically. `BuildContext::theme` still exists as a synchronous read for things that are only needed once at build time (computing a widget ID, reading an initial layout constant), but any value derived from `theme` and captured into a closure becomes stale on the next theme switch and should be expressed as a role or a `theme_signal` binding instead.
+Widgets access the theme at three times through their context objects. `LayoutContext::theme` is read during `layout_response` and `place_children` for spacing, typography, and shape values. `PaintContext::theme` is read during `paint` for colors, corner radii, border widths, shadows, and text styles. `BuildContext::theme_signal` returns the reactive handle and is the preferred access path for any widget that needs theme values after `build` — derived signals built from `theme_signal` stay live across theme switches automatically. `BuildContext::theme` still exists as a synchronous read for things that are only needed once at build time (computing a widget ID, reading an initial layout constant), but any value derived from `theme` and captured into a closure becomes stale on the next theme switch and should be expressed as a role or a `theme_signal` binding instead.
 
 The preferred API surface for widget authors is the role enums and the `ColorProp` / `TextStyleProp` wrappers documented in [docs/reactive-theme.md](./reactive-theme.md). Widgets store roles (`TextRole::Primary`, `SurfaceRole::AccentSubtle`, `BorderRole::Focused`, `TextStyleRole::Body`) and resolve them against the current theme at paint or layout time via the `resolve(&theme)` methods on each role enum and prop wrapper. Writing `.bind_color(theme_signal.map(|t| t.colors.text_primary))` is still valid but almost never necessary: most widget-authoring use cases reduce to `.color(TextRole::Primary)` or a `Signal<Role>` emitted by an interaction signal.
 
@@ -3085,7 +3107,7 @@ Primitives are Level 2 widgets that serve as building blocks for composition. Th
 
 **ZStack** — exists. Overlay layout container. All children positioned at the same origin, stacked in insertion order. Two-axis alignment (`Alignment`).
 
-**Padding** — exists. Single-child wrapper adding uniform or per-edge padding. Adjusts `size_that_fits` and `place_children` to account for padding.
+**Padding** — exists. Single-child wrapper adding uniform or per-edge padding. Adjusts `layout_response` and `place_children` to account for padding.
 
 **Spacer** — exists. Flexible space filler. Claims all remaining space on the container's primary axis. Used in stacks to push siblings to edges.
 
@@ -3099,7 +3121,7 @@ Primitives are Level 2 widgets that serve as building blocks for composition. Th
 
 **MaxSize** — exists. Single-child wrapper that clamps the reported size to a maximum.
 
-**Divider** — new primitive. A 1-pixel line (horizontal or vertical) colored from the theme's `border` token. `size_that_fits` returns 1px on the cross axis and claims the full proposed size on the primary axis. Used as a visual separator in stacks, toolbars, and menus. Accessibility: `Role::Splitter` (non-interactive) or `Role::GenericContainer` with `set_hidden(true)` since it is purely decorative.
+**Divider** — new primitive. A 1-pixel line (horizontal or vertical) colored from the theme's `border` token. `layout_response` returns 1px on the cross axis and claims the full proposed size on the primary axis. Used as a visual separator in stacks, toolbars, and menus. Accessibility: `Role::Splitter` (non-interactive) or `Role::GenericContainer` with `set_hidden(true)` since it is purely decorative.
 
 **IconWidget** — new primitive. Renders a vector icon from a predefined icon set. Icons are defined as `Path` data (sequences of `PathCommand`) and rendered via the Canvas's `fill_path` method, which is CPU-rasterized by tiny-skia and cached in the PathAtlas. Supports color (from theme or explicit), size (defaulting to 16×16 or 24×24 from theme), and reactive color binding. Accessibility: `Role::Image` with `set_name` describing the icon's meaning. The icon set is a separate data module (`fern-icons` or an icon enum in `fern-widgets`) providing named paths: `Icon::Search`, `Icon::Close`, `Icon::ChevronDown`, `Icon::ChevronRight`, `Icon::Check`, `Icon::Plus`, `Icon::Minus`, etc. This widget is a dependency for many composites (Button with icon, ComboBox chevron, TreeView expand arrow, Checkbox checkmark).
 
@@ -3111,7 +3133,7 @@ These are Level 2 widgets that provide layout behavior beyond simple stacking.
 
 **Wrap / FlowLayout** — new. Children flow horizontally, wrapping to the next line when the available width is exhausted. `place_children` fills rows left-to-right (or right-to-left in RTL), breaking to a new row when the next child would exceed the container's width. Configurable spacing between items and between rows. Used for tag lists, chip collections, and responsive layouts. Accessibility: `Role::GenericContainer`.
 
-**AspectRatio** — new. Single-child wrapper that constrains the child's bounds to a specific width-to-height ratio. `size_that_fits` computes the largest rectangle with the given ratio that fits within the proposal. Used for images, videos, and fixed-proportion containers.
+**AspectRatio** — new. Single-child wrapper that constrains the child's bounds to a specific width-to-height ratio. `layout_response` computes the largest rectangle with the given ratio that fits within the proposal. Used for images, videos, and fixed-proportion containers.
 
 ### 28.3 Container Widgets (`fern-widgets/src/`)
 
@@ -3398,7 +3420,7 @@ The Canvas operations are standard FernUI primitives — `canvas.fill_rect()` fo
 
 This is the most important architectural distinction in the rich text editor design, and the reason its catalog entry is much longer than every other widget's.
 
-A `ScrollArea` wraps a child widget. The child has an intrinsic size (computed by `size_that_fits` with an unbounded proposal); the ScrollArea derives `max_scroll = max(0, child_size - viewport_size)` and clips the child's painting to the viewport. The scroll bar's visibility is determined after the child's intrinsic size is known.
+A `ScrollArea` wraps a child widget. The child has an intrinsic size (computed by `layout_response` with an unbounded proposal); the ScrollArea derives `max_scroll = max(0, child_size - viewport_size)` and clips the child's painting to the viewport. The scroll bar's visibility is determined after the child's intrinsic size is known.
 
 This works for any widget whose layout does not depend on the viewport. It does not work for the rich text editor, because the editor's layout has a circular dependency:
 
@@ -3705,7 +3727,7 @@ The Godot reference at github.com/jacquetc/godot-rich-text is the working implem
 
 #### 27.10.17 Intrinsic sizing — `min_lines` and `max_lines`
 
-By default, `RichTextEditor::size_that_fits` is **greedy** — it consumes whatever proposal the parent hands it. This is the right behaviour for a writer-IDE pane that fills its panel and grows with the window. It is the wrong behaviour for embedded composers (chat input, comment box, search refinement) where the editor should size itself to its content up to a small visible cap, and let the vertical scroll bar absorb anything past that cap.
+By default, `RichTextEditor::layout_response` is **greedy** — it consumes whatever proposal the parent hands it. This is the right behaviour for a writer-IDE pane that fills its panel and grows with the window. It is the wrong behaviour for embedded composers (chat input, comment box, search refinement) where the editor should size itself to its content up to a small visible cap, and let the vertical scroll bar absorb anything past that cap.
 
 The two builder methods `.min_lines(u32)` and `.max_lines(u32)` switch the editor into **intrinsic** sizing mode:
 
@@ -3715,13 +3737,13 @@ RichTextEditor::editor(doc).min_lines(3)                // form field, comfortab
 RichTextEditor::read_only(doc).max_lines(8)             // help-doc viewer with cap
 ```
 
-When either knob is set, `size_that_fits` returns
+When either knob is set, `layout_response` returns
 `clamp(content_height, min_lines × line_height, max_lines × line_height)`
 for whichever dimension the parent leaves unspecified. Defaults: `min_lines = 0`, `max_lines = ∞`. The line height comes from the typesetter's default font (`TypesetterBridge::default_line_height`, computed as `ascent + descent + leading`), so a `min_lines(3)` editor reports three line heights even when the document is empty and there is no laid-out content yet.
 
 **Visible-text semantics, not outer height.** Both knobs measure the visible *text area*. `min_lines(4)` means "show four lines of text," not "be four line-heights tall overall." The editor's own internal padding (currently zero — text bounds match widget bounds) stacks on top.
 
-**Parent always wins on pinned dimensions.** The framework's layout discipline is that a parent's `Some(proposal_height)` overrides a child's `size_that_fits` return value (see [`layout_impl.rs:355-357`](../crates/fern-core/src/widget_tree/layout_impl.rs#L355-L357)). `min_lines` / `max_lines` therefore take effect when the parent leaves height unspecified — `VStack` proposing unbounded height to its non-Expand children is the prototypical case, which is exactly the messenger-composer pattern. A parent that *forces* the height (`FixedSize::height(...)`, a row in a flex container with explicit allocation) still wins. This is intentional and matches FernUI's general parent-has-final-say policy.
+**Parent always wins on pinned dimensions.** The framework's layout discipline is that a parent's `Some(proposal_height)` overrides a child's `layout_response` return value (see [`layout_impl.rs:355-357`](../crates/fern-core/src/widget_tree/layout_impl.rs#L355-L357)). `min_lines` / `max_lines` therefore take effect when the parent leaves height unspecified — `VStack` proposing unbounded height to its non-Expand children is the prototypical case, which is exactly the messenger-composer pattern. A parent that *forces* the height (`FixedSize::height(...)`, a row in a flex container with explicit allocation) still wins. This is intentional and matches FernUI's general parent-has-final-say policy.
 
 **Composer recipe.** A messenger-style composer combines four primitives:
 
@@ -3786,8 +3808,10 @@ pub trait Widget: std::fmt::Debug + 'static {
         vec![]
     }
 
-    /// Respond to the parent's size proposal.
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
+    /// Respond to the parent's size proposal with wanted size + flex weight.
+    /// Most widgets just return a `Size` (auto-converts via `From<Size>`).
+    /// Flex-bearing widgets return `LayoutResponse::flexible(size, flex)`.
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse;
 
     /// Position children within the allocated bounds.
     fn place_children(
@@ -3806,12 +3830,12 @@ pub trait Widget: std::fmt::Debug + 'static {
 }
 ```
 
-Six methods. Only `size_that_fits` is required — all others have defaults. A leaf widget (TextWidget, RectWidget, IconWidget) implements `size_that_fits` and `paint`. A layout container (HStack, VStack, ZStack) implements `size_that_fits`, `place_children`, and `children`. A composing widget (Button, Checkbox) implements `build` and `accessibility`. A hybrid widget (Card, Toggle, ScrollArea) implements `build` for children and `paint` for its own visuals.
+Six methods. Only `layout_response` is required — all others have defaults. A leaf widget (TextWidget, RectWidget, IconWidget) implements `layout_response` and `paint`. A layout container (HStack, VStack, ZStack) implements `layout_response`, `place_children`, and `children`. A composing widget (Button, Checkbox) implements `build` and `accessibility`. A hybrid widget (Card, Toggle, ScrollArea) implements `build` for children and `paint` for its own visuals.
 
 Methods removed from the trait compared to V1:
 - `event()`, `preview_event()` — replaced by attached handlers (Section 28.3).
 - `is_focusable()`, `tab_index()` — replaced by `.focusable(true)`, `.tab_index(n)` builder methods stored on the arena node.
-- `is_spacer()` — replaced by a flag on the arena node, set by Spacer during construction.
+- `is_spacer()`, `flex_factor()` — folded into the `LayoutResponse { size, flex }` returned from `layout_response`. The widget answers size and flex weight in one call; HStack/VStack honor every child's wanted size as a floor and divide leftover **slack** proportional to flex.
 - `is_composite()`, `as_any_mut()` — gone, no composite adapter to distinguish or downcast.
 - `register_bindings()` — gone, signal-to-widget bindings register automatically through `Prop<T>` resolution.
 - `take_pending_children()`, `set_resolved_children()`, `take_visible_when()`, `take_enabled_when()` — moved to the `WidgetBuilder` blanket impl and arena resolution.
@@ -4032,7 +4056,6 @@ pub struct WidgetNode {
     pub(crate) enabled_signal: Option<Signal<bool>>,
     pub(crate) focusable: bool,
     pub(crate) tab_index: Option<i32>,
-    pub(crate) is_spacer: bool,
     pub(crate) cursor: Option<CursorIcon>,
     pub(crate) has_built_children: bool,
     pub(crate) effect_handles: Vec<ObserverHandle>,
@@ -4080,13 +4103,13 @@ No `add_widget()`, `add_composite()`, `add_composite_inner()`, `add_widget_direc
 
 ### 29.8 What Each Widget Type Looks Like
 
-**Leaf primitive (TextWidget, RectWidget, IconWidget, Divider).** Implements `size_that_fits` and `paint`. Properties use `Prop<T>` with `Into<Prop<T>>` for static/reactive flexibility. No `build()`, no handlers, no `children()`. Binding registration happens automatically during arena insertion through `Prop<T>` resolution. Migration: replace `Reactive<T>` with `Prop<T>`, remove `register_bindings()`, `take_visible_when()`, `take_enabled_when()`. Net change per file: ~20 lines.
+**Leaf primitive (TextWidget, RectWidget, IconWidget, Divider).** Implements `layout_response` and `paint`. Properties use `Prop<T>` with `Into<Prop<T>>` for static/reactive flexibility. No `build()`, no handlers, no `children()`. Binding registration happens automatically during arena insertion through `Prop<T>` resolution. Migration: replace `Reactive<T>` with `Prop<T>`, remove `register_bindings()`, `take_visible_when()`, `take_enabled_when()`. Net change per file: ~20 lines.
 
-**Layout container (HStack, VStack, ZStack, Grid, Wrap, Padding, Expand, MinSize, MaxSize, FixedSize, Center, AspectRatio, Spacer, Switcher).** Implements `size_that_fits`, `place_children`, and `children`. No `build()`, no `paint()`, no handlers. The `place_children` logic is unchanged — it is the container's core responsibility and the SwiftUI layout negotiation is preserved exactly. Migration: remove trait methods that moved off Widget, replace `Reactive<bool>` with `Prop<bool>`. Net change per file: ~15 lines.
+**Layout container (HStack, VStack, ZStack, Grid, Wrap, Padding, Expand, MinSize, MaxSize, FixedSize, Center, AspectRatio, Spacer, Switcher).** Implements `layout_response`, `place_children`, and `children`. No `build()`, no `paint()`, no handlers. The `place_children` logic is unchanged — it is the container's core responsibility and the SwiftUI layout negotiation is preserved exactly. Migration: remove trait methods that moved off Widget, replace `Reactive<bool>` with `Prop<bool>`. Net change per file: ~15 lines.
 
-**Composing widget (Button, Checkbox, RadioButton).** Implements `build(&mut self)` to construct child subtrees, `size_that_fits` (delegates to child subtree via `ctx.child_size()`), and `accessibility`. Handlers (`on_tap`, `on_hover`, `on_key`) are attached to child widgets inside `build()`. The `RefCell<Option<State<T>>>` pattern is eliminated — state handles are plain struct fields set in `build()`. Migration: merge CompositeWidget impl into Widget impl, replace `State<T>` with `Signal<T>`, move `event()` match arms to handler attachments. Net reduction: ~30%.
+**Composing widget (Button, Checkbox, RadioButton).** Implements `build(&mut self)` to construct child subtrees, `layout_response` (delegates to child subtree via `ctx.child_size()`), and `accessibility`. Handlers (`on_tap`, `on_hover`, `on_key`) are attached to child widgets inside `build()`. The `RefCell<Option<State<T>>>` pattern is eliminated — state handles are plain struct fields set in `build()`. Migration: merge CompositeWidget impl into Widget impl, replace `State<T>` with `Signal<T>`, move `event()` match arms to handler attachments. Net reduction: ~30%.
 
-**Custom-paint widget (Toggle, Slider, ScrollBar, ProgressBar).** Implements `paint` for custom rendering, `size_that_fits` for sizing, and optionally `build` if it has children (e.g., Toggle with a label). Handlers are attached at the construction site: `.on_tap(...)`, `.on_drag(...)`, `.on_pointer_event(...)`. The monolithic `event()` match block is replaced by focused handler closures. Migration: remove `event()`, attach handlers at construction. Net reduction: ~20%.
+**Custom-paint widget (Toggle, Slider, ScrollBar, ProgressBar).** Implements `paint` for custom rendering, `layout_response` for sizing, and optionally `build` if it has children (e.g., Toggle with a label). Handlers are attached at the construction site: `.on_tap(...)`, `.on_drag(...)`, `.on_pointer_event(...)`. The monolithic `event()` match block is replaced by focused handler closures. Migration: remove `event()`, attach handlers at construction. Net reduction: ~20%.
 
 **Hybrid widget (Card, Panel, ScrollArea, Accordion).** Implements both `build` for child construction and `paint` for custom background/shadow/decoration rendering. This combination was awkward in V1 — Card had to be a Widget with manual child management because CompositeWidget had no `paint()`. In V2, `build()` and `paint()` coexist naturally on the same trait. Migration: add `build()` for child creation, keep `paint()` for visuals. Net simplification for every hybrid widget.
 
@@ -4132,7 +4155,7 @@ The V2 migration is complete. All widgets use the unified Widget trait and Signa
 
 **New files in fern-core.** `signal.rs` (793 lines) implements `Signal<T>`, `Prop<T>`, `ObserverHandle`, with bridge `From` impls to/from V1 types. `build_context.rs` (139 lines) provides `BuildContext` with V2 APIs (`ctx.signal()`, `ctx.effect()`, `ctx.animated_signal()`, `ctx.self_id()`, `ctx.apply_self_handlers()`) and V1 compatibility APIs (marked as legacy). `event_handlers.rs` (86 lines) defines `EventHandlers` struct with optional closures for each handler type. `widget_builder.rs` (438 lines) defines `HandlerSet` and the `WidgetBuilder` blanket trait.
 
-**Unified Widget trait.** `widget.rs` (266 lines) has the six-method trait: `build(&mut self)`, `size_that_fits`, `place_children`, `paint`, `accessibility`, `children`. All 22 widget files in fern-widgets use `impl Widget for` with no composite distinction. All container primitives (HStack, VStack, Grid, Wrap, Expand, FixedSize, MinSize, MaxSize, Center, AspectRatio) implement `build()` for PendingChild resolution.
+**Unified Widget trait.** `widget.rs` (266 lines) has the six-method trait: `build(&mut self)`, `layout_response`, `place_children`, `paint`, `accessibility`, `children`. All 22 widget files in fern-widgets use `impl Widget for` with no composite distinction. All container primitives (HStack, VStack, Grid, Wrap, Expand, FixedSize, MinSize, MaxSize, Center, AspectRatio) implement `build()` for PendingChild resolution.
 
 **Signal<T> adoption.** Every interactive widget uses `Signal<T>`: Button, Toggle, Checkbox, RadioButton, Slider, Accordion, Badge, Card, Link, SegmentedControl, ScrollArea, ScrollBar, ProgressBar. ScrollArea uses `Signal<f32>` for all six scroll state fields (scroll_y, scroll_x, max_scroll_y, max_scroll_x, viewport_ratio_y, viewport_ratio_x). Toggle is fully Signal-ified (no `Rc<Cell<>>` remaining). ProgressBar uses `Prop<T>` for fill/track colors and `Signal<f32>` for indeterminate animation. The widget_catalog example uses exclusively `ctx.signal()` (14 calls, zero `ctx.state()`).
 

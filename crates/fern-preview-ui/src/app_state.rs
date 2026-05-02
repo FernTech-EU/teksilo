@@ -350,13 +350,13 @@ impl Widget for PreviewerRoot {
             .second_id(right_split_id);
         let outer_split_id = ctx.add(outer_split);
 
-        // Wrap the split in `Expand::vertical().fills_stack()` so the
+        // Wrap the split in `Expand::vertical()` so the
         // VStack gives it all remaining vertical space below the
         // toolbar — without this the split collapses to its minimum
         // and the whole previewer renders in <360 px height.
         let outer_split_expanded = ctx.add(
             Expand::vertical()
-                .fills_stack()
+                
                 .child_id(outer_split_id),
         );
 
@@ -368,13 +368,13 @@ impl Widget for PreviewerRoot {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 
     fn place_children(

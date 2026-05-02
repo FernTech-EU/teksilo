@@ -375,11 +375,11 @@ impl<T: 'static> Widget for BodyPane<T> {
         self.row_entries.iter().map(|(_, id)| *id).collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(400.0);
         let height = proposal.height.unwrap_or(300.0);
         self.viewport_height.set(height);
-        Size::new(width, height)
+        Size::new(width, height).into()
     }
 
     fn place_children(

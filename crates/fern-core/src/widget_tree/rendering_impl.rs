@@ -305,12 +305,12 @@ mod tests {
     struct ThemeAwareWidget;
 
     impl Widget for ThemeAwareWidget {
-        fn size_that_fits(
+        fn layout_response(
             &self,
             proposal: SizeProposal,
             _ctx: &LayoutContext,
-        ) -> fern_canvas::Size {
-            proposal.resolve(0.0, 0.0)
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
         }
 
         fn paint(

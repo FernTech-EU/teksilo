@@ -1160,14 +1160,14 @@ impl Widget for RichTextEditor {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let w = proposal.width.unwrap_or(200.0).max(0.0);
 
         // Greedy mode (default, behaviour unchanged): both knobs
         // unset → consume the proposal exactly as before.
         if self.min_lines.is_none() && self.max_lines.is_none() {
             let h = proposal.height.unwrap_or(100.0).max(0.0);
-            return Size::new(w, h);
+            return (Size::new(w, h)).into();
         }
 
         // Intrinsic mode: clamp content height to `[min_h, max_h]`
@@ -1188,7 +1188,7 @@ impl Widget for RichTextEditor {
             .map(|n| n as f32 * line_h)
             .unwrap_or(f32::INFINITY);
         let intrinsic_h = content_h.clamp(min_h, max_h);
-        Size::new(w, intrinsic_h.max(0.0))
+        Size::new(w, intrinsic_h.max(0.0)).into()
     }
 
     fn place_children(

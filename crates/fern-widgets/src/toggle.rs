@@ -190,7 +190,7 @@ impl Widget for Toggle {
         vec![] // leaf widget — no children
     }
 
-    fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.toggle;
         // Reserve a 24 dp hit-area row but draw the track centered within it.
         let row_h = style.track_height.max(24.0);
@@ -205,7 +205,7 @@ impl Widget for Toggle {
             Size::new(style.track_width + style.label_gap + label_w, row_h)
         } else {
             Size::new(style.track_width, row_h)
-        }
+        }.into()
     }
 
     fn place_children(

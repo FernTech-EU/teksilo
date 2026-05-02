@@ -104,10 +104,10 @@ impl Widget for MainRoot {
         vec![btn]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.child
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn children(&self) -> Vec<WidgetId> {

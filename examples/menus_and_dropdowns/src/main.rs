@@ -512,7 +512,7 @@ impl Widget for Root {
             VStack::new()
                 .add_child(menu_bar)
                 .add_child(toolbar)
-                .child(Expand::new().fills_stack().child_id(scroll))
+                .child(Expand::new().child_id(scroll))
                 .child(
                     StatusBar::new().child(
                         TextWidget::new_literal("Milestone 4 -- Menus & Dropdowns")
@@ -526,13 +526,13 @@ impl Widget for Root {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 }
 

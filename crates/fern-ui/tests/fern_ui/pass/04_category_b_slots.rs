@@ -16,8 +16,8 @@ impl Header {
 }
 
 impl Widget for Header {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 
@@ -33,8 +33,8 @@ impl Footer {
 }
 
 impl Widget for Footer {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 
@@ -73,8 +73,8 @@ impl CardLike {
 }
 
 impl Widget for CardLike {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 
@@ -90,8 +90,8 @@ impl Content {
 }
 
 impl Widget for Content {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 

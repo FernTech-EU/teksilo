@@ -13,12 +13,12 @@ use fern_canvas::RenderFrame;
 pub(crate) struct PlaceholderWidget;
 
 impl Widget for PlaceholderWidget {
-    fn size_that_fits(
+    fn layout_response(
         &self,
         _proposal: fern_canvas::SizeProposal,
         _ctx: &crate::widget::LayoutContext,
-    ) -> fern_canvas::Size {
-        fern_canvas::Size::ZERO
+    ) -> crate::widget::LayoutResponse {
+        fern_canvas::Size::ZERO.into()
     }
 }
 
@@ -120,8 +120,6 @@ pub struct WidgetNode {
     pub(crate) node_focusable: Option<bool>,
     /// Tab index override set via HandlerSet.
     pub(crate) node_tab_index: Option<i32>,
-    #[allow(dead_code)] // V2 API: spacer flag, set by Spacer during insertion
-    pub(crate) node_is_spacer: bool,
     /// Cursor override set via HandlerSet.
     pub(crate) node_cursor: Option<CursorIcon>,
     /// Whether build() returned children (for rebuild on environment change).
@@ -225,7 +223,6 @@ impl WidgetArena {
             external_handlers: EventHandlers::new(),
             node_focusable: None,
             node_tab_index: None,
-            node_is_spacer: false,
             node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),
@@ -278,7 +275,6 @@ impl WidgetArena {
             external_handlers: EventHandlers::new(),
             node_focusable: None,
             node_tab_index: None,
-            node_is_spacer: false,
             node_cursor: None,
             has_built_children: false,
             effect_handles: Vec::new(),

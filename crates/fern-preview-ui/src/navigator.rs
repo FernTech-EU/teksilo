@@ -33,7 +33,7 @@ pub fn build_navigator(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
     // header — otherwise the VStack collapses to header height.
     let scroll_expanded = ctx.add(
         Expand::vertical()
-            .fills_stack()
+            
             .child_id(scroll_id),
     );
 

@@ -437,7 +437,7 @@ impl Widget for PreviewCanvas {
         vec![self.child_id.unwrap()]
     }
 
-    fn size_that_fits(&self, p: SizeProposal, c: &LayoutContext) -> Size { /* delegate */ }
+    fn layout_response(&self, p: SizeProposal, c: &LayoutContext) -> Size { /* delegate */ }
 }
 ```
 

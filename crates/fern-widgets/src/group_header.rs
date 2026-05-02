@@ -11,7 +11,7 @@
 //! ```
 //!
 //! Trivially composed from existing primitives:
-//! `HStack → TextWidget + Expand(fills_stack, Divider)`.
+//! `HStack → TextWidget + Expand(Divider)`.
 
 use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
@@ -109,15 +109,9 @@ impl Widget for GroupHeader {
         let label_id = ctx.add(label);
 
         // Fill the remaining horizontal space with a horizontal Divider.
-        // `Expand::fills_stack()` marks the Expand as a spacer in its HStack
-        // parent so it absorbs leftover width, and fills the child (the
-        // Divider) to the full expanded bounds — the divider is asked for a
-        // Size with a concrete width proposal and reports `(width, thickness)`.
-        let rule_id = ctx.add(
-            Expand::horizontal()
-                .fills_stack()
-                .child(Divider::horizontal()),
-        );
+        // `Expand::horizontal()` defaults to flex=1, claiming leftover slack
+        // from the parent HStack and stretching the divider to its bounds.
+        let rule_id = ctx.add(Expand::horizontal().child(Divider::horizontal()));
 
         let row_id = ctx.add(
             HStack::new()
@@ -130,13 +124,13 @@ impl Widget for GroupHeader {
         vec![row_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 
     fn place_children(

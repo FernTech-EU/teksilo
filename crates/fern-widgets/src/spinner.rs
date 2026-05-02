@@ -142,8 +142,8 @@ impl Widget for Spinner {
         vec![]
     }
 
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        Size::new(self.size, self.size)
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        Size::new(self.size, self.size).into()
     }
 
     fn place_children(

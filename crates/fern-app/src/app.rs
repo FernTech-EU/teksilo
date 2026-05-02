@@ -1985,8 +1985,8 @@ mod tests {
                 Vec::new()
             }
 
-            fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-                proposal.resolve(0.0, 0.0)
+            fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
             }
         }
 
@@ -2108,14 +2108,14 @@ mod tests {
             vec![row]
         }
 
-        fn size_that_fits(
+        fn layout_response(
             &self,
             proposal: fern_canvas::SizeProposal,
             ctx: &fern_core::LayoutContext,
-        ) -> fern_canvas::Size {
+        ) -> fern_core::widget::LayoutResponse {
             self.root
                 .and_then(|id| ctx.child_size(id, proposal))
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
         }
 
         fn initial_focus_hint(&self) -> Option<WidgetId> {

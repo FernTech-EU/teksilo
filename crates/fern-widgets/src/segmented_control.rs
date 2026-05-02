@@ -83,12 +83,12 @@ impl Widget for SegmentButton {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // The parent SegmentedControl assigns exact bounds in
         // `place_children`; `size_that_fits` is only consulted when
         // the parent uses `child_size`, which we don't. Return
         // whatever the proposal resolves to.
-        proposal.resolve(0.0, 0.0)
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn paint(&self, _bounds: Rect, _canvas: &mut Canvas, _ctx: &PaintContext) {
@@ -333,7 +333,7 @@ impl Widget for SegmentedControl {
         self.segment_ids.clone()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let sc_style = ctx.theme.components.segmented_control;
         let width = proposal
@@ -342,7 +342,7 @@ impl Widget for SegmentedControl {
         // Reserve the focus-ring envelope on top and bottom.
         let visual_h =
             (FALLBACK_LINE_HEIGHT + sc_style.padding_vertical * 2.0).max(sc_style.height);
-        Size::new(width, visual_h + envelope * 2.0)
+        Size::new(width, visual_h + envelope * 2.0).into()
     }
 
     fn place_children(

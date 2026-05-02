@@ -925,11 +925,11 @@ impl<T: 'static> Widget for TreeView<T> {
         children
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(300.0);
         let height = proposal.height.unwrap_or(200.0);
         self.viewport_height.set(height);
-        Size::new(width, height)
+        Size::new(width, height).into()
     }
 
     fn place_children(
@@ -1029,8 +1029,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

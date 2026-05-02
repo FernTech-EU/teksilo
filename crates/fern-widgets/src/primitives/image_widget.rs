@@ -238,7 +238,7 @@ impl std::fmt::Debug for ImageWidget {
 }
 
 impl Widget for ImageWidget {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let natural_w = self.display_width.unwrap_or(self.width as f32);
         let natural_h = self.display_height.unwrap_or(self.height as f32);
         let ar = self.aspect_ratio();
@@ -255,7 +255,7 @@ impl Widget for ImageWidget {
             (None, Some(ph)) => Size::new(ph * ar, ph),
             // Unconstrained: natural size
             (None, None) => Size::new(natural_w, natural_h),
-        }
+        }.into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
@@ -322,7 +322,9 @@ mod tests {
         let theme = fern_tokens::Theme::light_default();
         let ctx = LayoutContext::for_testing(&theme);
         // Width constrained to 100, no height constraint → 100x50
-        let size = widget.size_that_fits(SizeProposal { width: Some(100.0), height: None }, &ctx);
+        let size = widget
+            .layout_response(SizeProposal { width: Some(100.0), height: None }, &ctx)
+            .size;
         assert!((size.width - 100.0).abs() < 0.5, "width: {}", size.width);
         assert!((size.height - 50.0).abs() < 0.5, "height: {}", size.height);
     }

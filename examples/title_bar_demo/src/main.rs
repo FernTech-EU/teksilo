@@ -83,7 +83,7 @@ fn main() {
             // space. Without this the body would collapse to its 16-px
             // text intrinsic height and leave a huge unused area below
             // the title bar.
-            let body_filling = Expand::new().fills_stack().child(body);
+            let body_filling = Expand::new().child(body);
 
             let title_bar_id = tree.add_boxed(title_bar);
             let body_id = tree.add(body_filling);

@@ -147,15 +147,15 @@ impl Widget for Slide {
         vec![child_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let Some(child_id) = self.child_id else {
-            return proposal.resolve(0.0, 0.0);
+            return (proposal.resolve(0.0, 0.0)).into();
         };
         let natural = ctx.child_size(child_id, proposal).unwrap_or(Size::ZERO);
         self.natural_size.set(natural);
         // Layout-stable: slot stays at child's natural size at all
         // progress values; only the child's *visual* offset moves.
-        natural
+        natural.into()
     }
 
     fn place_children(

@@ -89,8 +89,8 @@ mod tests {
     struct FixedWidget(f32, f32);
 
     impl Widget for FixedWidget {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

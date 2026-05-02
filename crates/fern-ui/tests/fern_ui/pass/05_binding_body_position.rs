@@ -17,8 +17,8 @@ impl Button {
 }
 
 impl Widget for Button {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 
@@ -49,8 +49,8 @@ impl Stack {
 }
 
 impl Widget for Stack {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 

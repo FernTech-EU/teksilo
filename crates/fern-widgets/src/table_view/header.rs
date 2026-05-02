@@ -434,13 +434,13 @@ impl Widget for HeaderCell {
         vec![padded]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 
     fn place_children(
@@ -503,8 +503,8 @@ impl SortIndicator {
 }
 
 impl Widget for SortIndicator {
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        Size::new(self.size, self.size)
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        Size::new(self.size, self.size).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -564,12 +564,12 @@ impl HeaderRow {
 }
 
 impl Widget for HeaderRow {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let width = proposal
             .width
             .unwrap_or_else(|| self.widths.borrow().iter().sum());
         let height = proposal.height.unwrap_or(32.0);
-        Size::new(width, height)
+        Size::new(width, height).into()
     }
 
     fn place_children(

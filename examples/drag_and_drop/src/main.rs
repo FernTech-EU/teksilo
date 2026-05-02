@@ -120,7 +120,7 @@ impl Root {
                 ),
             )
             .child(
-                Expand::vertical().fills_stack().child(
+                Expand::vertical().child(
                     ListView::new(songs, move |index, title, selected| {
                         let row_body = body.clone();
                         let bg = if selected {
@@ -189,7 +189,7 @@ impl Root {
                 ),
             )
             .child(
-                Expand::vertical().fills_stack().child(
+                Expand::vertical().child(
                     TreeView::new(folders, move |name, entry, selected| {
                         let row_body = body.clone();
                         let indent = entry.depth as f32 * 16.0;
@@ -240,13 +240,13 @@ impl Widget for Root {
                     .spacing(0.0)
                     .child(
                         Expand::horizontal()
-                            .fills_stack()
+                            
                             .child(self.build_songs_panel(&theme)),
                     )
                     .child(Divider::vertical())
                     .child(
                         Expand::horizontal()
-                            .fills_stack()
+                            
                             .child(self.build_folders_panel(&theme)),
                     ),
             ),
@@ -255,14 +255,14 @@ impl Widget for Root {
         vec![root]
     }
 
-    fn size_that_fits(
+    fn layout_response(
         &self,
         proposal: SizeProposal,
         ctx: &fern_ui::core::LayoutContext,
-    ) -> Size {
+    ) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(

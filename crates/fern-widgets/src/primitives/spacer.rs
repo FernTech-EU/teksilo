@@ -27,17 +27,21 @@ impl Default for Spacer {
 }
 
 impl Widget for Spacer {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        // Claim all offered space; fall back to min_length if unspecified.
-        proposal.resolve(self.min_length, self.min_length)
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        // Spacer wants `min_length` as a floor; the parent stack adds slack
+        // share on top via the flex weight below. Cross axis is 0.
+        fern_core::widget::LayoutResponse::flexible(
+            Size::new(self.min_length, self.min_length),
+            1.0,
+        )
     }
 
     fn paint(&self, _bounds: Rect, _canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {
         // Spacer is invisible.
-    }
-
-    fn is_spacer(&self) -> bool {
-        true
     }
 }
 
@@ -52,8 +56,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
@@ -114,7 +118,10 @@ mod tests {
     }
 
     #[test]
-    fn is_spacer_returns_true() {
-        assert!(Spacer::new().is_spacer());
+    fn flex_factor_is_one() {
+        let theme = fern_tokens::Theme::light_default();
+        let ctx = LayoutContext::for_testing(&theme);
+        let r = Spacer::new().layout_response(SizeProposal::unspecified(), &ctx);
+        assert_eq!(r.flex, 1.0);
     }
 }

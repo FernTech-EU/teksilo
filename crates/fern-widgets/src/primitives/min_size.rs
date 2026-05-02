@@ -85,7 +85,7 @@ impl Widget for MinSize {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let min_w = self.min_width.as_ref().map(|r| r.get());
         let min_h = self.min_height.as_ref().map(|r| r.get());
 
@@ -119,7 +119,7 @@ impl Widget for MinSize {
             Some(min) => child_size.height.max(min),
             None => child_size.height,
         };
-        Size::new(w, h)
+        Size::new(w, h).into()
     }
 
     fn place_children(
@@ -151,8 +151,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
@@ -217,12 +217,12 @@ mod tests {
     #[derive(Debug)]
     struct WrappingLeaf;
     impl Widget for WrappingLeaf {
-        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
             let content_width = 120.0_f32;
             let line_height = 20.0_f32;
             let w = proposal.width.unwrap_or(content_width).min(content_width);
             let lines = (content_width / w.max(1.0)).ceil();
-            Size::new(w, lines * line_height)
+            Size::new(w, lines * line_height).into()
         }
     }
 

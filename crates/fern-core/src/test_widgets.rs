@@ -56,8 +56,8 @@ impl Default for FillWidget {
 }
 
 impl Widget for FillWidget {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
@@ -104,8 +104,8 @@ impl StackWidget {
 }
 
 impl Widget for StackWidget {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn place_children(
@@ -148,10 +148,10 @@ impl InsetWidget {
 }
 
 impl Widget for InsetWidget {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> crate::widget::LayoutResponse {
         let total = self.inset * 2.0;
         let size = proposal.resolve(total, total);
-        Size::new(size.width.max(total), size.height.max(total))
+        Size::new(size.width.max(total), size.height.max(total)).into()
     }
 
     fn place_children(

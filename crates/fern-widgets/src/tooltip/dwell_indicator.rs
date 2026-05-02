@@ -66,8 +66,8 @@ impl Widget for DwellIndicator {
         Vec::new()
     }
 
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        Size::new(DWELL_INDICATOR_SIZE, DWELL_INDICATOR_SIZE)
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        Size::new(DWELL_INDICATOR_SIZE, DWELL_INDICATOR_SIZE).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {

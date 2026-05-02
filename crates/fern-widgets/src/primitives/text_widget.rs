@@ -374,7 +374,7 @@ impl Widget for TextWidget {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let text = self.text.get();
         let style = self.style.resolve(&ctx.theme.typography);
         let Some(backend) = self.text_backend.as_ref().or(ctx.text_backend) else {
@@ -386,7 +386,7 @@ impl Widget for TextWidget {
                 Some(max) => width.min(max),
                 None => width,
             };
-            return Size::new(w, height);
+            return (Size::new(w, height)).into();
         };
         let mut backend = backend.borrow_mut();
 
@@ -409,7 +409,7 @@ impl Widget for TextWidget {
             };
             let size = Size::new(layout.width, layout.height);
             *self.last_layout.borrow_mut() = Some(layout);
-            return size;
+            return (size).into();
         }
 
         match self.overflow {
@@ -436,7 +436,7 @@ impl Widget for TextWidget {
                 // first, then measure it unconstrained.
                 let Some(max_w) = max_width else {
                     let layout = backend.layout_single_line(&text, &style, None);
-                    return Size::new(layout.width, layout.height);
+                    return (Size::new(layout.width, layout.height)).into();
                 };
                 let truncated = fern_canvas::ellipsis::ellipsize(
                     &text,
@@ -448,7 +448,7 @@ impl Widget for TextWidget {
                 let layout = backend.layout_single_line(&truncated, &style, None);
                 Size::new(layout.width, layout.height)
             }
-        }
+        }.into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

@@ -871,18 +871,13 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             )
             .child_id(field_id),
         );
-        // `fills_stack()` is critical here: without it the HStack
-        // below treats Expand as a natural-sized child and queries
-        // `TextInputField::size_that_fits` with `width = None`, which
-        // falls back to the primitive's 200 dp default. That natural
-        // width then adds up with the divider + buttons, blows past
-        // the MaxSize cap, and the field paints off-screen. With
-        // `fills_stack`, Expand reports as a spacer and the HStack
-        // assigns it exactly the leftover width inside the
-        // constrained bounds.
-        let expanded_field_id = ctx.add(
-            Expand::horizontal().fills_stack().child_id(padded_field_id),
-        );
+        // `Expand::horizontal()` defaults to flex=1 with zero-basis: the
+        // wrapped field's natural 200 dp default does NOT enter the rigid
+        // pool, so the field gets exactly the leftover width inside the
+        // SpinBox's MaxSize-capped bounds. Without flex, the natural width
+        // would add up with the divider + buttons, blow past the cap, and
+        // paint off-screen.
+        let expanded_field_id = ctx.add(Expand::horizontal().child_id(padded_field_id));
 
         // ── Step button column ─────────────────────────────────────
         let buttons_id_opt = if self.button_layout != ButtonLayout::Hidden {
@@ -1128,7 +1123,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Narrow the parent's proposal by `pixel_cap` (if any)
         // before delegating. This enforces the `.width(...)` /
         // `.width_chars(...)` caps without wrapping the subtree
@@ -1146,7 +1141,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         };
         self.root_child_id
             .and_then(|id| ctx.child_size(id, effective_proposal))
-            .unwrap_or_else(|| effective_proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| effective_proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(

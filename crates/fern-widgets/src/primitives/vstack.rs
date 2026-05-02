@@ -74,51 +74,46 @@ impl Default for VStack {
 }
 
 impl Widget for VStack {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if self.child_ids.is_empty() {
-            return proposal.resolve(0.0, 0.0);
+            return proposal.resolve(0.0, 0.0).into();
         }
 
-        // Query each child's intrinsic size: height=None (ideal), width from
-        // proposal. We ask every child, *including spacers*: a plain `Spacer`
-        // reports `min_length` (0) at an unspecified height and so contributes
-        // nothing to the total, but `Expand::fills_stack` wrapping a content
-        // child reports that child's natural size — which must be included
-        // or the stack under-reports its own intrinsic height and the
-        // content spills over siblings.
+        // SwiftUI-shape negotiation: ask each child for its full
+        // LayoutResponse (wanted size + flex weight) in a single call.
         let child_proposal = SizeProposal {
             width: proposal.width,
             height: None,
         };
 
-        let mut total_height: f32 = 0.0;
+        let mut total_wanted: f32 = 0.0;
         let mut max_width: f32 = 0.0;
-
+        let mut total_flex: f32 = 0.0;
         for &child_id in &self.child_ids {
-            if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
-                total_height += child_size.height;
-                max_width = max_width.max(child_size.width);
+            if let Some(r) = ctx.child_layout_response(child_id, child_proposal) {
+                total_wanted += r.size.height;
+                max_width = max_width.max(r.size.width);
+                total_flex += r.flex;
             }
         }
 
         let n = self.child_ids.len();
         let spacing = self.spacing.get();
         let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        total_height += total_spacing;
+        let content_height = total_wanted + total_spacing;
 
         let width = proposal.width.unwrap_or(max_width);
-        // Primary axis: if the container has spacers AND the parent gave us
-        // a height, fill that height so spacers can stretch. Otherwise just
-        // report `total_height` (which, with the loop above, now includes
-        // content-carrying expands).
-        let has_spacers = self.child_ids.iter().any(|&id| ctx.child_is_spacer(id));
-        let height = if has_spacers {
-            proposal.height.unwrap_or(total_height)
+        let height = if total_flex > 0.0 {
+            proposal.height.unwrap_or(content_height)
         } else {
-            total_height
+            content_height
         };
 
-        Size::new(width, height)
+        Size::new(width, height).into()
     }
 
     fn place_children(
@@ -133,56 +128,51 @@ impl Widget for VStack {
             return;
         }
 
-        // Query each child's intrinsic size: offer the full container width
-        // so children containing spacers (e.g. HStack) can expand properly.
-        let intrinsic_proposal = SizeProposal {
+        // Single-query negotiation: ask each child for size + flex.
+        let wanted_proposal = SizeProposal {
             width: Some(bounds.width),
             height: None,
         };
 
-        let mut intrinsic_widths: Vec<f32> = Vec::with_capacity(n);
-        let mut intrinsic_heights: Vec<f32> = Vec::with_capacity(n);
-        let mut is_spacer: Vec<bool> = Vec::with_capacity(n);
-        let mut total_non_spacer_height: f32 = 0.0;
-        let mut spacer_count = 0;
+        let mut wanted_widths: Vec<f32> = Vec::with_capacity(n);
+        let mut wanted_heights: Vec<f32> = Vec::with_capacity(n);
+        let mut flex_factors: Vec<f32> = Vec::with_capacity(n);
+        let mut total_wanted: f32 = 0.0;
+        let mut total_flex: f32 = 0.0;
 
         for child in children.iter() {
-            let spacer = ctx.child_is_spacer(child.id);
-            is_spacer.push(spacer);
-            if spacer {
-                intrinsic_widths.push(bounds.width);
-                intrinsic_heights.push(0.0);
-                spacer_count += 1;
-            } else {
-                let size = ctx
-                    .child_size(child.id, intrinsic_proposal)
-                    .unwrap_or(Size::ZERO);
-                intrinsic_widths.push(size.width);
-                intrinsic_heights.push(size.height);
-                total_non_spacer_height += size.height;
-            }
+            let r = ctx
+                .child_layout_response(child.id, wanted_proposal)
+                .unwrap_or(fern_core::widget::LayoutResponse::ZERO);
+            wanted_widths.push(r.size.width);
+            wanted_heights.push(r.size.height);
+            flex_factors.push(r.flex);
+            total_wanted += r.size.height;
+            total_flex += r.flex;
         }
 
-        // Distribute remaining space among spacers
+        // Slack is leftover space after honoring every child's wanted size
+        // and inter-child spacing. Distributed proportionally to flex.
         let spacing = self.spacing.get();
         let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        let remaining = (bounds.height - total_non_spacer_height - total_spacing).max(0.0);
-        let spacer_height = if spacer_count > 0 {
-            remaining / spacer_count as f32
-        } else {
-            0.0
-        };
+        let slack = (bounds.height - total_wanted - total_spacing).max(0.0);
+
+        let mut final_heights: Vec<f32> = Vec::with_capacity(n);
+        for i in 0..n {
+            let bonus = if total_flex > 0.0 {
+                (flex_factors[i] / total_flex) * slack
+            } else {
+                0.0
+            };
+            final_heights.push(wanted_heights[i] + bonus);
+        }
 
         // Place children top-to-bottom with alignment on cross axis
         let rtl = ctx.is_rtl();
         let mut y = bounds.y;
         for (i, child) in children.iter_mut().enumerate() {
-            let w = intrinsic_widths[i];
-            let h = if is_spacer[i] {
-                spacer_height
-            } else {
-                intrinsic_heights[i]
-            };
+            let w = wanted_widths[i];
+            let h = final_heights[i];
 
             // Cross-axis alignment: check per-child override, then container default
             let halign = ctx
@@ -235,8 +225,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
@@ -256,16 +246,23 @@ mod tests {
     #[test]
     fn nested_vstack_with_content_carrying_expand_reports_full_height() {
         // Regression for the TabWidget "tabs half-visible behind switcher"
-        // bug. An inner VStack contains [leaf(32), Expand::fills_stack(leaf(200))].
-        // Without the fix, VStack reports height=32 because spacers were
-        // skipped in size_that_fits, so the outer VStack squashes the inner
-        // stack into a 32-dp slot and the content spills over siblings.
+        // bug. An inner VStack contains [leaf(32),
+        // Expand::vertical().respect_intrinsic().child(leaf(200))]. Without
+        // `respect_intrinsic`, the Expand wants 0 on the flex axis (clean
+        // ratios), and an unconstrained outer parent would squash the inner
+        // VStack to 32 dp and the wrapped content would overflow. Auto-basis
+        // makes the Expand report the child's natural size as a floor, so
+        // the inner stack honestly reports 232.
         use crate::primitives::expand::Expand;
 
         let mut tree = WidgetTree::new();
         let tab_bar = tree.add(FixedLeaf(120.0, 32.0));
         let content = tree.add(FixedLeaf(120.0, 200.0));
-        let filled = tree.add(Expand::vertical().fills_stack().child_id(content));
+        let filled = tree.add(
+            Expand::vertical()
+                .respect_intrinsic()
+                .child_id(content),
+        );
         let inner = tree.add(VStack::new().add_child(tab_bar).add_child(filled));
 
         // Outer VStack with another sibling underneath. Height is

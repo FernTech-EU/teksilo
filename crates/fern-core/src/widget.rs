@@ -23,6 +23,54 @@ impl std::fmt::Debug for PendingChild {
     }
 }
 
+/// A widget's reply to a parent's layout query.
+///
+/// Carries both the size the widget wants (a floor the parent must honor)
+/// and a flex weight that tells the parent how to distribute any leftover
+/// **slack** among siblings. `flex == 0.0` means rigid (no opinion on
+/// slack); `flex > 0.0` means the widget wants a share proportional to its
+/// weight.
+///
+/// Most widgets just return a `Size`; the `From<Size>` impl wraps it as a
+/// rigid response. Flex-bearing widgets (`Spacer`, `Expand`, …) construct
+/// `LayoutResponse { size, flex }` directly or use
+/// [`LayoutResponse::flexible`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LayoutResponse {
+    pub size: Size,
+    pub flex: f32,
+}
+
+impl LayoutResponse {
+    pub const ZERO: Self = Self {
+        size: Size::ZERO,
+        flex: 0.0,
+    };
+
+    pub fn rigid(size: Size) -> Self {
+        Self { size, flex: 0.0 }
+    }
+
+    pub fn flexible(size: Size, flex: f32) -> Self {
+        Self {
+            size,
+            flex: flex.max(0.0),
+        }
+    }
+
+    /// Builder: set the flex weight on an existing response.
+    pub fn with_flex(mut self, flex: f32) -> Self {
+        self.flex = flex.max(0.0);
+        self
+    }
+}
+
+impl From<Size> for LayoutResponse {
+    fn from(size: Size) -> Self {
+        Self { size, flex: 0.0 }
+    }
+}
+
 /// Context available during layout.
 pub struct LayoutContext<'a> {
     pub theme: &'a fern_tokens::Theme,
@@ -44,19 +92,30 @@ impl<'a> LayoutContext<'a> {
         }
     }
 
-    /// Query a child widget's preferred size for a given proposal.
+    /// Query a child widget's full layout response (wanted size + flex weight).
     /// Returns None if the child doesn't exist, is dormant, or the arena is not available.
-    pub fn child_size(
+    pub fn child_layout_response(
         &self,
         child_id: WidgetId,
         proposal: fern_canvas::SizeProposal,
-    ) -> Option<fern_canvas::Size> {
+    ) -> Option<LayoutResponse> {
         let arena = self.arena?;
         if !arena.is_active(child_id) {
             return None;
         }
         let node = arena.get(child_id)?;
-        Some(node.widget.size_that_fits(proposal, self))
+        Some(node.widget.layout_response(proposal, self))
+    }
+
+    /// Query a child widget's wanted size only (drops the flex weight).
+    /// Convenience over [`child_layout_response`](Self::child_layout_response).
+    pub fn child_size(
+        &self,
+        child_id: WidgetId,
+        proposal: fern_canvas::SizeProposal,
+    ) -> Option<fern_canvas::Size> {
+        self.child_layout_response(child_id, proposal)
+            .map(|r| r.size)
     }
 
     /// Query a child's per-widget alignment override, if any.
@@ -68,15 +127,6 @@ impl<'a> LayoutContext<'a> {
     /// Whether the layout direction is right-to-left.
     pub fn is_rtl(&self) -> bool {
         self.layout_direction == crate::environment::LayoutDirection::RightToLeft
-    }
-
-    /// Query whether a child widget is a spacer.
-    /// Returns false for dormant children.
-    pub fn child_is_spacer(&self, child_id: WidgetId) -> bool {
-        self.arena
-            .filter(|arena| arena.is_active(child_id))
-            .and_then(|arena| arena.get(child_id))
-            .is_some_and(|node| node.widget.is_spacer())
     }
 }
 
@@ -148,8 +198,16 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         Vec::new()
     }
 
-    /// Respond to the parent's size proposal with the size this widget wants.
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size;
+    /// Respond to the parent's size proposal with this widget's wanted size
+    /// and flex weight.
+    ///
+    /// Most widgets just return a `Size` (auto-converts via `From<Size>` to
+    /// a rigid response with `flex = 0`). Flex-bearing widgets (`Spacer`,
+    /// `Expand`) return a [`LayoutResponse`] with a non-zero flex.
+    ///
+    /// The parent honors `size` as a floor and distributes any leftover
+    /// **slack** among siblings proportional to `flex`.
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse;
 
     /// Position children within the allocated bounds.
     fn place_children(
@@ -159,7 +217,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         _children: &mut [WidgetPlacement],
         _ctx: &LayoutContext,
     ) {
-        // Leaf widgets have no children to place.
+        // Leaf widgets have no children to place..into()
     }
 
     /// Draw the widget's visual representation.
@@ -219,11 +277,6 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// satisfy the `'static` requirement.
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         None
-    }
-
-    /// Whether this widget is a flexible spacer (claims remaining space in stacks).
-    fn is_spacer(&self) -> bool {
-        false
     }
 
     /// Whether this widget clips its children to its bounds.

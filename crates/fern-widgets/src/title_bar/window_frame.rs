@@ -176,14 +176,14 @@ impl Widget for WindowFrame {
         ids
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Always claim every pixel offered. The frame is meant to wrap a
         // window's full client area — anything smaller would leave bare
         // space at the edges.
         Size::new(
             proposal.width.unwrap_or(0.0),
             proposal.height.unwrap_or(0.0),
-        )
+        ).into()
     }
 
     fn place_children(
@@ -331,11 +331,11 @@ mod tests {
     #[derive(Debug)]
     struct ContentLeaf;
     impl Widget for ContentLeaf {
-        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
             Size::new(
                 proposal.width.unwrap_or(0.0),
                 proposal.height.unwrap_or(0.0),
-            )
+            ).into()
         }
     }
 

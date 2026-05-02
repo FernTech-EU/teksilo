@@ -296,11 +296,11 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
         self.center_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(220.0),
-        )
+        ).into()
     }
 
     fn place_children(

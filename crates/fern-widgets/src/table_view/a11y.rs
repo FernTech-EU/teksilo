@@ -44,9 +44,9 @@ impl RowA11y {
 }
 
 impl Widget for RowA11y {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -122,9 +122,9 @@ impl CellA11y {
 }
 
 impl Widget for CellA11y {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -194,9 +194,9 @@ impl TreeRowA11y {
 }
 
 impl Widget for TreeRowA11y {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -259,9 +259,9 @@ impl ColumnHeaderA11y {
 }
 
 impl Widget for ColumnHeaderA11y {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(

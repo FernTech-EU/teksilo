@@ -239,13 +239,15 @@ impl WidgetTree {
                     arena: Some(&self.arena),
                 };
                 let node = self.arena.get(*content_id).unwrap();
-                node.widget.size_that_fits(
-                    SizeProposal {
-                        width: None,
-                        height: None,
-                    },
-                    &ctx,
-                )
+                node.widget
+                    .layout_response(
+                        SizeProposal {
+                            width: None,
+                            height: None,
+                        },
+                        &ctx,
+                    )
+                    .size
             };
             if let Some(overlay_id) = overlay_id {
                 self.overlay_manager
@@ -346,7 +348,7 @@ fn layout_widget_recursive(
             arena: Some(arena),
         };
         let node = arena.get(id).unwrap();
-        node.widget.size_that_fits(proposal, &ctx)
+        node.widget.layout_response(proposal, &ctx).size
     };
 
     let bounds = Rect::new(
@@ -433,14 +435,14 @@ mod tests {
     }
 
     impl Widget for ShrinkWrapContainer {
-        fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
             let child_size = ctx
                 .child_size(self.child, SizeProposal::unspecified())
                 .unwrap_or(Size::ZERO);
             Size::new(
                 child_size.width + self.inset * 2.0,
                 child_size.height + self.inset * 2.0,
-            )
+            ).into()
         }
 
         fn place_children(

@@ -65,7 +65,7 @@ impl Default for Divider {
 }
 
 impl Widget for Divider {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let thickness = self.resolved_thickness(ctx.theme);
         match self.orientation {
             Orientation::Horizontal => {
@@ -76,7 +76,7 @@ impl Widget for Divider {
                 let height = proposal.height.unwrap_or(0.0);
                 Size::new(thickness, height)
             }
-        }
+        }.into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

@@ -121,9 +121,9 @@ impl Widget for MasonryLayout {
         self.child_ids.clone()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         if self.child_ids.is_empty() {
-            return proposal.resolve(0.0, 0.0);
+            return (proposal.resolve(0.0, 0.0)).into();
         }
 
         let (total_width, col_width) = if let Some(w) = proposal.width {
@@ -156,7 +156,7 @@ impl Widget for MasonryLayout {
         }
 
         let total_height = col_heights.iter().copied().fold(0.0_f32, f32::max);
-        Size::new(total_width, total_height)
+        Size::new(total_width, total_height).into()
     }
 
     fn place_children(
@@ -224,8 +224,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

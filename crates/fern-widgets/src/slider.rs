@@ -329,7 +329,7 @@ impl Widget for Slider {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.slider;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         // Reserve the focus-ring envelope around the thumb plus a dp of slack
@@ -345,7 +345,7 @@ impl Widget for Slider {
                 let height = proposal.height.unwrap_or(200.0);
                 Size::new(cross, height)
             }
-        }
+        }.into()
     }
 
     fn place_children(

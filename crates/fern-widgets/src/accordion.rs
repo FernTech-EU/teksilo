@@ -36,10 +36,10 @@ impl AccordionRegion {
 }
 
 impl Widget for AccordionRegion {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.child
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -293,13 +293,13 @@ impl Widget for Accordion {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         if let Some(root) = self.root_child_id
             && let Some(size) = ctx.child_size(root, proposal)
         {
-            return size;
+            return (size).into();
         }
-        proposal.resolve(0.0, 0.0)
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn place_children(

@@ -195,9 +195,9 @@ impl Widget for SmoothSize {
         vec![child_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let Some(child_id) = self.child_id else {
-            return proposal.resolve(0.0, 0.0);
+            return (proposal.resolve(0.0, 0.0)).into();
         };
         let natural = ctx.child_size(child_id, proposal).unwrap_or(Size::ZERO);
         self.natural_size.set(natural);
@@ -206,7 +206,7 @@ impl Widget for SmoothSize {
             (self.width_anim.as_ref(), self.height_anim.as_ref())
         else {
             // build() hasn't run yet — fall back to natural size.
-            return natural;
+            return (natural).into();
         };
 
         let last = self.last_target.get();
@@ -245,7 +245,7 @@ impl Widget for SmoothSize {
             }
         }
 
-        Size::new(w_sig.get().max(0.0), h_sig.get().max(0.0))
+        Size::new(w_sig.get().max(0.0), h_sig.get().max(0.0)).into()
     }
 
     fn place_children(

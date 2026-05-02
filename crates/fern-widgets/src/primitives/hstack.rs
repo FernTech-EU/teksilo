@@ -75,49 +75,49 @@ impl Default for HStack {
 }
 
 impl Widget for HStack {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
         if self.child_ids.is_empty() {
-            return proposal.resolve(0.0, 0.0);
+            return proposal.resolve(0.0, 0.0).into();
         }
 
-        // Query each child's intrinsic size: width=None (ideal), height
-        // from proposal. See the matching comment in VStack — every child
-        // is queried including spacers, because `Expand::fills_stack`
-        // (which reports `is_spacer == true`) carries a content child
-        // whose natural size must be included in the stack's intrinsic
-        // width; a plain `Spacer` reports 0 anyway so this doesn't change
-        // the gap-spacer case.
+        // SwiftUI-shape negotiation: ask each child for its full
+        // LayoutResponse (wanted size + flex weight) in a single call.
         let child_proposal = SizeProposal {
             width: None,
             height: proposal.height,
         };
 
-        let mut total_width: f32 = 0.0;
+        let mut total_wanted: f32 = 0.0;
         let mut max_height: f32 = 0.0;
+        let mut total_flex: f32 = 0.0;
         for &child_id in &self.child_ids {
-            if let Some(child_size) = ctx.child_size(child_id, child_proposal) {
-                total_width += child_size.width;
-                max_height = max_height.max(child_size.height);
+            if let Some(r) = ctx.child_layout_response(child_id, child_proposal) {
+                total_wanted += r.size.width;
+                max_height = max_height.max(r.size.height);
+                total_flex += r.flex;
             }
         }
 
         let n = self.child_ids.len();
         let spacing = self.spacing.get();
         let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        total_width += total_spacing;
+        let content_width = total_wanted + total_spacing;
 
-        // Primary axis: if we have spacers AND the parent gave us a width,
-        // fill it so spacers can stretch. Otherwise just report
-        // `total_width` (which now includes content-carrying expands).
-        let has_spacers = self.child_ids.iter().any(|&id| ctx.child_is_spacer(id));
-        let width = if has_spacers {
-            proposal.width.unwrap_or(total_width)
+        // If any child is flex (wants slack), greedily claim the parent's
+        // offered width so slack exists to distribute. Otherwise honestly
+        // report content_width.
+        let width = if total_flex > 0.0 {
+            proposal.width.unwrap_or(content_width)
         } else {
-            total_width
+            content_width
         };
         let height = proposal.height.unwrap_or(max_height);
 
-        Size::new(width, height)
+        Size::new(width, height).into()
     }
 
     fn place_children(
@@ -132,45 +132,44 @@ impl Widget for HStack {
             return;
         }
 
-        // Query each child's intrinsic size: offer the full container height
-        // so children containing spacers (e.g. VStack) can expand properly.
-        let intrinsic_proposal = SizeProposal {
+        // Single-query negotiation: ask each child for size + flex.
+        let wanted_proposal = SizeProposal {
             width: None,
             height: Some(bounds.height),
         };
 
-        let mut intrinsic_widths: Vec<f32> = Vec::with_capacity(n);
-        let mut intrinsic_heights: Vec<f32> = Vec::with_capacity(n);
-        let mut is_spacer: Vec<bool> = Vec::with_capacity(n);
-        let mut total_non_spacer_width: f32 = 0.0;
-        let mut spacer_count = 0;
+        let mut wanted_widths: Vec<f32> = Vec::with_capacity(n);
+        let mut wanted_heights: Vec<f32> = Vec::with_capacity(n);
+        let mut flex_factors: Vec<f32> = Vec::with_capacity(n);
+        let mut total_wanted: f32 = 0.0;
+        let mut total_flex: f32 = 0.0;
 
         for child in children.iter() {
-            let spacer = ctx.child_is_spacer(child.id);
-            is_spacer.push(spacer);
-            if spacer {
-                intrinsic_widths.push(0.0);
-                intrinsic_heights.push(bounds.height);
-                spacer_count += 1;
-            } else {
-                let size = ctx
-                    .child_size(child.id, intrinsic_proposal)
-                    .unwrap_or(Size::ZERO);
-                intrinsic_widths.push(size.width);
-                intrinsic_heights.push(size.height);
-                total_non_spacer_width += size.width;
-            }
+            let r = ctx
+                .child_layout_response(child.id, wanted_proposal)
+                .unwrap_or(fern_core::widget::LayoutResponse::ZERO);
+            wanted_widths.push(r.size.width);
+            wanted_heights.push(r.size.height);
+            flex_factors.push(r.flex);
+            total_wanted += r.size.width;
+            total_flex += r.flex;
         }
 
-        // Distribute remaining space among spacers
+        // Slack is leftover space after honoring every child's wanted size
+        // and inter-child spacing. Distributed proportionally to flex.
         let spacing = self.spacing.get();
         let total_spacing = spacing * (n as f32 - 1.0).max(0.0);
-        let remaining = (bounds.width - total_non_spacer_width - total_spacing).max(0.0);
-        let spacer_width = if spacer_count > 0 {
-            remaining / spacer_count as f32
-        } else {
-            0.0
-        };
+        let slack = (bounds.width - total_wanted - total_spacing).max(0.0);
+
+        let mut final_widths: Vec<f32> = Vec::with_capacity(n);
+        for i in 0..n {
+            let bonus = if total_flex > 0.0 {
+                (flex_factors[i] / total_flex) * slack
+            } else {
+                0.0
+            };
+            final_widths.push(wanted_widths[i] + bonus);
+        }
 
         // Place children with alignment on cross axis.
         // In RTL mode, children are placed right-to-left.
@@ -178,12 +177,8 @@ impl Widget for HStack {
         if rtl {
             let mut x = bounds.right();
             for (i, child) in children.iter_mut().enumerate() {
-                let w = if is_spacer[i] {
-                    spacer_width
-                } else {
-                    intrinsic_widths[i]
-                };
-                let h = intrinsic_heights[i];
+                let w = final_widths[i];
+                let h = wanted_heights[i];
                 let valign = ctx
                     .child_alignment(child.id)
                     .map(|a| a.vertical)
@@ -198,12 +193,8 @@ impl Widget for HStack {
         } else {
             let mut x = bounds.x;
             for (i, child) in children.iter_mut().enumerate() {
-                let w = if is_spacer[i] {
-                    spacer_width
-                } else {
-                    intrinsic_widths[i]
-                };
-                let h = intrinsic_heights[i];
+                let w = final_widths[i];
+                let h = wanted_heights[i];
                 let valign = ctx
                     .child_alignment(child.id)
                     .map(|a| a.vertical)
@@ -257,8 +248,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
@@ -349,7 +340,9 @@ mod tests {
         // Without arena, size_that_fits falls back to proposal
         let theme = fern_tokens::Theme::light_default();
         let ctx = LayoutContext::for_testing(&theme);
-        let size = stack.size_that_fits(SizeProposal::exact(100.0, 50.0), &ctx);
+        let size = stack
+            .layout_response(SizeProposal::exact(100.0, 50.0), &ctx)
+            .size;
         // No children queryable without arena, so returns proposal
         assert_eq!(size.width, 100.0);
         assert_eq!(size.height, 50.0);
@@ -361,6 +354,101 @@ mod tests {
         let _stack = tree.add(HStack::new());
         tree.layout(SizeProposal::exact(200.0, 50.0));
         // No crash, no children to place
+    }
+
+    #[test]
+    fn flex_distributes_proportionally() {
+        // [Expand::flex(1), Expand::flex(2)] in 300px → 100, 200.
+        use crate::primitives::expand::Expand;
+        let mut tree = WidgetTree::new();
+        let a = tree.add(Expand::new().flex(1.0));
+        let b = tree.add(Expand::new().flex(2.0));
+        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+
+        assert!(
+            (tree.bounds(a).width - 100.0).abs() < 0.01,
+            "a.width={}",
+            tree.bounds(a).width
+        );
+        assert!(
+            (tree.bounds(b).width - 200.0).abs() < 0.01,
+            "b.width={}",
+            tree.bounds(b).width
+        );
+    }
+
+    #[test]
+    fn flex_with_rigid_floor() {
+        // [Fixed(100), Expand::flex(1), Expand::flex(2)] in 400 → 100, 100, 200.
+        use crate::primitives::expand::Expand;
+        let mut tree = WidgetTree::new();
+        let fixed = tree.add(FixedLeaf(100.0, 30.0));
+        let a = tree.add(Expand::new().flex(1.0));
+        let b = tree.add(Expand::new().flex(2.0));
+        let _stack = tree.add(
+            HStack::new()
+                .add_child(fixed)
+                .add_child(a)
+                .add_child(b),
+        );
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+
+        assert!((tree.bounds(fixed).width - 100.0).abs() < 0.01);
+        assert!((tree.bounds(a).width - 100.0).abs() < 0.01);
+        assert!((tree.bounds(b).width - 200.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn spacer_min_length_is_floor_plus_share() {
+        // [Spacer::min(20), Spacer::min(20)] in 100 → 50, 50
+        // (each gets 20 floor + 30 share).
+        use crate::primitives::spacer::Spacer;
+        let mut tree = WidgetTree::new();
+        let a = tree.add(Spacer::new().min_length(20.0));
+        let b = tree.add(Spacer::new().min_length(20.0));
+        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        assert!((tree.bounds(a).width - 50.0).abs() < 0.01);
+        assert!((tree.bounds(b).width - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn expand_default_is_flex_one_in_hstack() {
+        // `Expand::new()` (no .flex(n)) inside HStack claims all leftover.
+        // The footgun fix: previously `Expand::new()` collapsed without
+        // `.fills_stack()`.
+        use crate::primitives::expand::Expand;
+        let mut tree = WidgetTree::new();
+        let fixed = tree.add(FixedLeaf(80.0, 30.0));
+        let expand = tree.add(Expand::new());
+        let _stack = tree.add(HStack::new().add_child(fixed).add_child(expand));
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+
+        assert!((tree.bounds(fixed).width - 80.0).abs() < 0.01);
+        assert!((tree.bounds(expand).width - 120.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn respect_intrinsic_uses_child_natural_as_floor() {
+        // With respect_intrinsic, Expand::flex(1) wrapping a 60px child
+        // contributes 60 to the rigid pool, then gets the remaining slack.
+        // [Expand::flex(1).respect_intrinsic(child=60), Fixed(100)] in 300:
+        //   - Expand wants 60 (auto-basis), flex=1
+        //   - Fixed wants 100, no flex
+        //   - slack = 300 - 60 - 100 = 140, all to Expand
+        //   - Final: Expand = 60 + 140 = 200, Fixed = 100
+        use crate::primitives::expand::Expand;
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FixedLeaf(60.0, 20.0));
+        let expand = tree.add(Expand::new().respect_intrinsic().child_id(inner));
+        let fixed = tree.add(FixedLeaf(100.0, 30.0));
+        let _stack = tree.add(HStack::new().add_child(expand).add_child(fixed));
+        tree.layout(SizeProposal::exact(300.0, 50.0));
+
+        assert!((tree.bounds(expand).width - 200.0).abs() < 0.01);
+        assert!((tree.bounds(fixed).width - 100.0).abs() < 0.01);
     }
 
     #[test]

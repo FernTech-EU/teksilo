@@ -309,10 +309,10 @@ impl Widget for StepButton {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(self.width, self.height))
+            .unwrap_or_else(|| proposal.resolve(self.width, self.height)).into()
     }
 
     fn place_children(

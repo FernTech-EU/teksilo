@@ -49,7 +49,7 @@ impl TooltipWidget {
 }
 
 impl Widget for TooltipWidget {
-    fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.tooltip;
         let pad_h = style.padding_horizontal;
         let pad_v = style.padding_vertical;
@@ -62,7 +62,7 @@ impl Widget for TooltipWidget {
             let text_width = self.text.len() as f32 * 7.0;
             let text_height = ctx.theme.typography.small.size;
             Size::new(text_width + pad_h * 2.0, text_height + pad_v * 2.0)
-        }
+        }.into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

@@ -77,7 +77,7 @@ impl Widget for FixedSize {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Forward the bound width/height to the child as its size proposal so
         // wrap-aware children (TextWidget in TextOverflow::Wrap, ScrollArea,
         // etc.) can compute their intrinsic cross-axis size against the same
@@ -96,7 +96,7 @@ impl Widget for FixedSize {
 
         let w = bound_width.unwrap_or(child_size.width);
         let h = bound_height.unwrap_or(child_size.height);
-        Size::new(w, h)
+        Size::new(w, h).into()
     }
 
     fn place_children(
@@ -128,8 +128,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

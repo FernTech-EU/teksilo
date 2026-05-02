@@ -71,8 +71,8 @@ impl Widget for DragPreview {
         vec![panel_id]
     }
 
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        Size::new(self.width, self.height)
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        Size::new(self.width, self.height).into()
     }
 
     fn place_children(

@@ -227,11 +227,11 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         Size::new(
             proposal.width.unwrap_or(320.0),
             proposal.height.unwrap_or(200.0),
-        )
+        ).into()
     }
 
     fn place_children(

@@ -83,10 +83,10 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let series_vec = self.series.get();
         if series_vec.is_empty() {
-            return Size::ZERO;
+            return (Size::ZERO).into();
         }
         let style = &ctx.theme.components.chart;
         let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
@@ -120,7 +120,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
                     proposal.height.unwrap_or(total_h),
                 )
             }
-        }
+        }.into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

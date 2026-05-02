@@ -232,7 +232,7 @@ impl Widget for Root {
                             ))
                             // `.fill_width()` needs a flex parent to
                             // stretch into, so this row wraps the
-                            // SpinBox in `Expand::horizontal().fills_stack()`
+                            // SpinBox in `Expand::horizontal()`
                             // instead of the normal `row` helper.
                             .child(
                                 HStack::new()
@@ -244,7 +244,7 @@ impl Widget for Root {
                                         .width(220.0),
                                     )
                                     .child(
-                                        Expand::horizontal().fills_stack().child(
+                                        Expand::horizontal().child(
                                             SpinBox::new(
                                                 self.values.opacity.clone(),
                                                 0,
@@ -283,14 +283,14 @@ impl Widget for Root {
         vec![root]
     }
 
-    fn size_that_fits(
+    fn layout_response(
         &self,
         proposal: SizeProposal,
         ctx: &LayoutContext,
-    ) -> Size {
+    ) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 }
 
@@ -337,9 +337,9 @@ impl Widget for MinSizeForLabel {
         self.child_id = Some(id);
         vec![id]
     }
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         let Some(id) = self.child_id else {
-            return proposal.resolve(self.width, 0.0);
+            return (proposal.resolve(self.width, 0.0)).into();
         };
         let mut measured = ctx
             .child_size(id, proposal)
@@ -347,7 +347,7 @@ impl Widget for MinSizeForLabel {
         if measured.width < self.width {
             measured.width = self.width;
         }
-        measured
+        measured.into()
     }
     fn place_children(
         &self,

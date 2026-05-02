@@ -38,11 +38,11 @@ impl<L: Widget, R: Widget> Widget for FernBranch<L, R> {
         }
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
         match self {
-            FernBranch::L(w) => w.size_that_fits(proposal, ctx),
-            FernBranch::R(w) => w.size_that_fits(proposal, ctx),
-        }
+            FernBranch::L(w) => w.layout_response(proposal, ctx),
+            FernBranch::R(w) => w.layout_response(proposal, ctx),
+        }.into()
     }
 
     fn place_children(
@@ -93,13 +93,6 @@ impl<L: Widget, R: Widget> Widget for FernBranch<L, R> {
         }
     }
 
-    fn is_spacer(&self) -> bool {
-        match self {
-            FernBranch::L(w) => w.is_spacer(),
-            FernBranch::R(w) => w.is_spacer(),
-        }
-    }
-
     fn clips_children(&self) -> bool {
         match self {
             FernBranch::L(w) => w.clips_children(),
@@ -135,12 +128,12 @@ impl<A: Widget, B: Widget, C: Widget> Widget for FernBranch3<A, B, C> {
         }
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
         match self {
-            FernBranch3::A(w) => w.size_that_fits(proposal, ctx),
-            FernBranch3::B(w) => w.size_that_fits(proposal, ctx),
-            FernBranch3::C(w) => w.size_that_fits(proposal, ctx),
-        }
+            FernBranch3::A(w) => w.layout_response(proposal, ctx),
+            FernBranch3::B(w) => w.layout_response(proposal, ctx),
+            FernBranch3::C(w) => w.layout_response(proposal, ctx),
+        }.into()
     }
 
     fn place_children(
@@ -197,14 +190,6 @@ impl<A: Widget, B: Widget, C: Widget> Widget for FernBranch3<A, B, C> {
         }
     }
 
-    fn is_spacer(&self) -> bool {
-        match self {
-            FernBranch3::A(w) => w.is_spacer(),
-            FernBranch3::B(w) => w.is_spacer(),
-            FernBranch3::C(w) => w.is_spacer(),
-        }
-    }
-
     fn clips_children(&self) -> bool {
         match self {
             FernBranch3::A(w) => w.clips_children(),
@@ -244,13 +229,13 @@ impl<A: Widget, B: Widget, C: Widget, D: Widget> Widget for FernBranch4<A, B, C,
         }
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> crate::widget::LayoutResponse {
         match self {
-            FernBranch4::A(w) => w.size_that_fits(proposal, ctx),
-            FernBranch4::B(w) => w.size_that_fits(proposal, ctx),
-            FernBranch4::C(w) => w.size_that_fits(proposal, ctx),
-            FernBranch4::D(w) => w.size_that_fits(proposal, ctx),
-        }
+            FernBranch4::A(w) => w.layout_response(proposal, ctx),
+            FernBranch4::B(w) => w.layout_response(proposal, ctx),
+            FernBranch4::C(w) => w.layout_response(proposal, ctx),
+            FernBranch4::D(w) => w.layout_response(proposal, ctx),
+        }.into()
     }
 
     fn place_children(
@@ -310,15 +295,6 @@ impl<A: Widget, B: Widget, C: Widget, D: Widget> Widget for FernBranch4<A, B, C,
             FernBranch4::B(w) => w.children(),
             FernBranch4::C(w) => w.children(),
             FernBranch4::D(w) => w.children(),
-        }
-    }
-
-    fn is_spacer(&self) -> bool {
-        match self {
-            FernBranch4::A(w) => w.is_spacer(),
-            FernBranch4::B(w) => w.is_spacer(),
-            FernBranch4::C(w) => w.is_spacer(),
-            FernBranch4::D(w) => w.is_spacer(),
         }
     }
 

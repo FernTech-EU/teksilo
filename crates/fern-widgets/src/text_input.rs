@@ -291,7 +291,7 @@ impl Widget for TextInput {
                 .color(TextRole::Secondary)
                 .a11y_hidden();
             let ph_id = ctx.add(
-                Expand::new().fills_stack().child(
+                Expand::new().child(
                     Padding::new(
                         field_style.padding_vertical, 0.0,
                         field_style.padding_vertical, 0.0,
@@ -420,10 +420,10 @@ impl Widget for TextInput {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(

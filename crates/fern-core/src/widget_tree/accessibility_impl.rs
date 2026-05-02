@@ -339,12 +339,12 @@ mod tests {
     struct ActionWidget;
 
     impl Widget for ActionWidget {
-        fn size_that_fits(
+        fn layout_response(
             &self,
             proposal: SizeProposal,
             _ctx: &LayoutContext,
-        ) -> fern_canvas::Size {
-            proposal.resolve(0.0, 0.0)
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
         }
 
         fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -359,12 +359,12 @@ mod tests {
     struct ClickableWidget;
 
     impl Widget for ClickableWidget {
-        fn size_that_fits(
+        fn layout_response(
             &self,
             proposal: SizeProposal,
             _ctx: &LayoutContext,
-        ) -> fern_canvas::Size {
-            proposal.resolve(0.0, 0.0)
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
         }
 
         fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
@@ -528,12 +528,12 @@ mod tests {
         struct ValueWidget;
 
         impl Widget for ValueWidget {
-            fn size_that_fits(
+            fn layout_response(
                 &self,
                 proposal: SizeProposal,
                 _ctx: &LayoutContext,
-            ) -> fern_canvas::Size {
-                proposal.resolve(0.0, 0.0)
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
             }
 
             fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {

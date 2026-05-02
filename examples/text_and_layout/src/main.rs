@@ -158,13 +158,13 @@ impl Widget for RootContent {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 }
 
@@ -217,8 +217,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
@@ -242,7 +242,7 @@ mod tests {
         let theme = Theme::light_default();
         let w = TextWidget::new_literal("Hello World").style(theme.typography.body.clone());
         let ctx = LayoutContext::for_testing(&theme);
-        let size = w.size_that_fits(SizeProposal::unspecified(), &ctx);
+        let size = w.layout_response(SizeProposal::unspecified(), &ctx).size;
         assert!((size.width - 88.0).abs() < 0.01);
         assert!(size.height > 0.0);
     }

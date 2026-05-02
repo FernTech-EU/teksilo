@@ -274,14 +274,14 @@ impl Widget for TitleBar {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Always claim the full width offered by the parent and the
         // configured fixed height. Ignoring the child HStack's natural
         // width is intentional: when the title bar is laid out by a
         // shrink-to-fit container the inner HStack would otherwise
         // collapse to the sum of its non-spacer children, leaving the
         // drag region with zero pixels.
-        Size::new(proposal.width.unwrap_or(0.0), self.height)
+        Size::new(proposal.width.unwrap_or(0.0), self.height).into()
     }
 
     fn place_children(

@@ -617,10 +617,10 @@ impl Widget for TextInputField {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let w = proposal.width.unwrap_or(200.0).max(0.0);
         let h = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(0.0);
-        Size::new(w, h)
+        Size::new(w, h).into()
     }
 
     fn place_children(

@@ -241,7 +241,7 @@ impl Widget for BreadcrumbSegment {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.breadcrumb;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let width = proposal.width.unwrap_or_else(|| self.estimate_width(ctx));
@@ -254,7 +254,7 @@ impl Widget for BreadcrumbSegment {
             FALLBACK_LINE_HEIGHT
         };
         let visual_h = text_height.max(style.item_height);
-        Size::new(width, visual_h + envelope * 2.0)
+        Size::new(width, visual_h + envelope * 2.0).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -354,9 +354,9 @@ impl Widget for BreadcrumbSegment {
 struct BreadcrumbSeparator;
 
 impl Widget for BreadcrumbSeparator {
-    fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.breadcrumb;
-        Size::new(style.separator_gap * 3.0, style.item_height)
+        Size::new(style.separator_gap * 3.0, style.item_height).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -502,10 +502,10 @@ impl Widget for Breadcrumb {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(

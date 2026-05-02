@@ -551,7 +551,7 @@ impl Widget for Root {
         vec![root]
     }
 
-    // size_that_fits delegates to root child…
+    // layout_response delegates to root child…
 }
 ```
 

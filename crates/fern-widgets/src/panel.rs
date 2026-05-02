@@ -145,7 +145,7 @@ impl Widget for Panel {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let pad = self.resolve_padding(ctx.theme);
         let inset = pad * 2.0;
 
@@ -155,11 +155,11 @@ impl Widget for Panel {
                 height: proposal.height.map(|h| (h - inset).max(0.0)),
             };
             if let Some(child_size) = ctx.child_size(child_id, inner_proposal) {
-                return Size::new(child_size.width + inset, child_size.height + inset);
+                return (Size::new(child_size.width + inset, child_size.height + inset)).into();
             }
         }
 
-        proposal.resolve(inset, inset)
+        proposal.resolve(inset, inset).into()
     }
 
     fn place_children(
@@ -226,8 +226,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

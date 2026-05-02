@@ -440,7 +440,7 @@ impl Widget for SplitHandle {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.orientation {
             Orientation::Horizontal => Size::new(
                 self.divider_thickness,
@@ -450,7 +450,7 @@ impl Widget for SplitHandle {
                 proposal.width.unwrap_or(self.divider_thickness),
                 self.divider_thickness,
             ),
-        }
+        }.into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -718,7 +718,7 @@ impl Widget for SplitView {
         self.children()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = self.resolved_style(ctx.theme);
         // Query children with an unbounded primary axis to get their intrinsic
         // size — used only as a fallback when the parent doesn't constrain us.
@@ -766,7 +766,7 @@ impl Widget for SplitView {
                     proposal.height.unwrap_or(intrinsic_height).max(min_height),
                 )
             }
-        }
+        }.into()
     }
 
     fn place_children(
@@ -843,9 +843,9 @@ struct ClipPane {
 }
 
 impl Widget for ClipPane {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         ctx.child_size(self.child_id, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -885,8 +885,8 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

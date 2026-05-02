@@ -43,8 +43,8 @@ impl std::fmt::Debug for FilterIndicator {
 }
 
 impl Widget for FilterIndicator {
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        Size::new(self.size, self.size)
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        Size::new(self.size, self.size).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
@@ -192,10 +192,10 @@ mod rich {
             vec![input_id]
         }
 
-        fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
             self.root_child_id
                 .and_then(|id| ctx.child_size(id, proposal))
-                .unwrap_or_else(|| proposal.resolve(280.0, 32.0))
+                .unwrap_or_else(|| proposal.resolve(280.0, 32.0)).into()
         }
 
         fn place_children(

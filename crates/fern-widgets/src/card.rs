@@ -147,7 +147,7 @@ impl Widget for Card {
             .collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let pad = self.resolve_padding(ctx.theme);
         let inset = pad * 2.0;
         let inner_width = proposal.width.map(|w| (w - inset).max(0.0));
@@ -174,7 +174,7 @@ impl Widget for Card {
 
         let width = proposal.width.unwrap_or(inset);
         let height = total_height + inset;
-        Size::new(width, height)
+        Size::new(width, height).into()
     }
 
     fn place_children(
@@ -245,8 +245,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

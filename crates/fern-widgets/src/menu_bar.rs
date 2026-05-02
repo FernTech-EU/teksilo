@@ -250,13 +250,13 @@ impl Widget for MenuBarTrigger {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 28.0)),
             None => proposal.resolve(60.0, 28.0),
-        }
+        }.into()
     }
 
     fn place_children(
@@ -357,10 +357,10 @@ impl Widget for MenuOverlayHost {
         vec![id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.inner_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -483,7 +483,7 @@ impl Widget for MenuBar {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 let content_proposal = SizeProposal {
@@ -496,7 +496,7 @@ impl Widget for MenuBar {
                 Size::new(proposal.width.unwrap_or(size.width), size.height)
             }
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 
     fn place_children(

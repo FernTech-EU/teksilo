@@ -504,7 +504,7 @@ impl Widget for ScrollArea {
         ids
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Use preferred_size if set; otherwise use content width but a fixed
         // default height.  A scroll area's HEIGHT should come from its parent,
         // not from its content — otherwise it grows to fit everything and no
@@ -517,7 +517,7 @@ impl Widget for ScrollArea {
             let w = if cs.width > 0.0 { cs.width } else { 300.0 };
             (w, 200.0)
         };
-        proposal.resolve(default_w, default_h)
+        proposal.resolve(default_w, default_h).into()
     }
 
     fn place_children(
@@ -782,11 +782,11 @@ mod tests {
     }
 
     impl Widget for TallLeaf {
-        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
             Size::new(
                 proposal.width.unwrap_or(self.width),
                 proposal.height.unwrap_or(self.height),
-            )
+            ).into()
         }
     }
 
@@ -978,8 +978,8 @@ mod tests {
         }
     }
     impl Widget for WideLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.width, self.height)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.width, self.height).into()
         }
     }
 
@@ -1463,10 +1463,10 @@ mod tests {
             self.scroll_id = Some(id);
             vec![id]
         }
-        fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
             self.scroll_id
                 .and_then(|id| ctx.child_size(id, proposal))
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
         }
         fn place_children(
             &self,

@@ -76,8 +76,8 @@ impl Widget for AspectRatio {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        self.constrain(proposal.width, proposal.height)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        self.constrain(proposal.width, proposal.height).into()
     }
 
     fn place_children(
@@ -112,8 +112,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
@@ -170,13 +170,15 @@ mod tests {
         let ar = AspectRatio::new(4.0 / 3.0);
         let theme = fern_tokens::Theme::light_default();
         let ctx = LayoutContext::for_testing(&theme);
-        let size = ar.size_that_fits(
-            SizeProposal {
-                width: Some(400.0),
-                height: None,
-            },
-            &ctx,
-        );
+        let size = ar
+            .layout_response(
+                SizeProposal {
+                    width: Some(400.0),
+                    height: None,
+                },
+                &ctx,
+            )
+            .size;
         assert!((size.width - 400.0).abs() < 0.01);
         assert!((size.height - 300.0).abs() < 0.01); // 400 / (4/3)
     }

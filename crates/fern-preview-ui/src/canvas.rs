@@ -133,7 +133,7 @@ impl Widget for PreviewCanvas {
         // reports 0×0 intrinsic, which would propagate up and starve
         // the layout otherwise.
         let stage_expanded = ctx.add(
-            Expand::new().fills_stack().child_id(stage_id),
+            Expand::new().child_id(stage_id),
         );
 
         // Footer strip: thin divider + size readout.
@@ -150,7 +150,7 @@ impl Widget for PreviewCanvas {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let size = match self.root_id {
             Some(id) => ctx.child_size(id, proposal).unwrap_or_else(|| {
                 proposal.resolve(0.0, 0.0)
@@ -162,7 +162,7 @@ impl Widget for PreviewCanvas {
         if self.size_readout.get() != formatted {
             self.size_readout.set(formatted);
         }
-        size
+        size.into()
     }
 
     fn place_children(

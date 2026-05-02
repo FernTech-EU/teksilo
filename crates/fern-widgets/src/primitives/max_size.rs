@@ -86,7 +86,7 @@ impl Widget for MaxSize {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let max_w = self.max_width.as_ref().map(|r| r.get());
         let max_h = self.max_height.as_ref().map(|r| r.get());
 
@@ -116,7 +116,7 @@ impl Widget for MaxSize {
             Some(max) => child_size.height.min(max),
             None => child_size.height,
         };
-        Size::new(w, h)
+        Size::new(w, h).into()
     }
 
     fn place_children(
@@ -156,8 +156,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

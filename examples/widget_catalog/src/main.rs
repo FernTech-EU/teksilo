@@ -348,7 +348,7 @@ impl Widget for WidgetCatalog {
         );
         let left_padded = ctx.add(Padding::uniform(24.0).child_id(left_content_col));
         let left_scroll = ctx.add(ScrollArea::from_id(left_padded));
-        let left_expand = ctx.add(Expand::new().fills_stack().child_id(left_scroll));
+        let left_expand = ctx.add(Expand::new().child_id(left_scroll));
         let left_root = ctx.add(
             VStack::new()
                 .add_child(left_toolbar)
@@ -430,7 +430,6 @@ impl Widget for WidgetCatalog {
                     }
                 }
                 Expand {
-                    fills_stack
                     child_id: right_scroll
                 }
                 StatusBar {
@@ -456,13 +455,13 @@ impl Widget for WidgetCatalog {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         match self.root_child_id {
             Some(id) => ctx
                 .child_size(id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 }
 

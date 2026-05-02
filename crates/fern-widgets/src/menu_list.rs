@@ -29,9 +29,9 @@ enum MenuEntry {
 pub struct MenuSeparator;
 
 impl Widget for MenuSeparator {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let width = proposal.width.unwrap_or(0.0);
-        Size::new(width, ctx.theme.components.menu.separator_height)
+        Size::new(width, ctx.theme.components.menu.separator_height).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {
@@ -97,7 +97,7 @@ impl Widget for KeyboardHighlightWrapper {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Forward the proposal to the wrapped MenuItem directly rather than
         // going through the internal ZStack. ZStack::size_that_fits always
         // queries its children with `unspecified` (correct for most uses,
@@ -112,7 +112,7 @@ impl Widget for KeyboardHighlightWrapper {
         // Respect the proposed width when offered, so VStack::place_children
         // places this wrapper at the full popup width.
         let width = proposal.width.unwrap_or(item_size.width);
-        Size::new(width, item_size.height)
+        Size::new(width, item_size.height).into()
     }
 
     fn place_children(
@@ -381,7 +381,7 @@ impl Widget for MenuList {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 // Menu lists size to their content, with a minimum width
@@ -391,7 +391,7 @@ impl Widget for MenuList {
                 Size::new(child_size.width.max(120.0), child_size.height)
             }
             None => proposal.resolve(120.0, 0.0),
-        }
+        }.into()
     }
 
     fn place_children(

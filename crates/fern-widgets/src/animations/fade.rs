@@ -124,14 +124,14 @@ impl Widget for Fade {
         vec![child_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Layout-transparent: report the child's natural size at all
         // opacity values. A faded-out tooltip still occupies its
         // future visible footprint so `Fade` doesn't drive layout
         // jitter when used purely as a visual modulator.
         self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(

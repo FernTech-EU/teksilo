@@ -48,8 +48,8 @@ impl Image {
 }
 
 impl Widget for Image {
-    fn size_that_fits(&self, p: SizeProposal, _: &LayoutContext) -> Size {
-        p.resolve(0.0, 0.0)
+    fn layout_response(&self, p: SizeProposal, _: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        p.resolve(0.0, 0.0).into()
     }
 }
 

@@ -3201,12 +3201,12 @@ mod tests {
                 self.built.set(true);
                 Vec::new()
             }
-            fn size_that_fits(
+            fn layout_response(
                 &self,
                 _: SizeProposal,
                 _: &crate::widget::LayoutContext,
-            ) -> fern_canvas::Size {
-                fern_canvas::Size::new(50.0, 20.0)
+            ) -> crate::widget::LayoutResponse {
+                fern_canvas::Size::new(50.0, 20.0).into()
             }
         }
 
@@ -4103,12 +4103,12 @@ mod tests {
                 );
                 Vec::new()
             }
-            fn size_that_fits(
+            fn layout_response(
                 &self,
                 proposal: SizeProposal,
                 _ctx: &crate::widget::LayoutContext,
-            ) -> fern_canvas::Size {
-                proposal.resolve(10.0, 10.0)
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(10.0, 10.0).into()
             }
         }
 

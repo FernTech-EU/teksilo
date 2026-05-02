@@ -116,14 +116,20 @@ impl Widget for DragRegion {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        // Spacer-style: report zero intrinsic width so the parent HStack
-        // gives us all the leftover horizontal space via `place_children`
-        // (`HStack::place_children` allocates `(bounds.width - non_spacer)
-        // / spacer_count` to each child returning `is_spacer == true`).
-        // Height comes from the proposal so we match the title bar's
-        // configured height even when the child reports zero.
-        Size::new(0.0, proposal.height.unwrap_or(0.0))
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        // Wanted width is 0 — we want pure slack from the parent HStack.
+        // Height matches the title bar's configured height so we paint
+        // through even when the inner child reports zero.
+        // `flex = 1.0` claims the leftover horizontal space; without it the
+        // drag region collapses and there is nothing to drag.
+        fern_core::widget::LayoutResponse::flexible(
+            Size::new(0.0, proposal.height.unwrap_or(0.0)),
+            1.0,
+        )
     }
 
     fn place_children(
@@ -148,13 +154,6 @@ impl Widget for DragRegion {
         let mut regions = HitRegions::new();
         regions.drag.push(bounds);
         self.host.update_hit_regions(&regions);
-    }
-
-    fn is_spacer(&self) -> bool {
-        // Tells the parent `HStack` to stretch us across all leftover
-        // horizontal space. Critical: without this override the drag
-        // region collapses to zero width and there is nothing to drag.
-        true
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

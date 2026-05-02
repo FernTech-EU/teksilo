@@ -375,7 +375,7 @@ impl Widget for RichTooltipWidget {
         vec![padded]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Clamp proposal width to the tooltip max_width token so long
         // bodies wrap rather than stretching the surface.
         let max_w = ctx.theme.components.tooltip.max_width;
@@ -390,7 +390,7 @@ impl Widget for RichTooltipWidget {
         };
         self.root_child_id
             .and_then(|id| ctx.child_size(id, clamped))
-            .unwrap_or_else(|| Size::new(0.0, 0.0))
+            .unwrap_or_else(|| Size::new(0.0, 0.0)).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

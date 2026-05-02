@@ -167,10 +167,10 @@ impl Widget for ControlButton {
         vec![sized]
     }
 
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Always exactly the configured cell. Returning the proposal here
         // would let an HStack stretch us to the leftover width.
-        Size::new(self.width, self.height)
+        Size::new(self.width, self.height).into()
     }
 
     fn place_children(
@@ -344,13 +344,13 @@ impl Widget for WindowControls {
         );
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(root_id) => ctx
                 .child_size(root_id, proposal)
                 .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
             None => proposal.resolve(0.0, 0.0),
-        }
+        }.into()
     }
 
     fn place_children(

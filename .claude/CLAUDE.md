@@ -115,21 +115,20 @@ One trait for all widgets — leaf, container, composite, hybrid:
 ```rust
 pub trait Widget: std::fmt::Debug + 'static {
     fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> { vec![] }
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size; // required
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse; // required
     fn place_children(&self, _bounds: Rect, _proposal: SizeProposal, _children: &mut [WidgetPlacement], _ctx: &LayoutContext) {}
     fn paint(&self, _bounds: Rect, _canvas: &mut Canvas, _ctx: &PaintContext) {}
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
     fn children(&self) -> Vec<WidgetId> { vec![] }
-    fn is_spacer(&self) -> bool { false }       // Spacer, Expand
     fn clips_children(&self) -> bool { false }   // ScrollArea, MaxSize
 }
 ```
 
-`size_that_fits` is the only required method. All others have sensible defaults.
+`layout_response` is the only required method. It returns a `LayoutResponse { size: Size, flex: f32 }` carrying both the size the widget wants and a flex weight for slack distribution. Most widgets just return a `Size` (auto-converts via `From<Size>` to `flex = 0`); flex-bearing widgets like `Spacer` and `Expand` return `LayoutResponse::flexible(size, flex)`.
 
-- **Leaf** (TextWidget, RectWidget): `size_that_fits` + `paint`
-- **Container** (VStack, HStack, ZStack): `size_that_fits` + `place_children` + `children`
-- **Composing** (Button, Checkbox): `build` + `size_that_fits` (delegates to child) + `accessibility`
+- **Leaf** (TextWidget, RectWidget): `layout_response` + `paint`
+- **Container** (VStack, HStack, ZStack): `layout_response` + `place_children` + `children`
+- **Composing** (Button, Checkbox): `build` + `layout_response` (delegates to child) + `accessibility`
 - **Hybrid** (Card, ScrollArea): `build` + `paint`
 
 ### Widget insertion
@@ -141,7 +140,17 @@ pub trait Widget: std::fmt::Debug + 'static {
 
 ## Layout Model
 
-SwiftUI-style two-phase negotiation: parent proposes size → child responds with actual size → parent places child. All in logical pixels. `Leading`/`Trailing` instead of Left/Right (RTL-aware).
+SwiftUI-style two-phase negotiation: parent proposes size → child responds with wanted size → parent places child. All in logical pixels. `Leading`/`Trailing` instead of Left/Right (RTL-aware).
+
+**Flex distribution in stacks.** `HStack`/`VStack` honor every child's wanted size as a floor, then distribute any **slack** (`bounds − Σ wanted − spacing`) proportional to the child's `flex` weight (carried in the same `LayoutResponse` query — no separate trait method). Default flex is `0.0` (rigid). `Spacer` and `Expand` return `1.0`. Ratios are first-class:
+
+```rust
+HStack::new()
+    .child(Expand::new().flex(1).child(panel_a))   // 1/3 of slack
+    .child(Expand::new().flex(2).child(panel_b))   // 2/3 of slack
+```
+
+`Expand::new()` defaults to `flex(1)` and stretches its child to its bounds. Default basis is **zero** (CSS flex-basis: 0) so ratios divide bounds cleanly. Call `.respect_intrinsic()` for **auto** basis, where the wrapped child's natural size acts as a floor and slack is added on top — useful in unconstrained parents (e.g. an outer `VStack` with `height = None`) where zero-basis would let the child overflow. Use `.align_child(Alignment::X)` to opt out of fill and align the child at its natural size. `Center::new()` is sugar for `Expand::new().align_child(CENTER)`.
 
 **Layout primitives** (in [crates/fern-widgets/src/primitives/](crates/fern-widgets/src/primitives/)): `HStack`, `VStack`, `ZStack`, `Grid`, `Wrap`, `Padding`, `Spacer`, `Center`, `Expand`, `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `Switcher`, `Divider`, `FocusRing`, `IconWidget`, `ImageWidget`, `MasonryLayout`, `FormLayout`
 
@@ -571,10 +580,11 @@ impl Widget for MyWidget {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 }
 

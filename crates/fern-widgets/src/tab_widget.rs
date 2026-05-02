@@ -122,10 +122,10 @@ impl Widget for TabPane {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -339,7 +339,7 @@ impl Widget for TabHeader {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let tab_style = ctx.theme.components.tab;
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         // Reserve the focus-ring envelope around the visual tab.
@@ -354,7 +354,7 @@ impl Widget for TabHeader {
         } else {
             (FALLBACK_LINE_HEIGHT + HEADER_PADDING_V * 2.0 + envelope * 2.0).max(min_height)
         };
-        Size::new(width, proposal.height.unwrap_or(height))
+        Size::new(width, proposal.height.unwrap_or(height)).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -557,7 +557,7 @@ impl Widget for TabBar {
 
         let mut row = HStack::new().spacing(8.0).child(
             Expand::horizontal()
-                .fills_stack()
+                
                 .child_id(headers_scroll_id),
         );
 
@@ -570,10 +570,10 @@ impl Widget for TabBar {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -762,7 +762,7 @@ impl Widget for TabWidget {
         // Content sits flush under the tab bar — the TabBar paints its own
         // 1 dp bottom separator, and selected tabs overpaint that with
         // their 3 dp underline. No inset, no extra divider.
-        let content_id = ctx.add(Expand::vertical().fills_stack().child_id(switcher_id));
+        let content_id = ctx.add(Expand::vertical().child_id(switcher_id));
 
         let root_id = ctx.add(
             VStack::new()
@@ -774,10 +774,10 @@ impl Widget for TabWidget {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
     }
 
     fn place_children(
@@ -818,8 +818,8 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
@@ -834,8 +834,8 @@ mod tests {
             Vec::new()
         }
 
-        fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            proposal.resolve(120.0, 48.0)
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            proposal.resolve(120.0, 48.0).into()
         }
     }
 

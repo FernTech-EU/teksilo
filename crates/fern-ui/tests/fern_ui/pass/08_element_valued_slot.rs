@@ -22,8 +22,8 @@ impl Page {
 }
 
 impl Widget for Page {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 
@@ -46,8 +46,8 @@ impl TabLike {
 }
 
 impl Widget for TabLike {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        proposal.resolve(0.0, 0.0)
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
     }
 }
 

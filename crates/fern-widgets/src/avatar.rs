@@ -851,10 +851,10 @@ impl Widget for Avatar {
         children
     }
 
-    fn size_that_fits(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.avatar;
         let side = self.size.resolve(&style);
-        Size::new(side, side)
+        Size::new(side, side).into()
     }
 
     fn place_children(
@@ -1177,9 +1177,9 @@ impl InitialsLeaf {
 }
 
 impl Widget for InitialsLeaf {
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Always fill the proposal — the parent Avatar drives sizing.
-        proposal.resolve(0.0, 0.0)
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -1375,7 +1375,7 @@ mod tests {
         let widget = Avatar::with_initials_literal("JD");
         let theme = Theme::light_default();
         let ctx = LayoutContext::for_testing(&theme);
-        let s = widget.size_that_fits(SizeProposal::exact(400.0, 400.0), &ctx);
+        let s = widget.layout_response(SizeProposal::exact(400.0, 400.0), &ctx).size;
         assert!((s.width - 32.0).abs() < 0.01);
         assert!((s.height - 32.0).abs() < 0.01);
     }

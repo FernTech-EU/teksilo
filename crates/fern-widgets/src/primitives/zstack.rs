@@ -65,7 +65,7 @@ impl Default for ZStack {
 }
 
 impl Widget for ZStack {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Ask each child for its intrinsic size (unspecified proposal) and take the max.
         // This ensures background elements (like RectWidget, which returns 0x0 for
         // unspecified) don't inflate the stack's size.
@@ -83,7 +83,7 @@ impl Widget for ZStack {
             Size::new(max_w, max_h)
         } else {
             proposal.resolve(0.0, 0.0)
-        }
+        }.into()
     }
 
     fn place_children(
@@ -149,8 +149,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

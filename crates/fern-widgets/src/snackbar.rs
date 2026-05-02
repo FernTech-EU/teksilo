@@ -85,7 +85,7 @@ impl Widget for SnackbarSurface {
         self.children()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let style = ctx.theme.components.notification;
         let inset_x = style.padding_horizontal * 2.0;
         let inset_y = style.padding_vertical * 2.0;
@@ -102,7 +102,7 @@ impl Widget for SnackbarSurface {
             })
             .unwrap_or_else(|| proposal.resolve(220.0, 44.0));
 
-        Size::new(content.width + inset_x, content.height + inset_y)
+        Size::new(content.width + inset_x, content.height + inset_y).into()
     }
 
     fn place_children(
@@ -415,10 +415,10 @@ impl Widget for Snackbar {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(140.0, 40.0))
+            .unwrap_or_else(|| proposal.resolve(140.0, 40.0)).into()
     }
 
     fn place_children(
@@ -458,8 +458,8 @@ mod tests {
     struct FixedLeaf(f32, f32);
 
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 

@@ -879,10 +879,10 @@ impl Widget for MessageBox {
         vec![root]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(280.0, 160.0))
+            .unwrap_or_else(|| proposal.resolve(280.0, 160.0)).into()
     }
 
     fn place_children(

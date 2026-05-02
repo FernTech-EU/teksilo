@@ -462,7 +462,7 @@ impl Widget for ScrollBar {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.orientation {
             ScrollBarOrientation::Vertical => {
                 Size::new(self.thickness, proposal.height.unwrap_or(100.0))
@@ -470,7 +470,7 @@ impl Widget for ScrollBar {
             ScrollBarOrientation::Horizontal => {
                 Size::new(proposal.width.unwrap_or(100.0), self.thickness)
             }
-        }
+        }.into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, ctx: &PaintContext) {

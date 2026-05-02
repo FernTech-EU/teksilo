@@ -697,7 +697,7 @@ impl Widget for MenuItem {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         match self.root_child_id {
             Some(id) => {
                 let size = ctx
@@ -716,7 +716,7 @@ impl Widget for MenuItem {
                 Size::new(width, size.height.max(32.0))
             }
             None => proposal.resolve(120.0, 32.0),
-        }
+        }.into()
     }
 
     fn place_children(

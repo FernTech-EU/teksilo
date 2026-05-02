@@ -11,8 +11,8 @@ use crate::primitives::{
 #[derive(Debug)]
 struct FixedLeaf(f32, f32);
 impl Widget for FixedLeaf {
-    fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-        Size::new(self.0, self.1)
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+        Size::new(self.0, self.1).into()
     }
 }
 
@@ -138,7 +138,10 @@ fn min_size_wrapping_small_widget() {
 
 #[test]
 fn expand_horizontal_in_hstack() {
-    // [fixed] [expand fills remaining]
+    // [fixed(60)] [Expand::horizontal()] in 300px stack:
+    //   - fixed wants 60, no flex
+    //   - Expand wants 0 on horizontal (default zero-basis), flex=1
+    //   - slack = 300 - 60 = 240, all to Expand
     let mut tree = WidgetTree::new();
     let fixed = tree.add(FixedLeaf(60.0, 30.0));
     let inner = tree.add(FixedLeaf(40.0, 20.0));
@@ -146,20 +149,13 @@ fn expand_horizontal_in_hstack() {
     let _stack = tree.add(HStack::new().add_child(fixed).add_child(expanded));
     tree.layout(SizeProposal::exact(300.0, 50.0));
 
-    // fixed: 60px wide
     assert!((tree.bounds(fixed).width - 60.0).abs() < 0.01);
-    // expanded: reports child height (20), but width from proposal
-    // In HStack, expanded is queried with width=None → it returns child's width (40)
-    // Actually, Expand::horizontal size_that_fits with width=None returns proposal.width
-    // which is None, so it returns child_size.width=40. Hmm.
-    // Wait - in HStack place_children, children are queried with width=None.
-    // Expand::horizontal.size_that_fits(width=None) → child_size.width = 40
-    // So expanded gets 40px wide, not filling remaining space.
-    // This is correct behavior - Expand needs to be a Spacer-like element to fill space.
-    // The correct pattern for "fill remaining" is to use Spacer, not Expand.
-    // Expand works correctly when it's the root or in a ZStack.
     let eb = tree.bounds(expanded);
-    assert!((eb.width - 40.0).abs() < 0.01);
+    assert!(
+        (eb.width - 240.0).abs() < 0.01,
+        "Expand should claim leftover slack, got width={}",
+        eb.width
+    );
 }
 
 #[test]

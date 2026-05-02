@@ -116,10 +116,10 @@ impl Widget for RectWidget {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // RectWidget has no intrinsic content — it accepts whatever space is offered.
         // With an exact proposal it fills the space; with unspecified it reports 0x0.
-        proposal.resolve(0.0, 0.0)
+        proposal.resolve(0.0, 0.0).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {

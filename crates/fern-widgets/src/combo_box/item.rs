@@ -143,7 +143,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         vec![root_id]
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let min_h = ctx.theme.components.menu.item_height;
         // Forward the width proposal so each row stretches the full panel
         // width instead of collapsing to its text's intrinsic width —
@@ -156,7 +156,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
             .unwrap_or_else(|| proposal.resolve(0.0, min_h));
         let width = proposal.width.unwrap_or(child_size.width.max(120.0));
         let height = child_size.height.max(min_h);
-        Size::new(width, height)
+        Size::new(width, height).into()
     }
 
     fn place_children(

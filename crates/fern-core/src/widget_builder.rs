@@ -545,12 +545,12 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.build(ctx)
     }
 
-    fn size_that_fits(
+    fn layout_response(
         &self,
         proposal: fern_canvas::SizeProposal,
         ctx: &crate::widget::LayoutContext,
-    ) -> fern_canvas::Size {
-        self.widget.size_that_fits(proposal, ctx)
+    ) -> crate::widget::LayoutResponse {
+        self.widget.layout_response(proposal, ctx).into()
     }
 
     fn place_children(
@@ -582,10 +582,6 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         self.widget.as_any()
-    }
-
-    fn is_spacer(&self) -> bool {
-        self.widget.is_spacer()
     }
 
     fn clips_children(&self) -> bool {
@@ -624,12 +620,12 @@ mod tests {
             vec![child]
         }
 
-        fn size_that_fits(
+        fn layout_response(
             &self,
             proposal: fern_canvas::SizeProposal,
             _ctx: &crate::widget::LayoutContext,
-        ) -> fern_canvas::Size {
-            proposal.resolve(120.0, 40.0)
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(120.0, 40.0).into()
         }
 
         fn place_children(

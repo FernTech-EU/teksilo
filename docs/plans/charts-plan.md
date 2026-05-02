@@ -419,7 +419,7 @@ Themes can override `chart_palette` to brand-match. Per-chart override via
 
 ## 5. Layout and paint strategy
 
-### `size_that_fits`
+### `layout_response`
 
 Charts are **proposal-driven**. Fill whatever the parent proposes; fallback
 `Size::new(320.0, 200.0)` when unbounded. Same pattern as `ProgressBar`,
@@ -676,7 +676,7 @@ for the shape).
 - Palette wraps for series count > palette length.
 
 **`bar_chart.rs`:**
-- `size_that_fits` returns proposal verbatim.
+- `layout_response` returns proposal verbatim.
 - N data points → N bar decorations rendered.
 - Mutating bound `Signal<Vec<ChartSeries>>` dirties tree at `Relayout`.
 - Horizontal orientation swaps bar dimensions.

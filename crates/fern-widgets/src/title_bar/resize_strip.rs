@@ -126,7 +126,7 @@ impl Widget for ResizeStrip {
         Vec::new()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         // Horizontal strips: claim full proposed width, fixed height.
         // Vertical strips: claim full proposed height, fixed width.
         let w = if self.width > 0.0 {
@@ -139,7 +139,7 @@ impl Widget for ResizeStrip {
         } else {
             proposal.height.unwrap_or(0.0)
         };
-        Size::new(w, h)
+        Size::new(w, h).into()
     }
 
     fn place_children(
@@ -155,12 +155,4 @@ impl Widget for ResizeStrip {
         // Invisible.
     }
 
-    fn is_spacer(&self) -> bool {
-        // For a horizontal (top/bottom) strip in a VStack, claiming
-        // "spacer on the cross axis" doesn't matter — VStack uses the
-        // child's reported width directly. We mark non-spacer so the
-        // strip's reported width equals the parent's offered width and
-        // it stretches naturally across the row/column.
-        false
-    }
 }

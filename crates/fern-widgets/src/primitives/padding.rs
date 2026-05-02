@@ -104,7 +104,7 @@ impl Widget for Padding {
         self.child_id.into_iter().collect()
     }
 
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         let h_inset = self.horizontal_inset();
         let v_inset = self.vertical_inset();
 
@@ -115,12 +115,12 @@ impl Widget for Padding {
                 height: proposal.height.map(|h| (h - v_inset).max(0.0)),
             };
             if let Some(child_size) = ctx.child_size(child_id, inner_proposal) {
-                return Size::new(child_size.width + h_inset, child_size.height + v_inset);
+                return (Size::new(child_size.width + h_inset, child_size.height + v_inset)).into();
             }
         }
 
         let size = proposal.resolve(h_inset, v_inset);
-        Size::new(size.width.max(h_inset), size.height.max(v_inset))
+        Size::new(size.width.max(h_inset), size.height.max(v_inset)).into()
     }
 
     fn place_children(

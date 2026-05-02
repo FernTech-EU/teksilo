@@ -308,7 +308,7 @@ Override with the standalone widget if you need something different.
 
 ## 7. Layout — proposal-driven plot-area carve
 
-All three charts are **proposal-driven**: `size_that_fits` returns
+All three charts are **proposal-driven**: `layout_response` returns
 whatever the parent proposes, with a 320×200 (line / bar) or 320×220
 (pie) fallback when the proposal is unbounded. This matches
 [`ProgressBar`](../crates/fern-widgets/src/progress_bar.rs) and

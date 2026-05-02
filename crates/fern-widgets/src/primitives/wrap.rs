@@ -107,9 +107,9 @@ impl Default for Wrap {
 }
 
 impl Widget for Wrap {
-    fn size_that_fits(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
         if self.child_ids.is_empty() {
-            return proposal.resolve(0.0, 0.0);
+            return (proposal.resolve(0.0, 0.0)).into();
         }
 
         let available_width = proposal.width.unwrap_or(f32::MAX);
@@ -143,7 +143,7 @@ impl Widget for Wrap {
         line_count += 1;
 
         let total_line_gap = line_spacing * (line_count as f32 - 1.0).max(0.0);
-        Size::new(max_line_width, total_height + total_line_gap)
+        Size::new(max_line_width, total_height + total_line_gap).into()
     }
 
     fn place_children(
@@ -225,8 +225,8 @@ mod tests {
     #[derive(Debug)]
     struct FixedLeaf(f32, f32);
     impl Widget for FixedLeaf {
-        fn size_that_fits(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> Size {
-            Size::new(self.0, self.1)
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+            Size::new(self.0, self.1).into()
         }
     }
 
