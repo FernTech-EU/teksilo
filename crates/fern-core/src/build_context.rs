@@ -248,6 +248,20 @@ impl<'a> BuildContext<'a> {
         self.tree.set_transform(id, transform);
     }
 
+    /// Bind a Gaussian-equivalent blur radius to a widget. The render
+    /// walker emits `BeginBlurredSubtree { bounds, radius }` before
+    /// painting the widget's subtree and `EndBlurredSubtree` afterwards;
+    /// the renderer redirects drawing into an intermediate texture, runs
+    /// a dual-Kawase blur chain at the requested radius, and composites
+    /// the blurred result back into the parent pass at the widget's
+    /// bounds. Bound at `RepaintOnly`: blur radius changes never trigger
+    /// relayout. Sub-perceptual radii (< 0.5) skip the Begin/End pair
+    /// entirely so animated enable/disable patterns have zero per-frame
+    /// cost when fully off. Used by the `Blur` wrapper.
+    pub fn set_blur(&mut self, id: WidgetId, radius: impl Into<crate::signal::Prop<f32>>) {
+        self.tree.set_blur(id, radius);
+    }
+
     /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.enabled_when(id, state);

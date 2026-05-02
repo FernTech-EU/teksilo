@@ -188,9 +188,34 @@ fn paint_widget_cached(
         // Sub-perceptual: skip the subtree entirely. Saves a draw
         // pass when a `Fade` is fully transparent (e.g. just-dismissed
         // tooltip waiting for cleanup) and prevents 0.0 from emitting
-        // a spurious blend pass on the GPU.
+        // a spurious blend pass on the GPU. We do this before any blur
+        // scope emit so the Begin/End pair stays balanced.
         return;
     }
+
+    // Optional blur scope is the OUTERMOST per-node scope: it captures
+    // the entire rendered subtree (including any opacity/transform scopes
+    // we're about to push) into an intermediate texture, blurs it via
+    // the renderer's dual-Kawase chain, and composites the blurred
+    // result back at the widget's bounds. Sub-perceptual radii skip the
+    // pair entirely so animated 0→target_radius patterns have zero cost
+    // when fully off.
+    let node = arena.get(id).unwrap();
+    let blur_radius = node
+        .blur_prop
+        .as_ref()
+        .map(|p| p.get())
+        .filter(|r| *r >= 0.5);
+    let blur_bounds = arena.bounds(id);
+    if let Some(r) = blur_radius {
+        frame
+            .draw_order
+            .push(fern_canvas::DrawCommand::BeginBlurredSubtree {
+                bounds: blur_bounds,
+                radius: r,
+            });
+    }
+
     if let Some(o) = opacity {
         frame
             .draw_order
@@ -315,6 +340,12 @@ fn paint_widget_cached(
         frame
             .draw_order
             .push(fern_canvas::DrawCommand::RestoreOpacity);
+    }
+
+    if blur_radius.is_some() {
+        frame
+            .draw_order
+            .push(fern_canvas::DrawCommand::EndBlurredSubtree);
     }
 }
 
@@ -662,6 +693,109 @@ mod tests {
         assert!(so < pt, "opacity must open before transform: {so} < {pt}");
         assert!(pt < popt, "transform push must precede its pop");
         assert!(popt < ro, "transform must close before opacity: {popt} < {ro}");
+    }
+
+    #[test]
+    fn blur_prop_emits_begin_end_pair_around_subtree() {
+        // A widget with blur_prop = Some(Static(8.0)) wraps both its
+        // own paint AND its children's paint inside a BeginBlurredSubtree
+        // / EndBlurredSubtree pair, mirroring the opacity and transform
+        // patterns. The Begin command carries the widget's bounds and
+        // the requested radius.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        let _child = tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.set_blur(parent, 8.0_f32);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let mut begin_count = 0;
+        let mut end_count = 0;
+        let mut begin_radius = None;
+        for cmd in &frame.draw_order {
+            match cmd {
+                fern_canvas::DrawCommand::BeginBlurredSubtree { radius, .. } => {
+                    begin_count += 1;
+                    begin_radius = Some(*radius);
+                }
+                fern_canvas::DrawCommand::EndBlurredSubtree => end_count += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(begin_count, 1, "draw_order = {:?}", frame.draw_order);
+        assert_eq!(end_count, 1);
+        assert_eq!(begin_radius, Some(8.0));
+    }
+
+    #[test]
+    fn blur_prop_subperceptual_radius_skipped() {
+        // blur_prop = Some(Static(0.2)) is below the 0.5 threshold —
+        // the walker emits no Begin/End pair so animated 0→target
+        // patterns have zero per-frame cost when fully off.
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.set_blur(parent, 0.2_f32);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        for cmd in &frame.draw_order {
+            assert!(
+                !matches!(
+                    cmd,
+                    fern_canvas::DrawCommand::BeginBlurredSubtree { .. }
+                        | fern_canvas::DrawCommand::EndBlurredSubtree
+                ),
+                "sub-perceptual blur must not emit Begin/End"
+            );
+        }
+    }
+
+    #[test]
+    fn blur_scope_is_outermost_when_combined_with_opacity_and_transform() {
+        // Architectural pin: blur is the OUTERMOST scope so it captures
+        // the already-faded, already-transformed subtree into the
+        // intermediate texture.  Order on enter:
+        //   Begin → SetOpacity → PushTransform → ...paint...
+        // Order on exit (LIFO):
+        //   PopTransform → RestoreOpacity → End
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let parent = tree.add(StackWidget::new());
+        tree.add_child(parent, FillWidget::new().background(Color::RED));
+        tree.set_blur(parent, 8.0_f32);
+        tree.set_opacity(parent, 0.7_f32);
+        tree.set_transform(parent, fern_canvas::Transform2D::scale(2.0, 2.0));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let mut begin_idx = None;
+        let mut set_opacity_idx = None;
+        let mut push_transform_idx = None;
+        let mut pop_transform_idx = None;
+        let mut restore_opacity_idx = None;
+        let mut end_idx = None;
+        for (i, cmd) in frame.draw_order.iter().enumerate() {
+            match cmd {
+                fern_canvas::DrawCommand::BeginBlurredSubtree { .. } => begin_idx = Some(i),
+                fern_canvas::DrawCommand::SetOpacity(_) => set_opacity_idx = Some(i),
+                fern_canvas::DrawCommand::PushTransform(_) => push_transform_idx = Some(i),
+                fern_canvas::DrawCommand::PopTransform => pop_transform_idx = Some(i),
+                fern_canvas::DrawCommand::RestoreOpacity => restore_opacity_idx = Some(i),
+                fern_canvas::DrawCommand::EndBlurredSubtree => end_idx = Some(i),
+                _ => {}
+            }
+        }
+        let bg = begin_idx.expect("Begin emitted");
+        let so = set_opacity_idx.expect("SetOpacity emitted");
+        let pt = push_transform_idx.expect("PushTransform emitted");
+        let popt = pop_transform_idx.expect("PopTransform emitted");
+        let ro = restore_opacity_idx.expect("RestoreOpacity emitted");
+        let en = end_idx.expect("End emitted");
+        assert!(bg < so, "blur opens before opacity");
+        assert!(so < pt, "opacity opens before transform");
+        assert!(pt < popt);
+        assert!(popt < ro, "transform closes before opacity");
+        assert!(ro < en, "opacity closes before blur");
     }
 
     #[test]

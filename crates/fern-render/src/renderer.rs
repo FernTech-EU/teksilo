@@ -1051,6 +1051,17 @@ impl Renderer {
                             .copied()
                             .unwrap_or(Transform2D::IDENTITY);
                     }
+                    fern_canvas::DrawCommand::BeginBlurredSubtree { .. }
+                    | fern_canvas::DrawCommand::EndBlurredSubtree => {
+                        // Engine scaffolding only at this stage — the
+                        // walker emits a balanced Begin/End pair around
+                        // a blur scope, but the offscreen-render +
+                        // dual-Kawase pipeline that consumes it is a
+                        // follow-up. For now the subtree renders inline
+                        // (unblurred) into the main pass; the Begin/End
+                        // commands are recognized so the debug stack
+                        // validator stays balanced.
+                    }
                 }
             }
 

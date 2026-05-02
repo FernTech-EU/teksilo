@@ -113,6 +113,7 @@ impl RenderFrame {
         let mut opacity_depth: i32 = 0;
         let mut blend_depth: i32 = 0;
         let mut transform_depth: i32 = 0;
+        let mut blur_depth: i32 = 0;
         for (i, cmd) in self.draw_order.iter().enumerate() {
             match cmd {
                 DrawCommand::SetClip(_) => clip_depth += 1,
@@ -147,6 +148,14 @@ impl RenderFrame {
                         "RenderFrame: PopTransform without matching PushTransform at draw_order[{i}]"
                     );
                 }
+                DrawCommand::BeginBlurredSubtree { .. } => blur_depth += 1,
+                DrawCommand::EndBlurredSubtree => {
+                    blur_depth -= 1;
+                    debug_assert!(
+                        blur_depth >= 0,
+                        "RenderFrame: EndBlurredSubtree without matching BeginBlurredSubtree at draw_order[{i}]"
+                    );
+                }
                 _ => {}
             }
         }
@@ -165,6 +174,10 @@ impl RenderFrame {
         debug_assert!(
             transform_depth == 0,
             "RenderFrame: {transform_depth} unmatched PushTransform(s) without PopTransform"
+        );
+        debug_assert!(
+            blur_depth == 0,
+            "RenderFrame: {blur_depth} unmatched BeginBlurredSubtree(s) without EndBlurredSubtree"
         );
     }
 }
@@ -386,6 +399,16 @@ pub enum DrawCommand {
     /// top as the new `current_transform`. Must be paired with a
     /// [`DrawCommand::PushTransform`].
     PopTransform,
+    /// Begin an offscreen-rendered, blurred subtree. The renderer
+    /// allocates an intermediate texture sized to `bounds` (in logical
+    /// pixels), redirects subsequent drawing into it, and on the
+    /// matching [`DrawCommand::EndBlurredSubtree`] runs a dual-Kawase
+    /// blur chain at the requested `radius` and composites the result
+    /// back into the parent pass at `bounds`.
+    BeginBlurredSubtree { bounds: Rect, radius: f32 },
+    /// End an offscreen-rendered, blurred subtree. Must be paired with
+    /// a preceding [`DrawCommand::BeginBlurredSubtree`].
+    EndBlurredSubtree,
 }
 
 /// An animated quad to render with one of the shader-animation pipelines.

@@ -1849,6 +1849,28 @@ impl WidgetTree {
         }
     }
 
+    /// Bind a Gaussian-equivalent blur radius to a widget. The render
+    /// walker emits `BeginBlurredSubtree { bounds, radius }` before
+    /// painting the widget's subtree and `EndBlurredSubtree` afterwards;
+    /// the renderer redirects drawing into an intermediate texture, runs
+    /// a dual-Kawase blur chain at the requested radius, and composites
+    /// the blurred result back into the parent pass. Bound at `Repaint`
+    /// level: blur radius changes never trigger relayout. Sub-perceptual
+    /// radii (< 0.5) skip the Begin/End pair entirely so animated
+    /// enable/disable patterns have zero per-frame cost when fully off.
+    /// Pass any `Prop<f32>` or `Signal<f32>` source.
+    pub fn set_blur(&mut self, id: WidgetId, radius: impl Into<crate::signal::Prop<f32>>) {
+        let prop = radius.into();
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        if let Some(node) = self.arena.get_mut(id) {
+            node.blur_prop = Some(prop);
+        }
+    }
+
     /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
     /// When false, the widget and its entire subtree ignore all events but remain
     /// visible. Focus traversal skips disabled subtrees and AccessKit marks their

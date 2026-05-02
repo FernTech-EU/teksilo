@@ -103,6 +103,19 @@ pub struct WidgetNode {
     /// widget). The `Scale` and `Rotate` widgets set this on their own
     /// node.
     pub(crate) transform_prop: Option<Prop<fern_canvas::Transform2D>>,
+    /// Optional Gaussian-equivalent blur radius applied to this widget's
+    /// entire subtree during paint. The render walker emits
+    /// `BeginBlurredSubtree { bounds, radius }` before walking the
+    /// widget's own paint and children, then `EndBlurredSubtree`
+    /// afterwards — the renderer redirects drawing into an intermediate
+    /// texture, runs a dual-Kawase blur chain at the requested radius,
+    /// and composites the blurred result back into the parent pass.
+    /// Bound at `Repaint` level: blur radius changes never trigger
+    /// relayout. `None` (or `Some(radius < 0.5)`) means "no blur scope"
+    /// — the walker skips the Begin/End pair entirely so disabled blur
+    /// has zero per-frame cost. The `Blur` widget sets this on its own
+    /// node.
+    pub(crate) blur_prop: Option<Prop<f32>>,
     /// Cached paint output for this widget (excludes children).
     /// Reused when `needs_paint` is false to avoid re-running `paint()`.
     pub(crate) cached_paint: Option<RenderFrame>,
@@ -231,6 +244,7 @@ impl WidgetArena {
             clips_children: false,
             opacity_prop: None,
             transform_prop: None,
+            blur_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),
@@ -284,6 +298,7 @@ impl WidgetArena {
             clips_children: false,
             opacity_prop: None,
             transform_prop: None,
+            blur_prop: None,
             cached_paint: None,
             last_painted_epoch: 0,
             handlers: EventHandlers::new(),

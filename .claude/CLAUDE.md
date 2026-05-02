@@ -221,14 +221,20 @@ Application:
   `prefers-reduced-motion`. Use this for almost all UI transitions.
 
 **Per-node paint scopes** (the engine primitives wrappers build on):
-`BuildContext::set_opacity`, `set_clips_children`, and `set_transform`
-each attach a Prop to a node; the render walker emits a matching
-push/pop pair (`SetOpacity`/`RestoreOpacity`, `SetClip`/`ClearClip`,
-`PushTransform`/`PopTransform`) around the subtree. The renderer
-maintains a stack per scope. `SetTransform` is *compose-with-stack-top*
-semantics — a widget's canvas-local transforms (canvas.translate/scale/
-rotate) compose with any ancestor transform scope instead of clobbering
-it.
+`BuildContext::set_opacity`, `set_clips_children`, `set_transform`, and
+`set_blur` each attach a Prop to a node; the render walker emits a
+matching push/pop pair (`SetOpacity`/`RestoreOpacity`, `SetClip`/
+`ClearClip`, `PushTransform`/`PopTransform`, `BeginBlurredSubtree`/
+`EndBlurredSubtree`) around the subtree. The renderer maintains a stack
+per scope. `SetTransform` is *compose-with-stack-top* semantics — a
+widget's canvas-local transforms (canvas.translate/scale/rotate)
+compose with any ancestor transform scope instead of clobbering it.
+`set_blur` is the only scope that triggers an offscreen render pass
+(intermediate texture + dual-Kawase chain + composite blit) — sub-
+perceptual radii (`< 0.5 px`) skip the Begin/End emit at the walker so
+animated `0 → target_radius` patterns pay zero cost when fully off.
+Scope nesting order on a single node, outermost to innermost:
+`Begin (blur) → SetOpacity → PushTransform → ...paint...`.
 
 **Animated wrapper widgets** (live in [crates/fern-widgets/src/animations/](crates/fern-widgets/src/animations/), re-exported flat from `fern_ui::widgets`):
 
@@ -281,6 +287,18 @@ it.
   the angle signal and pairs with `Signal::animate_to` for animated
   rotations. Layout-stable. Use for chevrons, dial controls, rotation
   feedback. See [crates/fern-widgets/src/animations/rotate.rs](crates/fern-widgets/src/animations/rotate.rs).
+- `Blur::new(radius).child(w)` — Gaussian-equivalent blur applied to
+  the entire child subtree. `radius: Prop<f32>` in logical pixels;
+  accepts static, signal, or animated values. Built on
+  `BuildContext::set_blur` — the renderer redirects the subtree's
+  draws into an intermediate texture, runs a dual-Kawase blur chain,
+  and composites the blurred result back at the widget's bounds.
+  Layout-transparent. Sub-perceptual radii (`< 0.5`) are zero-cost.
+  Use for modal backdrops, click-to-reveal sensitive content
+  (numerics/characters obscured), out-of-focus emphasis, animated
+  frosted glass on modal show. The most expensive paint scope; don't
+  use it for items that animate radius every frame at full radius.
+  See [crates/fern-widgets/src/animations/blur.rs](crates/fern-widgets/src/animations/blur.rs).
 - `Spinner::new(size)` — circular-arc loading indicator backed by the
   shader-driven `AnimatedQuadKind::SpinnerArc` pipeline (~one uniform
   write + one `draw_indexed` per frame, no `paint()` re-runs). Honours

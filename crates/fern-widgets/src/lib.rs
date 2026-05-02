@@ -65,8 +65,8 @@ pub use tooltip::TooltipWidget;
 
 pub use accordion::Accordion;
 pub use animations::{
-    Collapse, Crossfade, Cycle, Fade, Pulse, Rotate, Scale, ScaleOrigin, Shake, Slide, SlideEdge,
-    SmoothSize, SmoothSizeAxes,
+    Blur, Collapse, Crossfade, Cycle, Fade, Pulse, Rotate, Scale, ScaleOrigin, Shake, Slide,
+    SlideEdge, SmoothSize, SmoothSizeAxes,
 };
 pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;

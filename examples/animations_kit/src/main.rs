@@ -22,9 +22,9 @@ use std::time::Duration;
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Fade, FixedSize,
-    HStack, Padding, Panel, ProgressBar, Pulse, RectWidget, Rotate, Scale, ScaleOrigin, ScrollArea,
-    Shake, Slide, SlideEdge, SmoothSize, Spinner, TextWidget, Toggle, VStack, ZStack,
+    Blur, Button, ButtonVariant, Card, Center, Collapse, Crossfade, Cycle, Divider, Fade,
+    FixedSize, HStack, Padding, Panel, ProgressBar, Pulse, RectWidget, Rotate, Scale, ScaleOrigin,
+    ScrollArea, Shake, Slide, SlideEdge, SmoothSize, Spinner, TextWidget, Toggle, VStack, ZStack,
 };
 
 fn main() {
@@ -63,6 +63,8 @@ fn build_kit(
     let scale_visible = Signal::new(true);
     let scale_reflow_visible = Signal::new(true);
     let rotate_angle = Signal::new_animated(0.0_f32);
+    let blur_obscured = Signal::new(true);
+    let blur_radius = Signal::new_animated(12.0_f32);
 
     VStack::new()
         .spacing(20.0)
@@ -356,6 +358,43 @@ fn build_kit(
                         })
                 }),
         )
+        .child(Divider::new())
+        .child(section_header("Blur"))
+        .child(caption(
+            "Built on BuildContext::set_blur — the renderer captures the subtree into an \
+             intermediate texture, runs a dual-Kawase blur chain, and composites the blurred \
+             result back. Layout-transparent. Use for click-to-reveal sensitive content (the \
+             numerics below are obscured until you 'Reveal'), modal backdrops, frosted glass.",
+        ))
+        .child({
+            let obscured = blur_obscured.clone();
+            let radius = blur_radius.clone();
+            HStack::new()
+                .spacing(12.0)
+                .child(
+                    Button::new_literal("Reveal / Hide")
+                        .style(ButtonVariant::Regular)
+                        .on_activate_fn(move |_| {
+                            let now_obscured = !obscured.get();
+                            obscured.set(now_obscured);
+                            let target = if now_obscured { 12.0 } else { 0.0 };
+                            radius.animate_to(
+                                target,
+                                Duration::from_millis(220),
+                                fern_ui::tokens::Easing::EaseOut,
+                            );
+                        }),
+                )
+                .child(
+                    Blur::new(blur_radius.clone()).child(
+                        VStack::new()
+                            .spacing(2.0)
+                            .child(TextWidget::new_literal("Card balance: $42,851.07"))
+                            .child(TextWidget::new_literal("Account #: 1234-5678-9012-3456"))
+                            .child(TextWidget::new_literal("CVV: 042  ·  Exp: 12/29")),
+                    ),
+                )
+        })
 }
 
 fn section_header(title: &str) -> impl Widget + 'static {

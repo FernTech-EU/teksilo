@@ -14,6 +14,7 @@
 //! `AnimatedQuadKind::SpinnerArc`), not a subtree wrapper, and lives at
 //! the crate root.
 
+pub mod blur;
 pub mod collapse;
 pub mod crossfade;
 pub mod cycle;
@@ -25,6 +26,7 @@ pub mod shake;
 pub mod slide;
 pub mod smooth_size;
 
+pub use blur::Blur;
 pub use collapse::Collapse;
 pub use crossfade::Crossfade;
 pub use cycle::Cycle;
