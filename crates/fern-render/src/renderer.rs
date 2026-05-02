@@ -3,6 +3,7 @@ use wgpu;
 use fern_canvas::RenderFrame;
 use fern_canvas::geometry::Transform2D;
 
+use crate::blur::{BlurPipelines, BlurPool};
 use crate::image_manager::ImageManager;
 use crate::path_atlas::PathAtlas;
 use crate::stream_buffer::StreamBuffers;
@@ -50,6 +51,23 @@ pub struct Renderer {
     /// for every batch flush in that frame — replaces the historical
     /// per-flush `create_buffer_init` antipattern.
     streams: StreamBuffers,
+    /// Dual-Kawase blur pipelines (downsample + upsample) and per-pass
+    /// uniform buffer. Built once at construction; consumed by the
+    /// `BeginBlurredSubtree` / `EndBlurredSubtree` handler in `render`.
+    blur_pipelines: BlurPipelines,
+    /// Recycled intermediate-texture pool for blur scopes. Begin-of-
+    /// frame resets per-texture in-use flags; textures unused for
+    /// several frames evict.
+    blur_pool: BlurPool,
+    /// Cached bind group layout for the quad pipeline's group(0)
+    /// (texture + sampler). Used to build per-frame bind groups that
+    /// expose blur-pool intermediates as image sources for the
+    /// compositing blit at the end of each blur scope.
+    quad_bind_group_layout: wgpu::BindGroupLayout,
+    /// Sampler used by the blur composite blit. Linear filtering so
+    /// the over-allocated bucket texture's used sub-rect samples
+    /// cleanly when composited onto a non-aligned target rect.
+    blur_composite_sampler: wgpu::Sampler,
 }
 
 struct AtlasTexture {
@@ -57,6 +75,67 @@ struct AtlasTexture {
     bind_group: wgpu::BindGroup,
     width: u32,
     height: u32,
+}
+
+/// Active render target — the bottom of the stack is always the
+/// surface; intermediates push above it for the duration of a blur
+/// scope. Each entry tracks both the target's identity and per-target
+/// state that survives across multiple segment passes against the
+/// same target (e.g. when an inner blur scope ends and we re-open
+/// the parent intermediate to draw additional commands).
+struct ActiveTarget {
+    /// `None` ⇒ surface (the caller-provided texture view).
+    /// `Some(handle)` ⇒ a blur intermediate from `BlurPool`.
+    intermediate: Option<crate::blur::AcquiredTexture>,
+    /// Viewport dimensions for NDC conversion in this scope.
+    viewport_w: u32,
+    viewport_h: u32,
+    /// `false` until the first segment pass against this target runs;
+    /// controls whether the next pass uses Clear or Load.
+    opened: bool,
+    /// Blurred sub-tree results that nested scopes have queued for
+    /// compositing into THIS target on its next segment open. Drained
+    /// at the top of each segment.
+    pending_composites: Vec<PendingComposite>,
+    /// Intermediate-only metadata, populated when `intermediate.is_some()`.
+    /// Carried here (rather than in a separate `BlurScope` stack)
+    /// because End needs to look these up after popping the target.
+    blur_bounds: Option<fern_canvas::Rect>,
+    blur_radius_logical: Option<f32>,
+    used_w: Option<u32>,
+    used_h: Option<u32>,
+    bucket_w: Option<u32>,
+    bucket_h: Option<u32>,
+}
+
+impl ActiveTarget {
+    fn surface(viewport_w: u32, viewport_h: u32) -> Self {
+        Self {
+            intermediate: None,
+            viewport_w,
+            viewport_h,
+            opened: false,
+            pending_composites: Vec::new(),
+            blur_bounds: None,
+            blur_radius_logical: None,
+            used_w: None,
+            used_h: None,
+            bucket_w: None,
+            bucket_h: None,
+        }
+    }
+}
+
+/// One blurred sub-tree result waiting to be composited into a parent
+/// target's next render pass. Lives on `ActiveTarget::pending_composites`
+/// for the parent target.
+struct PendingComposite {
+    blurred_texture: crate::blur::AcquiredTexture,
+    used_w: u32,
+    used_h: u32,
+    bucket_w: u32,
+    bucket_h: u32,
+    bounds: fern_canvas::Rect,
 }
 
 impl Renderer {
@@ -87,6 +166,21 @@ impl Renderer {
             &quad_texture_layout,
         );
 
+        let quad_bind_group_layout = quad_pipeline.get_bind_group_layout(0);
+        let blur_pool = BlurPool::new(&device, surface_format);
+        let blur_pipelines =
+            BlurPipelines::new(&device, &blur_pool.bind_group_layout, surface_format);
+        let blur_composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("blur_composite_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
         Self {
             device,
             queue,
@@ -103,6 +197,10 @@ impl Renderer {
             path_atlas_texture: None,
             image_manager: ImageManager::new(),
             streams: StreamBuffers::new(),
+            blur_pipelines,
+            blur_pool,
+            quad_bind_group_layout,
+            blur_composite_sampler,
         }
     }
 
@@ -199,6 +297,9 @@ impl Renderer {
     ) {
         // Begin frame for path atlas LRU tracking
         self.path_atlas.begin_frame();
+        // Reset blur intermediate-texture pool — marks every texture
+        // available, evicts ones unused for too long.
+        self.blur_pool.begin_frame();
 
         // Process pending images: upload textures for newly embedded resources
         for pending in &frame.pending_images {
@@ -244,7 +345,16 @@ impl Renderer {
         // serves all pipelines.
         let rect_quads = frame.decorations.len();
         let sdf_quads = frame.shapes.len();
-        let quad_quads = frame.glyphs.len() + frame.paths.len() + frame.images.len();
+        // Each blur scope produces one composite-blit quad on End,
+        // emitted via the quad pipeline. Account for it in the stream
+        // sizing so `composite_blur_quad` can `.write` without growing.
+        let composite_quads = frame
+            .draw_order
+            .iter()
+            .filter(|c| matches!(c, fern_canvas::DrawCommand::BeginBlurredSubtree { .. }))
+            .count();
+        let quad_quads =
+            frame.glyphs.len() + frame.paths.len() + frame.images.len() + composite_quads;
         let shadow_quads = frame.shadows.len();
         let anim_proc_quads = frame
             .animated_quads
@@ -321,28 +431,34 @@ impl Renderer {
                 label: Some("fern_render"),
             });
 
+        // Per-frame mutable viewport — overridden inside blur scopes
+        // (the offscreen intermediate is sized differently from the
+        // surface). Restored on `EndBlurredSubtree`.
+        let mut viewport_width = viewport_width;
+        let mut viewport_height = viewport_height;
+
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("fern_render_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_color[0] as f64,
-                            g: clear_color[1] as f64,
-                            b: clear_color[2] as f64,
-                            a: clear_color[3] as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let surface_clear_color = wgpu::Color {
+                r: clear_color[0] as f64,
+                g: clear_color[1] as f64,
+                b: clear_color[2] as f64,
+                a: clear_color[3] as f64,
+            };
+
+            // Target stack — bottom is the surface (never popped),
+            // intermediates pushed on `BeginBlurredSubtree` and popped
+            // on `EndBlurredSubtree`. The active target is always
+            // `target_stack.last_mut()`. Each target carries:
+            //   - opened: false until the first segment runs against
+            //     it (controls Clear vs Load on the next open)
+            //   - viewport dimensions for NDC conversion in this scope
+            //   - pending_composites: blurred quads that nested scopes
+            //     have queued for compositing into THIS target on its
+            //     next segment
+            let mut target_stack: Vec<ActiveTarget> = vec![ActiveTarget::surface(
+                viewport_width,
+                viewport_height,
+            )];
 
             // Clip rect stack for nested scroll areas.
             // Each SetClip pushes a rect; the effective clip is the intersection.
@@ -483,9 +599,106 @@ impl Renderer {
                 };
             }
 
-            // Draw in painter's order
-            for cmd in &frame.draw_order {
-                match cmd {
+            // Draw in painter's order. Outer loop iterates render
+            // segments — one segment per `RenderPass`. A blur Begin/End
+            // boundary opens a new segment. The pass lives in its own
+            // scope so the encoder borrow is released at each boundary
+            // (allowing the next pass open or any in-between Kawase
+            // work on the encoder).
+            let mut cmd_idx = 0;
+            while cmd_idx <= frame.draw_order.len() {
+                // Resolve current target. We `match` the intermediate
+                // handle vs. surface here; the resulting `target_view`
+                // lifetime ties to one of self.blur_pool / `view` arg.
+                let (target_view, load_op): (&wgpu::TextureView, wgpu::LoadOp<wgpu::Color>) = {
+                    let t = target_stack.last_mut().expect("surface target always present");
+                    let v: &wgpu::TextureView = match t.intermediate {
+                        Some(h) => self.blur_pool.view(h),
+                        None => view,
+                    };
+                    let lo = if t.opened {
+                        wgpu::LoadOp::Load
+                    } else if t.intermediate.is_none() {
+                        wgpu::LoadOp::Clear(surface_clear_color)
+                    } else {
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                    };
+                    t.opened = true;
+                    viewport_width = t.viewport_w;
+                    viewport_height = t.viewport_h;
+                    (v, lo)
+                };
+
+                // Drain pending composites — these are blurred sub-tree
+                // results from nested blur scopes that finished while
+                // we weren't drawing into THIS target. They paint first
+                // in the new segment so subsequent commands stack on
+                // top of the blurred quad.
+                let composites_to_draw: Vec<PendingComposite> = std::mem::take(
+                    &mut target_stack.last_mut().unwrap().pending_composites,
+                );
+
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("fern_segment_pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: target_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: load_op,
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+
+                    // Composite pending blurred sub-trees first.
+                    for pc in &composites_to_draw {
+                        composite_blur_quad(
+                            &self.device,
+                            &self.queue,
+                            &mut pass,
+                            &self.blur_pool,
+                            &self.quad_pipeline,
+                            &self.quad_bind_group_layout,
+                            &self.blur_composite_sampler,
+                            &self.streams.quad,
+                            index_binding,
+                            pc.blurred_texture,
+                            pc.used_w,
+                            pc.used_h,
+                            pc.bucket_w,
+                            pc.bucket_h,
+                            pc.bounds,
+                            scale_factor,
+                            viewport_width,
+                            viewport_height,
+                        );
+                        // The composite uses the quad pipeline with a
+                        // fresh bind group → invalidate any cached
+                        // glyph/path-atlas binding for the next quad
+                        // batch.
+                        quad_source = None;
+                    }
+
+                    let pass = &mut pass;
+
+                    // Inner loop: process commands until we hit a blur
+                    // boundary or run out.
+                    while cmd_idx < frame.draw_order.len() {
+                        let cmd = &frame.draw_order[cmd_idx];
+                        if matches!(
+                            cmd,
+                            fern_canvas::DrawCommand::BeginBlurredSubtree { .. }
+                                | fern_canvas::DrawCommand::EndBlurredSubtree
+                        ) {
+                            break;
+                        }
+                        match cmd {
                     fern_canvas::DrawCommand::Decoration(idx) => {
                         flush_all!(
                             pass,
@@ -668,7 +881,7 @@ impl Renderer {
                             continue;
                         };
                         self.draw_image(
-                            &mut pass,
+                            pass,
                             image,
                             scale_factor,
                             viewport_width,
@@ -1053,36 +1266,224 @@ impl Renderer {
                     }
                     fern_canvas::DrawCommand::BeginBlurredSubtree { .. }
                     | fern_canvas::DrawCommand::EndBlurredSubtree => {
-                        // Engine scaffolding only at this stage — the
-                        // walker emits a balanced Begin/End pair around
-                        // a blur scope, but the offscreen-render +
-                        // dual-Kawase pipeline that consumes it is a
-                        // follow-up. For now the subtree renders inline
-                        // (unblurred) into the main pass; the Begin/End
-                        // commands are recognized so the debug stack
-                        // validator stays balanced.
+                        // Unreachable — the inner-loop guard above
+                        // breaks before we enter the match for these.
+                        unreachable!(
+                            "blur boundaries are handled at the segment level"
+                        );
                     }
+                        }
+                        cmd_idx += 1;
+                    }
+
+                    // End-of-segment flush.
+                    flush_all!(
+                        pass,
+                        &self.queue,
+                        self.streams,
+                        &self.rect_pipeline,
+                        &self.sdf_pipeline,
+                        &self.quad_pipeline,
+                        &self.shadow_pipeline,
+                        rect_batch,
+                        sdf_batch,
+                        quad_batch,
+                        shadow_batch,
+                        self.atlas_texture,
+                        self.path_atlas_texture,
+                        quad_source,
+                        index_binding
+                    );
+                    quad_source = None;
+                } // pass dropped here, encoder borrow released
+
+                // Boundary handling. EOF, Begin, or End.
+                if cmd_idx >= frame.draw_order.len() {
+                    break;
                 }
+                match &frame.draw_order[cmd_idx] {
+                    fern_canvas::DrawCommand::BeginBlurredSubtree { bounds, radius } => {
+                        // Allocate intermediate sized to bounds × scale.
+                        let device_w = (bounds.width * scale_factor)
+                            .ceil()
+                            .max(1.0) as u32;
+                        let device_h = (bounds.height * scale_factor)
+                            .ceil()
+                            .max(1.0) as u32;
+                        let intermediate =
+                            self.blur_pool.acquire(&self.device, device_w, device_h);
+                        let (bucket_w, bucket_h) = self.blur_pool.dimensions(intermediate);
+
+                        // Push a translation so the subtree renders at
+                        // (0, 0) of the intermediate. Device-pixel
+                        // translation since vertices arrive pre-scaled
+                        // (see SetTransform handler for the same trick).
+                        let translate = Transform2D {
+                            m: [
+                                1.0, 0.0, 0.0, 1.0,
+                                -bounds.x * scale_factor,
+                                -bounds.y * scale_factor,
+                            ],
+                        };
+                        let prev_top = transform_stack
+                            .last()
+                            .copied()
+                            .unwrap_or(Transform2D::IDENTITY);
+                        let new_top = translate.then(&prev_top);
+                        transform_stack.push(new_top);
+                        current_transform = new_top;
+
+                        target_stack.push(ActiveTarget {
+                            intermediate: Some(intermediate),
+                            viewport_w: bucket_w,
+                            viewport_h: bucket_h,
+                            opened: false,
+                            pending_composites: Vec::new(),
+                            blur_bounds: Some(*bounds),
+                            blur_radius_logical: Some(*radius),
+                            used_w: Some(device_w),
+                            used_h: Some(device_h),
+                            bucket_w: Some(bucket_w),
+                            bucket_h: Some(bucket_h),
+                        });
+                    }
+                    fern_canvas::DrawCommand::EndBlurredSubtree => {
+                        let scope = target_stack
+                            .pop()
+                            .expect("EndBlurredSubtree without matching Begin");
+                        debug_assert!(
+                            scope.intermediate.is_some(),
+                            "End popped the surface (impossible if walker is balanced)"
+                        );
+                        let intermediate = scope.intermediate.unwrap();
+                        let bounds = scope.blur_bounds.unwrap();
+                        let radius = scope.blur_radius_logical.unwrap();
+                        let used_w = scope.used_w.unwrap();
+                        let used_h = scope.used_h.unwrap();
+                        let bucket_w = scope.bucket_w.unwrap();
+                        let bucket_h = scope.bucket_h.unwrap();
+
+                        // Pop the translation pushed in Begin.
+                        if transform_stack.len() > 1 {
+                            transform_stack.pop();
+                        }
+                        current_transform = transform_stack
+                            .last()
+                            .copied()
+                            .unwrap_or(Transform2D::IDENTITY);
+
+                        // Run dual-Kawase. The chain begins its own
+                        // sub-passes against pool textures — the outer
+                        // segment's pass is already dropped.
+                        let blurred = run_kawase_chain(
+                            &self.device,
+                            &self.queue,
+                            &mut encoder,
+                            &mut self.blur_pool,
+                            &self.blur_pipelines,
+                            intermediate,
+                            used_w,
+                            used_h,
+                            bucket_w,
+                            bucket_h,
+                            radius * scale_factor,
+                        );
+
+                        // Schedule a composite into the parent target's
+                        // next segment open.
+                        target_stack
+                            .last_mut()
+                            .unwrap()
+                            .pending_composites
+                            .push(PendingComposite {
+                                blurred_texture: blurred.texture,
+                                used_w: blurred.used_w,
+                                used_h: blurred.used_h,
+                                bucket_w: blurred.bucket_w,
+                                bucket_h: blurred.bucket_h,
+                                bounds,
+                            });
+                    }
+                    _ => unreachable!("inner loop only breaks on Begin/End"),
+                }
+                cmd_idx += 1;
             }
 
-            // Flush remaining batches
-            flush_all!(
-                pass,
-                &self.queue,
-                self.streams,
-                &self.rect_pipeline,
-                &self.sdf_pipeline,
-                &self.quad_pipeline,
-                &self.shadow_pipeline,
-                rect_batch,
-                sdf_batch,
-                quad_batch,
-                shadow_batch,
-                self.atlas_texture,
-                self.path_atlas_texture,
-                quad_source,
-                index_binding
+            debug_assert!(
+                target_stack.len() == 1,
+                "target_stack not balanced at EOF — unmatched Begin/End in walker output"
             );
+            // The remaining surface target may still have a pending
+            // composite (an outermost blur scope ending at end-of-frame
+            // with no further commands). Drain it in one final pass.
+            let final_composites = std::mem::take(
+                &mut target_stack.last_mut().unwrap().pending_composites,
+            );
+            if !final_composites.is_empty() {
+                let surface = target_stack.last_mut().unwrap();
+                let load_op = if surface.opened {
+                    wgpu::LoadOp::Load
+                } else {
+                    wgpu::LoadOp::Clear(surface_clear_color)
+                };
+                surface.opened = true;
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("fern_final_composite_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: load_op,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                for pc in &final_composites {
+                    composite_blur_quad(
+                        &self.device,
+                        &self.queue,
+                        &mut pass,
+                        &self.blur_pool,
+                        &self.quad_pipeline,
+                        &self.quad_bind_group_layout,
+                        &self.blur_composite_sampler,
+                        &self.streams.quad,
+                        index_binding,
+                        pc.blurred_texture,
+                        pc.used_w,
+                        pc.used_h,
+                        pc.bucket_w,
+                        pc.bucket_h,
+                        pc.bounds,
+                        scale_factor,
+                        viewport_width,
+                        viewport_height,
+                    );
+                }
+            } else if !target_stack.last().unwrap().opened {
+                // Empty frame — open one pass to apply the clear.
+                let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("fern_empty_clear_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(surface_clear_color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -1378,6 +1779,258 @@ fn apply_transform_pixel(pixel: [f32; 2], transform: &Transform2D) -> [f32; 2] {
         a * pixel[0] + c * pixel[1] + tx,
         b * pixel[0] + d * pixel[1] + ty,
     ]
+}
+
+/// Result of running the dual-Kawase chain on a `BlurScope`'s
+/// intermediate. The returned texture is the final upsampled level —
+/// it shares the same bucket-size convention as the input (only
+/// `(used_w, used_h)` of `(bucket_w, bucket_h)` holds rendered
+/// content), so the caller maps UVs as `used / bucket`.
+struct KawaseResult {
+    texture: crate::blur::AcquiredTexture,
+    used_w: u32,
+    used_h: u32,
+    bucket_w: u32,
+    bucket_h: u32,
+}
+
+/// Run a dual-Kawase blur chain on `source`. The chain depth is chosen
+/// from the requested radius; each pass halves (downsample) or doubles
+/// (upsample) the active region's size. Returns the final upsampled
+/// texture handle (which may be the input handle itself if the chain
+/// is a single round-trip).
+#[allow(clippy::too_many_arguments)]
+fn run_kawase_chain(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    pool: &mut crate::blur::BlurPool,
+    pipelines: &crate::blur::BlurPipelines,
+    source: crate::blur::AcquiredTexture,
+    used_w: u32,
+    used_h: u32,
+    bucket_w: u32,
+    bucket_h: u32,
+    radius_device_px: f32,
+) -> KawaseResult {
+    let levels = crate::blur::kawase_levels(radius_device_px);
+
+    // Track the chain as (handle, used_w, used_h, bucket_w, bucket_h).
+    // Each downsample halves used_w/h; the bucket size we sample from
+    // is the *previous* level's bucket.
+    let mut current = (source, used_w, used_h, bucket_w, bucket_h);
+
+    // Upsample needs to know all intermediate bucket sizes so we can
+    // walk back up. Stash one entry per chain level (input + each
+    // downsample target).
+    let mut chain: Vec<(crate::blur::AcquiredTexture, u32, u32, u32, u32)> =
+        Vec::with_capacity(levels as usize + 1);
+    chain.push(current);
+
+    // Per-pass kernel offset multiplier. Bjørge's reference uses 0.5
+    // for both passes; the actual blur radius this produces is
+    // proportional to `2^levels * 0.5`, which roughly matches the
+    // requested Gaussian-equivalent radius for typical UI values.
+    const KERNEL_OFFSET: f32 = 0.5;
+
+    // Downsample chain: source → mip1 → mip2 → ...
+    for _ in 0..levels {
+        let (src_handle, src_used_w, src_used_h, src_bucket_w, src_bucket_h) = current;
+        let dst_used_w = (src_used_w / 2).max(1);
+        let dst_used_h = (src_used_h / 2).max(1);
+        let dst = pool.acquire(device, dst_used_w, dst_used_h);
+        let (dst_bucket_w, dst_bucket_h) = pool.dimensions(dst);
+
+        // Build per-pass uniforms: source-bucket UV-offset.
+        let params = crate::blur::BlurParams {
+            offset: crate::blur::kawase_offset(src_bucket_w, src_bucket_h, KERNEL_OFFSET),
+        };
+        queue.write_buffer(&pipelines.params_buffer, 0, bytemuck::bytes_of(&params));
+        let bind_group = pool.make_bind_group(device, src_handle, &pipelines.params_buffer);
+
+        run_kawase_pass(
+            encoder,
+            &pipelines.down,
+            &bind_group,
+            pool.view(dst),
+            dst_used_w,
+            dst_used_h,
+            "kawase_down_pass",
+        );
+
+        current = (dst, dst_used_w, dst_used_h, dst_bucket_w, dst_bucket_h);
+        chain.push(current);
+    }
+
+    // Upsample chain: mipN → mipN-1 → ... → mip0 (a fresh allocation;
+    // we don't write back into the source texture because some Kawase
+    // implementations rely on the source bucket's content surviving).
+    for level in (0..levels).rev() {
+        let (src_handle, _src_used_w, _src_used_h, src_bucket_w, src_bucket_h) = current;
+        let target = chain[level as usize];
+        let dst_used_w = target.1;
+        let dst_used_h = target.2;
+        let dst = pool.acquire(device, dst_used_w, dst_used_h);
+        let (dst_bucket_w, dst_bucket_h) = pool.dimensions(dst);
+
+        let params = crate::blur::BlurParams {
+            offset: crate::blur::kawase_offset(src_bucket_w, src_bucket_h, KERNEL_OFFSET),
+        };
+        queue.write_buffer(&pipelines.params_buffer, 0, bytemuck::bytes_of(&params));
+        let bind_group = pool.make_bind_group(device, src_handle, &pipelines.params_buffer);
+
+        run_kawase_pass(
+            encoder,
+            &pipelines.up,
+            &bind_group,
+            pool.view(dst),
+            dst_used_w,
+            dst_used_h,
+            "kawase_up_pass",
+        );
+
+        current = (dst, dst_used_w, dst_used_h, dst_bucket_w, dst_bucket_h);
+    }
+
+    KawaseResult {
+        texture: current.0,
+        used_w: current.1,
+        used_h: current.2,
+        bucket_w: current.3,
+        bucket_h: current.4,
+    }
+}
+
+/// Run one full-screen-triangle Kawase pass. The viewport is set to
+/// `(used_w, used_h)` — the destination bucket may be larger but we
+/// only write the upper-left sub-rect that the next pass will sample
+/// from.
+fn run_kawase_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    pipeline: &wgpu::RenderPipeline,
+    bind_group: &wgpu::BindGroup,
+    target_view: &wgpu::TextureView,
+    used_w: u32,
+    used_h: u32,
+    label: &str,
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target_view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                store: wgpu::StoreOp::Store,
+            },
+            depth_slice: None,
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    // Full-screen triangle covers the whole viewport — restricting the
+    // viewport to the used sub-rect keeps the over-allocated bucket
+    // clean and (more importantly) limits the fragment work.
+    pass.set_viewport(0.0, 0.0, used_w as f32, used_h as f32, 0.0, 1.0);
+    pass.draw(0..3, 0..1);
+}
+
+/// Composite the final blurred intermediate onto the parent target as
+/// a textured quad at `bounds` (logical pixels). Uses the same quad
+/// pipeline as static images: builds 4 vertices in NDC with image
+/// flag set, binds the intermediate texture + sampler, and issues one
+/// indexed draw.
+///
+/// `index_binding` is the per-frame index buffer (the first 6 u16s
+/// already encode the standard quad index pattern, so we slice 12
+/// bytes off the front).
+#[allow(clippy::too_many_arguments)]
+fn composite_blur_quad(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pass: &mut wgpu::RenderPass<'_>,
+    pool: &crate::blur::BlurPool,
+    quad_pipeline: &wgpu::RenderPipeline,
+    quad_bind_group_layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    quad_stream: &crate::stream_buffer::StreamBuffer,
+    index_binding: Option<(&wgpu::Buffer, u64, u64)>,
+    blurred: crate::blur::AcquiredTexture,
+    used_w: u32,
+    used_h: u32,
+    bucket_w: u32,
+    bucket_h: u32,
+    bounds: fern_canvas::Rect,
+    scale_factor: f32,
+    viewport_width: u32,
+    viewport_height: u32,
+) {
+    let view = pool.view(blurred);
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("blur_composite_bind_group"),
+        layout: quad_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+
+    // Vertex positions in device pixels, converted to NDC.
+    let sx = bounds.x * scale_factor;
+    let sy = bounds.y * scale_factor;
+    let sw = bounds.width * scale_factor;
+    let sh = bounds.height * scale_factor;
+
+    // UVs map the used sub-rect inside the bucket. The bucket's
+    // upper-left holds the rendered content; the rest is the
+    // cleared-to-transparent padding from the bucket's allocation.
+    let u_max = used_w as f32 / bucket_w as f32;
+    let v_max = used_h as f32 / bucket_h as f32;
+
+    // Image flag (bit 0 = 1 → fragment shader uses tex.rgb directly).
+    let flags = 1u32;
+    let color = [1.0, 1.0, 1.0, 1.0];
+
+    let p_tl = pixel_to_ndc([sx, sy], viewport_width, viewport_height);
+    let p_tr = pixel_to_ndc([sx + sw, sy], viewport_width, viewport_height);
+    let p_br = pixel_to_ndc([sx + sw, sy + sh], viewport_width, viewport_height);
+    let p_bl = pixel_to_ndc([sx, sy + sh], viewport_width, viewport_height);
+
+    let verts: [QuadVertex; 4] = [
+        QuadVertex { position: p_tl, tex_coord: [0.0, 0.0],   color, flags, _pad: 0 },
+        QuadVertex { position: p_tr, tex_coord: [u_max, 0.0], color, flags, _pad: 0 },
+        QuadVertex { position: p_br, tex_coord: [u_max, v_max], color, flags, _pad: 0 },
+        QuadVertex { position: p_bl, tex_coord: [0.0, v_max], color, flags, _pad: 0 },
+    ];
+
+    // Caller has already sized `quad_stream` for the worst-case quad
+    // count *including composites* (see render()'s up-front sizing).
+    // The index buffer's first 6 u16s = `[0, 1, 2, 0, 2, 3]` (the
+    // standard quad pattern), reused here.
+    let _ = device; // device is only used for bind-group creation above
+    let Some((vb, v_off, v_len)) = quad_stream.write(queue, bytemuck::cast_slice(&verts))
+    else {
+        return;
+    };
+    let Some((ib, _, _)) = index_binding else { return };
+    let composite_index_bytes: u64 = 6 * std::mem::size_of::<u16>() as u64;
+
+    pass.set_pipeline(quad_pipeline);
+    pass.set_bind_group(0, &bind_group, &[]);
+    pass.set_viewport(0.0, 0.0, viewport_width as f32, viewport_height as f32, 0.0, 1.0);
+    pass.set_vertex_buffer(0, vb.slice(v_off..v_off + v_len));
+    pass.set_index_buffer(ib.slice(0..composite_index_bytes), wgpu::IndexFormat::Uint16);
+    pass.draw_indexed(0..6, 0, 0..1);
 }
 
 // --- Pipeline creation ---

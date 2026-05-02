@@ -1,3 +1,4 @@
+pub(crate) mod blur;
 pub mod image_manager;
 pub mod path_atlas;
 pub mod renderer;

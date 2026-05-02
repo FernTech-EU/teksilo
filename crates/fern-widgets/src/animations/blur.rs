@@ -105,6 +105,18 @@ impl Widget for Blur {
         let id = ctx.self_id();
         ctx.set_blur(id, self.radius.clone());
 
+        // Register the radius source with the animation scheduler if
+        // it's a Signal (a no-op for `Signal::new(_)`, only relevant
+        // for `Signal::new_animated(_)`). Without this, the typical
+        // "create animated signal outside build, animate it from a
+        // handler" pattern is a silent no-op — `set_blur` registers
+        // the prop with the binding registry for repaint-on-change,
+        // but the scheduler is a separate registry. Same trap Rotate
+        // had to fix.
+        if let Prop::Bound(signal) = &self.radius {
+            ctx.register_animated_signal(signal);
+        }
+
         vec![child_id]
     }
 
@@ -229,6 +241,41 @@ mod tests {
             off_bounds.size(),
             on_bounds.size(),
             "Blur must not change its own size with radius"
+        );
+    }
+
+    #[test]
+    fn user_provided_animated_signal_is_registered_with_scheduler() {
+        // Regression: Blur accepts a user-provided Signal<f32> via its
+        // Prop<f32> argument. If the user creates the signal with
+        // `Signal::new_animated(12.0)` (the natural pattern for a
+        // signal built outside any BuildContext — e.g. in the
+        // animations-kit example), `animate_to` queues a request that
+        // the scheduler only picks up if the signal is registered with
+        // the tree. Blur's build() must auto-register so user
+        // `animate_to` calls actually drive the radius — without this,
+        // the click-to-reveal pattern in the docs is a silent no-op
+        // (the radius signal stays at its initial value, so the blur
+        // never lifts).
+        use std::time::Duration;
+        let radius = Signal::new_animated(12.0_f32);
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        tree.add(
+            Blur::new(radius.clone())
+                .child(FixedSize::new().bind_width(80.0).bind_height(40.0).child(RectWidget::new())),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        radius.animate_to(
+            0.0,
+            Duration::from_millis(100),
+            fern_tokens::Easing::Linear,
+        );
+        // Drain the pending request onto the scheduler.
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(
+            tree.has_active_animations(),
+            "user-provided animated signal must reach the scheduler"
         );
     }
 
