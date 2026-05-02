@@ -45,16 +45,12 @@ fn main() -> io::Result<()> {
 
 struct Server {
     documents: HashMap<String, String>,
-    initialized: bool,
-    shutting_down: bool,
 }
 
 impl Server {
     fn new() -> Self {
         Self {
             documents: HashMap::new(),
-            initialized: false,
-            shutting_down: false,
         }
     }
 
@@ -83,10 +79,7 @@ impl Server {
 
         match (method, id.is_some()) {
             ("initialize", true) => Some(ok(id.unwrap(), self.handle_initialize())),
-            ("initialized", false) => {
-                self.initialized = true;
-                None
-            }
+            ("initialized", false) => None,
             ("textDocument/didOpen", false) => {
                 self.handle_did_open(&params);
                 None
@@ -102,10 +95,7 @@ impl Server {
             ("textDocument/formatting", true) => {
                 Some(self.handle_formatting(id.unwrap(), &params))
             }
-            ("shutdown", true) => {
-                self.shutting_down = true;
-                Some(ok(id.unwrap(), Value::Null))
-            }
+            ("shutdown", true) => Some(ok(id.unwrap(), Value::Null)),
             ("exit", false) => None,
             (_, true) => Some(err(
                 id.unwrap(),

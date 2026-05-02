@@ -54,6 +54,12 @@ impl std::error::Error for FmtError {}
 /// `source` is the text between the macro parens — for `fern!(ctx => VStack {})`
 /// pass `"ctx => VStack {}"`. The returned string is the reformatted body
 /// without surrounding parens or `fern!`.
+///
+/// Output uses LF newlines unconditionally. CRLF input is parsed
+/// correctly (the trivia scanner handles `\r\n`) but emitted as LF.
+/// Callers that need to preserve CRLF should use [`format_file`],
+/// which detects the host file's line ending convention and applies
+/// it to the formatter's output.
 pub fn format_block(source: &str, _config: &FmtConfig) -> Result<String, FmtError> {
     let tokens = TokenStream::from_str(source).map_err(|e| {
         FmtError::Parse(syn::Error::new(proc_macro2::Span::call_site(), e.to_string()))

@@ -218,10 +218,11 @@ language-servers = [{ name = "rust-analyzer" }, { name = "fern-fmt-lsp" }]
 
 ### VS Code
 
-Use a generic LSP client extension (e.g. *Generic LSP Client* by
-llllvvuu) or write a tiny extension that registers `fern-fmt-lsp` for
-`rust` documents. With format-on-save enabled, every save runs
-`textDocument/formatting`.
+VS Code needs an extension to register an LSP server. See the
+dedicated walkthrough in [fern-fmt-vscode.md](fern-fmt-vscode.md) —
+it covers two paths: a five-minute *Run on Save* hook (no LSP) and a
+small custom extension that registers `fern-fmt-lsp` for Rust
+documents.
 
 ### Neovim (`nvim-lspconfig`)
 
