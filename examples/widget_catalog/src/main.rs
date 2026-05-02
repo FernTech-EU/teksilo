@@ -854,17 +854,27 @@ impl WidgetCatalog {
                         .style(ButtonVariant::Regular)
                         .on_activate_fn(|_| println!("Cancel")),
                 )
+                // Icon-only buttons need explicit accessibility metadata —
+                // their drawn glyph is meaningless to screen readers. Demo
+                // of the new builder-level overrides:
+                //   .access_label_literal       — what AT software announces
+                //   .access_keyboard_shortcut   — surfaced as "Ctrl+S" on the node
+                //   .access_has_popup           — flags the chevron as a disclosure
                 .child(
                     Button::new_literal("Save")
                         .icon(IconWidget::from_svg_icon(save_icon), IconLocation::IconOnly)
                         .style(ButtonVariant::Flat)
-                        .on_activate_fn(|_| println!("Save")),
+                        .on_activate_fn(|_| println!("Save"))
+                        .access_label_literal("Save")
+                        .access_keyboard_shortcut("Ctrl+S"),
                 )
                 .child(
                     Button::new_literal("")
                         .icon(IconWidget::chevron_down(16.0), IconLocation::IconOnly)
                         .style(ButtonVariant::Regular)
-                        .on_activate_fn(|_| println!("Cancel")),
+                        .on_activate_fn(|_| println!("Cancel"))
+                        .access_label_literal("More options")
+                        .access_has_popup(fern_ui::core::accesskit::HasPopup::Menu),
                 ),
         );
 
@@ -2345,15 +2355,23 @@ impl WidgetCatalog {
                             style: ButtonVariant::Regular
                             on_activate_fn: |_| println!("Cancel")
                         }
+                        // Icon-only buttons + a11y overrides — mirror of
+                        // the controls_builder() block. `name: value` in
+                        // fern! body desugars to `.name(value)`, so each
+                        // `.access_*` builder method composes the same way.
                         Button::new_literal("Save") {
                             icon: IconWidget::from_svg_icon(save_icon), IconLocation::IconOnly
                             style: ButtonVariant::Flat
                             on_activate_fn: |_| println!("Save")
+                            access_label_literal: "Save"
+                            access_keyboard_shortcut: "Ctrl+S"
                         }
                         Button::new_literal("") {
                             icon: IconWidget::chevron_down(16.0), IconLocation::IconOnly
                             style: ButtonVariant::Regular
                             on_activate_fn: |_| println!("Cancel")
+                            access_label_literal: "More options"
+                            access_has_popup: fern_ui::core::accesskit::HasPopup::Menu
                         }
                     }
                     GroupHeader::new_literal("Split buttons")
