@@ -165,6 +165,20 @@ pub struct WidgetNode {
     /// Consulted during intent dispatch (source-widget → root walk).
     /// Cleared on rebuild in the same pass that clears handlers.
     pub(crate) actions: Vec<crate::action::Action>,
+    /// Builder-level accessibility overrides (`access_label`,
+    /// `access_role`, etc.). Mirrored from the wrapper's `HandlerSet`
+    /// at insertion via `apply_handler_set`. Applied by the
+    /// accessibility tree walker after the inner widget's
+    /// `accessibility(&self, builder)` runs. Action callbacks
+    /// (`actions`, `custom_actions` inside this struct) are dispatched
+    /// by `event_dispatch_impl.rs` when handling
+    /// `WidgetEvent::AccessAction`.
+    pub(crate) access_overrides:
+        Option<Box<crate::widget_builder::AccessibilityOverrides>>,
+    /// Subtree visibility / merge mode (`access_exclude_subtree` /
+    /// `access_merge_subtree`). Mirrored from the wrapper's
+    /// `HandlerSet`.
+    pub(crate) access_subtree: crate::widget_builder::AccessSubtreeMode,
 }
 
 impl std::fmt::Debug for WidgetNode {
@@ -257,6 +271,8 @@ impl WidgetArena {
             subscription_handles: Vec::new(),
             context_menu_factory: None,
             actions: Vec::new(),
+            access_overrides: None,
+            access_subtree: crate::widget_builder::AccessSubtreeMode::default(),
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -311,6 +327,8 @@ impl WidgetArena {
             subscription_handles: Vec::new(),
             context_menu_factory: None,
             actions: Vec::new(),
+            access_overrides: None,
+            access_subtree: crate::widget_builder::AccessSubtreeMode::default(),
         });
         // Set up parent-child for declared children
         for &child_id in &children {
@@ -607,6 +625,16 @@ impl WidgetArena {
             }
             if let Some(sig) = handler_set.hover_within {
                 node.hover_within_signal = Some(sig);
+            }
+            // Mirror builder-level accessibility overrides + subtree mode
+            // onto the persistent WidgetNode so the accessibility tree
+            // walker (and the event dispatcher, for action callbacks) can
+            // read them after handler extraction.
+            if handler_set.access.is_some() {
+                node.access_overrides = handler_set.access;
+            }
+            if let Some(mode) = handler_set.access_subtree {
+                node.access_subtree = mode;
             }
         }
     }

@@ -76,7 +76,9 @@ pub use widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget,
     WidgetPlacement,
 };
-pub use widget_builder::{HandlerSet, WidgetBuilder, WidgetWithHandlers};
+pub use widget_builder::{
+    AccessSubtreeMode, AccessibilityOverrides, HandlerSet, WidgetBuilder, WidgetWithHandlers,
+};
 pub use widget_builder_branching::{
     FernBranch, FernBranch3, FernBranch4, IntoFernChild, IntoFernCondition,
 };

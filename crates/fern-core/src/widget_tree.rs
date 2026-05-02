@@ -1636,6 +1636,15 @@ impl WidgetTree {
                         if let Some(sig) = handler_set.hover_within {
                             node.hover_within_signal = Some(sig);
                         }
+                        // Builder-level accessibility overrides + subtree
+                        // mode. Mirrored here because this insertion path
+                        // bypasses `apply_handler_set`.
+                        if handler_set.access.is_some() {
+                            node.access_overrides = handler_set.access;
+                        }
+                        if let Some(mode) = handler_set.access_subtree {
+                            node.access_subtree = mode;
+                        }
                     }
                 } else {
                     self.arena.restore_widget(id, widget_box);
@@ -1730,6 +1739,14 @@ impl WidgetTree {
                         }
                         if let Some(sig) = handler_set.hover_within {
                             node.hover_within_signal = Some(sig);
+                        }
+                        // Builder-level accessibility overrides + subtree
+                        // mode. Same rationale as in `insert_widget`.
+                        if handler_set.access.is_some() {
+                            node.access_overrides = handler_set.access;
+                        }
+                        if let Some(mode) = handler_set.access_subtree {
+                            node.access_subtree = mode;
                         }
                     }
                 } else {

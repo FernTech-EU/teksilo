@@ -12,6 +12,218 @@ use crate::event::{EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
 use crate::gesture::{DragPhase, PinchPhase, SwipeDirection};
 use crate::widget::{CursorIcon, EventContext, Widget};
+use crate::widget_id::WidgetId;
+
+// ---------------------------------------------------------------------------
+// Accessibility overrides
+// ---------------------------------------------------------------------------
+
+/// Subtree visibility / merge mode applied by the accessibility tree walker.
+///
+/// Set via `WidgetBuilder::access_exclude_subtree()` /
+/// `access_merge_subtree()`. The walker honors the mode after the parent
+/// node has been emitted, before recursing into descendants.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AccessSubtreeMode {
+    /// Normal walk — descendants emitted as their own AT nodes.
+    #[default]
+    Inherit,
+    /// Descendants pruned from the AT tree entirely. Parent node still
+    /// emitted normally. Equivalent to Flutter's `excludeSemantics: true`.
+    Exclude,
+    /// Descendants' labels / descriptions / values / actions are
+    /// concatenated into the parent's emitted node, then descendants are
+    /// pruned. The parent reads as a single AT element. Equivalent to
+    /// Flutter's `mergeAllDescendants: true` and SwiftUI's
+    /// `.accessibilityElement(children: .combine)`.
+    Merge,
+}
+
+/// Builder-level accessibility overrides.
+///
+/// Carried on `HandlerSet` during builder-chain construction, mirrored
+/// onto `WidgetNode::access_overrides` at arena insertion (parallel to
+/// `clips_children` / `cursor` / `focus_within_signal`), then applied by
+/// the accessibility tree walker after the inner widget's
+/// `accessibility(&self, builder)` runs.
+///
+/// User-visible string fields store eagerly-resolved `String`. The
+/// translated path goes through `impl From<LocalizedString> for String`
+/// in `fern-i18n` — `.access_label(tr!("save"))` resolves the
+/// `LocalizedString` once at builder time and stores the result here.
+/// Locale changes rebuild the composite, which re-runs the builder
+/// chain and picks up new translations. The `_literal` builder
+/// variants are `#[doc(hidden)]` grep markers for explicitly
+/// untranslated call sites — same convention as `Button::new_literal`.
+#[derive(Default)]
+pub struct AccessibilityOverrides {
+    // -- Tier 1: labeling / state -----------------------------------------
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub value: Option<String>,
+    pub role: Option<accesskit::Role>,
+    pub hidden: Option<bool>,
+    pub disabled: Option<bool>,
+
+    // -- Tier 2: relationships / live / identity --------------------------
+    pub identifier: Option<String>,
+    pub controls: Vec<WidgetId>,
+    pub described_by: Vec<WidgetId>,
+    pub labelled_by: Vec<WidgetId>,
+    pub live: Option<accesskit::Live>,
+    pub aria_current: Option<accesskit::AriaCurrent>,
+    pub keyboard_shortcut: Option<String>,
+    pub has_popup: Option<accesskit::HasPopup>,
+    pub orientation: Option<accesskit::Orientation>,
+
+    // -- Tier 3: numeric / actions / escape hatch -------------------------
+    pub numeric_value: Option<f64>,
+    pub min_numeric_value: Option<f64>,
+    pub max_numeric_value: Option<f64>,
+    pub numeric_step: Option<f64>,
+
+    /// Standard `accesskit::Action` advertisements with their handlers.
+    /// Dispatched by `event_dispatch_impl.rs` when handling
+    /// `WidgetEvent::AccessAction`, layered on top of any
+    /// user-installed `on_access_action` / `on_access_action_request`
+    /// handlers (both fire for the same dispatched event).
+    pub actions: Vec<(accesskit::Action, Box<dyn FnMut(&mut EventContext)>)>,
+
+    /// Actions to remove from the widget-emitted action list (called
+    /// after the widget's `accessibility()` runs, before custom-action
+    /// emission).
+    pub removed_actions: Vec<accesskit::Action>,
+
+    /// Custom-named actions (SwiftUI `.accessibilityAction(named:_:)`).
+    /// Each entry pairs a resolved description string with a handler.
+    /// Index in the vec is the stable `i32` `CustomAction::id` exposed
+    /// to AT software.
+    pub custom_actions: Vec<(String, Box<dyn FnMut(&mut EventContext)>)>,
+
+    /// Final escape hatch — invoked **last** in `apply()` with full
+    /// `&mut AccessNodeBuilder` access (including `inner_mut()`). Used
+    /// for sub-node surgery (synthetic children) and for cases the
+    /// typed surface doesn't cover.
+    pub customize: Option<Box<dyn Fn(&mut crate::accessibility::AccessNodeBuilder)>>,
+}
+
+impl std::fmt::Debug for AccessibilityOverrides {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccessibilityOverrides")
+            .field("label", &self.label)
+            .field("description", &self.description)
+            .field("value", &self.value)
+            .field("role", &self.role)
+            .field("hidden", &self.hidden)
+            .field("disabled", &self.disabled)
+            .field("identifier", &self.identifier)
+            .field("controls_len", &self.controls.len())
+            .field("described_by_len", &self.described_by.len())
+            .field("labelled_by_len", &self.labelled_by.len())
+            .field("actions_len", &self.actions.len())
+            .field("removed_actions", &self.removed_actions)
+            .field("custom_actions_len", &self.custom_actions.len())
+            .finish()
+    }
+}
+
+impl AccessibilityOverrides {
+    /// Apply the override scalar / list fields onto a builder. Called by
+    /// the accessibility tree walker after the inner widget's
+    /// `accessibility(&self, builder)` runs and before the framework
+    /// finalizes the node.
+    pub(crate) fn apply(&self, b: &mut crate::accessibility::AccessNodeBuilder) {
+        use crate::accessibility::widget_id_to_node_id;
+
+        if let Some(ref s) = self.label {
+            b.set_name(s.clone());
+        }
+        if let Some(ref s) = self.description {
+            b.set_description(s.clone());
+        }
+        if let Some(ref s) = self.value {
+            b.set_value(s.clone());
+        }
+        if let Some(role) = self.role {
+            b.set_role(role);
+        }
+        match self.hidden {
+            Some(true) => b.set_hidden(),
+            Some(false) => b.clear_hidden(),
+            None => {}
+        }
+        match self.disabled {
+            Some(true) => b.set_disabled(),
+            Some(false) => b.clear_disabled(),
+            None => {}
+        }
+        if let Some(ref s) = self.identifier {
+            b.set_author_id(s.clone());
+        }
+        for &id in &self.controls {
+            b.push_controlled(widget_id_to_node_id(id));
+        }
+        for &id in &self.described_by {
+            b.push_described_by(widget_id_to_node_id(id));
+        }
+        for &id in &self.labelled_by {
+            b.push_labelled_by(widget_id_to_node_id(id));
+        }
+        if let Some(live) = self.live {
+            b.set_live(live);
+        }
+        if let Some(c) = self.aria_current {
+            b.set_aria_current(c);
+        }
+        if let Some(ref s) = self.keyboard_shortcut {
+            b.set_keyboard_shortcut(s.clone());
+        }
+        if let Some(p) = self.has_popup {
+            b.set_has_popup(p);
+        }
+        if let Some(o) = self.orientation {
+            b.set_orientation(o);
+        }
+        if let Some(v) = self.numeric_value {
+            b.set_numeric_value(v);
+        }
+        if let Some(v) = self.min_numeric_value {
+            b.set_min_numeric_value(v);
+        }
+        if let Some(v) = self.max_numeric_value {
+            b.set_max_numeric_value(v);
+        }
+        if let Some(v) = self.numeric_step {
+            b.set_numeric_value_step(v);
+        }
+        // Suppression first, then advertisement — so `access_remove_action`
+        // can prune what the widget emitted, but a subsequent
+        // `access_action(same_action, ...)` re-advertises with the
+        // override-installed handler.
+        for &a in &self.removed_actions {
+            b.remove_action(a);
+        }
+        for (action, _) in &self.actions {
+            b.add_action(*action);
+        }
+        if !self.custom_actions.is_empty() {
+            let custom: Vec<accesskit::CustomAction> = self
+                .custom_actions
+                .iter()
+                .enumerate()
+                .map(|(i, (label, _))| accesskit::CustomAction {
+                    id: i as i32,
+                    description: label.clone().into(),
+                })
+                .collect();
+            b.set_custom_actions(custom);
+        }
+        if let Some(ref f) = self.customize {
+            f(b);
+        }
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // HandlerSet — temporary storage before arena insertion
@@ -37,6 +249,17 @@ pub struct HandlerSet {
     /// hovered widget is a strict descendant of this node. See
     /// [`HandlerSet::hover_within`].
     pub(crate) hover_within: Option<crate::signal::Signal<bool>>,
+    /// Builder-level accessibility overrides. Mirrored to
+    /// `WidgetNode::access_overrides` at insertion. Action callbacks
+    /// (`actions`, `custom_actions`) are dispatched by
+    /// `event_dispatch_impl.rs` when handling
+    /// `WidgetEvent::AccessAction`, in addition to the user's
+    /// `on_access_action` / `on_access_action_request` handlers — so
+    /// builder order doesn't matter.
+    pub(crate) access: Option<Box<AccessibilityOverrides>>,
+    /// Subtree visibility / merge mode. Mirrored to
+    /// `WidgetNode::access_subtree`.
+    pub(crate) access_subtree: Option<AccessSubtreeMode>,
 }
 
 impl HandlerSet {
@@ -51,7 +274,16 @@ impl HandlerSet {
             context_menu_factory: None,
             focus_within: None,
             hover_within: None,
+            access: None,
+            access_subtree: None,
         }
+    }
+
+    /// Get a `&mut` to the override block, lazily allocating it on first
+    /// access. Used by all `access_*` builder methods.
+    pub(crate) fn access_mut(&mut self) -> &mut AccessibilityOverrides {
+        self.access
+            .get_or_insert_with(|| Box::new(AccessibilityOverrides::default()))
     }
 
     // -- Builder methods (mirror WidgetWithHandlers) --
@@ -525,6 +757,272 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self.handler_set.handlers.on_drop = Some(Box::new(f));
         self
     }
+
+    // ── Accessibility overrides ────────────────────────────────────────
+    //
+    // All string-accepting methods take `impl Into<String>`. With the
+    // `i18n` feature enabled, `fern_i18n::LocalizedString` (the type
+    // produced by `tr!(...)`) provides `From<LocalizedString> for String`,
+    // so `.access_label(tr!("save"))` works directly — the conversion
+    // resolves the translation at builder time. The `_literal` twins
+    // are `#[doc(hidden)]` grep markers for explicitly untranslated
+    // call sites — same convention as `Button::new_literal`.
+
+    /// Override the accessibility label (`Node::label`) of this widget.
+    /// Replaces whatever the inner widget emitted via `set_name`.
+    ///
+    /// Accepts any `impl Into<String>`. With the `i18n` feature
+    /// enabled, `fern_i18n::LocalizedString` (the type produced by
+    /// `tr!(...)`) implements `From<LocalizedString> for String`, so
+    /// `.access_label(tr!("save"))` works directly. Translation is
+    /// resolved eagerly at builder time; the composite rebuild on
+    /// locale change re-runs the chain to pick up new translations.
+    pub fn access_label(mut self, label: impl Into<String>) -> Self {
+        self.handler_set.access_mut().label = Some(label.into());
+        self
+    }
+
+    /// `#[doc(hidden)]` grep marker for explicitly-untranslated label
+    /// strings — the same convention as
+    /// [`Button::new_literal`](crate::widget_builder::WidgetWithHandlers).
+    /// Functionally identical to [`access_label`]; the distinct name
+    /// makes untranslated call sites greppable as a one-pass audit.
+    #[doc(hidden)]
+    pub fn access_label_literal(self, label: impl Into<String>) -> Self {
+        self.access_label(label)
+    }
+
+    /// Override the accessibility description (`Node::description`).
+    /// Same conversion rules as [`access_label`].
+    pub fn access_description(mut self, description: impl Into<String>) -> Self {
+        self.handler_set.access_mut().description = Some(description.into());
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn access_description_literal(self, description: impl Into<String>) -> Self {
+        self.access_description(description)
+    }
+
+    /// Long-form context hint. Alias of [`access_description`] —
+    /// AccessKit has no separate hint slot (SwiftUI's split is
+    /// VoiceOver-specific). Provided for SwiftUI parity.
+    pub fn access_hint(self, hint: impl Into<String>) -> Self {
+        self.access_description(hint)
+    }
+
+    #[doc(hidden)]
+    pub fn access_hint_literal(self, hint: impl Into<String>) -> Self {
+        self.access_description(hint)
+    }
+
+    /// Override the accessibility value (`Node::value`).
+    /// Same conversion rules as [`access_label`].
+    pub fn access_value(mut self, value: impl Into<String>) -> Self {
+        self.handler_set.access_mut().value = Some(value.into());
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn access_value_literal(self, value: impl Into<String>) -> Self {
+        self.access_value(value)
+    }
+
+    /// Override the accessibility role.
+    pub fn access_role(mut self, role: accesskit::Role) -> Self {
+        self.handler_set.access_mut().role = Some(role);
+        self
+    }
+
+    /// Hide (or un-hide) this node from assistive technologies.
+    /// `false` un-sets a hidden state the inner widget may have emitted
+    /// unconditionally (e.g. `Panel::a11y_presentational`).
+    pub fn access_hidden(mut self, hidden: bool) -> Self {
+        self.handler_set.access_mut().hidden = Some(hidden);
+        self
+    }
+
+    /// Mark (or un-mark) this widget as disabled for AT. `false`
+    /// clears both widget-emitted disabled state AND the framework's
+    /// arena-driven disabled gate at
+    /// `accessibility_impl::build_accessibility_recursive`.
+    pub fn access_disabled(mut self, disabled: bool) -> Self {
+        self.handler_set.access_mut().disabled = Some(disabled);
+        self
+    }
+
+    /// Stable test/debug identifier (`Node::author_id`). Not
+    /// user-visible — used by accessibility inspectors and UI tests.
+    pub fn access_identifier(mut self, id: impl Into<String>) -> Self {
+        self.handler_set.access_mut().identifier = Some(id.into());
+        self
+    }
+
+    /// Append a `controls` relationship. The target widget's NodeId
+    /// is included in this node's `aria-controls`-equivalent list.
+    pub fn access_controls(mut self, target: WidgetId) -> Self {
+        self.handler_set.access_mut().controls.push(target);
+        self
+    }
+
+    /// Append a `described_by` relationship.
+    pub fn access_described_by(mut self, target: WidgetId) -> Self {
+        self.handler_set.access_mut().described_by.push(target);
+        self
+    }
+
+    /// Append a `labelled_by` relationship.
+    pub fn access_labelled_by(mut self, target: WidgetId) -> Self {
+        self.handler_set.access_mut().labelled_by.push(target);
+        self
+    }
+
+    /// Set the live-region politeness (`Node::live`).
+    pub fn access_live(mut self, mode: accesskit::Live) -> Self {
+        self.handler_set.access_mut().live = Some(mode);
+        self
+    }
+
+    /// Mark this node as the current item within its container
+    /// (`aria-current`).
+    pub fn access_current(mut self, current: accesskit::AriaCurrent) -> Self {
+        self.handler_set.access_mut().aria_current = Some(current);
+        self
+    }
+
+    /// Override the announced keyboard shortcut (e.g. `"Ctrl+S"`).
+    pub fn access_keyboard_shortcut(mut self, shortcut: impl Into<String>) -> Self {
+        self.handler_set.access_mut().keyboard_shortcut = Some(shortcut.into());
+        self
+    }
+
+    /// Indicate that activating this widget pops up a menu / listbox /
+    /// dialog (`aria-haspopup`).
+    pub fn access_has_popup(mut self, kind: accesskit::HasPopup) -> Self {
+        self.handler_set.access_mut().has_popup = Some(kind);
+        self
+    }
+
+    /// Override orientation (`Node::orientation`) — used on sliders,
+    /// scrollbars, separators.
+    pub fn access_orientation(mut self, orientation: accesskit::Orientation) -> Self {
+        self.handler_set.access_mut().orientation = Some(orientation);
+        self
+    }
+
+    /// Prune all descendants from the accessibility tree. The widget's
+    /// own AT node is still emitted; only children disappear. Use for
+    /// purely decorative composites. Flutter's `excludeSemantics: true`.
+    pub fn access_exclude_subtree(mut self) -> Self {
+        self.handler_set.access_subtree = Some(AccessSubtreeMode::Exclude);
+        self
+    }
+
+    /// Lift descendants' labels / descriptions / values / actions into
+    /// this widget's AT node, then prune the descendants. The whole
+    /// composite reads as a single AT element. Flutter's
+    /// `mergeAllDescendants: true` and SwiftUI's
+    /// `.accessibilityElement(children: .combine)`.
+    pub fn access_merge_subtree(mut self) -> Self {
+        self.handler_set.access_subtree = Some(AccessSubtreeMode::Merge);
+        self
+    }
+
+    /// Set an explicit subtree mode.
+    pub fn access_subtree(mut self, mode: AccessSubtreeMode) -> Self {
+        self.handler_set.access_subtree = Some(mode);
+        self
+    }
+
+    /// Override `Node::numeric_value`.
+    pub fn access_numeric_value(mut self, value: f64) -> Self {
+        self.handler_set.access_mut().numeric_value = Some(value);
+        self
+    }
+
+    /// Override `Node::min_numeric_value` and `max_numeric_value`.
+    pub fn access_numeric_range(mut self, min: f64, max: f64) -> Self {
+        let access = self.handler_set.access_mut();
+        access.min_numeric_value = Some(min);
+        access.max_numeric_value = Some(max);
+        self
+    }
+
+    /// Override `Node::numeric_value_step`.
+    pub fn access_numeric_step(mut self, step: f64) -> Self {
+        self.handler_set.access_mut().numeric_step = Some(step);
+        self
+    }
+
+    /// Advertise an accessibility action and the callback that fires
+    /// when AT software invokes it. Multiple `access_action` calls
+    /// register separate callbacks for distinct actions; calling twice
+    /// with the same action records both — they fire in order.
+    pub fn access_action<F>(mut self, action: accesskit::Action, handler: F) -> Self
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        self.handler_set
+            .access_mut()
+            .actions
+            .push((action, Box::new(handler)));
+        self
+    }
+
+    /// Suppress an action the inner widget emitted (e.g. neutralize
+    /// `Action::Click` on a Button used purely as a layout shim).
+    /// Applied after the widget's `accessibility()` runs but before
+    /// override-advertised actions, so a subsequent `access_action`
+    /// for the same action re-advertises it with the override-installed
+    /// callback.
+    pub fn access_remove_action(mut self, action: accesskit::Action) -> Self {
+        self.handler_set
+            .access_mut()
+            .removed_actions
+            .push(action);
+        self
+    }
+
+    /// Advertise a custom-named action (SwiftUI parity:
+    /// `.accessibilityAction(named:_:)`). The label is exposed
+    /// verbatim by AT software (e.g. VoiceOver's Actions rotor).
+    /// Accepts `tr!(...)` via the `LocalizedString -> String`
+    /// conversion in `fern-i18n`.
+    pub fn access_custom_action<F>(
+        mut self,
+        label: impl Into<String>,
+        handler: F,
+    ) -> Self
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        self.handler_set
+            .access_mut()
+            .custom_actions
+            .push((label.into(), Box::new(handler)));
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn access_custom_action_literal<F>(self, label: impl Into<String>, handler: F) -> Self
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        self.access_custom_action(label, handler)
+    }
+
+    /// Final escape hatch — invoked after all typed override setters,
+    /// with full `&mut AccessNodeBuilder` access (including
+    /// `inner_mut()`). Use for synthetic-child surgery (rich text
+    /// paragraphs, text runs) or any AccessKit field the typed
+    /// surface doesn't cover.
+    pub fn access_customize<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&mut crate::accessibility::AccessNodeBuilder) + 'static,
+    {
+        self.handler_set.access_mut().customize = Some(Box::new(f));
+        self
+    }
 }
 
 // Delegate all Widget trait methods to the inner widget.
@@ -867,6 +1365,180 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drop(f)
+    }
+
+    // ── Accessibility overrides ────────────────────────────────────────
+    //
+    // Trait-level entry points: each method wraps the widget into a
+    // `WidgetWithHandlers` (the first builder call in any chain) and
+    // forwards to the inherent method of the same name. See
+    // `WidgetWithHandlers` for full rustdoc on each method's semantics.
+    // For translated strings, `LocalizedString` flows through
+    // `impl Into<String>` via `fern-i18n`'s `From<LocalizedString>` impl.
+
+    fn access_label(self, label: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_label(label)
+    }
+
+    #[doc(hidden)]
+    fn access_label_literal(self, label: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_label(label)
+    }
+
+    fn access_description(
+        self,
+        description: impl Into<String>,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_description(description)
+    }
+
+    #[doc(hidden)]
+    fn access_description_literal(
+        self,
+        description: impl Into<String>,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_description(description)
+    }
+
+    fn access_hint(self, hint: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_hint(hint)
+    }
+
+    #[doc(hidden)]
+    fn access_hint_literal(self, hint: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_hint(hint)
+    }
+
+    fn access_value(self, value: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_value(value)
+    }
+
+    #[doc(hidden)]
+    fn access_value_literal(self, value: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_value(value)
+    }
+
+    fn access_role(self, role: accesskit::Role) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_role(role)
+    }
+
+    fn access_hidden(self, hidden: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_hidden(hidden)
+    }
+
+    fn access_disabled(self, disabled: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_disabled(disabled)
+    }
+
+    fn access_identifier(self, id: impl Into<String>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_identifier(id)
+    }
+
+    fn access_controls(self, target: WidgetId) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_controls(target)
+    }
+
+    fn access_described_by(self, target: WidgetId) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_described_by(target)
+    }
+
+    fn access_labelled_by(self, target: WidgetId) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_labelled_by(target)
+    }
+
+    fn access_live(self, mode: accesskit::Live) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_live(mode)
+    }
+
+    fn access_current(self, current: accesskit::AriaCurrent) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_current(current)
+    }
+
+    fn access_keyboard_shortcut(
+        self,
+        shortcut: impl Into<String>,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_keyboard_shortcut(shortcut)
+    }
+
+    fn access_has_popup(self, kind: accesskit::HasPopup) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_has_popup(kind)
+    }
+
+    fn access_orientation(
+        self,
+        orientation: accesskit::Orientation,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_orientation(orientation)
+    }
+
+    fn access_exclude_subtree(self) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_exclude_subtree()
+    }
+
+    fn access_merge_subtree(self) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_merge_subtree()
+    }
+
+    fn access_subtree(self, mode: AccessSubtreeMode) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_subtree(mode)
+    }
+
+    fn access_numeric_value(self, value: f64) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_numeric_value(value)
+    }
+
+    fn access_numeric_range(self, min: f64, max: f64) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_numeric_range(min, max)
+    }
+
+    fn access_numeric_step(self, step: f64) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_numeric_step(step)
+    }
+
+    fn access_action<F>(
+        self,
+        action: accesskit::Action,
+        handler: F,
+    ) -> WidgetWithHandlers<Self>
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        WidgetWithHandlers::new(self).access_action(action, handler)
+    }
+
+    fn access_remove_action(self, action: accesskit::Action) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).access_remove_action(action)
+    }
+
+    fn access_custom_action<F>(
+        self,
+        label: impl Into<String>,
+        handler: F,
+    ) -> WidgetWithHandlers<Self>
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        WidgetWithHandlers::new(self).access_custom_action(label, handler)
+    }
+
+    #[doc(hidden)]
+    fn access_custom_action_literal<F>(
+        self,
+        label: impl Into<String>,
+        handler: F,
+    ) -> WidgetWithHandlers<Self>
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        WidgetWithHandlers::new(self).access_custom_action(label, handler)
+    }
+
+    fn access_customize<F>(self, f: F) -> WidgetWithHandlers<Self>
+    where
+        F: Fn(&mut crate::accessibility::AccessNodeBuilder) + 'static,
+    {
+        WidgetWithHandlers::new(self).access_customize(f)
     }
 }
 

@@ -135,6 +135,22 @@ impl From<LocalizedString> for Prop<String> {
 // `LocalizedString::literal(...)` or produced by `tr!(...)`, so that a
 // grep for those names finds every untranslated string in one pass.
 
+/// Eagerly resolve a `LocalizedString` into a plain `String`. Equivalent
+/// to calling `resolve_now()`. Enables `tr!(...)` to flow through
+/// `impl Into<String>`-bounded APIs (e.g. the accessibility override
+/// builder methods in `fern-core` that can't reference `LocalizedString`
+/// directly because of the dependency direction).
+///
+/// This conversion is not reactive: locale changes after the conversion
+/// are not observed by the produced `String`. Re-resolution happens at
+/// the next composite rebuild, which re-runs the builder chain that
+/// produced the `String`.
+impl From<LocalizedString> for String {
+    fn from(ls: LocalizedString) -> String {
+        ls.resolve_now()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

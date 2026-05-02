@@ -704,7 +704,7 @@ impl WidgetTree {
                 );
                 let request_is_set = node.handlers.on_access_action_request.is_some()
                     || node.external_handlers.on_access_action_request.is_some();
-                let result = if request_is_set {
+                let user_handled = if request_is_set {
                     let r1 = node
                         .external_handlers
                         .on_access_action_request
@@ -749,8 +749,37 @@ impl WidgetTree {
                 } else {
                     None
                 };
+
+                // Builder-level access_action / access_custom_action
+                // callbacks. These layer on top of any user-installed
+                // on_access_action / on_access_action_request — both
+                // fire for the same dispatched event. Drives the
+                // SwiftUI `.accessibilityAction(...)` parity.
+                let mut override_handled = false;
+                if let Some(ov) = node.access_overrides.as_deref_mut() {
+                    if matches!(action, accesskit::Action::CustomAction) {
+                        if let Some(accesskit::ActionData::CustomAction(idx)) = data {
+                            if let Some((_, cb)) = ov.custom_actions.get_mut(*idx as usize) {
+                                cb(ctx);
+                                override_handled = true;
+                            }
+                        }
+                    } else {
+                        for (a, cb) in ov.actions.iter_mut() {
+                            if *a == *action {
+                                cb(ctx);
+                                override_handled = true;
+                            }
+                        }
+                    }
+                }
+
                 ctx.current_source = saved_a11y_source;
-                result
+                match (user_handled, override_handled) {
+                    (Some(EventResponse::Handled), _) | (_, true) => Some(EventResponse::Handled),
+                    (Some(EventResponse::Ignored), false) => Some(EventResponse::Ignored),
+                    (None, false) => None,
+                }
             }
             WidgetEvent::Gesture { gesture } => {
                 // Pre-recognized gestures from the platform (OS trackpad

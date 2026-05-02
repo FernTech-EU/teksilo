@@ -341,6 +341,49 @@ Visual showcase: `cargo run -p animations-kit`.
 - `.focusable(true)`, `.cursor(CursorIcon::Pointer)` — framework-level properties on node
 - Cross-widget behavior: `ctx.send_intent(MyIntent::X)` inside handlers; ancestor `Action`s consume it (see "Actions, Intents & Shortcuts")
 
+## Accessibility Overrides
+
+Builder-level `.access_*` methods on `WidgetBuilder` (and `WidgetWithHandlers`) let an app author augment, replace, or annotate any widget's accessibility info from the outside — analogous to SwiftUI's `.accessibility*` modifiers and Flutter's `Semantics(...)`. Overrides ride the same `HandlerSet → WidgetNode` plumbing as `cursor` / `clips_children` / `focus_within`, then apply from the accessibility tree walker after the inner widget's `accessibility(builder)` runs.
+
+```rust
+use accesskit::{Action, Role, Live, HasPopup};
+
+Button::new(tr!("save_icon"))
+    .access_label(tr!("save"))                  // replace widget label
+    .access_description(tr!("save_explanation")) // long-form context
+    .access_role(Role::Button)
+    .access_keyboard_shortcut("Ctrl+S")
+    .access_action(Action::ShowContextMenu, |ctx| ctx.send_intent(AppIntent::Menu))
+    .access_custom_action(tr!("publish_now"), |ctx| ctx.send_intent(AppIntent::Publish));
+
+// Subtree control:
+my_card.access_merge_subtree();        // collapse card into one AT element
+animated_logo.access_exclude_subtree();// hide all descendants from AT
+
+// Status region:
+toast_panel.access_live(Live::Polite);
+
+// Cross-widget relationships:
+combo_button.access_controls(listbox_id);
+field.access_described_by(error_message_id);
+```
+
+**Naming and i18n.** All user-visible-string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<String>`. With the `i18n` feature, `fern_i18n::LocalizedString` (the type produced by `tr!`) implements `From<LocalizedString> for String`, so `.access_label(tr!("save"))` resolves and stores the translated literal. Each translated method has a `#[doc(hidden)]` `_literal` twin (`access_label_literal`, etc.) — the same grep marker as `Button::new_literal`/`tooltip_literal` for explicitly-untranslated call sites.
+
+**Merge rules.** Scalars (`label`, `description`, `value`, `role`, `identifier`, `keyboard_shortcut`, `live`, `aria_current`, `has_popup`, `orientation`, numeric range/step) replace if `Some`. Lists (`controls`, `described_by`, `labelled_by`, advertised actions, custom actions) append. `access_remove_action` suppresses an action the widget emitted before override-advertised actions are added. `access_customize(|b| ...)` runs **last** with full `&mut AccessNodeBuilder` access (including `inner_mut()`) — it's the supported escape hatch for synthetic-children surgery (rich-text paragraphs / text runs) and any AccessKit field the typed surface doesn't cover.
+
+**Clearing widget-set state.** `access_hidden(false)` calls `clear_hidden()` to un-set a hidden flag the widget emitted unconditionally (e.g. `Panel::a11y_presentational`). `access_disabled(false)` clears both widget-emitted and arena-driven disabled — the framework's gate at `accessibility_impl::build_accessibility_recursive` respects the override.
+
+**Subtree modes.** `access_subtree(AccessSubtreeMode::{Inherit, Exclude, Merge})` (or the convenience `access_exclude_subtree()` / `access_merge_subtree()`) controls how the AT walker handles descendants:
+
+- `Inherit` (default) — descendants emit normally.
+- `Exclude` — descendants pruned from the AT tree; parent emits as-is.
+- `Merge` — descendants' label / description / value (first non-empty) / actions / relationships are concatenated into the parent, then descendants pruned. The parent reads as one AT element. Nested `Exclude` inside `Merge` wins (excluded subtree contributes nothing); nested `Merge` inside `Merge` walks the inner merge first then absorbs the result as one element.
+
+**Action callbacks.** `.access_action(action, callback)` advertises the action AND registers the callback. The dispatcher routes AT-invoked actions through `WidgetEvent::AccessAction` to the callback, layered on top of any user-installed `.on_access_action(...)` (both fire). Custom actions (SwiftUI `accessibilityAction(named:)`) use `accesskit::ActionData::CustomAction(idx)` and route by index in declaration order.
+
+Reference: [crates/fern-core/src/widget_builder.rs](crates/fern-core/src/widget_builder.rs) (`AccessibilityOverrides`, `AccessSubtreeMode`, `.access_*` methods); [crates/fern-core/src/widget_tree/accessibility_impl.rs](crates/fern-core/src/widget_tree/accessibility_impl.rs) (walker integration, `merge_descendants_into`).
+
 ## Actions, Intents & Shortcuts
 
 Three-layer input-to-behavior pipeline. There is **no** `AppCommand`/`on_command` anymore — widgets fire `Intent`s, ancestor widgets register `Action`s keyed by intent name, and `Shortcut`s bind rebindable keystrokes to intent names.
@@ -516,7 +559,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Window management (multi-window, modal dialogs, custom title bar)
 - GPU rendering (3 pipelines, glyph atlas, path atlas)
 - All ~21 layout primitives (including Grid, Wrap, AspectRatio, Switcher, MasonryLayout, FormLayout)
-- Accessibility (AccessKit integration at trait level)
+- Accessibility (AccessKit integration at trait level + builder-level overrides: `.access_label`, `.access_description`, `.access_hidden`, `.access_role`, `.access_disabled`, `.access_controls`/`described_by`/`labelled_by`, `.access_live`, `.access_action`/`access_remove_action`/`access_custom_action`, `.access_exclude_subtree`/`access_merge_subtree`, `.access_customize` — see "Accessibility Overrides" above)
 - Animation system (`Signal<f32>::animate_to`, easing, per-frame scheduler)
 - Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal)
 - `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)

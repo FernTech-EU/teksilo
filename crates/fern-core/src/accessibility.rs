@@ -144,9 +144,24 @@ impl AccessNodeBuilder {
         self.inner.set_disabled();
     }
 
+    /// Clear the disabled flag set by an earlier `set_disabled()` call. Used
+    /// by the override layer to un-set state a widget emitted unconditionally
+    /// (e.g. a Panel that always calls `set_hidden`/`set_disabled`).
+    pub fn clear_disabled(&mut self) {
+        self.inner.clear_disabled();
+    }
+
     pub fn add_action(&mut self, action: Action) {
         self.inner.add_action(action);
         self.actions.push(action);
+    }
+
+    /// Remove a previously-advertised action. Used by the override layer
+    /// (`access_remove_action`) to suppress an action a widget emitted but
+    /// that doesn't apply in this composition.
+    pub fn remove_action(&mut self, action: Action) {
+        self.inner.remove_action(action);
+        self.actions.retain(|a| *a != action);
     }
 
     pub fn set_value(&mut self, value: impl Into<String>) {
@@ -165,6 +180,32 @@ impl AccessNodeBuilder {
 
     pub fn set_described_by(&mut self, ids: impl Into<Vec<NodeId>>) {
         self.inner.set_described_by(ids);
+    }
+
+    /// Append one node to the `described_by` relationship list. Mirror of
+    /// the existing [`push_controlled`]; used by the override layer's
+    /// `access_described_by` builder method and by the framework's
+    /// tooltip wiring.
+    pub fn push_described_by(&mut self, id: NodeId) {
+        self.inner.push_described_by(id);
+    }
+
+    /// Append one node to the `labelled_by` relationship list. Used by
+    /// `access_labelled_by` to point at an external label widget.
+    pub fn push_labelled_by(&mut self, id: NodeId) {
+        self.inner.push_labelled_by(id);
+    }
+
+    /// Stable author-supplied identifier (test/debug id, equivalent to
+    /// `aria-label`-style `data-testid`). Maps to `accesskit::Node::set_author_id`.
+    pub fn set_author_id(&mut self, id: impl Into<String>) {
+        self.inner.set_author_id(id.into());
+    }
+
+    /// Replace the node's custom-action list with `actions`. Used by the
+    /// override layer's `access_custom_action` builder method.
+    pub fn set_custom_actions(&mut self, actions: Vec<accesskit::CustomAction>) {
+        self.inner.set_custom_actions(actions);
     }
 
     pub fn set_toggled(&mut self, toggled: bool) {
@@ -291,6 +332,16 @@ impl AccessNodeBuilder {
     pub fn set_hidden(&mut self) {
         self.hidden = true;
         self.inner.set_hidden();
+    }
+
+    /// Clear the hidden flag set by an earlier `set_hidden()` call. Used
+    /// by the override layer to re-expose a widget that marked itself
+    /// presentational. AccessKit's Node `hidden` is local — un-hiding this
+    /// node does not propagate to descendants, but descendants are not
+    /// transitively hidden by their ancestor's `hidden` either.
+    pub fn clear_hidden(&mut self) {
+        self.hidden = false;
+        self.inner.clear_hidden();
     }
 
     pub fn is_hidden(&self) -> bool {

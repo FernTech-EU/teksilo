@@ -129,6 +129,7 @@ impl WidgetTree {
         seen_children: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
     ) {
         use crate::accessibility::widget_id_to_node_id;
+        use crate::widget_builder::AccessSubtreeMode;
 
         if !self.arena.is_active(id) {
             return;
@@ -138,21 +139,45 @@ impl WidgetTree {
         let mut builder = AccessNodeBuilder::for_widget(id);
         node.widget.accessibility(&mut builder);
 
+        // Apply builder-level overrides AFTER the inner widget has
+        // emitted its defaults, so the overrides win for scalar fields
+        // and append on relationship lists.
+        if let Some(ov) = node.access_overrides.as_deref() {
+            ov.apply(&mut builder);
+        }
+
+        let subtree_mode = node.access_subtree;
         let children = self.arena.children(id);
-        for &child_id in children {
-            if self.arena.is_active(child_id) {
-                let child_nid = widget_id_to_node_id(child_id);
-                if let Some(&prior_parent) = seen_children.get(&child_nid) {
-                    eprintln!(
-                        "FernUI bug: duplicate accessibility child {:?}: \
-                         first claimed by parent {:?}, now also claimed by {:?}. \
-                         Please file a bug report.",
-                        child_id, prior_parent, id
-                    );
-                    continue;
+
+        // Subtree dispatch:
+        //   Inherit  — push child NodeIds onto the parent and recurse normally
+        //   Exclude  — neither push nor recurse: descendants vanish from AT
+        //   Merge    — collect descendants' label/description/value/actions
+        //              into THIS node, then prune (no push, no recurse)
+        match subtree_mode {
+            AccessSubtreeMode::Inherit => {
+                for &child_id in children {
+                    if self.arena.is_active(child_id) {
+                        let child_nid = widget_id_to_node_id(child_id);
+                        if let Some(&prior_parent) = seen_children.get(&child_nid) {
+                            eprintln!(
+                                "FernUI bug: duplicate accessibility child {:?}: \
+                                 first claimed by parent {:?}, now also claimed by {:?}. \
+                                 Please file a bug report.",
+                                child_id, prior_parent, id
+                            );
+                            continue;
+                        }
+                        seen_children.insert(child_nid, id);
+                        builder.inner_mut().push_child(child_nid);
+                    }
                 }
-                seen_children.insert(child_nid, id);
-                builder.inner_mut().push_child(child_nid);
+            }
+            AccessSubtreeMode::Exclude => {
+                // No children pushed, no descendants recursed-into.
+            }
+            AccessSubtreeMode::Merge => {
+                merge_descendants_into(&mut builder, id, &self.arena);
             }
         }
 
@@ -164,7 +189,16 @@ impl WidgetTree {
             y1: (bounds.y + bounds.height) as f64,
         });
 
-        if !self.arena.is_enabled(id) {
+        // Framework-driven disabled gate. Respects an
+        // `access_disabled(false)` override that wants to clear
+        // arena-driven disabled state too — without this short-circuit,
+        // `clear_disabled()` in the override layer would be re-set here.
+        let force_clear_disabled = node
+            .access_overrides
+            .as_deref()
+            .and_then(|ov| ov.disabled)
+            == Some(false);
+        if !self.arena.is_enabled(id) && !force_clear_disabled {
             builder.set_disabled();
         }
 
@@ -190,20 +224,43 @@ impl WidgetTree {
             synthetic_parents.insert(syn_id, id);
         }
 
-        for &child_id in children {
-            self.build_accessibility_recursive(
-                child_id,
-                nodes,
-                synthetic_parents,
-                seen_children,
-            );
+        // Recurse only for `Inherit` — `Exclude` and `Merge` prune
+        // descendants from the AT tree.
+        if matches!(subtree_mode, AccessSubtreeMode::Inherit) {
+            for &child_id in children {
+                self.build_accessibility_recursive(
+                    child_id,
+                    nodes,
+                    synthetic_parents,
+                    seen_children,
+                );
+            }
         }
+    }
+
+    /// Build a builder representing the widget's full a11y state at this
+    /// instant — the inner widget's `accessibility(builder)` plus any
+    /// builder-level overrides (`access_label`, `access_role`, …) and,
+    /// when the widget has `access_subtree(Merge)`, the merged
+    /// descendant state. Centralized so `accessibility_node`,
+    /// `text_content`, and the recursive walker stay in sync.
+    fn build_overridden_builder(&self, id: WidgetId) -> AccessNodeBuilder {
+        use crate::widget_builder::AccessSubtreeMode;
+        let node = self.arena.get(id).unwrap();
+        let mut builder = AccessNodeBuilder::for_widget(id);
+        node.widget.accessibility(&mut builder);
+        if let Some(ov) = node.access_overrides.as_deref() {
+            ov.apply(&mut builder);
+        }
+        if node.access_subtree == AccessSubtreeMode::Merge {
+            merge_descendants_into(&mut builder, id, &self.arena);
+        }
+        builder
     }
 
     pub fn accessibility_node(&self, id: WidgetId) -> AccessibilityInfo {
         let node = self.arena.get(id).unwrap();
-        let mut builder = AccessNodeBuilder::for_widget(id);
-        node.widget.accessibility(&mut builder);
+        let builder = self.build_overridden_builder(id);
         let role = builder.role();
         let name = builder.name().map(|s| s.to_string());
         let actions = builder.actions().to_vec();
@@ -217,7 +274,25 @@ impl WidgetTree {
         if let Some(selected) = builder.selected() {
             info = info.with_selected(selected);
         }
-        if !self.arena.is_enabled(id) {
+        // Mirror the framework gate at `build_accessibility_recursive`:
+        // arena-driven disabled wins unless the override explicitly
+        // asks for `access_disabled(false)`.
+        let force_clear_disabled = node
+            .access_overrides
+            .as_deref()
+            .and_then(|ov| ov.disabled)
+            == Some(false);
+        let disabled_arena = !self.arena.is_enabled(id) && !force_clear_disabled;
+        // Override `Some(true)` already called `set_disabled()` inside
+        // the override apply; we only need to surface it here as a
+        // separate signal because `AccessNodeBuilder` doesn't expose a
+        // `is_disabled()` getter on the builder side.
+        let disabled_override = node
+            .access_overrides
+            .as_deref()
+            .and_then(|ov| ov.disabled)
+            == Some(true);
+        if disabled_arena || disabled_override {
             info = info.with_disabled(true);
         }
         if builder.is_hidden() {
@@ -228,10 +303,7 @@ impl WidgetTree {
 
     pub fn find_by_role(&self, role: accesskit::Role) -> Option<WidgetId> {
         for id in self.arena.active_ids() {
-            let node = self.arena.get(id).unwrap();
-            let mut builder = AccessNodeBuilder::new();
-            node.widget.accessibility(&mut builder);
-            if builder.role() == role {
+            if self.build_overridden_builder(id).role() == role {
                 return Some(id);
             }
         }
@@ -240,10 +312,7 @@ impl WidgetTree {
 
     pub fn find_by_label(&self, label: &str) -> Option<WidgetId> {
         for id in self.arena.active_ids() {
-            let node = self.arena.get(id).unwrap();
-            let mut builder = AccessNodeBuilder::new();
-            node.widget.accessibility(&mut builder);
-            if builder.name() == Some(label) {
+            if self.build_overridden_builder(id).name() == Some(label) {
                 return Some(id);
             }
         }
@@ -252,10 +321,7 @@ impl WidgetTree {
 
     pub fn find_by_action(&self, action: accesskit::Action) -> Option<WidgetId> {
         for id in self.arena.active_ids() {
-            let node = self.arena.get(id).unwrap();
-            let mut builder = AccessNodeBuilder::new();
-            node.widget.accessibility(&mut builder);
-            if builder.actions().contains(&action) {
+            if self.build_overridden_builder(id).actions().contains(&action) {
                 return Some(id);
             }
         }
@@ -263,21 +329,187 @@ impl WidgetTree {
     }
 
     /// Get the text content of a widget from its accessibility name.
-    /// Equivalent to the label set via `AccessNodeBuilder::set_name`.
+    /// Equivalent to the label set via `AccessNodeBuilder::set_name`,
+    /// after override application.
     pub fn text_content(&self, id: WidgetId) -> Option<String> {
-        let node = self.arena.get(id)?;
-        let mut builder = AccessNodeBuilder::for_widget(id);
-        node.widget.accessibility(&mut builder);
-        builder.name().map(|s| s.to_string())
+        self.arena.get(id)?;
+        self.build_overridden_builder(id)
+            .name()
+            .map(|s| s.to_string())
     }
 
     /// Get the text value of a widget from its accessibility value.
-    /// Equivalent to the value set via `AccessNodeBuilder::set_value`.
+    /// Equivalent to the value set via `AccessNodeBuilder::set_value`,
+    /// after override application.
     pub fn text_value(&self, id: WidgetId) -> Option<String> {
-        let node = self.arena.get(id)?;
-        let mut builder = AccessNodeBuilder::for_widget(id);
-        node.widget.accessibility(&mut builder);
-        builder.value().map(|s| s.to_string())
+        self.arena.get(id)?;
+        self.build_overridden_builder(id)
+            .value()
+            .map(|s| s.to_string())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Subtree-merge helpers
+// ─────────────────────────────────────────────────────────────────────
+//
+// These run when a widget's `access_subtree` is `Merge`. The walker
+// recurses through the descendants, applies each descendant's own
+// `accessibility() + override apply()` into a temp builder, and absorbs
+// the resulting label / description / value / actions / relationships
+// into a `MergeAccumulator`. After the walk finishes the accumulator
+// flushes its accumulated state onto the parent's builder.
+//
+// The accumulator deliberately discards descendant role and numeric
+// fields (parent's role wins for the merged element) and discards
+// hidden / disabled (parent's state governs the whole merged subtree).
+// Action lists union with deduplication so two child Buttons each
+// emitting `Click` don't pollute the merged parent with two copies.
+
+/// Walk the descendants of `parent_id` and absorb their label /
+/// description / value / actions / relationships into `parent_builder`.
+/// Per-descendant subtree-mode handling lives in
+/// [`merge_collect_recursive`].
+fn merge_descendants_into(
+    parent_builder: &mut AccessNodeBuilder,
+    parent_id: WidgetId,
+    arena: &crate::arena::WidgetArena,
+) {
+    let mut acc = MergeAccumulator::default();
+    for &child in arena.children(parent_id) {
+        merge_collect_recursive(child, arena, &mut acc);
+    }
+    acc.flush_into(parent_builder);
+}
+
+fn merge_collect_recursive(
+    id: WidgetId,
+    arena: &crate::arena::WidgetArena,
+    acc: &mut MergeAccumulator,
+) {
+    use crate::widget_builder::AccessSubtreeMode;
+
+    if !arena.is_active(id) {
+        return;
+    }
+    let Some(node) = arena.get(id) else {
+        return;
+    };
+
+    // Build a temp builder for this descendant the same way the walker
+    // would: widget.accessibility() then override apply(). This means
+    // a descendant's `.access_label(...)` contributes its resolved
+    // override string, not its raw widget label.
+    let mut tmp = AccessNodeBuilder::for_widget(id);
+    node.widget.accessibility(&mut tmp);
+    if let Some(ov) = node.access_overrides.as_deref() {
+        ov.apply(&mut tmp);
+    }
+    // Nested-merge: the descendant itself has access_subtree=Merge.
+    // Run its own merge into `tmp` BEFORE absorbing — otherwise we'd
+    // absorb the descendant's empty container state and lose its
+    // subtree-merged label.
+    if matches!(node.access_subtree, AccessSubtreeMode::Merge) {
+        merge_descendants_into(&mut tmp, id, arena);
+    }
+    // Skip nodes that opted out of AT entirely: a child marked
+    // `access_hidden(true)` (or whose widget called `set_hidden()`)
+    // contributes nothing to the merge.
+    if !tmp.is_hidden() {
+        acc.absorb(&tmp);
+    }
+
+    match node.access_subtree {
+        AccessSubtreeMode::Exclude => {
+            // Prune — don't recurse into descendants of an excluded subtree.
+        }
+        AccessSubtreeMode::Merge => {
+            // Nested Merge: descendant's own subtree was absorbed into
+            // `tmp` above; don't re-walk its children at this level
+            // (would double-count). The descendant reads as one
+            // AT element from the outer merge's perspective.
+        }
+        AccessSubtreeMode::Inherit => {
+            for &grandchild in arena.children(id) {
+                merge_collect_recursive(grandchild, arena, acc);
+            }
+        }
+    }
+}
+
+/// Per-merge-walk accumulator. Collects descendant state across the
+/// recursive walk, then `flush_into` writes the unioned values onto
+/// the parent's builder.
+///
+/// Fields that the absorb path can read from `AccessNodeBuilder`
+/// (label, value, advertised actions) participate in the merge.
+/// Description and relationship lists (`controls` / `described_by` /
+/// `labelled_by`) live inside `accesskit::Node` and have no public
+/// getter on `AccessNodeBuilder`; merging them would require
+/// reflecting builder mutations into a parallel field, which we
+/// haven't found a real-world use case for. App authors who need
+/// description / relationship merge can use the `access_customize`
+/// escape hatch on the parent.
+#[derive(Default)]
+struct MergeAccumulator {
+    label_parts: Vec<String>,
+    /// First non-empty value wins.
+    value: Option<String>,
+    actions: Vec<accesskit::Action>,
+}
+
+impl MergeAccumulator {
+    fn absorb(&mut self, src: &AccessNodeBuilder) {
+        if let Some(name) = src.name() {
+            if !name.is_empty() {
+                self.label_parts.push(name.to_string());
+            }
+        }
+        if let Some(value) = src.value() {
+            if self.value.is_none() && !value.is_empty() {
+                self.value = Some(value.to_string());
+            }
+        }
+        for &action in src.actions() {
+            if !self.actions.contains(&action) {
+                self.actions.push(action);
+            }
+        }
+    }
+
+    fn flush_into(self, dst: &mut AccessNodeBuilder) {
+        // Concatenate new label parts onto whatever the parent's
+        // builder already carried. Existing parent name kept first.
+        if !self.label_parts.is_empty() {
+            let existing = dst.name().map(|s| s.to_string());
+            let merged = match existing {
+                Some(e) if !e.is_empty() => {
+                    let mut s = e;
+                    for part in self.label_parts {
+                        s.push(' ');
+                        s.push_str(&part);
+                    }
+                    s
+                }
+                _ => self.label_parts.join(" "),
+            };
+            dst.set_name(merged);
+        }
+        if let Some(v) = self.value {
+            // Only overwrite parent value if it's currently None — the
+            // parent's own value (from the inner widget or override
+            // `access_value`) takes precedence.
+            if dst.value().is_none() {
+                dst.set_value(v);
+            }
+        }
+        for action in self.actions {
+            // Union: skip actions already advertised on the parent
+            // (avoid duplicate Click/Focus when parent is itself a Button).
+            if !dst.actions().contains(&action) {
+                dst.add_action(action);
+            }
+        }
     }
 }
 
@@ -589,5 +821,651 @@ mod tests {
         let update = tree.sync_accessibility();
         assert_no_dangling_relationships(&update);
         assert_a11y_tree_valid(&update);
+    }
+
+    // ── Builder-level accessibility override tests ───────────────────
+    //
+    // Tests for `WidgetBuilder::access_*` methods. The 36-test plan from
+    // `docs/plans/...` is realized below — each test name maps to the
+    // numbered entry in the plan's "Test plan" section.
+
+    use crate::widget_builder::WidgetBuilder;
+    use accesskit::{Action, AriaCurrent, HasPopup, Live, Orientation, Role};
+
+    /// Find a node in a TreeUpdate by WidgetId.
+    fn find_node(
+        update: &accesskit::TreeUpdate,
+        id: WidgetId,
+    ) -> Option<&accesskit::Node> {
+        let nid = crate::accessibility::widget_id_to_node_id(id);
+        update
+            .nodes
+            .iter()
+            .find(|(node_id, _)| *node_id == nid)
+            .map(|(_, n)| n)
+    }
+
+    /// A widget that calls set_hidden() unconditionally — used to test
+    /// `access_hidden(false)` clears widget-emitted hidden state.
+    #[derive(Debug)]
+    struct AlwaysHiddenWidget;
+    impl Widget for AlwaysHiddenWidget {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            builder.set_role(Role::GenericContainer);
+            builder.set_hidden();
+        }
+    }
+
+    // Test 1
+    #[test]
+    fn access_label_replaces_widget_label() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ClickableWidget.access_label_literal("Publish"));
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+        assert_eq!(tree.accessibility_node(id).name(), Some("Publish"));
+    }
+
+    // Test 2
+    #[test]
+    fn access_description_appears_on_bare_widget() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_description_literal("Decorative"));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).expect("node present");
+        assert_eq!(node.description(), Some("Decorative"));
+    }
+
+    // Test 3
+    #[test]
+    fn access_value_replaces_widget_value() {
+        #[derive(Debug)]
+        struct SliderWidget;
+        impl Widget for SliderWidget {
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                builder.set_role(Role::Slider);
+                builder.set_value("50");
+            }
+        }
+        let mut tree = WidgetTree::new();
+        let id = tree.add(SliderWidget.access_value_literal("Custom"));
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+        assert_eq!(tree.text_value(id), Some("Custom".to_string()));
+    }
+
+    // Test 4
+    #[test]
+    fn access_role_overrides_widget_role() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().label("H").access_role(Role::Heading));
+        tree.layout(SizeProposal::exact(100.0, 40.0));
+        assert_eq!(tree.accessibility_node(id).role(), Role::Heading);
+    }
+
+    // Test 5
+    #[test]
+    fn access_hint_alias_writes_description_field() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_hint_literal("Tip"));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.description(), Some("Tip"));
+    }
+
+    // Test 6
+    #[test]
+    fn access_identifier_writes_author_id() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_identifier("save-button"));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.author_id(), Some("save-button"));
+    }
+
+    // Test 7
+    #[test]
+    fn access_keyboard_shortcut_set() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ClickableWidget.access_keyboard_shortcut("Ctrl+S"));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.keyboard_shortcut(), Some("Ctrl+S"));
+    }
+
+    // Test 8
+    #[test]
+    fn access_hidden_true_hides_widget() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ClickableWidget.access_hidden(true));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        assert!(tree.accessibility_node(id).is_hidden());
+    }
+
+    // Test 9
+    #[test]
+    fn access_hidden_false_clears_widget_set_hidden() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(AlwaysHiddenWidget.access_hidden(false));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        assert!(
+            !tree.accessibility_node(id).is_hidden(),
+            "access_hidden(false) should clear widget-emitted hidden"
+        );
+    }
+
+    // Test 10
+    #[test]
+    fn access_disabled_true_marks_disabled() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_disabled(true));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        assert!(tree.accessibility_node(id).is_disabled());
+    }
+
+    // Test 11
+    #[test]
+    fn access_disabled_false_clears_arena_driven_disabled() {
+        use crate::signal::Signal;
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().label("X").access_disabled(false));
+        tree.enabled_when(id, Signal::new(false));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        assert!(
+            !tree.accessibility_node(id).is_disabled(),
+            "access_disabled(false) should clear even arena-driven disabled"
+        );
+    }
+
+    // Test 12
+    #[test]
+    fn access_controls_appends() {
+        let mut tree = WidgetTree::new();
+        let target = tree.add(FillWidget::new().label("Target"));
+        let controller = tree.add(FillWidget::new().label("Controller").access_controls(target));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, controller).unwrap();
+        let target_nid = crate::accessibility::widget_id_to_node_id(target);
+        assert!(
+            node.controls().contains(&target_nid),
+            "controls list should contain the target NodeId"
+        );
+    }
+
+    // Test 13
+    #[test]
+    fn access_described_by_appends() {
+        let mut tree = WidgetTree::new();
+        let other = tree.add(FillWidget::new().label("Desc"));
+        let id = tree.add(FillWidget::new().label("Main").access_described_by(other));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        let other_nid = crate::accessibility::widget_id_to_node_id(other);
+        assert!(node.described_by().contains(&other_nid));
+    }
+
+    // Test 14
+    #[test]
+    fn access_labelled_by_appends() {
+        let mut tree = WidgetTree::new();
+        let other = tree.add(FillWidget::new().label("Lbl"));
+        let id = tree.add(FillWidget::new().label("Main").access_labelled_by(other));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        let other_nid = crate::accessibility::widget_id_to_node_id(other);
+        assert!(node.labelled_by().contains(&other_nid));
+    }
+
+    // Test 15
+    #[test]
+    fn access_live_assertive_set() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_live(Live::Assertive));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.live(), Some(Live::Assertive));
+    }
+
+    // Test 16
+    #[test]
+    fn access_aria_current_set() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_current(AriaCurrent::Page));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.aria_current(), Some(AriaCurrent::Page));
+    }
+
+    // Test 17
+    #[test]
+    fn access_has_popup_set() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ClickableWidget.access_has_popup(HasPopup::Menu));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.has_popup(), Some(HasPopup::Menu));
+    }
+
+    // Test 18
+    #[test]
+    fn access_orientation_set() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_orientation(Orientation::Vertical));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.orientation(), Some(Orientation::Vertical));
+    }
+
+    // Test 19
+    #[test]
+    fn access_numeric_value_and_range() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new()
+                .access_role(Role::Slider)
+                .access_numeric_value(50.0)
+                .access_numeric_range(0.0, 100.0)
+                .access_numeric_step(5.0),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.numeric_value(), Some(50.0));
+        assert_eq!(node.min_numeric_value(), Some(0.0));
+        assert_eq!(node.max_numeric_value(), Some(100.0));
+        assert_eq!(node.numeric_value_step(), Some(5.0));
+    }
+
+    // Test 20
+    #[test]
+    fn access_action_advertises_and_routes() {
+        use crate::signal::Signal;
+        let flag = Signal::new(false);
+        let flag_for_cb = flag.clone();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_action(
+            Action::ShowContextMenu,
+            move |_ctx| flag_for_cb.set(true),
+        ));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let info = tree.accessibility_node(id);
+        assert!(info.actions().contains(&Action::ShowContextMenu));
+        tree.dispatch_event(crate::event::WidgetEvent::AccessAction {
+            action: Action::ShowContextMenu,
+            target: Some(id),
+            target_node: crate::accessibility::widget_id_to_node_id(id),
+            data: None,
+        });
+        assert!(flag.get(), "callback should have been invoked");
+    }
+
+    // Test 21
+    #[test]
+    fn access_two_actions_both_route() {
+        use crate::signal::Signal;
+        let click = Signal::new(false);
+        let increment = Signal::new(false);
+        let click_cb = click.clone();
+        let inc_cb = increment.clone();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new()
+                .access_action(Action::ShowContextMenu, move |_| click_cb.set(true))
+                .access_action(Action::Increment, move |_| inc_cb.set(true)),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        tree.dispatch_event(crate::event::WidgetEvent::AccessAction {
+            action: Action::ShowContextMenu,
+            target: Some(id),
+            target_node: crate::accessibility::widget_id_to_node_id(id),
+            data: None,
+        });
+        assert!(click.get() && !increment.get(), "only first action fired");
+        tree.dispatch_event(crate::event::WidgetEvent::AccessAction {
+            action: Action::Increment,
+            target: Some(id),
+            target_node: crate::accessibility::widget_id_to_node_id(id),
+            data: None,
+        });
+        assert!(click.get() && increment.get(), "both actions fired exactly once each");
+    }
+
+    // Test 22
+    #[test]
+    fn access_remove_action_suppresses_widget_action() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(ActionWidget.access_remove_action(Action::Click));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let info = tree.accessibility_node(id);
+        assert!(!info.actions().contains(&Action::Click));
+        assert!(info.actions().contains(&Action::Focus));
+    }
+
+    // Test 23
+    #[test]
+    fn access_custom_action_uses_localized_label() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new().access_custom_action("Reply", |_ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        let actions = node.custom_actions();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].id, 0);
+        assert_eq!(actions[0].description.as_ref(), "Reply");
+    }
+
+    // Test 24
+    #[test]
+    fn access_custom_action_routes_by_index() {
+        use crate::signal::Signal;
+        let first = Signal::new(false);
+        let second = Signal::new(false);
+        let f = first.clone();
+        let s = second.clone();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new()
+                .access_custom_action("First", move |_| f.set(true))
+                .access_custom_action("Second", move |_| s.set(true)),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        tree.dispatch_event(crate::event::WidgetEvent::AccessAction {
+            action: Action::CustomAction,
+            target: Some(id),
+            target_node: crate::accessibility::widget_id_to_node_id(id),
+            data: Some(accesskit::ActionData::CustomAction(1)),
+        });
+        assert!(!first.get(), "first should not fire");
+        assert!(second.get(), "second should fire (index 1)");
+    }
+
+    // Test 25
+    #[test]
+    fn access_action_layered_with_on_access_action() {
+        use crate::signal::Signal;
+        let from_override = Signal::new(false);
+        let from_user = Signal::new(false);
+        let ov_cb = from_override.clone();
+        let user_cb = from_user.clone();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new()
+                .access_action(Action::ShowContextMenu, move |_| ov_cb.set(true))
+                .on_access_action(move |_action, _ctx| {
+                    user_cb.set(true);
+                    crate::event::EventResponse::Handled
+                }),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        tree.dispatch_event(crate::event::WidgetEvent::AccessAction {
+            action: Action::ShowContextMenu,
+            target: Some(id),
+            target_node: crate::accessibility::widget_id_to_node_id(id),
+            data: None,
+        });
+        assert!(from_override.get(), "override callback fired");
+        assert!(from_user.get(), "user catch-all fired");
+    }
+
+    // Test 26 — i18n integration via fern_i18n's
+    // `From<LocalizedString> for String` impl. We don't import
+    // fern-i18n here (it depends on fern-core), but the conversion
+    // works the same way for any `Into<String>` that resolves to a
+    // string at builder-call time. This stand-in test covers the
+    // same code path the FTL-bundle case takes.
+    #[test]
+    fn access_label_accepts_resolved_string_via_into() {
+        // Simulate a `LocalizedString`-like wrapper: any type that
+        // `impl Into<String>`. The override surface receives the
+        // resolved String regardless of source.
+        struct ResolvedAtCall(String);
+        impl From<ResolvedAtCall> for String {
+            fn from(v: ResolvedAtCall) -> String {
+                v.0
+            }
+        }
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new().access_label(ResolvedAtCall("Save".to_string())),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        assert_eq!(tree.accessibility_node(id).name(), Some("Save"));
+    }
+
+    // Test 27
+    #[test]
+    fn access_exclude_subtree_prunes_children_from_at_tree() {
+        let mut tree = WidgetTree::new();
+        let inner1 = tree.add(FillWidget::new().label("A"));
+        let inner2 = tree.add(FillWidget::new().label("B"));
+        let outer = tree.add(
+            StackWidget::new()
+                .add_child(inner1)
+                .add_child(inner2)
+                .access_exclude_subtree(),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let update = tree.sync_accessibility();
+        // Outer is present; inner1 and inner2 are pruned.
+        assert!(find_node(&update, outer).is_some());
+        assert!(find_node(&update, inner1).is_none(), "inner1 pruned");
+        assert!(find_node(&update, inner2).is_none(), "inner2 pruned");
+        let outer_node = find_node(&update, outer).unwrap();
+        assert!(
+            outer_node.children().is_empty(),
+            "outer should have no AT children when excluded"
+        );
+    }
+
+    // Test 28
+    #[test]
+    fn access_merge_subtree_concatenates_descendant_labels() {
+        let mut tree = WidgetTree::new();
+        let title = tree.add(FillWidget::new().label("Title"));
+        let subtitle = tree.add(FillWidget::new().label("Subtitle"));
+        let card = tree.add(
+            StackWidget::new()
+                .add_child(title)
+                .add_child(subtitle)
+                .access_merge_subtree(),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        // After merge: card's name is "Title Subtitle", children pruned.
+        assert_eq!(tree.text_content(card), Some("Title Subtitle".to_string()));
+        let update = tree.sync_accessibility();
+        assert!(find_node(&update, title).is_none());
+        assert!(find_node(&update, subtitle).is_none());
+    }
+
+    // Test 29
+    #[test]
+    fn access_merge_subtree_unions_actions() {
+        let mut tree = WidgetTree::new();
+        let click_a = tree.add(ClickableWidget);
+        let click_b = tree.add(ClickableWidget);
+        let card = tree.add(
+            StackWidget::new()
+                .add_child(click_a)
+                .add_child(click_b)
+                .access_merge_subtree(),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let actions = tree.accessibility_node(card).actions().to_vec();
+        let click_count = actions.iter().filter(|a| **a == Action::Click).count();
+        assert_eq!(
+            click_count, 1,
+            "Click should be present exactly once after merge (deduplicated)"
+        );
+    }
+
+    // Test 30 — covered by the i18n integration mechanism documented in
+    // `From<LocalizedString> for String`. Since fern-core can't reference
+    // LocalizedString, the merged-localized-label case is exercised by
+    // tests 26 + 28 in combination: each child's resolved-at-call-time
+    // String contributes to the merged label. The full FTL-bundle
+    // round-trip is tested in the fern-i18n / fern-widgets integration
+    // tests, not here.
+
+    // Test 31
+    #[test]
+    fn access_merge_subtree_first_nonempty_value_wins() {
+        #[derive(Debug)]
+        struct ValueWidget(&'static str);
+        impl Widget for ValueWidget {
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(0.0, 0.0).into()
+            }
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                builder.set_role(Role::Slider);
+                builder.set_value(self.0);
+            }
+        }
+        let mut tree = WidgetTree::new();
+        let v1 = tree.add(ValueWidget("first"));
+        let v2 = tree.add(ValueWidget("second"));
+        let card = tree.add(
+            StackWidget::new()
+                .add_child(v1)
+                .add_child(v2)
+                .access_merge_subtree(),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.text_value(card), Some("first".to_string()));
+    }
+
+    // Test 32
+    #[test]
+    fn access_exclude_inside_merge() {
+        let mut tree = WidgetTree::new();
+        let visible = tree.add(FillWidget::new().label("VISIBLE"));
+        let pruned = tree.add(FillWidget::new().label("PRUNED"));
+        let inner_excluded = tree.add(
+            StackWidget::new()
+                .add_child(pruned)
+                .access_exclude_subtree(),
+        );
+        let card = tree.add(
+            StackWidget::new()
+                .add_child(visible)
+                .add_child(inner_excluded)
+                .access_merge_subtree(),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let merged = tree.text_content(card).unwrap_or_default();
+        // VISIBLE present, PRUNED absent (because inner_excluded
+        // pruned its own subtree before the merge could absorb it).
+        assert!(merged.contains("VISIBLE"));
+        assert!(
+            !merged.contains("PRUNED"),
+            "excluded subtree should not contribute to merge"
+        );
+    }
+
+    // Test 33
+    #[test]
+    fn access_merge_inside_merge() {
+        let mut tree = WidgetTree::new();
+        let inner_a = tree.add(FillWidget::new().label("a"));
+        let inner_b = tree.add(FillWidget::new().label("b"));
+        let inner_card = tree.add(
+            StackWidget::new()
+                .add_child(inner_a)
+                .add_child(inner_b)
+                .access_merge_subtree(),
+        );
+        let outer_extra = tree.add(FillWidget::new().label("X"));
+        let outer = tree.add(
+            StackWidget::new()
+                .add_child(inner_card)
+                .add_child(outer_extra)
+                .access_merge_subtree(),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        // Outer absorbs inner_card's already-merged label ("a b") AND
+        // outer_extra ("X"), giving something like "a b X" or "X a b".
+        // Order is descendant-walk order; we just verify all parts
+        // appear and inner children are NOT double-counted.
+        let merged = tree.text_content(outer).unwrap_or_default();
+        assert!(merged.contains("a"));
+        assert!(merged.contains("b"));
+        assert!(merged.contains("X"));
+        // Inner children should not appear AS THEIR OWN nodes:
+        let update = tree.sync_accessibility();
+        assert!(find_node(&update, inner_a).is_none());
+        assert!(find_node(&update, inner_b).is_none());
+        assert!(find_node(&update, inner_card).is_none());
+        assert!(find_node(&update, outer_extra).is_none());
+    }
+
+    // Test 34
+    #[test]
+    fn access_customize_runs_last() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            FillWidget::new()
+                .access_label_literal("A")
+                .access_customize(|b| b.set_name("B")),
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        assert_eq!(tree.accessibility_node(id).name(), Some("B"));
+    }
+
+    // Test 35
+    #[test]
+    fn access_customize_can_reach_inner_mut() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new().access_customize(|b| {
+            b.inner_mut().set_author_id("from-customize");
+        }));
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        let update = tree.sync_accessibility();
+        let node = find_node(&update, id).unwrap();
+        assert_eq!(node.author_id(), Some("from-customize"));
+    }
+
+    // Test 36 — sanity guard. WidgetNode size delta when no overrides.
+    #[test]
+    fn access_overrides_zero_cost_when_unused() {
+        // The override fields add only `Option<Box<...>>` (8 bytes for
+        // the pointer-sized null) + `AccessSubtreeMode` (1 byte enum,
+        // padded). Sanity: at most 16 bytes added.
+        // We don't assert a specific size because struct layout shifts
+        // with rustc versions; we just confirm both fields are
+        // pointer/byte sized.
+        use std::mem::size_of;
+        assert!(
+            size_of::<Option<Box<crate::widget_builder::AccessibilityOverrides>>>() <= 16
+        );
+        assert!(size_of::<crate::widget_builder::AccessSubtreeMode>() <= 4);
     }
 }
