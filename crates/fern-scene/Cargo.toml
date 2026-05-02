@@ -1,0 +1,20 @@
+[package]
+name = "fern-scene"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+fern-tokens = { workspace = true }
+fern-canvas = { workspace = true }
+fern-core = { workspace = true }
+fern-data = { workspace = true }
+
+[dev-dependencies]
+# Used by tests for end-to-end checks against real widgets. Not part of
+# the runtime dep graph — keeps fern-scene at the same tier as
+# fern-charts (no dep on fern-widgets).
+fern-widgets = { workspace = true }

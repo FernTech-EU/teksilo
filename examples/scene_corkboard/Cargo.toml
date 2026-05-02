@@ -1,0 +1,11 @@
+[package]
+name = "scene-corkboard"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+fern-ui = { workspace = true }
+fern-scene = { workspace = true }

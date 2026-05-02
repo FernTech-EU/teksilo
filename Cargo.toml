@@ -52,6 +52,7 @@ fern-analytics-plausible = { path = "crates/fern-analytics-plausible", version =
 fern-analytics-otlp = { path = "crates/fern-analytics-otlp", version = "0.1.0" }
 fern-widgets = { path = "crates/fern-widgets", version = "0.1.0" }
 fern-charts = { path = "crates/fern-charts", version = "0.1.0" }
+fern-scene = { path = "crates/fern-scene", version = "0.1.0" }
 fern-i18n = { path = "crates/fern-i18n", version = "0.1.0" }
 fern-i18n-macros = { path = "crates/fern-i18n-macros", version = "0.1.0" }
 fern-ui-macros = { path = "crates/fern-ui-macros", version = "0.1.0" }
