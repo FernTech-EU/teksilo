@@ -1044,7 +1044,14 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             // effects that previously read an `interaction_signal` piped
             // out of the field.
             .focus_within(self.focused.clone())
-            .on_key(move |event, ctx| {
+            // Preview-pass dispatch — claims ArrowUp/ArrowDown/PageUp/PageDown
+            // for stepping BEFORE the focused TextInputField sees them. The
+            // bubble-pass `on_key` previously relied on the field happening
+            // not to bind arrow keys; preview makes the contract explicit so
+            // future field changes (multiline caret motion, etc.) cannot
+            // silently break stepping. Non-arrow keys return `Ignored` and
+            // fall through to the field for normal text input.
+            .on_key_preview(move |event, ctx| {
                 if !enabled || read_only {
                     return EventResponse::Ignored;
                 }
