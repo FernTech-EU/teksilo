@@ -20,11 +20,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-mod diag;
 mod intent_kind;
-mod ir;
 mod lower;
-mod parse;
 
 /// Crate-root token stream used inside emitted code. Internal fern-ui
 /// workspace library crates (which depend on `fern-core` directly but
@@ -79,7 +76,7 @@ pub(crate) fn fern_core_root() -> TokenStream2 {
 /// See `docs/fern-language-spec-v3.md` for the full surface language.
 #[proc_macro]
 pub fn fern(input: TokenStream) -> TokenStream {
-    match parse::parse_root(input.into()) {
+    match fern_parse::parse_root(input.into()) {
         Ok(root) => lower::lower_root(&root).into(),
         Err(err) => err.to_compile_error().into(),
     }

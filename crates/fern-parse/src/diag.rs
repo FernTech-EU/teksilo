@@ -7,17 +7,10 @@
 use proc_macro2::Span;
 use syn::Error;
 
-pub(crate) fn error<T: std::fmt::Display>(span: Span, msg: T) -> Error {
+pub fn error<T: std::fmt::Display>(span: Span, msg: T) -> Error {
     Error::new(span, msg)
 }
 
-/// Spec §9.2: a bare child element at body position inside a Category
-/// B widget whose content is addressed by named slots. The list below
-/// tracks the set of widgets that have no `.child()` method in the V2
-/// builder API; if a user writes a bare child under one of them, the
-/// compiler would otherwise produce a generic method-resolution error.
-/// We pre-empt with a targeted message pointing at the slot name they
-/// most likely meant.
 /// Returns true if `name` is a method on `WidgetBuilder` (or the
 /// inherent impl on `WidgetWithHandlers`). These methods wrap the
 /// widget in `WidgetWithHandlers<T>`, which doesn't expose per-widget
@@ -27,7 +20,7 @@ pub(crate) fn error<T: std::fmt::Display>(span: Span, msg: T) -> Error {
 /// `WidgetWithHandlers<T>`".
 ///
 /// Kept in sync with `crates/fern-core/src/widget_builder.rs`.
-pub(crate) fn is_widget_builder_method(name: &str) -> bool {
+pub fn is_widget_builder_method(name: &str) -> bool {
     matches!(
         name,
         "on_tap"
@@ -54,7 +47,14 @@ pub(crate) fn is_widget_builder_method(name: &str) -> bool {
     )
 }
 
-pub(crate) fn category_b_bare_child(parent_ty: &str, child_span: Span) -> Error {
+/// Spec §9.2: a bare child element at body position inside a Category
+/// B widget whose content is addressed by named slots. The list below
+/// tracks the set of widgets that have no `.child()` method in the V2
+/// builder API; if a user writes a bare child under one of them, the
+/// compiler would otherwise produce a generic method-resolution error.
+/// We pre-empt with a targeted message pointing at the slot name they
+/// most likely meant.
+pub fn category_b_bare_child(parent_ty: &str, child_span: Span) -> Error {
     let slot_hint = category_b_slot_hint(parent_ty);
     Error::new(
         child_span,
@@ -71,7 +71,7 @@ pub(crate) fn category_b_bare_child(parent_ty: &str, child_span: Span) -> Error 
 /// containers (VStack, Panel, …) where bare children are legal.
 ///
 /// Kept in sync with spec §4.2.
-pub(crate) fn is_category_b_widget(ident: &str) -> bool {
+pub fn is_category_b_widget(ident: &str) -> bool {
     matches!(
         ident,
         "Card"

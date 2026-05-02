@@ -684,6 +684,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-fern-fmt"
+version = "0.1.0"
+dependencies = [
+ "fern-fmt",
+ "tempfile",
+]
+
+[[package]]
 name = "cargo-fern-telemetry-lint"
 version = "0.1.0"
 dependencies = [
@@ -1306,6 +1314,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fern-fmt"
+version = "0.1.0"
+dependencies = [
+ "fern-parse",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "fern-i18n"
 version = "0.1.0"
 dependencies = [
@@ -1326,6 +1344,14 @@ dependencies = [
  "fluent-syntax",
  "proc-macro2",
  "quote",
+ "syn",
+]
+
+[[package]]
+name = "fern-parse"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
  "syn",
 ]
 
@@ -1476,6 +1502,7 @@ dependencies = [
 name = "fern-ui-macros"
 version = "0.1.0"
 dependencies = [
+ "fern-parse",
  "proc-macro2",
  "quote",
  "syn",

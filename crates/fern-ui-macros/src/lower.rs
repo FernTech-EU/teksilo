@@ -23,8 +23,8 @@
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
 
-use crate::diag;
-use crate::ir::{
+use fern_parse::diag;
+use fern_parse::{
     BodyItem, FernElement, FernElse, FernFor, FernIf, FernMatch, FernProperty, FernRoot, PropArg,
     RustShape,
 };

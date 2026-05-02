@@ -1,5 +1,5 @@
 [package]
-name = "fern-ui-macros"
+name = "fern-parse"
 edition = "2024"
 version.workspace = true
 license-file.workspace = true
@@ -7,11 +7,6 @@ publish.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-[lib]
-proc-macro = true
-
 [dependencies]
-fern-parse = { workspace = true }
 proc-macro2 = "1"
-quote = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }

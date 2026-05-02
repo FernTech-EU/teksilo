@@ -9,39 +9,39 @@ use proc_macro2::Span;
 use syn::{Block, Expr, Ident, Local, Pat, Path};
 
 /// The root of a `fern!` invocation.
-pub(crate) struct FernRoot {
+pub struct FernRoot {
     /// If `Some(ident)`, the macro was called as `fern!(ident => ...)`
     /// and expansion should wrap the root in `ident.add(...)` to return
     /// a `WidgetId`. If `None`, expansion returns the widget value
     /// directly.
-    pub(crate) ctx: Option<Ident>,
-    pub(crate) root: FernElement,
+    pub ctx: Option<Ident>,
+    pub root: FernElement,
 }
 
 /// An element: `Type[::ctor](args...) { body }`.
-pub(crate) struct FernElement {
+pub struct FernElement {
     /// The full callable path the user wrote. `Button("x")` stores
     /// `Button`; `Button::new_literal("x")` stores the whole
     /// `Button::new_literal` path. Lowering appends `::new` only when
     /// `has_explicit_ctor` is false.
-    pub(crate) type_path: Path,
+    pub type_path: Path,
     /// True when the user named a constructor explicitly (a lowercase
     /// last path segment, per Rust naming convention). Lowering then
     /// calls the path as-is without appending `::new`.
-    pub(crate) has_explicit_ctor: bool,
+    pub has_explicit_ctor: bool,
     /// Positional arguments between the parens after the type path.
     /// Empty when the user wrote `VStack` with no parens (equivalent to
     /// `VStack()`).
-    pub(crate) args: Vec<Expr>,
+    pub args: Vec<Expr>,
     /// Body items in source order.
-    pub(crate) body: Vec<BodyItem>,
+    pub body: Vec<BodyItem>,
     /// Span of the type path's first segment — used for error reporting
     /// on constructor typos.
-    pub(crate) head_span: Span,
+    pub head_span: Span,
 }
 
 /// One item in an element's body block.
-pub(crate) enum BodyItem {
+pub enum BodyItem {
     /// `name: arg1, arg2, ...` — builder method call with N args.
     /// A bare lowercase ident with no body is modeled as `args == []`.
     Property(FernProperty),
@@ -81,40 +81,40 @@ pub(crate) enum BodyItem {
     Spread { expr: Expr, span: Span },
 }
 
-pub(crate) struct FernIf {
-    pub(crate) cond: Expr,
-    pub(crate) then: FernElement,
-    pub(crate) else_branch: Option<Box<FernElse>>,
-    pub(crate) span: Span,
+pub struct FernIf {
+    pub cond: Expr,
+    pub then: FernElement,
+    pub else_branch: Option<Box<FernElse>>,
+    pub span: Span,
 }
 
-pub(crate) enum FernElse {
+pub enum FernElse {
     ElseIf(FernIf),
     Element(FernElement),
 }
 
-pub(crate) struct FernMatch {
-    pub(crate) scrutinee: Expr,
-    pub(crate) arms: Vec<FernMatchArm>,
-    pub(crate) span: Span,
+pub struct FernMatch {
+    pub scrutinee: Expr,
+    pub arms: Vec<FernMatchArm>,
+    pub span: Span,
 }
 
-pub(crate) struct FernMatchArm {
-    pub(crate) pat: Pat,
-    pub(crate) guard: Option<(syn::Token![if], Expr)>,
-    pub(crate) element: FernElement,
+pub struct FernMatchArm {
+    pub pat: Pat,
+    pub guard: Option<(syn::Token![if], Expr)>,
+    pub element: FernElement,
 }
 
-pub(crate) struct FernFor {
-    pub(crate) pat: Pat,
-    pub(crate) iter: Expr,
-    pub(crate) lets: Vec<Local>,
-    pub(crate) element: FernElement,
-    pub(crate) span: Span,
+pub struct FernFor {
+    pub pat: Pat,
+    pub iter: Expr,
+    pub lets: Vec<Local>,
+    pub element: FernElement,
+    pub span: Span,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RustShape {
+pub enum RustShape {
     /// Block's last statement is an expression without trailing `;` —
     /// the block's value becomes a child via `.child(block)`.
     Expression,
@@ -123,15 +123,15 @@ pub(crate) enum RustShape {
     SideEffect,
 }
 
-pub(crate) struct FernProperty {
-    pub(crate) name: Ident,
-    pub(crate) args: Vec<PropArg>,
+pub struct FernProperty {
+    pub name: Ident,
+    pub args: Vec<PropArg>,
 }
 
 /// A property argument. `Expr` and `Element` both emit `.prop_name(...)`;
 /// `Escape` and `Binding` force the `_id` slot suffix per spec §A.3 and
 /// hoist the binding when present.
-pub(crate) enum PropArg {
+pub enum PropArg {
     /// A plain Rust expression (scalars, closures, method calls).
     Expr(Expr),
     /// An embedded fern element — `tab_literal: "name", Card { ... }`.

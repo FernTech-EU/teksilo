@@ -17,7 +17,7 @@ mod element;
 mod property;
 mod structural;
 
-pub(crate) fn parse_root(tokens: TokenStream2) -> Result<FernRoot> {
+pub fn parse_root(tokens: TokenStream2) -> Result<FernRoot> {
     Parser::parse2(parse_root_impl, tokens)
 }
 

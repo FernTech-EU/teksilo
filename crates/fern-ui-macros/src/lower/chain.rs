@@ -3,7 +3,7 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote_spanned;
 
-use crate::ir::FernElement;
+use fern_parse::FernElement;
 
 /// Emit the constructor call: either `TypePath::ctor(args)` when the
 /// user named an explicit ctor, or `TypePath::new(args)` otherwise

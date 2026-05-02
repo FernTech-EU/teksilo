@@ -1,0 +1,178 @@
+//! Run-loop: discover files, format each, write or check-only.
+//!
+//! Atomic writes: the formatted text goes into a `NamedTempFile` next
+//! to the target file, then `persist`s via rename — same pattern used
+//! by `fern-settings`'s flush path. This keeps interrupted runs from
+//! leaving truncated source files on disk.
+
+use std::io::Write;
+use std::path::Path;
+
+use fern_fmt::{FmtConfig, FmtError, format_file};
+use tempfile::NamedTempFile;
+
+use crate::Config;
+use crate::walk;
+
+pub struct Outcome {
+    pub changed: usize,
+    pub unchanged: usize,
+    pub errors: usize,
+    /// True under `--check` and any file would change. Causes exit 1.
+    pub check_failed: bool,
+}
+
+impl Outcome {
+    pub fn exit_code(&self) -> i32 {
+        if self.errors > 0 || self.check_failed {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+pub fn run(cfg: &Config) -> Outcome {
+    let files = match walk::collect(&cfg.paths) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Outcome {
+                changed: 0,
+                unchanged: 0,
+                errors: 1,
+                check_failed: false,
+            };
+        }
+    };
+
+    let mut outcome = Outcome {
+        changed: 0,
+        unchanged: 0,
+        errors: 0,
+        check_failed: false,
+    };
+    let fmt_cfg = FmtConfig::default();
+
+    for file in &files {
+        match process_one(file, &fmt_cfg, cfg.check) {
+            Ok(FileResult::Unchanged) => {
+                outcome.unchanged += 1;
+            }
+            Ok(FileResult::Changed) => {
+                outcome.changed += 1;
+                if cfg.check {
+                    outcome.check_failed = true;
+                    println!("Would reformat: {}", file.display());
+                } else if !cfg.quiet {
+                    println!("Reformatted: {}", file.display());
+                }
+            }
+            Ok(FileResult::NoFernMacros) => {
+                outcome.unchanged += 1;
+            }
+            Err(e) => {
+                outcome.errors += 1;
+                eprintln!("error: {}: {e}", file.display());
+            }
+        }
+    }
+
+    if !cfg.quiet {
+        let scanned = files.len();
+        if cfg.check {
+            if outcome.check_failed {
+                println!(
+                    "{} of {scanned} file(s) would be reformatted",
+                    outcome.changed
+                );
+            } else {
+                println!("{scanned} file(s) already formatted");
+            }
+        } else {
+            println!(
+                "{} reformatted, {} unchanged{}",
+                outcome.changed,
+                outcome.unchanged,
+                if outcome.errors > 0 {
+                    format!(", {} errored", outcome.errors)
+                } else {
+                    String::new()
+                }
+            );
+        }
+    }
+
+    outcome
+}
+
+enum FileResult {
+    Unchanged,
+    Changed,
+    NoFernMacros,
+}
+
+#[derive(Debug)]
+enum ProcessError {
+    Io(std::io::Error),
+    Fmt(FmtError),
+    Persist(tempfile::PersistError),
+}
+
+impl std::fmt::Display for ProcessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessError::Io(e) => write!(f, "{e}"),
+            ProcessError::Fmt(e) => write!(f, "{e}"),
+            ProcessError::Persist(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl From<std::io::Error> for ProcessError {
+    fn from(e: std::io::Error) -> Self {
+        ProcessError::Io(e)
+    }
+}
+impl From<FmtError> for ProcessError {
+    fn from(e: FmtError) -> Self {
+        ProcessError::Fmt(e)
+    }
+}
+impl From<tempfile::PersistError> for ProcessError {
+    fn from(e: tempfile::PersistError) -> Self {
+        ProcessError::Persist(e)
+    }
+}
+
+fn process_one(
+    path: &Path,
+    fmt_cfg: &FmtConfig,
+    check_only: bool,
+) -> Result<FileResult, ProcessError> {
+    let source = std::fs::read_to_string(path)?;
+    // Cheap pre-filter: if the file has no `fern!` token, skip parsing.
+    // The host-file syn::parse_file inside format_file is the dominant
+    // cost; this guard turns the no-op case into a single string scan.
+    if !source.contains("fern!") {
+        return Ok(FileResult::NoFernMacros);
+    }
+    let formatted = format_file(&source, fmt_cfg)?;
+    if formatted == source {
+        return Ok(FileResult::Unchanged);
+    }
+    if check_only {
+        return Ok(FileResult::Changed);
+    }
+    write_atomic(path, &formatted)?;
+    Ok(FileResult::Changed)
+}
+
+fn write_atomic(path: &Path, content: &str) -> Result<(), ProcessError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = NamedTempFile::new_in(parent)?;
+    tmp.as_file_mut().write_all(content.as_bytes())?;
+    tmp.as_file_mut().sync_all()?;
+    tmp.persist(path)?;
+    Ok(())
+}
