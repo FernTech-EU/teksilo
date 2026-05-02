@@ -286,12 +286,19 @@ impl Widget for TextInput {
         // it shares the same column in the HStack — no overlap with
         // leading/trailing slots. The text field is the last ZStack child
         // so it wins hit-testing (ZStack tests children in reverse order).
+        // `respect_intrinsic` on these `Expand` wrappers preserves the
+        // wrapped field's natural width (≈200 dp from `TextInputField`)
+        // as the column's intrinsic width. The enclosing `ZStack`
+        // measures its children with an unspecified proposal, so the
+        // parent's offered width never reaches the `HStack` during
+        // measurement — without auto-basis the column reports 0 dp and
+        // the whole composite collapses to `MinSize`'s 65 dp floor.
         let text_column_id = if !self.placeholder.is_empty() {
             let ph = TextWidget::new(self.placeholder.clone())
                 .color(TextRole::Secondary)
                 .a11y_hidden();
             let ph_id = ctx.add(
-                Expand::new().child(
+                Expand::new().respect_intrinsic().child(
                     Padding::new(
                         field_style.padding_vertical, 0.0,
                         field_style.padding_vertical, 0.0,
@@ -302,14 +309,14 @@ impl Widget for TextInput {
             ctx.visible_when(ph_id, visible);
 
             ctx.add(
-                Expand::horizontal().child(
+                Expand::horizontal().respect_intrinsic().child(
                     ZStack::new()
                         .add_child(ph_id)       // below (placeholder)
                         .child(padded_field),    // on top (text field, gets hits)
                 ),
             )
         } else {
-            ctx.add(Expand::horizontal().child(padded_field))
+            ctx.add(Expand::horizontal().respect_intrinsic().child(padded_field))
         };
 
         // HStack: [leading] [text_column] [clear] [trailing]

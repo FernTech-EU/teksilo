@@ -1139,9 +1139,21 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             },
             height: proposal.height,
         };
-        self.root_child_id
+        let child_size = self
+            .root_child_id
             .and_then(|id| ctx.child_size(id, effective_proposal))
-            .unwrap_or_else(|| effective_proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| effective_proposal.resolve(0.0, 0.0));
+        // Claim the (cap-narrowed) proposal width on the cross axis — the
+        // inner `ZStack` queries its children with `SizeProposal::unspecified`,
+        // so the offered width never reaches the inner `HStack` during
+        // measurement; without this clamp the chain returns just
+        // `MinSize`'s floor and the SpinBox collapses regardless of
+        // `WidthPolicy::Fill` or `Pixels`/`Chars` caps.
+        let w = match effective_proposal.width {
+            Some(pw) => pw.max(child_size.width),
+            None => child_size.width,
+        };
+        Size::new(w, child_size.height).into()
     }
 
     fn place_children(
