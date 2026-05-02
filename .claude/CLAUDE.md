@@ -211,16 +211,45 @@ Application:
 - `.to_or_snap(&signal, target)` — one-shot tween that snaps under
   `prefers-reduced-motion`. Use this for almost all UI transitions.
 
-**Animated wrapper widgets:**
+**Animated wrapper widgets** (live in [crates/fern-widgets/src/animations/](crates/fern-widgets/src/animations/), re-exported flat from `fern_ui::widgets`):
 
 - `Collapse { expanded: Signal<bool>, child }` — wraps a child and animates
   its height (and width gate) between zero and natural when `expanded` flips.
-  Used internally by `Accordion`. See [crates/fern-widgets/src/collapse.rs](crates/fern-widgets/src/collapse.rs).
+  Used internally by `Accordion`. See [crates/fern-widgets/src/animations/collapse.rs](crates/fern-widgets/src/animations/collapse.rs).
 - `Fade { visible: Prop<bool>, child }` — wraps a child and animates the
   entire subtree's opacity between 0 and 1. Layout-transparent: the child
   reports its full natural size at all opacity values. Built on
   `BuildContext::set_opacity` (a node-level opacity scope, parallel to
-  `clips_children`). See [crates/fern-widgets/src/fade.rs](crates/fern-widgets/src/fade.rs).
+  `clips_children`). See [crates/fern-widgets/src/animations/fade.rs](crates/fern-widgets/src/animations/fade.rs).
+- `Pulse::opacity(min, max).period(d).child(w)` — sine-driven looping
+  opacity oscillation. The blinking-red-light / recording-indicator
+  pattern. Layout-transparent (same as `Fade`). Reduced motion: pins
+  at midpoint. See [crates/fern-widgets/src/animations/pulse.rs](crates/fern-widgets/src/animations/pulse.rs).
+- `Cycle::new().period(d).child(a).child(b)…` — steps through children
+  on a fixed period (rotating loading tips, status displays). Internally
+  a `Switcher` driven by a frame-tick effect. See [crates/fern-widgets/src/animations/cycle.rs](crates/fern-widgets/src/animations/cycle.rs).
+- `SmoothSize::new().child(w)` — auto-sizes the slot to the child's
+  current intrinsic size, *animating* every change. The "empty panel
+  that suddenly must grow gracefully to accept new content" case.
+  Distinct from `FixedSize::bind_width(animated_signal)` (numeric target)
+  — `SmoothSize` watches the child measure each frame. `.axes(Width|Height|Both)`
+  to restrict. Reuses Collapse's "child laid out at natural, framework
+  clips overflow" trick. See [crates/fern-widgets/src/animations/smooth_size.rs](crates/fern-widgets/src/animations/smooth_size.rs).
+- `Crossfade::new(key_signal, |k| build_for(k))` — when the key
+  changes, mounts both old and new content side by side in a `ZStack`,
+  fades old → 0 and new → 1. Builders may run more than once per
+  lifetime as keys recur. `.duration(d)` overrides the default.
+  See [crates/fern-widgets/src/animations/crossfade.rs](crates/fern-widgets/src/animations/crossfade.rs).
+- `Slide::new(visible).from(SlideEdge).child(w)` — slides a child in/out
+  from the chosen edge (Leading/Trailing/Top/Bottom). Translates child
+  position via `place_children`, doesn't change layout size — siblings
+  don't reflow. Pair with `Fade` for the snackbar pattern. Clips so the
+  off-edge child doesn't bleed past the slot. See [crates/fern-widgets/src/animations/slide.rs](crates/fern-widgets/src/animations/slide.rs).
+- `Shake::new(trigger).child(w)` — bumping `trigger: Signal<u32>`
+  plays a damped horizontal oscillation (defaults to
+  `MotionTokens::duration_slow`, 4 cycles). Invalid-input feedback.
+  Layout-stable, clips. Reduced motion: trigger is a no-op. See
+  [crates/fern-widgets/src/animations/shake.rs](crates/fern-widgets/src/animations/shake.rs).
 - `Spinner::new(size)` — circular-arc loading indicator backed by the
   shader-driven `AnimatedQuadKind::SpinnerArc` pipeline (~one uniform
   write + one `draw_indexed` per frame, no `paint()` re-runs). Honours
@@ -248,8 +277,8 @@ Application:
 [crates/fern-core/src/animation.rs](crates/fern-core/src/animation.rs),
 [crates/fern-core/src/animation_builder.rs](crates/fern-core/src/animation_builder.rs),
 [crates/fern-core/src/signal.rs](crates/fern-core/src/signal.rs),
-[crates/fern-widgets/src/collapse.rs](crates/fern-widgets/src/collapse.rs).
-Plan: [/home/cyril/.claude/plans/animations-are-difficulty-use-fluttering-pizza.md](/home/cyril/.claude/plans/animations-are-difficulty-use-fluttering-pizza.md).
+[crates/fern-widgets/src/animations/](crates/fern-widgets/src/animations/) (all wrapper widgets).
+Visual showcase: `cargo run -p animations-kit`.
 
 ## Event System (V2 Attached Handlers)
 

@@ -22,8 +22,9 @@ use std::time::Duration;
 
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Button, ButtonVariant, Collapse, Divider, Fade, HStack, Padding, ProgressBar, ScrollArea,
-    Spinner, TextWidget, Toggle, VStack,
+    Button, ButtonVariant, Card, Collapse, Crossfade, Cycle, Divider, Fade, FixedSize, HStack,
+    Padding, Panel, ProgressBar, Pulse, RectWidget, ScrollArea, Shake, Slide, SlideEdge, Spinner,
+    SmoothSize, TextWidget, Toggle, VStack,
 };
 
 fn main() {
@@ -54,6 +55,12 @@ fn build_kit(
     collapse_expanded: Signal<bool>,
     fade_visible: Signal<bool>,
 ) -> impl Widget + 'static {
+    // New-section signals. Kept here to avoid threading through `main`.
+    let smooth_size_long = Signal::new(false);
+    let crossfade_key = Signal::new(0_u32);
+    let slide_visible = Signal::new(false);
+    let shake_trigger = Signal::new(0_u32);
+
     VStack::new()
         .spacing(20.0)
         .child(section_header("Toggle"))
@@ -129,6 +136,131 @@ fn build_kit(
                 .style(ButtonVariant::Default)
                 .tooltip_literal(
                     "I fade in and out over `motion.duration_fast` (~120 ms).",
+                ),
+        )
+        .child(Divider::new())
+        .child(section_header("Pulse"))
+        .child(caption(
+            "Sine-driven opacity oscillation between min and max — the recording-light / \
+             attention-beacon pattern. Layout-transparent, like Fade.",
+        ))
+        .child(
+            HStack::new().spacing(12.0).child(
+                Pulse::opacity(0.25, 1.0)
+                    .period(Duration::from_millis(1100))
+                    .child(
+                        FixedSize::new()
+                            .bind_width(14.0)
+                            .bind_height(14.0)
+                            .child(
+                                RectWidget::new()
+                                    .background(Color::from_rgb(0.85, 0.18, 0.20))
+                                    .corner_radius(CornerRadius::uniform(7.0)),
+                            ),
+                    ),
+            ).child(TextWidget::new_literal("REC")),
+        )
+        .child(Divider::new())
+        .child(section_header("Cycle"))
+        .child(caption(
+            "Steps through children on a fixed period — rotating loading tips, status \
+             displays. Internally a Switcher driven by a frame-tick effect.",
+        ))
+        .child(
+            Cycle::new()
+                .period(Duration::from_secs(2))
+                .child(TextWidget::new_literal("Tip 1: hold Shift to multi-select"))
+                .child(TextWidget::new_literal("Tip 2: press Cmd-K to search"))
+                .child(TextWidget::new_literal("Tip 3: drag the divider to resize")),
+        )
+        .child(Divider::new())
+        .child(section_header("SmoothSize"))
+        .child(caption(
+            "Auto-sizes the slot to fit the child's intrinsic size, animating the change. \
+             Toggle to see the panel grow / shrink as content is added or removed.",
+        ))
+        .child(toggle_button("Toggle content", smooth_size_long.clone()))
+        .child(
+            SmoothSize::new()
+                .duration(Duration::from_millis(220))
+                .child(Card::new().content(Crossfade::new(
+                    smooth_size_long.clone(),
+                    |&long| -> Box<dyn Widget> {
+                        if long {
+                            Box::new(
+                                VStack::new()
+                                    .spacing(4.0)
+                                    .child(TextWidget::new_literal("Now there's more content."))
+                                    .child(TextWidget::new_literal("The panel grows to fit it."))
+                                    .child(TextWidget::new_literal("All animated, no jumps.")),
+                            )
+                        } else {
+                            Box::new(TextWidget::new_literal("Short."))
+                        }
+                    },
+                ))),
+        )
+        .child(Divider::new())
+        .child(section_header("Crossfade"))
+        .child(caption(
+            "Animated content swap when a key changes. Outgoing fades out while incoming \
+             fades in — like Switcher, but smooth.",
+        ))
+        .child(
+            Button::new_literal("Next page")
+                .style(ButtonVariant::Regular)
+                .on_activate_fn({
+                    let key = crossfade_key.clone();
+                    move |_| key.set((key.get() + 1) % 3)
+                }),
+        )
+        .child(Crossfade::new(crossfade_key, |k| -> Box<dyn Widget> {
+            let label = match k {
+                0 => "📄  Page A — overview",
+                1 => "📊  Page B — details",
+                _ => "🔧  Page C — settings",
+            };
+            Box::new(Panel::new().child(Padding::uniform(16.0).child(TextWidget::new_literal(label))))
+        }))
+        .child(Divider::new())
+        .child(section_header("Slide"))
+        .child(caption(
+            "Slides a child in / out from a chosen edge. Layout-stable: siblings don't \
+             reflow, the slot stays put. Pair with Fade for the snackbar pattern.",
+        ))
+        .child(toggle_button("Toggle banner", slide_visible.clone()))
+        .child(
+            Slide::new(slide_visible.clone())
+                .from(SlideEdge::Trailing)
+                .child(
+                    Fade::new(slide_visible).child(
+                        Card::new().content(TextWidget::new_literal(
+                            "⚠  Banner — slides + fades.",
+                        )),
+                    ),
+                ),
+        )
+        .child(Divider::new())
+        .child(section_header("Shake"))
+        .child(caption(
+            "Damped horizontal oscillation, played on each trigger bump — the invalid-input \
+             feedback pattern. Click the button to shake the field.",
+        ))
+        .child(
+            VStack::new()
+                .spacing(8.0)
+                .child(
+                    Shake::new(shake_trigger.clone()).child(
+                        Card::new()
+                            .content(TextWidget::new_literal("incorrect-password-input-field")),
+                    ),
+                )
+                .child(
+                    Button::new_literal("Submit")
+                        .style(ButtonVariant::Regular)
+                        .on_activate_fn(move |_| {
+                            shake_trigger.set(shake_trigger.get() + 1);
+                        }),
                 ),
         )
 }

@@ -5,11 +5,10 @@ pub mod breadcrumb;
 pub mod built_in_button;
 pub mod button;
 pub mod card;
+pub mod animations;
 pub mod checkbox;
-pub mod collapse;
 pub mod combo_box;
 pub mod dialog;
-pub mod fade;
 pub mod group_box;
 pub mod group_header;
 pub mod link;
@@ -65,6 +64,9 @@ mod preview_catalog;
 pub use tooltip::TooltipWidget;
 
 pub use accordion::Accordion;
+pub use animations::{
+    Collapse, Crossfade, Cycle, Fade, Pulse, Shake, Slide, SlideEdge, SmoothSize, SmoothSizeAxes,
+};
 pub use avatar::{Avatar, AvatarCorner, AvatarPresence, AvatarShape, AvatarSize};
 pub use badge::Badge;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
@@ -72,10 +74,8 @@ pub use built_in_button::{BuiltInButton, BuiltInButtonSize, BuiltInIcons};
 pub use button::{Button, ButtonVariant, IconLocation};
 pub use card::Card;
 pub use checkbox::{CheckState, Checkbox};
-pub use collapse::Collapse;
 pub use combo_box::ComboBox;
 pub use dialog::{Dialog, DialogContent, ModalContainer};
-pub use fade::Fade;
 pub use group_box::GroupBox;
 pub use group_header::GroupHeader;
 pub use link::Link;

@@ -16,7 +16,7 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, Color, TextRole, TextStyle, TextStyleRole};
 
-use crate::collapse::Collapse;
+use crate::animations::collapse::Collapse;
 use crate::primitives::{HStack, IconWidget, Spacer, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------

@@ -35,9 +35,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 WIDGETS_SRC = REPO_ROOT / "crates" / "fern-widgets" / "src"
 PRIMITIVES_DIR = WIDGETS_SRC / "primitives"
+ANIMATIONS_DIR = WIDGETS_SRC / "animations"
 
 # Aggregator files we never treat as "a widget".
-SKIP_FILES = {"lib.rs", "primitives.rs", "layout_integration_tests.rs", "mod.rs"}
+SKIP_FILES = {"lib.rs", "primitives.rs", "animations.rs", "layout_integration_tests.rs", "mod.rs"}
 
 
 # ----------------------------------------------------------------------------
@@ -858,6 +859,11 @@ def build_registry() -> Registry:
             if p.name in SKIP_FILES:
                 continue
             files.append(p)
+    if ANIMATIONS_DIR.exists():
+        for p in sorted(ANIMATIONS_DIR.glob("*.rs")):
+            if p.name in SKIP_FILES:
+                continue
+            files.append(p)
 
     cfg_by_file: dict[Path, list[str]] = {}
     cfg_by_file.update(
@@ -866,6 +872,11 @@ def build_registry() -> Registry:
     cfg_by_file.update(
         _collect_cfgs_from_aggregator(
             WIDGETS_SRC / "primitives.rs", PRIMITIVES_DIR
+        )
+    )
+    cfg_by_file.update(
+        _collect_cfgs_from_aggregator(
+            WIDGETS_SRC / "animations.rs", ANIMATIONS_DIR
         )
     )
 
