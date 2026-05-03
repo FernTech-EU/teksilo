@@ -223,6 +223,9 @@ date-time-edit-name = Date et heure
 date-time-edit-placeholder = Sélectionner la date et l'heure
 date-range-edit-name = Plage de dates
 date-range-edit-placeholder = Sélectionner une plage de dates
+date-range-edit-start-name = Date de début
+date-range-edit-end-name = Date de fin
+date-range-edit-trigger-tooltip = Ouvrir le calendrier de plage
 
 # Validation feedback (TextInputField + DateEdit/TimeEdit)
 validation-corrected-to = Corrigé en { $value }

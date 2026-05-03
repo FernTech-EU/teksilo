@@ -1054,7 +1054,7 @@ pub(crate) fn calendar_glyph_icon(size: f32) -> IconWidget {
     IconWidget::from_path(path, size)
 }
 
-fn clamp_date(d: Date, min: Option<Date>, max: Option<Date>) -> Date {
+pub(crate) fn clamp_date(d: Date, min: Option<Date>, max: Option<Date>) -> Date {
     let d = match min {
         Some(min) if d < min => min,
         _ => d,
@@ -1063,6 +1063,56 @@ fn clamp_date(d: Date, min: Option<Date>, max: Option<Date>) -> Date {
         Some(max) if d > max => max,
         _ => d,
     }
+}
+
+/// Build a date-validator closure suitable for plugging into
+/// `TextInputField::validator(...)`. Encapsulates the strict-parse →
+/// clamp-recovery → reject pipeline that `DateEdit` itself uses,
+/// so other widgets composing a `TextInputField` over a date pattern
+/// (e.g. `DateRangeEdit`'s start / end halves) can reuse the same
+/// validation behaviour without duplicating ~50 lines.
+///
+/// `pattern` and `behavior` are captured by value; `min`/`max` clamp
+/// the parsed date when present.
+pub(crate) fn build_date_validator(
+    pattern: Rc<ParsedPattern>,
+    min: Option<Date>,
+    max: Option<Date>,
+    behavior: ValidationBehavior,
+) -> crate::primitives::text_input_field::ValidatorFn {
+    Rc::new(move |raw: &str| -> ValidationOutcome {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return ValidationOutcome::Valid;
+        }
+        if let Some(ParsedValue::Date(d)) =
+            parse_value(&pattern, trimmed, ParseTarget::DateOnly)
+        {
+            let clamped = clamp_date(d, min, max);
+            let formatted = format_value(&pattern, Some(clamped), None);
+            if formatted == trimmed && clamped == d {
+                return ValidationOutcome::Valid;
+            }
+            return ValidationOutcome::Corrected {
+                corrected: formatted.clone(),
+                message: resolve_message_widget(
+                    "validation-corrected-to",
+                    &[("value", formatted.clone().into())],
+                ),
+            };
+        }
+        if behavior == ValidationBehavior::AutoCorrect
+            && let Some((corrected, msg)) = try_clamp_recovery(&pattern, trimmed, min, max)
+        {
+            return ValidationOutcome::Corrected {
+                corrected,
+                message: msg,
+            };
+        }
+        ValidationOutcome::Invalid {
+            message: resolve_message_widget("date-edit-validation-not-a-date", &[]),
+        }
+    })
 }
 
 /// AutoCorrect recovery: extract per-segment integer values from the
@@ -1080,7 +1130,7 @@ fn clamp_date(d: Date, min: Option<Date>, max: Option<Date>) -> Date {
 /// - `"31/2/2024"` → `Some(("29/02/2024", "Auto-corrected: day 31 → 29 (last day of February)"))`
 ///   (day clamped to month length)
 /// - `"abc"` → `None`
-fn try_clamp_recovery(
+pub(crate) fn try_clamp_recovery(
     pattern: &ParsedPattern,
     raw: &str,
     min: Option<Date>,

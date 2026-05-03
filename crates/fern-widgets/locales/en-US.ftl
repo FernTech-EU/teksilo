@@ -241,6 +241,9 @@ date-time-edit-name = Date and time
 date-time-edit-placeholder = Select date and time
 date-range-edit-name = Date range
 date-range-edit-placeholder = Select date range
+date-range-edit-start-name = Start date
+date-range-edit-end-name = End date
+date-range-edit-trigger-tooltip = Open range calendar
 
 # Validation feedback (TextInputField + DateEdit/TimeEdit)
 validation-corrected-to = Auto-corrected to { $value }

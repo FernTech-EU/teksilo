@@ -1,92 +1,118 @@
-//! `DateRangeEdit` — composes two [`DateEdit`]s over a single
-//! `Signal<Option<DateRange>>` for booking / analytics / report-filter
-//! UIs that need a start + end date pair.
+//! `DateRangeEdit` — single unified control for picking a `DateRange`.
 //!
-//! The widget owns two intermediate signals (start + end halves) that
-//! mirror the bound `DateRange`. Mutations on either half compose
-//! back into the outer signal: when both halves carry a value, the
-//! outer signal updates with the swap-aware [`DateRange::new`]
-//! constructor (so end-before-start is silently corrected). When
-//! either half is `None`, the outer signal is `None`.
+//! Visually one widget: a single bordered frame containing two
+//! `TextInputField` halves separated by a painted arrow glyph, with
+//! a trailing built-in calendar button that opens a shared
+//! `Calendar::range` popover. Backed by `Signal<Option<DateRange>>`.
 //!
-//! # Visual
+//! ```text
+//! ┌──────────────────────────────────────┐
+//! │ 05/12/2026   →   05/19/2026   │ 📅  │
+//! └──────────────────────────────────────┘
+//! ```
 //!
-//! `[start_edit] – [end_edit]` — two `DateEdit` instances separated
-//! by a configurable separator (default ` – ` en-dash). Each child
-//! carries its own border, calendar popover, and validation strip;
-//! the wrapper just composes them and merges feedback severity.
+//! # Why one frame?
 //!
-//! Min/max bounds, format pattern, first day of week, and validation
-//! behaviour are forwarded to both halves identically. The end half
-//! additionally gets `min_date(start)` dynamically — once the user
-//! has set a start date, the end half's calendar disables anything
-//! before it.
+//! Two adjacent `DateEdit`s (one frame each) visually read as two
+//! separate fields that happen to be next to each other. A single
+//! frame says "this is one range". Same affordance the user is used
+//! to from booking sites and analytics dashboards.
+//!
+//! # Behaviour
+//!
+//! - **Two text halves** — each masked from the resolved date pattern,
+//!   each with its own validator + segment-stepping (Up/Down on the
+//!   focused segment matches `DateEdit`).
+//! - **Painted arrow separator** — a thin chevron-right glyph, no text.
+//!   Visual only; AT users see the wrapper's `Role::DateInput`.
+//! - **One trailing calendar button** — Int UI `BuiltInButton` with
+//!   the calendar glyph. Opens a single popover hosting
+//!   `Calendar::range` bound to the outer signal. The two-anchor
+//!   click model (start-then-end) commits the range and closes the
+//!   popover. No per-half calendar buttons — there's only one
+//!   calendar, anchored to the wrapper.
+//! - **One frame** — focus-aware border (`BorderRole::Focused` while
+//!   any half holds focus, otherwise `Default`), validation-aware
+//!   border (`Error` for `Invalid`, `Focused` for `Corrected`).
+//! - **One validation strip** below the frame — composed feedback
+//!   from both halves (worse of the two wins).
 //!
 //! # Accessibility
 //!
 //! - Container — `Role::DateInput` with `set_value` formatted as
-//!   `YYYY-MM-DD/YYYY-MM-DD` (ISO-style range notation).
-//! - Each child `DateEdit` keeps its own `Role::DateInput` as a
-//!   nested AT child.
+//!   `YYYY-MM-DD/YYYY-MM-DD` (ISO range).
+//! - Each `TextInputField` keeps its own `Role::TextInput` AT node;
+//!   the wrapper's `Role::DateInput` provides the range semantics.
 
 #[cfg(test)]
 mod tests;
 
 use std::rc::Rc;
 
-use fern_canvas::{Rect, SizeProposal};
+use fern_canvas::{Path, Point, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::{Action, Role};
 use fern_core::build_context::BuildContext;
+use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
 use fern_core::signal::Signal;
 use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 use jiff::civil::Weekday;
 
+use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::{Calendar, DateRange};
+use crate::common::datetime::pattern::{
+    format_value, mask_for_pattern, parse_value, segment_at_position, step_date_field,
+    ParseTarget, ParsedPattern, ParsedValue,
+};
+use crate::common::datetime::types::today_local;
 use crate::common::datetime::Date;
-use crate::date_edit::{CalendarTriggerButton, DateEdit, ValidationBehavior};
-use crate::primitives::text_input_field::ValidationFeedback;
-use crate::primitives::{Divider, HStack, Padding, TextWidget};
+use crate::date_edit::{
+    build_date_validator, calendar_glyph_icon, clamp_date, ValidationBehavior,
+};
+use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
+use crate::primitives::{
+    Center, Divider, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, VStack, ZStack,
+};
 
 type OnRangeChanged = Rc<dyn Fn(Option<DateRange>, &mut EventContext)>;
 
-/// Two-handle date picker over a `Signal<Option<DateRange>>`. See the
-/// [module docs](self) for the full feature list.
+const DEFAULT_HALF_WIDTH: f32 = 110.0;
+
+/// Two-handle date picker over `Signal<Option<DateRange>>`. See the
+/// [module docs](self) for the visual layout and behaviour.
 pub struct DateRangeEdit {
     value: Signal<Option<DateRange>>,
-    /// Internal start half — published to the start `DateEdit` and
-    /// kept in sync with `value` via `ctx.effect`.
+    /// Internal start half — drives the start `TextInputField` text
+    /// signal and is kept in sync with `value` via `ctx.effect`.
     start_part: Signal<Option<Date>>,
-    /// Internal end half — same as `start_part` for end.
     end_part: Signal<Option<Date>>,
+    start_text: Signal<String>,
+    end_text: Signal<String>,
     min_date: Option<Date>,
     max_date: Option<Date>,
     pattern: Option<String>,
     placeholder_start: String,
     placeholder_end: String,
-    separator: String,
     first_day_of_week: Option<Weekday>,
-    show_calendar_button: bool,
-    /// Whether to render a trailing range-calendar button to the
-    /// right of the end DateEdit. The button opens a single popover
-    /// hosting `Calendar::range` bound to `self.value`. Default
-    /// `true`. Set to `false` to suppress the trailing button when
-    /// the per-half calendar buttons are sufficient.
-    show_range_calendar_button: bool,
-    /// Live state of the range-calendar popover for the trailing
-    /// trigger. Bound to `set_expanded` on the trigger's AT node.
-    range_popover_open: Signal<bool>,
     enabled: bool,
     read_only: bool,
     label: Option<String>,
     validation_behavior: ValidationBehavior,
     /// Composed validation feedback (severity-merged from both halves).
     feedback: Signal<ValidationFeedback>,
+    /// `true` while either half holds keyboard focus — drives the
+    /// unified frame border.
+    focused: Signal<bool>,
+    /// `true` while the calendar popover is open — drives the
+    /// trigger's AT `set_expanded` and the open/close toggle.
+    range_popover_open: Signal<bool>,
     on_value_changed: Option<OnRangeChanged>,
     root_child_id: Option<WidgetId>,
 }
@@ -98,7 +124,6 @@ impl std::fmt::Debug for DateRangeEdit {
 }
 
 impl DateRangeEdit {
-    /// Construct a range editor bound to a nullable `DateRange` signal.
     pub fn new(value: Signal<Option<DateRange>>) -> Self {
         let initial = value.get();
         let start_part = Signal::new(initial.map(|r| r.start));
@@ -107,21 +132,21 @@ impl DateRangeEdit {
             value,
             start_part,
             end_part,
+            start_text: Signal::new(String::new()),
+            end_text: Signal::new(String::new()),
             min_date: None,
             max_date: None,
             pattern: None,
             placeholder_start: String::new(),
             placeholder_end: String::new(),
-            separator: " – ".to_string(),
             first_day_of_week: None,
-            show_calendar_button: true,
-            show_range_calendar_button: true,
-            range_popover_open: Signal::new(false),
             enabled: true,
             read_only: false,
             label: None,
             validation_behavior: ValidationBehavior::AutoCorrect,
             feedback: Signal::new(ValidationFeedback::Pristine),
+            focused: Signal::new(false),
+            range_popover_open: Signal::new(false),
             on_value_changed: None,
             root_child_id: None,
         }
@@ -137,7 +162,6 @@ impl DateRangeEdit {
         self
     }
 
-    /// Override the locale-derived format pattern for both halves.
     pub fn format_pattern(mut self, p: impl Into<String>) -> Self {
         self.pattern = Some(p.into());
         self
@@ -153,29 +177,8 @@ impl DateRangeEdit {
         self
     }
 
-    /// Visual separator between the two halves (default ` – `, en-dash).
-    pub fn separator(mut self, s: impl Into<String>) -> Self {
-        self.separator = s.into();
-        self
-    }
-
     pub fn first_day_of_week(mut self, w: Weekday) -> Self {
         self.first_day_of_week = Some(w);
-        self
-    }
-
-    pub fn show_calendar_button(mut self, show: bool) -> Self {
-        self.show_calendar_button = show;
-        self
-    }
-
-    /// Whether to render a trailing single calendar button (right of
-    /// the end half) that opens a shared `Calendar::range` popover.
-    /// Default `true`. The per-half single-date calendar buttons
-    /// (controlled by [`Self::show_calendar_button`]) remain
-    /// independent — disabling one doesn't disable the other.
-    pub fn show_range_calendar_button(mut self, show: bool) -> Self {
-        self.show_range_calendar_button = show;
         self
     }
 
@@ -194,14 +197,11 @@ impl DateRangeEdit {
         self
     }
 
-    /// How parse failures are surfaced. Forwarded to both halves.
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
         self
     }
 
-    /// Reactive handle on the composed validation feedback (worse of
-    /// the two halves).
     pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback> {
         self.feedback.clone()
     }
@@ -221,14 +221,36 @@ impl DateRangeEdit {
 
 impl Widget for DateRangeEdit {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let theme = ctx.theme_signal().get();
+        let field_style = theme.components.text_field;
+        let date_style = theme.components.date_edit;
+        let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
         let read_only = self.read_only;
 
+        // Resolve pattern — locale default unless overridden.
+        let pattern_string = self.pattern.clone().unwrap_or_else(|| {
+            let tag = ctx.locale_signal().get().unwrap_or_default();
+            crate::common::datetime::format_pattern_for_locale(&tag).to_string()
+        });
+        let parsed_pattern = ParsedPattern::parse(&pattern_string)
+            .unwrap_or_else(|_| ParsedPattern::parse("%Y-%m-%d").unwrap());
+        let pattern_rc = Rc::new(parsed_pattern);
+        let mask_string = mask_for_pattern(&pattern_rc);
+        let min = self.min_date;
+        let max = self.max_date;
+
         // Outer → halves: when the bound range changes externally,
-        // push start/end into the per-half signals.
+        // push start/end into the per-half date signals AND reformat
+        // their text. The text reformat is necessary so a programmatic
+        // `value.set(...)` shows up in the visible field, not just the
+        // hidden state.
         {
             let start_part = self.start_part.clone();
             let end_part = self.end_part.clone();
+            let start_text = self.start_text.clone();
+            let end_text = self.end_text.clone();
+            let pattern = pattern_rc.clone();
             ctx.effect(&self.value, move |new_range| {
                 let (s, e) = match new_range {
                     Some(r) => (Some(r.start), Some(r.end)),
@@ -240,242 +262,218 @@ impl Widget for DateRangeEdit {
                 if end_part.get() != e {
                     end_part.set(e);
                 }
-            });
-        }
-
-        // ── Start DateEdit ────────────────────────────────────
-        let mut start_editor = DateEdit::new(self.start_part.clone());
-        if let Some(min) = self.min_date {
-            start_editor = start_editor.min_date(min);
-        }
-        if let Some(max) = self.max_date {
-            start_editor = start_editor.max_date(max);
-        }
-        if let Some(p) = self.pattern.clone() {
-            start_editor = start_editor.format_pattern(p);
-        }
-        if let Some(fdow) = self.first_day_of_week {
-            start_editor = start_editor.first_day_of_week(fdow);
-        }
-        if !self.placeholder_start.is_empty() {
-            start_editor = start_editor.placeholder(self.placeholder_start.clone());
-        }
-        start_editor = start_editor
-            .show_calendar_button(self.show_calendar_button)
-            .calendar_popover_placement(OverlayPlacement::BelowPreferred)
-            .enabled(enabled)
-            .read_only(read_only)
-            .validation_behavior(self.validation_behavior);
-        let start_feedback = start_editor.validation_feedback_signal();
-        {
-            let outer = self.value.clone();
-            let end_part = self.end_part.clone();
-            let on_changed = self.on_value_changed.clone();
-            start_editor = start_editor.on_value_changed(move |new_s, ctx_evt| {
-                let combined = match (new_s, end_part.get()) {
-                    (Some(s), Some(e)) => Some(DateRange::new(s, e)),
-                    _ => None,
-                };
-                if outer.get() != combined {
-                    outer.set(combined);
-                    if let Some(cb) = on_changed.as_ref() {
-                        cb(combined, ctx_evt);
-                    }
+                let s_text = s
+                    .map(|d| format_value(&pattern, Some(d), None))
+                    .unwrap_or_default();
+                let e_text = e
+                    .map(|d| format_value(&pattern, Some(d), None))
+                    .unwrap_or_default();
+                if start_text.get() != s_text {
+                    start_text.set(s_text);
+                }
+                if end_text.get() != e_text {
+                    end_text.set(e_text);
                 }
             });
         }
-        let start_id = ctx.add(start_editor);
+        // Seed text once at build time so the field shows the initial
+        // value without waiting for the first effect tick.
+        {
+            self.start_text.set(
+                self.start_part
+                    .get()
+                    .map(|d| format_value(&pattern_rc, Some(d), None))
+                    .unwrap_or_default(),
+            );
+            self.end_text.set(
+                self.end_part
+                    .get()
+                    .map(|d| format_value(&pattern_rc, Some(d), None))
+                    .unwrap_or_default(),
+            );
+        }
 
-        // ── End DateEdit ──────────────────────────────────────
-        let mut end_editor = DateEdit::new(self.end_part.clone());
-        // The end half's lower bound is `max(min_date, current start)`.
-        // Without a dynamic `min_date` accessor we settle for the
-        // static min — a follow-up could reactively re-tighten this.
+        // ── Build each half as a bare TextInputField ───────────
+        let start_field_id = self.build_half(
+            ctx,
+            HalfKind::Start,
+            pattern_rc.clone(),
+            &mask_string,
+            field_style.clone(),
+            min,
+            max,
+        );
+        let end_field_id = self.build_half(
+            ctx,
+            HalfKind::End,
+            pattern_rc.clone(),
+            &mask_string,
+            field_style.clone(),
+            min,
+            max,
+        );
+
+        // ── Painted arrow separator ────────────────────────────
+        let separator_icon = arrow_right_icon(field_style.height * 0.45)
+            .bind_color(fern_tokens::TextRole::Secondary);
+        let separator_id = ctx.add(
+            FixedSize::new()
+                .bind_width(field_style.height * 0.65)
+                .bind_height(field_style.height)
+                .child(Center::new().child(separator_icon)),
+        );
+
+        // ── Trailing calendar trigger ──────────────────────────
+        // Pre-build the dormant range calendar once.
+        let value_for_cal = self.value.clone();
+        let popover_open_for_cal = self.range_popover_open.clone();
+        let mut cal = Calendar::range(value_for_cal.clone()).on_range_changed(
+            move |new_range, ctx_evt| {
+                if new_range.is_some() {
+                    popover_open_for_cal.set(false);
+                    ctx_evt.dismiss_all_overlays();
+                    ctx_evt.request_frame();
+                }
+            },
+        );
         if let Some(min) = self.min_date {
-            end_editor = end_editor.min_date(min);
+            cal = cal.min_date(min);
         }
         if let Some(max) = self.max_date {
-            end_editor = end_editor.max_date(max);
-        }
-        if let Some(p) = self.pattern.clone() {
-            end_editor = end_editor.format_pattern(p);
+            cal = cal.max_date(max);
         }
         if let Some(fdow) = self.first_day_of_week {
-            end_editor = end_editor.first_day_of_week(fdow);
+            cal = cal.first_day_of_week(fdow);
         }
-        if !self.placeholder_end.is_empty() {
-            end_editor = end_editor.placeholder(self.placeholder_end.clone());
-        }
-        end_editor = end_editor
-            .show_calendar_button(self.show_calendar_button)
-            .calendar_popover_placement(OverlayPlacement::BelowPreferred)
-            .enabled(enabled)
-            .read_only(read_only)
-            .validation_behavior(self.validation_behavior);
-        let end_feedback = end_editor.validation_feedback_signal();
-        {
-            let outer = self.value.clone();
-            let start_part = self.start_part.clone();
-            let on_changed = self.on_value_changed.clone();
-            end_editor = end_editor.on_value_changed(move |new_e, ctx_evt| {
-                let combined = match (start_part.get(), new_e) {
-                    (Some(s), Some(e)) => Some(DateRange::new(s, e)),
-                    _ => None,
-                };
-                if outer.get() != combined {
-                    outer.set(combined);
-                    if let Some(cb) = on_changed.as_ref() {
-                        cb(combined, ctx_evt);
-                    }
-                }
-            });
-        }
-        let end_id = ctx.add(end_editor);
+        let cal_id = ctx.add(cal);
+        ctx.set_dormant(cal_id);
 
-        // ── Separator + row layout ────────────────────────────
-        let separator = TextWidget::new_literal(self.separator.clone())
-            .style(fern_tokens::TextStyleRole::Body)
-            .single_line()
-            .a11y_hidden();
-        let separator_id = ctx.add(separator);
-
-        // ── Trailing range-calendar button + popover ─────────
-        // One shared `Calendar::range` overlay, anchored to the
-        // wrapper, that lets the user pick start + end dates with
-        // the calendar's two-anchor input model. The per-half
-        // single-date calendar buttons stay independent — this is
-        // an additional affordance, not a replacement.
-        let range_trigger_id_opt = if self.show_range_calendar_button {
-            // Pre-build the dormant range calendar (mounted only
-            // while the popover is open).
-            let value_for_cal = self.value.clone();
-            let popover_open = self.range_popover_open.clone();
-            let mut cal = Calendar::range(value_for_cal.clone()).on_range_changed(
-                move |new_range, ctx_evt| {
-                    // Once both anchors are picked, the calendar
-                    // commits a `DateRange`; close the popover and
-                    // return focus to the trigger via the same
-                    // request-focus path DateEdit uses.
-                    if new_range.is_some() {
-                        popover_open.set(false);
-                        ctx_evt.dismiss_all_overlays();
-                        ctx_evt.request_frame();
-                    }
-                },
-            );
-            if let Some(min) = self.min_date {
-                cal = cal.min_date(min);
-            }
-            if let Some(max) = self.max_date {
-                cal = cal.max_date(max);
-            }
-            if let Some(fdow) = self.first_day_of_week {
-                cal = cal.first_day_of_week(fdow);
-            }
-            let cal_id = ctx.add(cal);
-            ctx.set_dormant(cal_id);
-
-            // Trigger button.
-            let popover_open = self.range_popover_open.clone();
-            let self_ref = ctx.self_id();
-            let dismiss_cb: OverlayDismissCallback = {
-                let popover_open = popover_open.clone();
-                std::rc::Rc::new(move || {
-                    popover_open.set(false);
-                })
-            };
-            // Style the trigger like the per-half buttons (same
-            // CalendarTriggerButton primitive that `DateEdit` uses).
-            // Width / icon size match Int UI conventions used by
-            // DateEdit so the three buttons align visually.
-            let trigger_widget = CalendarTriggerButton::new(
-                28.0,
-                14.0,
-                enabled && !read_only,
-                std::rc::Rc::new(move |ctx_evt: &mut EventContext| {
-                    if popover_open.get() {
-                        popover_open.set(false);
-                        ctx_evt.dismiss_all_overlays();
-                    } else {
-                        popover_open.set(true);
-                        ctx_evt.activate(cal_id);
-                        ctx_evt.show_overlay(OverlayRequest {
-                            content_id: cal_id,
-                            anchor: self_ref,
-                            placement: OverlayPlacement::BelowPreferred,
-                            dismiss: DismissBehavior::EscapeOrClickOutside,
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                            on_dismiss: Some(dismiss_cb.clone()),
-                            fade_duration: None,
-                        });
-                        ctx_evt.request_focus(cal_id);
-                    }
-                }),
-            );
-            // Tiny vertical divider between end DateEdit and the
-            // trailing trigger so it visually reads as a sibling
-            // affordance, not part of the end field's frame.
-            let div = ctx.add(
-                Padding::new(2.0, 0.0, 2.0, 0.0)
-                    .child(Divider::vertical().thickness(1.0)),
-            );
-            let trigger_id = ctx.add(trigger_widget);
-            Some((div, trigger_id))
-        } else {
-            None
+        let popover_open = self.range_popover_open.clone();
+        let self_ref = ctx.self_id();
+        let dismiss_cb: OverlayDismissCallback = {
+            let popover_open = popover_open.clone();
+            Rc::new(move || {
+                popover_open.set(false);
+            })
         };
+        let trigger_btn = BuiltInButton::new(
+            calendar_glyph_icon(date_style.calendar_icon_size),
+        )
+        .size(BuiltInButtonSize::Default)
+        .enabled(enabled && !read_only)
+        .tooltip(resolve_message_widget("date-range-edit-trigger-tooltip", &[]))
+        .on_activate_fn(move |ctx_evt: &mut EventContext| {
+            if popover_open.get() {
+                popover_open.set(false);
+                ctx_evt.dismiss_all_overlays();
+            } else {
+                popover_open.set(true);
+                ctx_evt.activate(cal_id);
+                ctx_evt.show_overlay(OverlayRequest {
+                    content_id: cal_id,
+                    anchor: self_ref,
+                    placement: OverlayPlacement::BelowPreferred,
+                    dismiss: DismissBehavior::EscapeOrClickOutside,
+                    layer: OverlayLayer::InTree,
+                    parent_overlay: None,
+                    on_dismiss: Some(dismiss_cb.clone()),
+                    fade_duration: None,
+                });
+                ctx_evt.request_focus(cal_id);
+            }
+        });
+        let trigger_id = ctx.add(trigger_btn);
+        let divider_id = ctx.add(
+            Padding::new(4.0, 0.0, 4.0, 0.0)
+                .child(Divider::vertical().thickness(1.0).color(BorderRole::Default)),
+        );
 
-        let mut row = HStack::new()
-            .spacing(4.0)
-            .add_child(start_id)
+        // ── Row layout ─────────────────────────────────────────
+        let row = HStack::new()
+            .spacing(0.0)
+            .add_child(start_field_id)
             .add_child(separator_id)
-            .add_child(end_id);
-        if let Some((div, trigger)) = range_trigger_id_opt {
-            row = row.add_child(div).add_child(trigger);
-        }
-        let row_id = ctx.add(row);
-        self.root_child_id = Some(row_id);
+            .add_child(end_field_id)
+            .add_child(divider_id)
+            .add_child(trigger_id);
+        let inline_row_id = ctx.add(row);
+        let row_id = ctx.add(
+            Padding::new(0.0, field_style.padding_horizontal, 0.0, field_style.padding_horizontal)
+                .child_id(inline_row_id),
+        );
 
-        // Bind value at AccessibilityOnly so the wrapper's `set_value`
-        // (composed ISO range) refreshes when either half mutates.
+        // ── Frame: bg + border driven by focus + validation ───
+        let feedback_for_border = self.feedback.clone();
+        let focused_for_border = self.focused.clone();
+        let border_role = focused_for_border
+            .clone()
+            .zip(&feedback_for_border)
+            .map(|(focused, fb)| match fb {
+                ValidationFeedback::Invalid { .. } => BorderRole::Error,
+                ValidationFeedback::Corrected { .. } if !*focused => BorderRole::Focused,
+                _ => {
+                    if *focused {
+                        BorderRole::Focused
+                    } else {
+                        BorderRole::Default
+                    }
+                }
+            });
+        let border_width_signal = focused_for_border.clone().zip(&feedback_for_border).map(
+            move |(focused, fb)| {
+                if *focused || matches!(fb, ValidationFeedback::Invalid { .. }) {
+                    focus_ring_width
+                } else {
+                    field_style.border_width
+                }
+            },
+        );
+        let bg = RectWidget::new()
+            .background(SurfaceRole::Content)
+            .border_color(border_role)
+            .border_width(border_width_signal)
+            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
+        let bg_id = ctx.add(bg);
+        let framed_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
+        let sized_id = ctx.add(MinSize::new(0.0, field_style.height).child_id(framed_id));
+
+        // ── Inline validation strip below the frame ───────────
+        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(self.feedback.clone()));
+        let root_with_strip = ctx.add(
+            VStack::new()
+                .spacing(field_style.validation_strip_gap)
+                .add_child(sized_id)
+                .add_child(strip_id),
+        );
+        self.root_child_id = Some(root_with_strip);
+
+        // ── Self handlers: focus_within drives the frame border ─
+        let handlers = HandlerSet::new().focus_within(self.focused.clone());
+        ctx.apply_self_handlers(handlers);
+
+        // Bind the value at AccessibilityOnly so the wrapper's AT
+        // node refreshes set_value when either half mutates.
         let self_id = ctx.self_id();
         self.value.bind_to(
             self_id,
             ctx.binding_registry(),
             fern_core::binding::BindingLevel::AccessibilityOnly,
         );
-
-        // ── Compose feedback severity from both halves ────────
-        // Same severity ladder DateTimeEdit uses: Invalid > Corrected
-        // > Valid > Pristine. Worst of the two halves wins.
-        {
-            let composed = self.feedback.clone();
-            let other = end_feedback.clone();
-            ctx.effect(&start_feedback, move |new_start| {
-                let combined = compose_feedback(new_start, &other.get());
-                if composed.get() != combined {
-                    composed.set(combined);
-                }
-            });
-        }
-        {
-            let composed = self.feedback.clone();
-            let other = start_feedback.clone();
-            ctx.effect(&end_feedback, move |new_end| {
-                let combined = compose_feedback(&other.get(), new_end);
-                if composed.get() != combined {
-                    composed.set(combined);
-                }
-            });
-        }
         self.feedback.bind_to(
             self_id,
             ctx.binding_registry(),
             fern_core::binding::BindingLevel::AccessibilityOnly,
         );
+        self.range_popover_open.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            fern_core::binding::BindingLevel::AccessibilityOnly,
+        );
+        // Suppress unused-field warning until we surface the trigger
+        // a11y separately.
+        let _ = trigger_id;
 
-        vec![row_id]
+        vec![root_with_strip]
     }
 
     fn layout_response(
@@ -510,9 +508,6 @@ impl Widget for DateRangeEdit {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // No `Role::DateRangeInput` in AccessKit — stay on `DateInput`
-        // for the wrapper and let the two child `DateInput`s carry the
-        // detailed structure.
         builder.set_role(Role::DateInput);
         if let Some(ref label) = self.label {
             builder.set_name(label.clone());
@@ -553,21 +548,269 @@ impl Widget for DateRangeEdit {
     }
 }
 
-/// Pick the more severe of two halves. Severity:
-/// `Invalid > Corrected > Valid > Pristine`. Same ladder
-/// `DateTimeEdit` uses (kept as a private helper here to avoid
-/// cross-widget visibility plumbing).
-fn compose_feedback(
-    a: &ValidationFeedback,
-    b: &ValidationFeedback,
-) -> ValidationFeedback {
-    fn rank(fb: &ValidationFeedback) -> u8 {
-        match fb {
-            ValidationFeedback::Invalid { .. } => 3,
-            ValidationFeedback::Corrected { .. } => 2,
-            ValidationFeedback::Valid => 1,
-            ValidationFeedback::Pristine => 0,
+#[derive(Clone, Copy)]
+enum HalfKind {
+    Start,
+    End,
+}
+
+impl DateRangeEdit {
+    /// Build one half (start or end) as a bare `TextInputField` with
+    /// mask + validator + segment-stepping wired against the
+    /// appropriate per-half text/date signals. Returns the WidgetId
+    /// wrapped in a fixed-width container so both halves visually
+    /// align inside the unified frame.
+    #[allow(clippy::too_many_arguments)]
+    fn build_half(
+        &self,
+        ctx: &mut BuildContext,
+        kind: HalfKind,
+        pattern_rc: Rc<ParsedPattern>,
+        mask_string: &str,
+        field_style: fern_tokens::TextFieldStyle,
+        min: Option<Date>,
+        max: Option<Date>,
+    ) -> WidgetId {
+        let (text_signal, date_signal, placeholder, other_date) = match kind {
+            HalfKind::Start => (
+                self.start_text.clone(),
+                self.start_part.clone(),
+                self.placeholder_start.clone(),
+                self.end_part.clone(),
+            ),
+            HalfKind::End => (
+                self.end_text.clone(),
+                self.end_part.clone(),
+                self.placeholder_end.clone(),
+                self.start_part.clone(),
+            ),
+        };
+
+        let validator = build_date_validator(
+            pattern_rc.clone(),
+            min,
+            max,
+            self.validation_behavior,
+        );
+
+        let outer_value = self.value.clone();
+        let on_changed = self.on_value_changed.clone();
+        let merge_into_outer = move |new_d: Option<Date>,
+                                     other_d: Option<Date>,
+                                     ctx_evt: &mut EventContext| {
+            let combined = match kind {
+                HalfKind::Start => match (new_d, other_d) {
+                    (Some(s), Some(e)) => Some(DateRange::new(s, e)),
+                    _ => None,
+                },
+                HalfKind::End => match (other_d, new_d) {
+                    (Some(s), Some(e)) => Some(DateRange::new(s, e)),
+                    _ => None,
+                },
+            };
+            if outer_value.get() != combined {
+                outer_value.set(combined);
+                if let Some(cb) = on_changed.as_ref() {
+                    cb(combined, ctx_evt);
+                }
+            }
+        };
+
+        // Commit closure: parse the field text on Enter / blur, sync
+        // the per-half date signal, then merge into the outer range.
+        let commit: Rc<dyn Fn(&mut EventContext)> = {
+            let text_signal = text_signal.clone();
+            let date_signal = date_signal.clone();
+            let other_date = other_date.clone();
+            let pattern = pattern_rc.clone();
+            let merge = merge_into_outer.clone();
+            Rc::new(move |ctx_evt: &mut EventContext| {
+                let raw = text_signal.get();
+                let trimmed = raw.trim();
+                let parsed: Option<Date> = if trimmed.is_empty() {
+                    None
+                } else {
+                    match parse_value(&pattern, trimmed, ParseTarget::DateOnly) {
+                        Some(ParsedValue::Date(d)) => Some(clamp_date(d, min, max)),
+                        _ => date_signal.get(),
+                    }
+                };
+                if date_signal.get() != parsed {
+                    date_signal.set(parsed);
+                }
+                merge(parsed, other_date.get(), ctx_evt);
+            })
+        };
+
+        let inner_height =
+            (field_style.height - 2.0 * field_style.border_width).max(0.0);
+        let text_area_height =
+            (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
+
+        let pattern_for_filter = pattern_rc.clone();
+        let mut field = TextInputField::new(text_signal.clone())
+            .enabled(self.enabled)
+            .read_only(self.read_only)
+            .placeholder(placeholder)
+            .text_height(text_area_height)
+            .input_mask(mask_string)
+            .validator({
+                let v = validator.clone();
+                move |s| (v)(s)
+            })
+            .char_filter(move |c: char| {
+                if c.is_ascii_digit() || c == '-' || c == ' ' {
+                    return true;
+                }
+                for tok in &pattern_for_filter.tokens {
+                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok {
+                        if s.chars().any(|x| x == c) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            });
+        // Mirror the inner field's feedback into the outer composed
+        // feedback signal (worse-of-two semantics).
+        {
+            let inner_feedback = field.validation_feedback_signal();
+            let composed = self.feedback.clone();
+            let other_feedback_owner = match kind {
+                HalfKind::Start => Some(self.feedback.clone()), // placeholder, replaced below
+                HalfKind::End => Some(self.feedback.clone()),
+            };
+            // The other half's feedback isn't accessible at this point
+            // (it's inside its own field). Compose via a per-half
+            // mirror: each half's effect computes max(self, current
+            // composed) → composed. As long as both halves install
+            // this, the worse always wins.
+            let _ = other_feedback_owner;
+            ctx.effect(&inner_feedback, move |new_fb| {
+                let merged = match (composed.get(), new_fb.clone()) {
+                    (a, b) if rank(&a) >= rank(&b) => a,
+                    (_, b) => b,
+                };
+                if composed.get() != merged {
+                    composed.set(merged);
+                }
+            });
         }
+        {
+            let commit = commit.clone();
+            field = field.on_submit_fn(move |ctx_evt| commit(ctx_evt));
+        }
+        {
+            let commit = commit.clone();
+            field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
+        }
+
+        // Capture caret signal + caret_setter BEFORE moving the field
+        // into the tree, for segment-stepping.
+        let caret = field.caret_position();
+        let caret_setter = field.caret_setter();
+
+        // A11y: TimeInput-like role + the half's name for screen readers.
+        let half_label_key = match kind {
+            HalfKind::Start => "date-range-edit-start-name",
+            HalfKind::End => "date-range-edit-end-name",
+        };
+        let field_with_a11y = field
+            .access_role(Role::DateInput)
+            .access_label(resolve_message_widget(half_label_key, &[]));
+        let field_id = ctx.add(field_with_a11y);
+
+        // Padding around the field for visual alignment with the
+        // separator icon and trigger button.
+        let padded_field_id = ctx.add(
+            Padding::new(
+                field_style.padding_vertical,
+                4.0,
+                field_style.padding_vertical,
+                4.0,
+            )
+            .child_id(field_id),
+        );
+        let sized_field_id = ctx.add(
+            MinSize::new(DEFAULT_HALF_WIDTH, 0.0).child_id(padded_field_id),
+        );
+
+        // ── Segment-stepping (Up/Down on focused segment) ──────
+        let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {
+            let pattern = pattern_rc.clone();
+            let date_signal = date_signal.clone();
+            let text_signal = text_signal.clone();
+            let other_date = other_date.clone();
+            let merge = merge_into_outer.clone();
+            Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
+                let pos = caret.get();
+                let Some((_, _, kind_seg)) = segment_at_position(&pattern, pos)
+                else {
+                    return;
+                };
+                let current = date_signal.get().unwrap_or_else(today_local);
+                let stepped = step_date_field(current, kind_seg, delta);
+                let clamped = clamp_date(stepped, min, max);
+                date_signal.set(Some(clamped));
+                text_signal.set(format_value(&pattern, Some(clamped), None));
+                caret_setter(pos);
+                merge(Some(clamped), other_date.get(), ctx_evt);
+                ctx_evt.request_frame();
+            })
+        };
+
+        // Attach key preview on a strict ancestor of the field — same
+        // pattern DateEdit uses for its ±segment stepping.
+        let enabled = self.enabled;
+        let read_only = self.read_only;
+        let step_for_key = segment_step.clone();
+        let stepping_ancestor = ctx.add(
+            ZStack::new().add_child(sized_field_id).on_key_preview(
+                move |event, ctx_evt| {
+                    if !enabled || read_only {
+                        return EventResponse::Ignored;
+                    }
+                    let WidgetEvent::KeyDown { key, modifiers, .. } = event
+                    else {
+                        return EventResponse::Ignored;
+                    };
+                    let mult = if modifiers.shift() { 10 } else { 1 };
+                    let delta = match key {
+                        Key::ArrowUp => mult,
+                        Key::ArrowDown => -mult,
+                        Key::PageUp => 10 * mult,
+                        Key::PageDown => -10 * mult,
+                        _ => return EventResponse::Ignored,
+                    };
+                    step_for_key(delta, ctx_evt);
+                    EventResponse::Handled
+                },
+            ),
+        );
+
+        stepping_ancestor
     }
-    if rank(a) >= rank(b) { a.clone() } else { b.clone() }
+}
+
+/// Severity rank for `ValidationFeedback`. Higher = more severe.
+fn rank(fb: &ValidationFeedback) -> u8 {
+    match fb {
+        ValidationFeedback::Invalid { .. } => 3,
+        ValidationFeedback::Corrected { .. } => 2,
+        ValidationFeedback::Valid => 1,
+        ValidationFeedback::Pristine => 0,
+    }
+}
+
+/// Painted right-arrow chevron used as the visual separator
+/// between the start and end halves. Same stroke convention as
+/// the calendar header chevrons.
+fn arrow_right_icon(size: f32) -> IconWidget {
+    let mut path = Path::new();
+    let s = size;
+    // Single chevron pointing right: `>`
+    path.move_to(Point::new(s * 0.35, s * 0.20));
+    path.line_to(Point::new(s * 0.70, s * 0.50));
+    path.line_to(Point::new(s * 0.35, s * 0.80));
+    IconWidget::from_path(path, size)
 }
