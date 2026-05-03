@@ -153,10 +153,15 @@ fn calendar_rebuilds_on_month_navigation() {
         after_nav_count
     );
     // Also assert we're in the right ballpark — 6 rows × 7 cells +
-    // header/footer/etc. lands somewhere near 290.
+    // header/footer/etc. for the day grid (~290), plus the dormant
+    // Months and Years zoom grids (12 cells each, mounted but not
+    // visible — Switcher mounts all children to avoid rebuild
+    // churn on mode flips). Total lands around 520. The check is
+    // a leak detector: as long as it's bounded, we're not piling up
+    // stale per-month nodes across navigations.
     assert!(
-        after_nav_count > 200 && after_nav_count < 400,
-        "expected calendar descendant count in 200..400, got {after_nav_count}"
+        after_nav_count > 200 && after_nav_count < 800,
+        "expected calendar descendant count in 200..800, got {after_nav_count}"
     );
 }
 
@@ -210,4 +215,49 @@ fn date_range_contains_inclusive() {
     assert!(r.contains(Date::constant(2026, 5, 5)));
     assert!(!r.contains(Date::constant(2026, 4, 30)));
     assert!(!r.contains(Date::constant(2026, 5, 6)));
+}
+
+// ── Header-zoom mode behaviour ──────────────────────────────────
+
+#[test]
+fn calendar_mode_default_is_days() {
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = Calendar::single(date);
+    assert_eq!(cal.mode_signal().get(), CalendarMode::Days);
+}
+
+#[test]
+fn calendar_mode_demote_chain() {
+    assert_eq!(CalendarMode::Days.demote(), CalendarMode::Months);
+    assert_eq!(CalendarMode::Months.demote(), CalendarMode::Years);
+    // Years is the coarsest; further demote is a no-op.
+    assert_eq!(CalendarMode::Years.demote(), CalendarMode::Years);
+}
+
+#[test]
+fn calendar_mode_signal_writable_for_programmatic_zoom() {
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = Calendar::single(date);
+    let mode = cal.mode_signal();
+    mode.set(CalendarMode::Years);
+    assert_eq!(mode.get(), CalendarMode::Years);
+    let mut tree = light_tree();
+    let _id = tree.add(cal);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    // Mode persists across the build pass — read again to confirm.
+    assert_eq!(mode.get(), CalendarMode::Years);
+}
+
+#[test]
+fn years_grid_decade_calculation() {
+    use crate::calendar::zoom_grid::YearsGrid;
+    assert_eq!(YearsGrid::decade_of(2026), 2020);
+    assert_eq!(YearsGrid::decade_of(2020), 2020);
+    assert_eq!(YearsGrid::decade_of(2029), 2020);
+    assert_eq!(YearsGrid::decade_of(2030), 2030);
+    assert_eq!(YearsGrid::decade_of(1999), 1990);
+    assert_eq!(YearsGrid::decade_of(0), 0);
 }

@@ -17,11 +17,14 @@ use crate::common::datetime::types::YearMonth;
 use crate::common::datetime::Date;
 use crate::primitives::{Center, Expand, FixedSize, HStack, IconWidget, RectWidget, TextWidget, ZStack};
 
-use super::OnMonthChanged;
+use super::{CalendarMode, OnMonthChanged};
 
 pub(crate) struct CalendarHeader {
     visible_month: Signal<YearMonth>,
     focused_date: Signal<Date>,
+    /// Body mode driving (a) what unit the chevrons step and
+    /// (b) the title-button's demote target.
+    mode: Signal<CalendarMode>,
     on_month_changed: Option<OnMonthChanged>,
     root_id: Option<WidgetId>,
 }
@@ -36,11 +39,13 @@ impl CalendarHeader {
     pub(crate) fn new(
         visible_month: Signal<YearMonth>,
         focused_date: Signal<Date>,
+        mode: Signal<CalendarMode>,
         on_month_changed: Option<OnMonthChanged>,
     ) -> Self {
         Self {
             visible_month,
             focused_date,
+            mode,
             on_month_changed,
             root_id: None,
         }
@@ -54,93 +59,106 @@ impl Widget for CalendarHeader {
         let prev_label = resolve_message_widget("calendar-button-previous-month", &[]);
         let next_label = resolve_message_widget("calendar-button-next-month", &[]);
 
-        // ── Previous year ─────────────────────────────────────
-        let visible_for_prev_year = self.visible_month.clone();
-        let focused_for_prev_year = self.focused_date.clone();
-        let cb_for_prev_year = self.on_month_changed.clone();
+        // Mode-aware step helpers. Single-chevron steps the visible
+        // body's natural unit (1 month in Days, 1 year in Months,
+        // 10 years in Years). Double-chevron steps a coarser unit
+        // (1 year, 10 years, 100 years respectively).
+        let step_single = {
+            let visible = self.visible_month.clone();
+            let focused = self.focused_date.clone();
+            let mode = self.mode.clone();
+            let cb = self.on_month_changed.clone();
+            std::rc::Rc::new(move |dir: i32, ctx_evt: &mut fern_core::widget::EventContext| {
+                let cur = visible.get();
+                let new_ym = match mode.get() {
+                    CalendarMode::Days => {
+                        if dir > 0 { cur.next_month() } else { cur.prev_month() }
+                    }
+                    CalendarMode::Months => cur.offset_months(dir * 12),
+                    CalendarMode::Years => cur.offset_months(dir * 120),
+                };
+                visible.set(new_ym);
+                clamp_focus_into_month(&focused, new_ym);
+                if let Some(cb) = cb.as_ref() {
+                    cb(new_ym, ctx_evt);
+                }
+                ctx_evt.request_frame();
+            })
+        };
+        let step_double = {
+            let visible = self.visible_month.clone();
+            let focused = self.focused_date.clone();
+            let mode = self.mode.clone();
+            let cb = self.on_month_changed.clone();
+            std::rc::Rc::new(move |dir: i32, ctx_evt: &mut fern_core::widget::EventContext| {
+                let cur = visible.get();
+                let new_ym = match mode.get() {
+                    CalendarMode::Days => cur.offset_months(dir * 12),
+                    CalendarMode::Months => cur.offset_months(dir * 120),
+                    // Years: a "double" step = +/- 100 years, but
+                    // YearMonth saturates so this is a soft jump.
+                    CalendarMode::Years => cur.offset_months(dir * 1200),
+                };
+                visible.set(new_ym);
+                clamp_focus_into_month(&focused, new_ym);
+                if let Some(cb) = cb.as_ref() {
+                    cb(new_ym, ctx_evt);
+                }
+                ctx_evt.request_frame();
+            })
+        };
+
+        // ── Previous double (year / decade / century) ─────────
+        let step_dbl_prev = step_double.clone();
         let prev_year_id = ctx.add(NavArrow::new(
             ArrowKind::LeftDouble,
             prev_year_label,
-            move |ctx_evt| {
-                let new_ym = visible_for_prev_year.get().offset_months(-12);
-                visible_for_prev_year.set(new_ym);
-                clamp_focus_into_month(&focused_for_prev_year, new_ym);
-                if let Some(cb) = cb_for_prev_year.as_ref() {
-                    cb(new_ym, ctx_evt);
-                }
-                ctx_evt.request_frame();
-            },
+            move |ctx_evt| step_dbl_prev(-1, ctx_evt),
         ));
 
-        // ── Previous month ────────────────────────────────────
-        let visible_for_prev = self.visible_month.clone();
-        let focused_for_prev = self.focused_date.clone();
-        let cb_for_prev = self.on_month_changed.clone();
+        // ── Previous single (month / year / decade) ───────────
+        let step_sgl_prev = step_single.clone();
         let prev_id = ctx.add(NavArrow::new(
             ArrowKind::Left,
             prev_label,
-            move |ctx_evt| {
-                let new_ym = visible_for_prev.get().prev_month();
-                visible_for_prev.set(new_ym);
-                clamp_focus_into_month(&focused_for_prev, new_ym);
-                if let Some(cb) = cb_for_prev.as_ref() {
-                    cb(new_ym, ctx_evt);
-                }
-                ctx_evt.request_frame();
-            },
+            move |ctx_evt| step_sgl_prev(-1, ctx_evt),
         ));
 
-        // ── Next month ────────────────────────────────────────
-        let visible_for_next = self.visible_month.clone();
-        let focused_for_next = self.focused_date.clone();
-        let cb_for_next = self.on_month_changed.clone();
+        // ── Next single (month / year / decade) ───────────────
+        let step_sgl_next = step_single.clone();
         let next_id = ctx.add(NavArrow::new(
             ArrowKind::Right,
             next_label,
-            move |ctx_evt| {
-                let new_ym = visible_for_next.get().next_month();
-                visible_for_next.set(new_ym);
-                clamp_focus_into_month(&focused_for_next, new_ym);
-                if let Some(cb) = cb_for_next.as_ref() {
-                    cb(new_ym, ctx_evt);
-                }
-                ctx_evt.request_frame();
-            },
+            move |ctx_evt| step_sgl_next(1, ctx_evt),
         ));
 
-        // ── Next year ─────────────────────────────────────────
-        let visible_for_next_year = self.visible_month.clone();
-        let focused_for_next_year = self.focused_date.clone();
-        let cb_for_next_year = self.on_month_changed.clone();
+        // ── Next double (year / decade / century) ─────────────
+        let step_dbl_next = step_double.clone();
         let next_year_id = ctx.add(NavArrow::new(
             ArrowKind::RightDouble,
             next_year_label,
-            move |ctx_evt| {
-                let new_ym = visible_for_next_year.get().offset_months(12);
-                visible_for_next_year.set(new_ym);
-                clamp_focus_into_month(&focused_for_next_year, new_ym);
-                if let Some(cb) = cb_for_next_year.as_ref() {
-                    cb(new_ym, ctx_evt);
-                }
-                ctx_evt.request_frame();
-            },
+            move |ctx_evt| step_dbl_next(1, ctx_evt),
         ));
 
-        // Center label "Month Year". Reactively bound so it updates
-        // when the visible_month changes.
-        let month_signal = self.visible_month.clone();
-        let label_signal = month_signal.map(|ym| {
-            let month_name = resolve_message_widget(month_long_key(ym.month()), &[]);
-            format!("{} {}", month_name, ym.year())
+        // Center label — clickable button that demotes the mode
+        // (Days → Months → Years; Years stays). Text reflects the
+        // current mode: "May 2026" / "2026" / "2020 — 2029".
+        let mode_for_label = self.mode.clone();
+        let visible_for_label = self.visible_month.clone();
+        let label_signal = visible_for_label.zip(&mode_for_label).map(|(ym, m)| match m {
+            CalendarMode::Days => {
+                let month_name = resolve_message_widget(month_long_key(ym.month()), &[]);
+                format!("{} {}", month_name, ym.year())
+            }
+            CalendarMode::Months => format!("{}", ym.year()),
+            CalendarMode::Years => {
+                let start = (ym.year() / 10) * 10;
+                format!("{} — {}", start, start + 9)
+            }
         });
-        let month_label = TextWidget::new_literal("")
-            .style(TextStyleRole::BodyBold)
-            .color(TextRole::Primary)
-            .bind_text(label_signal)
-            .single_line()
-            .a11y_hidden();
-        let label_id = ctx.add(month_label);
-        let label_centered = ctx.add(Expand::horizontal().child(Center::new().child_id(label_id)));
+        let title_label = TitleButton::new(label_signal, self.mode.clone());
+        let title_id = ctx.add(title_label);
+        let label_centered = ctx.add(Expand::horizontal().child(Center::new().child_id(title_id)));
 
         let row = HStack::new()
             .spacing(4.0)
@@ -188,6 +206,155 @@ impl Widget for CalendarHeader {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::Group);
         builder.set_hidden();
+    }
+}
+
+// ── TitleButton — clickable header label that demotes mode ───────────
+
+/// Center label of the header. Renders as plain bold text in `Years`
+/// mode (no further demote available); renders as a hover-reactive
+/// button in `Days` / `Months` mode that demotes the mode on click
+/// (Days → Months, Months → Years). The label text is always the
+/// `label_signal` value — the parent computes it per-mode so this
+/// widget stays mode-agnostic for paint.
+struct TitleButton {
+    label_signal: Signal<String>,
+    mode: Signal<CalendarMode>,
+    root_id: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for TitleButton {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TitleButton").finish()
+    }
+}
+
+impl TitleButton {
+    fn new(label_signal: Signal<String>, mode: Signal<CalendarMode>) -> Self {
+        Self {
+            label_signal,
+            mode,
+            root_id: None,
+        }
+    }
+}
+
+impl Widget for TitleButton {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let hover = ctx.signal(false);
+        let focused = ctx.signal(false);
+        let focus_ring_width = ctx.theme_signal().get().shape.focus_ring_width;
+
+        let bg_role = hover.map(|h| {
+            if *h {
+                SurfaceRole::Hover
+            } else {
+                SurfaceRole::Transparent
+            }
+        });
+        let border_role = focused.map(|f| {
+            if *f {
+                BorderRole::Focused
+            } else {
+                BorderRole::Transparent
+            }
+        });
+        let border_width = focused.map(move |f| if *f { focus_ring_width } else { 0.0 });
+
+        let bg = RectWidget::new()
+            .background(fern_core::color_prop::ColorProp::DynamicSurfaceRole(bg_role))
+            .border_color(border_role)
+            .border_width(border_width)
+            .corner_radius(CornerRadius::uniform(4.0));
+        let bg_id = ctx.add(bg);
+
+        let text = TextWidget::new_literal("")
+            .style(TextStyleRole::BodyBold)
+            .color(TextRole::Primary)
+            .bind_text(self.label_signal.clone())
+            .single_line()
+            .a11y_hidden();
+        let text_id = ctx.add(text);
+        let padded = ctx.add(crate::primitives::Padding::new(2.0, 8.0, 2.0, 8.0).child_id(text_id));
+        let z = ctx.add(ZStack::new().add_child(bg_id).add_child(padded));
+
+        // Self handlers. The button only fires when mode != Years
+        // (Years has no further demote target). Keyboard activation
+        // mirrors `NavArrow`: Enter / Space → demote.
+        let mode_for_tap = self.mode.clone();
+        let mode_for_key = self.mode.clone();
+        let hover_for_handler = hover.clone();
+        let focused_for_handler = focused.clone();
+        let handlers = HandlerSet::new()
+            .focusable(true)
+            .cursor(CursorIcon::Pointer)
+            .on_hover(move |entered, _| hover_for_handler.set(entered))
+            .on_focus(move |has_focus, _| focused_for_handler.set(has_focus))
+            .on_tap(move |_pos, ctx_evt| {
+                let cur = mode_for_tap.get();
+                let next = cur.demote();
+                if next != cur {
+                    mode_for_tap.set(next);
+                    ctx_evt.request_frame();
+                }
+            })
+            .on_key(move |event, ctx_evt| {
+                use fern_core::event::{EventResponse, Key, WidgetEvent};
+                let WidgetEvent::KeyDown { key, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                if matches!(key, Key::Enter | Key::Space) {
+                    let cur = mode_for_key.get();
+                    let next = cur.demote();
+                    if next != cur {
+                        mode_for_key.set(next);
+                        ctx_evt.request_frame();
+                    }
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            });
+        ctx.apply_self_handlers(handlers);
+        self.root_id = Some(z);
+        vec![z]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        match self.root_id {
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            None => proposal.resolve(0.0, 0.0),
+        }
+        .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_id.into_iter().collect()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(Role::Button);
+        builder.set_name(self.label_signal.get());
+        builder.add_action(Action::Click);
     }
 }
 

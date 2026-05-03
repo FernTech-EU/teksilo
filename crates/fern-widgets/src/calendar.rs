@@ -66,6 +66,7 @@
 
 mod cell;
 mod header;
+mod zoom_grid;
 #[cfg(test)]
 mod tests;
 
@@ -136,6 +137,37 @@ pub(crate) enum SelectionBinding {
     },
 }
 
+/// What the calendar body is showing — drives the WPF/Avalonia
+/// "header-zoom" UX where clicking the title cycles to a coarser
+/// grid, letting the user reach any year in 2-3 clicks instead of
+/// many chevron presses. Default [`CalendarMode::Days`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CalendarMode {
+    /// 6×7 day grid for the visible month. Title shows "May 2026".
+    /// Header chevrons step by ±1 month and ±1 year.
+    #[default]
+    Days,
+    /// 4×3 grid of months. Title shows "2026". Header chevrons step
+    /// by ±1 year. Picking a cell zooms back into [`Self::Days`].
+    Months,
+    /// 4×3 grid of years (current decade). Title shows "2020 — 2029".
+    /// Header chevrons step by ±10 years (one decade). Picking a cell
+    /// zooms back into [`Self::Months`].
+    Years,
+}
+
+impl CalendarMode {
+    /// Mode after demoting one level (clicking the header title).
+    /// `Years` is the coarsest level — no further demotion.
+    pub fn demote(self) -> Self {
+        match self {
+            Self::Days => Self::Months,
+            Self::Months => Self::Years,
+            Self::Years => Self::Years,
+        }
+    }
+}
+
 /// Whether and how week numbers are displayed in the leading column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeekNumberDisplay {
@@ -161,6 +193,10 @@ pub struct Calendar {
     selection: SelectionBinding,
     visible_month: Signal<YearMonth>,
     focused_date: Signal<Date>,
+    /// Body mode (Days / Months / Years). Owned so the header label
+    /// can demote it on click and the cells can promote it back
+    /// (Years cell → Months → Days). Default [`CalendarMode::Days`].
+    mode: Signal<CalendarMode>,
     /// Optional custom override of the locale-derived first day of week.
     first_day_of_week_override: Option<Weekday>,
     week_numbers: WeekNumberDisplay,
@@ -216,6 +252,7 @@ impl Calendar {
             selection,
             visible_month: Signal::new(YearMonth::from_date(initial_focus)),
             focused_date: Signal::new(initial_focus),
+            mode: Signal::new(CalendarMode::default()),
             first_day_of_week_override: None,
             week_numbers: WeekNumberDisplay::None,
             show_today_button: false,
@@ -342,6 +379,13 @@ impl Calendar {
     pub fn focused_date_signal(&self) -> Signal<Date> {
         self.focused_date.clone()
     }
+
+    /// Reactive accessor for the body mode (Days / Months / Years).
+    /// Drives the header-zoom UX. Apps can read this to react to mode
+    /// changes, or write to it to programmatically zoom in/out.
+    pub fn mode_signal(&self) -> Signal<CalendarMode> {
+        self.mode.clone()
+    }
 }
 
 impl Widget for Calendar {
@@ -366,6 +410,7 @@ impl Widget for Calendar {
             ctx.add(CalendarHeader::new(
                 self.visible_month.clone(),
                 self.focused_date.clone(),
+                self.mode.clone(),
                 self.on_month_changed.clone(),
             ))
         } else {
@@ -374,28 +419,55 @@ impl Widget for Calendar {
         };
 
         // ── Weekday header row ──────────────────────────────────
+        // Only meaningful in Days mode; hidden in Months/Years zoom.
         let weekday_row_id = build_weekday_row(ctx, first_dow, week_number_col_width, &style);
+        ctx.visible_when(
+            weekday_row_id,
+            self.mode.map(|m| matches!(m, CalendarMode::Days)),
+        );
 
-        // ── Day grid ────────────────────────────────────────────
-        let grid_id = build_day_grid(
-            ctx,
-            BuildGridParams {
-                visible_month: self.visible_month.clone(),
-                focused_date: self.focused_date.clone(),
-                focused: self.focused.clone(),
-                selection: self.selection.clone(),
-                first_dow,
-                style,
-                week_numbers,
-                min_date: self.min_date,
-                max_date: self.max_date,
-                disabled_filter: self.disabled_date_filter.clone(),
-                enabled,
-                on_selection_changed: self.on_selection_changed.clone(),
-                on_range_changed: self.on_range_changed.clone(),
-                on_activate: self.on_activate.clone(),
-                range_status: self.range_status.clone(),
-            },
+        // ── Body Switcher: Days / Months / Years ────────────────
+        // The mode signal drives a Switcher that mounts only the
+        // currently-active body. Day grid keeps all its existing
+        // wiring; the two zoom grids are minimal click-driven 4×3
+        // pickers that promote the visible_month and zoom back in
+        // when a cell is picked.
+        let day_body = self::CalendarBody::new(BuildGridParams {
+            visible_month: self.visible_month.clone(),
+            focused_date: self.focused_date.clone(),
+            focused: self.focused.clone(),
+            selection: self.selection.clone(),
+            first_dow,
+            style,
+            week_numbers,
+            min_date: self.min_date,
+            max_date: self.max_date,
+            disabled_filter: self.disabled_date_filter.clone(),
+            enabled,
+            on_selection_changed: self.on_selection_changed.clone(),
+            on_range_changed: self.on_range_changed.clone(),
+            on_activate: self.on_activate.clone(),
+            range_status: self.range_status.clone(),
+        });
+        // Cell height for zoom modes derived from day grid cell size
+        // so the body footprint stays roughly constant across modes.
+        let zoom_cell_height = (style.cell_size * 1.4).max(36.0);
+        let months_body =
+            zoom_grid::MonthsGrid::new(self.visible_month.clone(), self.mode.clone(), enabled, zoom_cell_height);
+        let years_body =
+            zoom_grid::YearsGrid::new(self.visible_month.clone(), self.mode.clone(), enabled, zoom_cell_height);
+        let mode_index = self
+            .mode
+            .map(|m| match m {
+                CalendarMode::Days => 0_usize,
+                CalendarMode::Months => 1,
+                CalendarMode::Years => 2,
+            });
+        let grid_id = ctx.add(
+            crate::primitives::Switcher::new(mode_index)
+                .child(day_body)
+                .child(months_body)
+                .child(years_body),
         );
 
         // ── Optional footer ─────────────────────────────────────
@@ -687,11 +759,6 @@ struct BuildGridParams {
     on_range_changed: Option<OnRangeChanged>,
     on_activate: Option<OnActivate>,
     range_status: Signal<String>,
-}
-
-fn build_day_grid(ctx: &mut BuildContext, params: BuildGridParams) -> WidgetId {
-    let body = CalendarBody::new(params);
-    ctx.add(body)
 }
 
 fn build_footer(

@@ -200,6 +200,8 @@ calendar-name = Calendrier
 calendar-name-with-month = Calendrier, { $month } { $year }
 calendar-cell-name = { $weekday } { $day } { $month } { $year }
 calendar-range-status = Sélection : { $start } – { $end }
+calendar-months-grid-label = Mois
+calendar-years-grid-label = Années
 
 date-edit-segment-year = Année
 date-edit-segment-month = Mois
