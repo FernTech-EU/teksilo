@@ -166,6 +166,18 @@ pub trait SceneItem: std::fmt::Debug + 'static {
         None
     }
 
+    /// AT subtree treatment for descendants.
+    ///
+    /// `Inherit` (default) — descendants emit AT nodes normally.
+    /// `Exclude` — descendants are pruned from the AT tree.
+    /// `Merge` — descendants' labels concatenate into this item's
+    /// AT name and they're pruned from individual emission, so the
+    /// subtree reads as a single AT element. Built-ins read this
+    /// from their per-item `.access_subtree(...)` chain.
+    fn access_subtree_mode(&self) -> crate::items::AccessSubtreeMode {
+        crate::items::AccessSubtreeMode::Inherit
+    }
+
     /// Register reactive bindings the item depends on. Called once
     /// per [`SceneView::build`](crate::SceneView) for every item in
     /// the scene, with the SceneView's `WidgetId` as `view_id`. Items

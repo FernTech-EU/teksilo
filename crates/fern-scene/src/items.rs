@@ -47,15 +47,38 @@ impl TextSource {
     }
 }
 
+/// How the AT walker treats descendants of an item.
+///
+/// Mirrors the widget-tier `AccessSubtreeMode`: `Inherit` is the
+/// default (descendants emit normally); `Exclude` prunes them from
+/// the AT tree; `Merge` collapses them into the parent so the
+/// subtree reads as a single AT element. Used for "card with rect +
+/// label + indicator dot reads as one card" patterns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccessSubtreeMode {
+    #[default]
+    Inherit,
+    Exclude,
+    Merge,
+}
+
 /// Builder-level accessibility overrides shared by every built-in
 /// `SceneItem`. Mirrors the widget-level `.access_*` chain — names
 /// match so muscle memory carries over.
 #[derive(Debug, Default, Clone)]
-struct ItemA11yOverrides {
+pub struct ItemA11yOverrides {
     label: Option<String>,
     description: Option<String>,
     role: Option<accesskit::Role>,
     hidden: bool,
+    pub(crate) subtree_mode: AccessSubtreeMode,
+}
+
+impl ItemA11yOverrides {
+    /// Read access for the AT walker.
+    pub fn subtree_mode(&self) -> AccessSubtreeMode {
+        self.subtree_mode
+    }
 }
 
 impl ItemA11yOverrides {
@@ -100,6 +123,27 @@ macro_rules! item_a11y_builders {
         /// Hide this item from the AT tree.
         pub fn access_hidden(mut self, hidden: bool) -> Self {
             self.a11y.hidden = hidden;
+            self
+        }
+
+        /// Set the AT subtree mode. `Merge` collapses descendants
+        /// into this item's AT node; `Exclude` prunes them; the
+        /// default `Inherit` lets them emit normally.
+        pub fn access_subtree(mut self, mode: $crate::items::AccessSubtreeMode) -> Self {
+            self.a11y.subtree_mode = mode;
+            self
+        }
+
+        /// Convenience: collapse all descendants into this item's
+        /// AT node so the subtree reads as one element.
+        pub fn access_merge_subtree(mut self) -> Self {
+            self.a11y.subtree_mode = $crate::items::AccessSubtreeMode::Merge;
+            self
+        }
+
+        /// Convenience: prune all descendants from the AT tree.
+        pub fn access_exclude_subtree(mut self) -> Self {
+            self.a11y.subtree_mode = $crate::items::AccessSubtreeMode::Exclude;
             self
         }
     };
@@ -191,6 +235,10 @@ impl SceneItem for RectItem {
 
     fn initial_flags(&self) -> crate::flags::ItemFlags {
         self.flags
+    }
+
+    fn access_subtree_mode(&self) -> crate::items::AccessSubtreeMode {
+        self.a11y.subtree_mode
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -336,6 +384,10 @@ impl SceneItem for PathItem {
         self.flags
     }
 
+    fn access_subtree_mode(&self) -> crate::items::AccessSubtreeMode {
+        self.a11y.subtree_mode
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
         builder.set_role(accesskit::Role::GraphicsObject);
         if let Some(label) = self.label() {
@@ -427,6 +479,10 @@ impl SceneItem for ImageItem {
 
     fn initial_flags(&self) -> crate::flags::ItemFlags {
         self.flags
+    }
+
+    fn access_subtree_mode(&self) -> crate::items::AccessSubtreeMode {
+        self.a11y.subtree_mode
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -528,6 +584,10 @@ impl SceneItem for TextItem {
 
     fn initial_flags(&self) -> crate::flags::ItemFlags {
         self.flags
+    }
+
+    fn access_subtree_mode(&self) -> crate::items::AccessSubtreeMode {
+        self.a11y.subtree_mode
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -720,11 +780,26 @@ impl SceneItem for GroupItem {
         }
         self.a11y.apply(builder);
     }
+
+    fn access_subtree_mode(&self) -> AccessSubtreeMode {
+        self.a11y.subtree_mode
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn access_subtree_mode_round_trips() {
+        let item = RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)).access_merge_subtree();
+        assert_eq!(item.access_subtree_mode(), AccessSubtreeMode::Merge);
+        let item = RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0))
+            .access_subtree(AccessSubtreeMode::Exclude);
+        assert_eq!(item.access_subtree_mode(), AccessSubtreeMode::Exclude);
+        let item = RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0));
+        assert_eq!(item.access_subtree_mode(), AccessSubtreeMode::Inherit);
+    }
 
     #[test]
     fn rect_item_local_bounds_round_trip() {

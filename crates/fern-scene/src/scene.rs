@@ -16,8 +16,38 @@ use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
 use crate::transform::local_to_parent;
-use fern_canvas::{Point, Rect, Transform2D};
+use fern_canvas::{Path, Point, Rect, Transform2D};
+use fern_core::signal::Signal;
 use fern_core::widget::Widget;
+
+/// A change to an item's state, fired through
+/// [`Scene::item_change_signal`] for every mutation. Apps observe
+/// to wire snap-to-grid, validation, side effects, etc. The model
+/// is "fire after the change has been applied" — by the time the
+/// observer sees the event, the Scene already reflects it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ItemChange {
+    /// `set_local_pos`: position in parent coords moved.
+    LocalPosChanged { id: ItemId, old: Point, new: Point },
+    /// `set_local_bounds`: AABB in local coords changed.
+    LocalBoundsChanged { id: ItemId, old: Rect, new: Rect },
+    /// `set_transform`: local→parent transform changed.
+    TransformChanged { id: ItemId },
+    /// `set_visible` flipped IS_VISIBLE.
+    VisibilityChanged { id: ItemId, visible: bool },
+    /// `set_flags` / `set_flag` changed the bitset.
+    FlagsChanged { id: ItemId, old: ItemFlags, new: ItemFlags },
+    /// `set_opacity`: local opacity multiplier changed.
+    OpacityChanged { id: ItemId, old: f32, new: f32 },
+    /// `set_z`: paint z-order changed.
+    ZChanged { id: ItemId, old: f32, new: f32 },
+    /// `set_item_parent`: logical parent changed.
+    ParentChanged { id: ItemId, old: Option<ItemId>, new: Option<ItemId> },
+    /// `remove`: item is gone.
+    Removed { id: ItemId },
+    /// `add_item` / `add_widget`: item was inserted.
+    Added { id: ItemId },
+}
 
 /// Which axes a [`SceneView`](crate::SceneView) is allowed to pan
 /// along. Set on the [`Scene`] (not the View) because a given scene
@@ -125,6 +155,10 @@ pub struct Scene {
     /// Whether the view honors zoom gestures (Ctrl+wheel, pinch,
     /// keyboard `+`/`-`). Default `true`.
     zoomable: bool,
+    /// Reactive change signal. Every mutation fires an
+    /// [`ItemChange`] through this signal so apps can observe
+    /// geometry / visibility / parent / z / opacity changes.
+    item_change_signal: Signal<ItemChange>,
 
     // --- logical AT structure ----------------------------------------
     pub(crate) a11y_groups: Vec<A11yGroup>,
@@ -151,6 +185,7 @@ impl Scene {
             user_scene_rect: None,
             pan_axes: PanAxes::Both,
             zoomable: true,
+            item_change_signal: Signal::new(ItemChange::Added { id: ItemId(0) }),
             a11y_groups: Vec::new(),
             a11y_group_index: HashMap::new(),
             a11y_parents: HashMap::new(),
@@ -221,7 +256,18 @@ impl Scene {
         self.entry_index.insert(id, pos);
         let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
         self.index.insert(id, aabb);
+        self.item_change_signal.set(ItemChange::Added { id });
         id
+    }
+
+    /// Reactive notification stream for every Scene mutation. Apps
+    /// observe via `signal.observe(|change| …)` to wire snap-to-grid,
+    /// clamping, validation, and side effects without having to
+    /// poll the Scene each frame. The signal fires *after* the
+    /// mutation has been applied — by the time the observer runs
+    /// the Scene already reflects the new state.
+    pub fn item_change_signal(&self) -> Signal<ItemChange> {
+        self.item_change_signal.clone()
     }
 
     // -----------------------------------------------------------------
@@ -240,8 +286,14 @@ impl Scene {
     /// No-op if the id is unknown.
     pub fn set_local_pos(&mut self, id: ItemId, local_pos: Point) {
         if let Some(&pos) = self.entry_index.get(&id) {
+            let old = self.entries[pos].local_pos;
+            if old == local_pos {
+                return;
+            }
             self.entries[pos].local_pos = local_pos;
             self.rebucket_subtree(id);
+            self.item_change_signal
+                .set(ItemChange::LocalPosChanged { id, old, new: local_pos });
         }
     }
 
@@ -258,6 +310,10 @@ impl Scene {
     /// are unchanged). No-op if the id is unknown.
     pub fn set_local_bounds(&mut self, id: ItemId, local_bounds: Rect) {
         if let Some(&pos) = self.entry_index.get(&id) {
+            let old = self.entries[pos].local_bounds;
+            if old == local_bounds {
+                return;
+            }
             self.entries[pos].local_bounds = local_bounds;
             if let SceneEntryKind::Item(item) = &mut self.entries[pos].kind {
                 item.set_local_bounds(local_bounds);
@@ -266,6 +322,8 @@ impl Scene {
             // descendants' local frames are unchanged.
             let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
             self.index.insert(id, aabb);
+            self.item_change_signal
+                .set(ItemChange::LocalBoundsChanged { id, old, new: local_bounds });
         }
     }
 
@@ -282,6 +340,8 @@ impl Scene {
         if let Some(&pos) = self.entry_index.get(&id) {
             self.entries[pos].transform = transform;
             self.rebucket_subtree(id);
+            self.item_change_signal
+                .set(ItemChange::TransformChanged { id });
         }
     }
 
@@ -384,14 +444,30 @@ impl Scene {
     /// Replace an item's flags wholesale. No-op if unknown.
     pub fn set_flags(&mut self, id: ItemId, flags: ItemFlags) {
         if let Some(&pos) = self.entry_index.get(&id) {
+            let old = self.entries[pos].flags;
+            if old == flags {
+                return;
+            }
             self.entries[pos].flags = flags;
+            self.item_change_signal
+                .set(ItemChange::FlagsChanged { id, old, new: flags });
         }
     }
 
     /// Set or clear a single flag on an item. No-op if unknown.
     pub fn set_flag(&mut self, id: ItemId, flag: ItemFlags, on: bool) {
         if let Some(&pos) = self.entry_index.get(&id) {
+            let old = self.entries[pos].flags;
             self.entries[pos].flags.set(flag, on);
+            let new = self.entries[pos].flags;
+            if old != new {
+                if flag == ItemFlags::IS_VISIBLE {
+                    self.item_change_signal
+                        .set(ItemChange::VisibilityChanged { id, visible: on });
+                }
+                self.item_change_signal
+                    .set(ItemChange::FlagsChanged { id, old, new });
+            }
         }
     }
 
@@ -434,7 +510,14 @@ impl Scene {
     /// Set an item's local opacity, clamped to `[0.0, 1.0]`.
     pub fn set_opacity(&mut self, id: ItemId, opacity: f32) {
         if let Some(&pos) = self.entry_index.get(&id) {
-            self.entries[pos].opacity = opacity.clamp(0.0, 1.0);
+            let new = opacity.clamp(0.0, 1.0);
+            let old = self.entries[pos].opacity;
+            if (old - new).abs() < f32::EPSILON {
+                return;
+            }
+            self.entries[pos].opacity = new;
+            self.item_change_signal
+                .set(ItemChange::OpacityChanged { id, old, new });
         }
     }
 
@@ -550,7 +633,13 @@ impl Scene {
     /// (on top); equal-z falls back to insertion order. Default 0.0.
     pub fn set_z(&mut self, id: ItemId, z: f32) {
         if let Some(&pos) = self.entry_index.get(&id) {
+            let old = self.entries[pos].z;
+            if (old - z).abs() < f32::EPSILON {
+                return;
+            }
             self.entries[pos].z = z;
+            self.item_change_signal
+                .set(ItemChange::ZChanged { id, old, new: z });
         }
     }
 
@@ -569,8 +658,17 @@ impl Scene {
     /// scene-rooted again). No cycle check.
     pub fn set_item_parent(&mut self, child: ItemId, parent: Option<ItemId>) {
         if let Some(&pos) = self.entry_index.get(&child) {
+            let old = self.entries[pos].parent;
+            if old == parent {
+                return;
+            }
             self.entries[pos].parent = parent;
             self.rebucket_subtree(child);
+            self.item_change_signal.set(ItemChange::ParentChanged {
+                id: child,
+                old,
+                new: parent,
+            });
         }
     }
 
@@ -652,8 +750,9 @@ impl Scene {
             for (pos, entry) in self.entries.iter().enumerate() {
                 self.entry_index.insert(entry.id, pos);
             }
+            self.index.remove(id);
+            self.item_change_signal.set(ItemChange::Removed { id });
         }
-        self.index.remove(id);
     }
 
     // -----------------------------------------------------------------
@@ -702,6 +801,34 @@ impl Scene {
             }
         }
         None
+    }
+
+    /// Items whose scene-AABB intersects the AABB of `id`. Excludes
+    /// `id` itself. Apps use this for "which other items overlap
+    /// this card?" queries — graph editors checking node-on-node
+    /// overlap, CAD canvases finding adjacent geometry. Backed by
+    /// the spatial index, so the cost is `O(visible)` not `O(N)`.
+    pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId> {
+        let Some(rect) = self.scene_rect(id) else {
+            return Vec::new();
+        };
+        self.items_in_rect(rect)
+            .into_iter()
+            .filter(|other| *other != id)
+            .collect()
+    }
+
+    /// Items whose scene-AABB intersects `path`'s bounding rect.
+    /// Apps use this for "which items lie under this connector?"
+    /// queries — graph editors highlighting hovered connectors,
+    /// CAD canvases doing point-in-polygon style picking. The
+    /// narrow phase is AABB-vs-AABB; per-segment-distance precision
+    /// is left to the app.
+    pub fn items_along_path(&self, path: &Path) -> Vec<ItemId> {
+        let Some(rect) = path_aabb(path) else {
+            return Vec::new();
+        };
+        self.items_in_rect(rect)
     }
 
     /// All lightweight items whose `shape_contains` fires for
@@ -893,6 +1020,46 @@ fn union_two_rects(a: Rect, b: Rect) -> Rect {
     let r = a.right().max(b.right());
     let bot = a.bottom().max(b.bottom());
     Rect::new(x, y, r - x, bot - y)
+}
+
+/// AABB enclosing every point in a path. Returns `None` for an
+/// empty path. Curves contribute their control / end points only —
+/// callers needing tight bounds for cubics should pre-compute and
+/// pass the AABB directly via `Scene::items_in_rect`.
+fn path_aabb(path: &Path) -> Option<Rect> {
+    let mut min_x = f32::INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    let mut include = |p: Point| {
+        min_x = min_x.min(p.x);
+        min_y = min_y.min(p.y);
+        max_x = max_x.max(p.x);
+        max_y = max_y.max(p.y);
+    };
+    for cmd in &path.commands {
+        match cmd {
+            fern_canvas::PathCommand::MoveTo(p) | fern_canvas::PathCommand::LineTo(p) => include(*p),
+            fern_canvas::PathCommand::QuadTo { control, to } => {
+                include(*control);
+                include(*to);
+            }
+            fern_canvas::PathCommand::CubicTo { control1, control2, to } => {
+                include(*control1);
+                include(*control2);
+                include(*to);
+            }
+            fern_canvas::PathCommand::ArcTo { rect, .. } => {
+                include(Point::new(rect.x, rect.y));
+                include(Point::new(rect.right(), rect.bottom()));
+            }
+            fern_canvas::PathCommand::Close => {}
+        }
+    }
+    if !min_x.is_finite() {
+        return None;
+    }
+    Some(Rect::new(min_x, min_y, max_x - min_x, max_y - min_y))
 }
 
 #[cfg(test)]
@@ -1206,5 +1373,91 @@ mod tests {
         assert_eq!(scene.current_pan_axes(), PanAxes::Horizontal);
         scene.zoomable(false);
         assert!(!scene.is_zoomable());
+    }
+
+    #[test]
+    fn item_change_signal_fires_on_set_local_pos() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(0.0, 0.0),
+        );
+        let last = Rc::new(Cell::new(None::<ItemChange>));
+        let last_clone = last.clone();
+        let _h = scene.item_change_signal().observe(move |c| {
+            last_clone.set(Some(*c));
+        });
+        scene.set_local_pos(id, Point::new(50.0, 60.0));
+        match last.get() {
+            Some(ItemChange::LocalPosChanged { new, .. }) => {
+                assert_eq!(new, Point::new(50.0, 60.0));
+            }
+            other => panic!("expected LocalPosChanged, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn item_change_signal_fires_on_set_visible() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::ZERO,
+        );
+        let count = Rc::new(Cell::new(0_u32));
+        let count_clone = count.clone();
+        let _h = scene.item_change_signal().observe(move |c| {
+            if matches!(c, ItemChange::VisibilityChanged { .. }) {
+                count_clone.set(count_clone.get() + 1);
+            }
+        });
+        scene.set_visible(id, false);
+        scene.set_visible(id, true);
+        // Same value twice: only one fire.
+        scene.set_visible(id, true);
+        assert_eq!(count.get(), 2);
+    }
+
+    #[test]
+    fn colliding_items_returns_overlapping_set_excluding_self() {
+        let mut scene = Scene::new();
+        let a = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)),
+            Point::new(10.0, 10.0),
+        );
+        let b = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)),
+            Point::new(40.0, 10.0),
+        );
+        let c = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(500.0, 500.0),
+        );
+        let collisions = scene.colliding_items(a);
+        assert!(collisions.contains(&b));
+        assert!(!collisions.contains(&a));
+        assert!(!collisions.contains(&c));
+    }
+
+    #[test]
+    fn items_along_path_finds_items_under_path_aabb() {
+        let mut scene = Scene::new();
+        let a = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(20.0, 20.0),
+        );
+        let b = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(200.0, 200.0),
+        );
+        let mut path = Path::new();
+        path.move_to(Point::new(15.0, 15.0));
+        path.line_to(Point::new(40.0, 40.0));
+        let hits = scene.items_along_path(&path);
+        assert!(hits.contains(&a));
+        assert!(!hits.contains(&b));
     }
 }
