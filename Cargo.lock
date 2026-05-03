@@ -4046,6 +4046,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scene-showcase"
+version = "0.1.0"
+dependencies = [
+ "fern-scene",
+ "fern-ui",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
