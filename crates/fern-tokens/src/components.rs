@@ -68,6 +68,22 @@ pub struct TextFieldStyle {
     pub border_width: f32,
     pub corner_radius: f32,
     pub caret_width: f32,
+    /// Vertical gap between the field bottom edge and the inline
+    /// validation-feedback strip. Int UI density convention.
+    pub validation_strip_gap: f32,
+    /// Pulse duration (ms) for the brief border-color attention cue
+    /// on transitions into `Error`. Int UI uses a short single-shot
+    /// pulse rather than a Material-style shake.
+    pub error_pulse_duration_ms: u32,
+    /// Decay window (ms) for the accent border tint + correction text
+    /// after a `Corrected` outcome. After this elapses, the field
+    /// returns to `None` state — the value is correct now, nothing
+    /// to keep flagging.
+    pub corrected_pulse_duration_ms: u32,
+    /// Visible character used for unfilled editable positions when an
+    /// input mask is set. Empty fields with a mask paint this char at
+    /// every editable position — `__/__/____` for `99/99/9999`.
+    pub mask_placeholder_char: char,
 }
 
 impl Default for TextFieldStyle {
@@ -79,6 +95,10 @@ impl Default for TextFieldStyle {
             border_width: 1.0,
             corner_radius: 4.0,
             caret_width: 1.0,
+            validation_strip_gap: 4.0,
+            error_pulse_duration_ms: 240,
+            corrected_pulse_duration_ms: 1500,
+            mask_placeholder_char: '_',
         }
     }
 }
@@ -916,6 +936,113 @@ impl Default for TableStyle {
     }
 }
 
+// ─── Date / Time pickers ────────────────────────────────────────────────────
+
+/// `Calendar` — month grid + navigation header.
+///
+/// Dimensions only; colors come from `SurfaceRole::Selected` / `Hover`,
+/// `BorderRole::Focused`, `TextRole::Primary` / `Secondary` / `Disabled` /
+/// `Accent`. Pulls layout numbers at build time, so a runtime theme switch
+/// repaints without rebuilding the cell tree.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CalendarStyle {
+    /// Outer padding around the whole widget.
+    pub outer_padding: f32,
+    /// Vertical gap between header / weekday row / day grid / footer.
+    pub section_gap: f32,
+    /// Height of the navigation header row (prev / label / next).
+    pub header_height: f32,
+    /// Height of the weekday-name row.
+    pub weekday_row_height: f32,
+    /// Side length of each day cell (square cells).
+    pub cell_size: f32,
+    /// Visible day-cell content radius (selection fill).
+    pub cell_radius: f32,
+    /// Gap between day cells in both axes.
+    pub cell_gap: f32,
+    /// Stroke width of the today ring.
+    pub today_ring_width: f32,
+    /// Diameter of the marker dot painted under marked dates.
+    pub marker_dot_size: f32,
+    /// Horizontal gap between the marker dot and the cell number's
+    /// baseline (vertical inset). Layout-only.
+    pub marker_inset: f32,
+    /// Edge length of header navigation arrow icons.
+    pub nav_icon_size: f32,
+    /// Width of the optional week-number column.
+    pub week_number_column_width: f32,
+}
+
+impl Default for CalendarStyle {
+    fn default() -> Self {
+        Self {
+            outer_padding: 8.0,
+            section_gap: 4.0,
+            header_height: 28.0,
+            weekday_row_height: 20.0,
+            cell_size: 32.0,
+            cell_radius: 4.0,
+            cell_gap: 0.0,
+            today_ring_width: 1.0,
+            marker_dot_size: 4.0,
+            marker_inset: 2.0,
+            nav_icon_size: 12.0,
+            week_number_column_width: 28.0,
+        }
+    }
+}
+
+/// `DateEdit` — segmented date editor with optional calendar popover.
+///
+/// Extends the `TextFieldStyle` baseline with a fixed-size calendar
+/// trigger button slot, a literal-text gap between segments, and a
+/// focused-segment tint. Field height / border / corner radius are
+/// inherited from `TextFieldStyle` at build time so DateEdit and
+/// TextInput / SpinBox sit on the same baseline.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DateEditStyle {
+    /// Width of the trailing calendar-button slot. The trigger icon is
+    /// centered inside this slot.
+    pub calendar_button_width: f32,
+    /// Edge length of the calendar trigger glyph drawn inside the slot.
+    pub calendar_icon_size: f32,
+    /// Gap between adjacent segments (visual separator characters sit
+    /// inside this gap).
+    pub segment_gap: f32,
+}
+
+impl Default for DateEditStyle {
+    fn default() -> Self {
+        Self {
+            calendar_button_width: 24.0,
+            calendar_icon_size: 14.0,
+            segment_gap: 1.0,
+        }
+    }
+}
+
+/// `TimeEdit` — segmented time-of-day editor.
+///
+/// Same baseline as `DateEditStyle`; the AM/PM segment is a small fixed
+/// width because the toggle never reads anything but `"AM"` / `"PM"` (or
+/// the localized 2-letter equivalent).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TimeEditStyle {
+    /// Width of the AM/PM segment in 12-hour mode.
+    pub period_segment_width: f32,
+    /// Gap between adjacent segments.
+    pub segment_gap: f32,
+}
+
+impl Default for TimeEditStyle {
+    fn default() -> Self {
+        Self {
+            period_segment_width: 28.0,
+            segment_gap: 1.0,
+        }
+    }
+}
+
 // ─── Aggregate ──────────────────────────────────────────────────────────────
 
 /// All per-component style structs, owned by the [`crate::theme::Theme`].
@@ -958,4 +1085,7 @@ pub struct ComponentStyles {
     pub split_view: SplitViewStyle,
     pub chart: ChartStyle,
     pub table: TableStyle,
+    pub calendar: CalendarStyle,
+    pub date_edit: DateEditStyle,
+    pub time_edit: TimeEditStyle,
 }

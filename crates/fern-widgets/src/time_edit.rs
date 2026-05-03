@@ -1,0 +1,771 @@
+//! `TimeEdit` — text input for time-of-day, bound to `Signal<Option<Time>>`.
+//!
+//! Single-line editable time field with strftime-pattern parse/format
+//! and optional 12h/24h mode + AM/PM. Same compositional pattern as
+//! [`DateEdit`](crate::date_edit::DateEdit) (TextInputField + commit on
+//! Enter/blur + step keys), without a popover (desktop convention is no
+//! graphical time picker).
+//!
+//! # Behaviour
+//!
+//! - **Value binding**: `Signal<Option<Time>>` — `None` shows the
+//!   placeholder.
+//! - **Pattern**: 24h default `%H:%M`; 12h is `%I:%M %p`. Override
+//!   via [`format_pattern`](Self::format_pattern). Add seconds with
+//!   [`seconds(SecondsMode::Editable)`](Self::seconds).
+//! - **Keyboard** (preview-pass on the wrapper):
+//!   - Arrow Up / Down → ±[`step_minutes`](Self::step_minutes)
+//!   - PageUp / PageDown → ±60 minutes
+//!   - Shift+ on either → ×10 multiplier (×600 max so values stay sane)
+//!
+//! # Accessibility
+//!
+//! - Container — `Role::TimeInput` with `set_value` formatted as
+//!   `HH:MM:SS` and `set_label` from `.label()`.
+//! - Underlying TextInputField keeps `Role::TextInput` so AT knows
+//!   it's editable.
+
+#[cfg(test)]
+mod tests;
+
+use std::rc::Rc;
+
+use fern_canvas::{Rect, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::accesskit::{Action, Role};
+use fern_core::build_context::BuildContext;
+use fern_core::event::{EventResponse, Key, WidgetEvent};
+use fern_core::signal::Signal;
+use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
+use fern_core::widget_id::WidgetId;
+use fern_i18n::resolve_message_widget;
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
+
+use crate::common::datetime::pattern::{
+    format_value, mask_for_pattern, parse_value, ParseTarget, ParsedPattern, ParsedValue,
+};
+use crate::common::datetime::Time;
+use crate::date_edit::ValidationBehavior;
+use crate::primitives::text_input_field::{TextInputField, ValidationFeedback, ValidationOutcome};
+use crate::primitives::{Padding, RectWidget, ZStack};
+
+const DEFAULT_WIDTH: f32 = 96.0;
+
+/// 12h vs 24h time formatting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimeFormat {
+    /// 24-hour clock (default — `%H:%M`).
+    #[default]
+    Hour24,
+    /// 12-hour clock with AM/PM segment (`%I:%M %p`).
+    Hour12,
+}
+
+/// Whether the seconds segment is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SecondsMode {
+    /// Hide the seconds segment (default).
+    #[default]
+    Hidden,
+    /// Show and edit the seconds segment.
+    Editable,
+}
+
+type OnValueChanged = Rc<dyn Fn(Option<Time>, &mut EventContext)>;
+
+pub struct TimeEdit {
+    value: Signal<Option<Time>>,
+    /// Set by `::required(Signal<Time>)` — wired into `ctx.effect()`
+    /// in `build()` so observer handles outlive construction.
+    required_source: Option<Signal<Time>>,
+    format: TimeFormat,
+    seconds: SecondsMode,
+    pattern_override: Option<String>,
+    min_time: Option<Time>,
+    max_time: Option<Time>,
+    step_minutes: u32,
+    placeholder: String,
+    enabled: bool,
+    read_only: bool,
+    validation_behavior: ValidationBehavior,
+    label: Option<String>,
+    on_value_changed: Option<OnValueChanged>,
+    text_signal: Signal<String>,
+    focused: Signal<bool>,
+    feedback: Signal<ValidationFeedback>,
+    root_child_id: Option<WidgetId>,
+    field_id: Option<WidgetId>,
+}
+
+impl std::fmt::Debug for TimeEdit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimeEdit")
+            .field("format", &self.format)
+            .field("seconds", &self.seconds)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TimeEdit {
+    pub fn new(value: Signal<Option<Time>>) -> Self {
+        Self {
+            value,
+            required_source: None,
+            format: TimeFormat::Hour24,
+            seconds: SecondsMode::Hidden,
+            pattern_override: None,
+            min_time: None,
+            max_time: None,
+            step_minutes: 1,
+            placeholder: String::new(),
+            enabled: true,
+            read_only: false,
+            validation_behavior: ValidationBehavior::AutoCorrect,
+            label: None,
+            on_value_changed: None,
+            text_signal: Signal::new(String::new()),
+            focused: Signal::new(false),
+            feedback: Signal::new(ValidationFeedback::Pristine),
+            root_child_id: None,
+            field_id: None,
+        }
+    }
+
+    pub fn required(value: Signal<Time>) -> Self {
+        let proxy: Signal<Option<Time>> = Signal::new(Some(value.get()));
+        let mut s = Self::new(proxy);
+        s.required_source = Some(value);
+        s
+    }
+
+    pub fn format(mut self, f: TimeFormat) -> Self {
+        self.format = f;
+        self
+    }
+
+    pub fn seconds(mut self, mode: SecondsMode) -> Self {
+        self.seconds = mode;
+        self
+    }
+
+    pub fn format_pattern(mut self, p: impl Into<String>) -> Self {
+        self.pattern_override = Some(p.into());
+        self
+    }
+
+    pub fn min_time(mut self, t: Time) -> Self {
+        self.min_time = Some(t);
+        self
+    }
+
+    pub fn max_time(mut self, t: Time) -> Self {
+        self.max_time = Some(t);
+        self
+    }
+
+    pub fn step_minutes(mut self, n: u32) -> Self {
+        self.step_minutes = n.max(1);
+        self
+    }
+
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        self.placeholder = text.into();
+        self
+    }
+
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+
+    /// How parse failures are surfaced. See
+    /// [`ValidationBehavior`](crate::date_edit::ValidationBehavior).
+    pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
+        self.validation_behavior = behavior;
+        self
+    }
+
+    /// Reactive handle on the live validation feedback.
+    pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback> {
+        self.feedback.clone()
+    }
+
+    pub fn label(mut self, text: impl Into<String>) -> Self {
+        self.label = Some(text.into());
+        self
+    }
+
+    pub fn on_value_changed(
+        mut self,
+        f: impl Fn(Option<Time>, &mut EventContext) + 'static,
+    ) -> Self {
+        self.on_value_changed = Some(Rc::new(f));
+        self
+    }
+
+    pub fn value(&self) -> Signal<Option<Time>> {
+        self.value.clone()
+    }
+
+    fn resolved_pattern(&self) -> String {
+        if let Some(p) = self.pattern_override.clone() {
+            return p;
+        }
+        match (self.format, self.seconds) {
+            (TimeFormat::Hour24, SecondsMode::Hidden) => "%H:%M".into(),
+            (TimeFormat::Hour24, SecondsMode::Editable) => "%H:%M:%S".into(),
+            (TimeFormat::Hour12, SecondsMode::Hidden) => "%I:%M %p".into(),
+            (TimeFormat::Hour12, SecondsMode::Editable) => "%I:%M:%S %p".into(),
+        }
+    }
+}
+
+impl Widget for TimeEdit {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // required-source mirror via ctx.effect (see DateEdit::build
+        // for the rationale — observers' RAII handles can't outlive
+        // construction).
+        if let Some(src) = self.required_source.clone() {
+            {
+                let proxy = self.value.clone();
+                ctx.effect(&src, move |new| {
+                    if proxy.get() != Some(*new) {
+                        proxy.set(Some(*new));
+                    }
+                });
+            }
+            {
+                let src_clone = src;
+                ctx.effect(&self.value, move |v| {
+                    if let Some(t) = v {
+                        if src_clone.get() != *t {
+                            src_clone.set(*t);
+                        }
+                    }
+                });
+            }
+        }
+
+        let theme = ctx.theme_signal().get();
+        let field_style = theme.components.text_field;
+        let focus_ring_width = theme.shape.focus_ring_width;
+        let enabled = self.enabled;
+        let read_only = self.read_only;
+
+        let pattern_string = self.resolved_pattern();
+        let parsed_pattern = ParsedPattern::parse(&pattern_string)
+            .unwrap_or_else(|_| ParsedPattern::parse("%H:%M").unwrap());
+        let pattern_rc = Rc::new(parsed_pattern);
+        let on_value_changed = self.on_value_changed.clone();
+        let min = self.min_time;
+        let max = self.max_time;
+        let step_minutes = self.step_minutes as i64;
+
+        // Seed text from current value.
+        {
+            let init = match self.value.get() {
+                Some(t) => format_value(&pattern_rc, None, Some(t)),
+                None => String::new(),
+            };
+            self.text_signal.set(init);
+        }
+
+        // External writes → reformat (skip while focused).
+        {
+            let text_signal = self.text_signal.clone();
+            let focused = self.focused.clone();
+            let pattern = pattern_rc.clone();
+            ctx.effect(&self.value, move |new_value| {
+                if focused.get() {
+                    return;
+                }
+                let formatted = match new_value {
+                    Some(t) => format_value(&pattern, None, Some(*t)),
+                    None => String::new(),
+                };
+                if text_signal.get() != formatted {
+                    text_signal.set(formatted);
+                }
+            });
+        }
+
+        // ── Validator ─────────────────────────────────────────
+        // Mirrors DateEdit's design: pure classification; the
+        // chained on_blur callback below re-parses and updates the
+        // bound value signal.
+        let validation_behavior = self.validation_behavior;
+        let validator: crate::primitives::text_input_field::ValidatorFn = {
+            let pattern = pattern_rc.clone();
+            Rc::new(move |raw: &str| -> ValidationOutcome {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return ValidationOutcome::Valid;
+                }
+                if let Some(ParsedValue::Time(t)) =
+                    parse_value(&pattern, trimmed, ParseTarget::TimeOnly)
+                {
+                    let clamped = clamp_time(t, min, max);
+                    let formatted = format_value(&pattern, None, Some(clamped));
+                    if formatted == trimmed && clamped == t {
+                        return ValidationOutcome::Valid;
+                    }
+                    return ValidationOutcome::Corrected {
+                        corrected: formatted.clone(),
+                        message: resolve_message_widget(
+                            "validation-corrected-to",
+                            &[("value", formatted.clone().into())],
+                        ),
+                    };
+                }
+                if validation_behavior == ValidationBehavior::AutoCorrect {
+                    if let Some((corrected, msg)) =
+                        try_clamp_time_recovery(&pattern, trimmed, min, max)
+                    {
+                        return ValidationOutcome::Corrected {
+                            corrected,
+                            message: msg,
+                        };
+                    }
+                }
+                ValidationOutcome::Invalid {
+                    message: resolve_message_widget(
+                        "time-edit-validation-not-a-time",
+                        &[],
+                    ),
+                }
+            })
+        };
+
+        // Commit-side: read (now-corrected) text and update value.
+        // Skips on Invalid so the user's typed text stays visible.
+        let commit: Rc<dyn Fn(&mut EventContext)> = {
+            let value_signal = self.value.clone();
+            let text_signal = self.text_signal.clone();
+            let feedback_signal = self.feedback.clone();
+            let pattern = pattern_rc.clone();
+            let on_value_changed = on_value_changed.clone();
+            Rc::new(move |ctx_evt: &mut EventContext| {
+                if matches!(feedback_signal.get(), ValidationFeedback::Invalid { .. }) {
+                    return;
+                }
+                let raw = text_signal.get();
+                let trimmed = raw.trim();
+                let new_value: Option<Time> = if trimmed.is_empty() {
+                    None
+                } else {
+                    match parse_value(&pattern, trimmed, ParseTarget::TimeOnly) {
+                        Some(ParsedValue::Time(t)) => Some(clamp_time(t, min, max)),
+                        _ => value_signal.get(),
+                    }
+                };
+                if value_signal.get() != new_value {
+                    value_signal.set(new_value);
+                    if let Some(cb) = on_value_changed.as_ref() {
+                        cb(new_value, ctx_evt);
+                    }
+                }
+            })
+        };
+
+        // Step closure (±minutes).
+        let step: Rc<dyn Fn(i64, &mut EventContext)> = {
+            let value_signal = self.value.clone();
+            let text_signal = self.text_signal.clone();
+            let pattern = pattern_rc.clone();
+            let on_value_changed = on_value_changed.clone();
+            Rc::new(move |delta_min: i64, ctx_evt: &mut EventContext| {
+                if read_only {
+                    return;
+                }
+                let cur = value_signal.get().unwrap_or_else(|| Time::midnight());
+                let total_minutes = cur.hour() as i64 * 60 + cur.minute() as i64 + delta_min;
+                let wrapped = ((total_minutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+                let h = (wrapped / 60) as i8;
+                let m = (wrapped % 60) as i8;
+                let next = Time::new(h, m, cur.second(), 0).unwrap_or(cur);
+                let next = clamp_time(next, min, max);
+                if Some(next) == value_signal.get() {
+                    return;
+                }
+                value_signal.set(Some(next));
+                let formatted = format_value(&pattern, None, Some(next));
+                text_signal.set(formatted);
+                if let Some(cb) = on_value_changed.as_ref() {
+                    cb(Some(next), ctx_evt);
+                }
+                ctx_evt.request_frame();
+            })
+        };
+
+        // ── Inner editing field ───────────────────────────────
+        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
+        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
+
+        let pattern_for_filter = pattern_rc.clone();
+        let mask_string = mask_for_pattern(&pattern_rc);
+        let mut field = TextInputField::new(self.text_signal.clone())
+            .enabled(enabled)
+            .read_only(read_only)
+            .placeholder(self.placeholder.clone())
+            .text_height(text_area_height)
+            .input_mask(&mask_string)
+            .validator({
+                let v = validator.clone();
+                move |s| (v)(s)
+            })
+            .char_filter(move |c: char| {
+                if c.is_ascii_digit() || c == ' ' || c == ':' {
+                    return true;
+                }
+                // Accept AM/PM letters in 12h mode.
+                if matches!(c, 'a' | 'A' | 'p' | 'P' | 'm' | 'M') {
+                    return true;
+                }
+                for tok in &pattern_for_filter.tokens {
+                    if let crate::common::datetime::pattern::PatternToken::Literal(s) = tok {
+                        if s.chars().any(|x| x == c) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            });
+        // Mirror feedback signal.
+        {
+            let inner_feedback = field.validation_feedback_signal();
+            let outer_feedback = self.feedback.clone();
+            ctx.effect(&inner_feedback, move |fb| {
+                if outer_feedback.get() != *fb {
+                    outer_feedback.set(fb.clone());
+                }
+            });
+        }
+        {
+            let commit = commit.clone();
+            field = field.on_submit_fn(move |ctx_evt| commit(ctx_evt));
+        }
+        {
+            let commit = commit.clone();
+            field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
+        }
+
+        // A11y override: focused field announces as TimeInput, not
+        // TextInput. The field's caret/selection/character AT stays.
+        let mut field_with_a11y = field.access_role(Role::TimeInput);
+        if let Some(label) = self.label.clone() {
+            field_with_a11y = field_with_a11y.access_label(label);
+        }
+        let field_id = ctx.add(field_with_a11y);
+        self.field_id = Some(field_id);
+
+        let padded_field_id = ctx.add(
+            Padding::new(
+                field_style.padding_vertical,
+                field_style.padding_horizontal,
+                field_style.padding_vertical,
+                field_style.padding_horizontal,
+            )
+            .child_id(field_id),
+        );
+
+        // Frame.
+        let border_role = self.focused.map(|f| {
+            if *f {
+                BorderRole::Focused
+            } else {
+                BorderRole::Default
+            }
+        });
+        let border_width_signal = self.focused.map(move |f| {
+            if *f {
+                focus_ring_width
+            } else {
+                field_style.border_width
+            }
+        });
+        let bg = RectWidget::new()
+            .background(SurfaceRole::Content)
+            .border_color(border_role)
+            .border_width(border_width_signal)
+            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
+        let bg_id = ctx.add(bg);
+        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padded_field_id));
+
+        let sized_id = ctx.add(
+            crate::primitives::MinSize::new(DEFAULT_WIDTH, field_style.height).child_id(zstack_id),
+        );
+
+        // ── Inline validation strip ───────────────────────────
+        // VStack(field, strip) wrap; strip collapses to zero size when
+        // feedback is Pristine/Valid (see ValidationStrip::layout_response).
+        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(self.feedback.clone()));
+        let root_with_strip = ctx.add(
+            crate::primitives::VStack::new()
+                .spacing(field_style.validation_strip_gap)
+                .add_child(sized_id)
+                .add_child(strip_id),
+        );
+        self.root_child_id = Some(root_with_strip);
+
+        let step_for_key = step.clone();
+        let handlers = HandlerSet::new()
+            .focus_within(self.focused.clone())
+            .on_key_preview(move |event, ctx_evt| {
+                if !enabled || read_only {
+                    return EventResponse::Ignored;
+                }
+                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                let mult = if modifiers.shift() { 10 } else { 1 };
+                match key {
+                    Key::ArrowUp => {
+                        step_for_key(step_minutes * mult, ctx_evt);
+                        EventResponse::Handled
+                    }
+                    Key::ArrowDown => {
+                        step_for_key(-step_minutes * mult, ctx_evt);
+                        EventResponse::Handled
+                    }
+                    Key::PageUp => {
+                        step_for_key(60 * mult, ctx_evt);
+                        EventResponse::Handled
+                    }
+                    Key::PageDown => {
+                        step_for_key(-60 * mult, ctx_evt);
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        ctx.apply_self_handlers(handlers);
+
+        // Bind value at AccessibilityOnly so the wrapper's set_value
+        // refreshes when the bound time changes.
+        let self_id = ctx.self_id();
+        self.value.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            fern_core::binding::BindingLevel::AccessibilityOnly,
+        );
+
+        vec![root_with_strip]
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> fern_core::widget::LayoutResponse {
+        match self.root_child_id {
+            Some(id) => ctx
+                .child_size(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
+            None => proposal.resolve(0.0, 0.0),
+        }
+        .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.root_child_id.into_iter().collect()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(Role::TimeInput);
+        if let Some(ref label) = self.label {
+            builder.set_name(label);
+        } else {
+            builder.set_name(resolve_message_widget("time-edit-name", &[]));
+        }
+        match self.value.get() {
+            Some(t) => {
+                builder.set_value(format!(
+                    "{:02}:{:02}:{:02}",
+                    t.hour(),
+                    t.minute(),
+                    t.second()
+                ));
+            }
+            None => {
+                if !self.placeholder.is_empty() {
+                    builder.set_placeholder(self.placeholder.clone());
+                } else {
+                    builder.set_placeholder(resolve_message_widget("time-edit-placeholder", &[]));
+                }
+            }
+        }
+        if !self.enabled {
+            builder.set_disabled();
+        }
+        if self.read_only {
+            builder.set_read_only();
+        }
+        builder.add_action(Action::Focus);
+        // SetValue is advertised on the inner field (overridden to
+        // Role::TimeInput). Wrapper duplicating it would route AT-
+        // invoked SetValue through both nodes.
+    }
+}
+
+fn clamp_time(t: Time, min: Option<Time>, max: Option<Time>) -> Time {
+    let t = match min {
+        Some(min) if t < min => min,
+        _ => t,
+    };
+    match max {
+        Some(max) if t > max => max,
+        _ => t,
+    }
+}
+
+/// AutoCorrect recovery for time inputs. Walks the pattern, extracts
+/// per-segment digit runs, clamps each value to its valid range
+/// (hour → 0..=23 in 24h or 1..=12 in 12h, minute/second → 0..=59),
+/// and re-constructs. The AM/PM segment is parsed permissively.
+fn try_clamp_time_recovery(
+    pattern: &ParsedPattern,
+    raw: &str,
+    min: Option<Time>,
+    max: Option<Time>,
+) -> Option<(String, String)> {
+    use crate::common::datetime::pattern::{PatternToken, SegmentKind};
+    let mut cursor = raw;
+    let mut hour24: Option<i8> = None;
+    let mut hour12: Option<i8> = None;
+    let mut minute: Option<i8> = None;
+    let mut second: Option<i8> = None;
+    let mut period: Option<i8> = None;
+    let mut clamp_notes: Vec<String> = Vec::new();
+
+    for token in &pattern.tokens {
+        if cursor.is_empty() {
+            break;
+        }
+        match token {
+            PatternToken::Literal(lit) => {
+                if let Some(rest) = cursor.strip_prefix(lit.as_str()) {
+                    cursor = rest;
+                } else if lit.starts_with(cursor) {
+                    cursor = "";
+                } else {
+                    return None;
+                }
+            }
+            PatternToken::Segment(kind) => {
+                if matches!(kind, SegmentKind::Period) {
+                    let first = cursor.chars().next()?;
+                    let upper = first.to_ascii_uppercase();
+                    let consumed = cursor.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+                    let after_first = &cursor[consumed..];
+                    let consumed2 = after_first
+                        .chars()
+                        .next()
+                        .filter(|c| c.is_ascii_alphabetic())
+                        .map(|c| c.len_utf8())
+                        .unwrap_or(0);
+                    cursor = &after_first[consumed2..];
+                    period = Some(if upper == 'P' { 1 } else { 0 });
+                    continue;
+                }
+                let max_d = kind.max_digits();
+                if max_d == 0 {
+                    continue;
+                }
+                let mut end = 0usize;
+                for (i, ch) in cursor.char_indices() {
+                    if ch.is_ascii_digit() && end < max_d {
+                        end = i + ch.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                if end == 0 {
+                    return None;
+                }
+                let digits = &cursor[..end];
+                cursor = &cursor[end..];
+                let raw_v: i32 = digits.parse().ok()?;
+                let (lo, hi) = kind.value_range().unwrap_or((i32::MIN, i32::MAX));
+                let clamped = raw_v.clamp(lo, hi);
+                if clamped != raw_v {
+                    let segment_key = match kind {
+                        SegmentKind::Hour24 | SegmentKind::Hour24Short
+                        | SegmentKind::Hour12 | SegmentKind::Hour12Short => {
+                            "validation-segment-hour"
+                        }
+                        SegmentKind::Minute | SegmentKind::MinuteShort => {
+                            "validation-segment-minute"
+                        }
+                        SegmentKind::Second | SegmentKind::SecondShort => {
+                            "validation-segment-second"
+                        }
+                        _ => "validation-segment-value",
+                    };
+                    let label = resolve_message_widget(segment_key, &[]);
+                    clamp_notes.push(resolve_message_widget(
+                        "validation-segment-clamped",
+                        &[
+                            ("segment", label.into()),
+                            ("raw", (raw_v as i64).into()),
+                            ("clamped", (clamped as i64).into()),
+                        ],
+                    ));
+                }
+                match kind {
+                    SegmentKind::Hour24 | SegmentKind::Hour24Short => hour24 = Some(clamped as i8),
+                    SegmentKind::Hour12 | SegmentKind::Hour12Short => hour12 = Some(clamped as i8),
+                    SegmentKind::Minute | SegmentKind::MinuteShort => minute = Some(clamped as i8),
+                    SegmentKind::Second | SegmentKind::SecondShort => second = Some(clamped as i8),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let hour = match (hour24, hour12, period) {
+        (Some(h), _, _) => h,
+        (None, Some(h12), Some(p)) => (h12 % 12) + if p == 1 { 12 } else { 0 },
+        (None, Some(h12), None) => h12 % 12,
+        (None, None, _) => return None,
+    };
+    let t = Time::new(hour, minute.unwrap_or(0), second.unwrap_or(0), 0).ok()?;
+    let final_t = clamp_time(t, min, max);
+    if final_t != t {
+        clamp_notes.push(resolve_message_widget(
+            "validation-clamped-to-range",
+            &[],
+        ));
+    }
+    let formatted = format_value(pattern, None, Some(final_t));
+    let message = if clamp_notes.is_empty() {
+        resolve_message_widget(
+            "validation-corrected-to",
+            &[("value", formatted.clone().into())],
+        )
+    } else {
+        resolve_message_widget(
+            "validation-corrected-with-notes",
+            &[("notes", clamp_notes.join(", ").into())],
+        )
+    };
+    Some((formatted, message))
+}

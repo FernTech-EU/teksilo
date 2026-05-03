@@ -45,6 +45,10 @@ fern-preview = { workspace = true, optional = true }
 # (http, https, mailto, file paths, …). Small, pure-Rust, no deps
 # on GUI toolkits — just spawns the OS default handler.
 open = { workspace = true }
+# Date/time backing for Calendar / DateEdit / TimeEdit / DateTimeEdit. The
+# four widgets re-export the relevant types through `common::datetime` so
+# the rest of the codebase never names `jiff` directly.
+jiff = { workspace = true }
 # text-typeset + text-document come through fern-text's re-exports
 # (`fern_text::text_document`, `fern_text::RichTextEngine`, …) under
 # its own `rich-text` feature. Widgets never name either crate

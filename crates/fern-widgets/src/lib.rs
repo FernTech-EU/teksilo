@@ -1,5 +1,13 @@
 pub mod accordion;
 pub mod avatar;
+pub mod calendar;
+pub mod common;
+#[cfg(feature = "rich-text")]
+pub mod date_edit;
+#[cfg(feature = "rich-text")]
+pub mod date_time_edit;
+#[cfg(feature = "rich-text")]
+pub mod time_edit;
 pub mod badge;
 pub mod breadcrumb;
 pub mod built_in_button;
@@ -73,7 +81,14 @@ pub use badge::Badge;
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use built_in_button::{BuiltInButton, BuiltInButtonSize, BuiltInIcons};
 pub use button::{Button, ButtonVariant, IconLocation};
+pub use calendar::{Calendar, DateRange, WeekNumberDisplay};
 pub use card::Card;
+#[cfg(feature = "rich-text")]
+pub use date_edit::DateEdit;
+#[cfg(feature = "rich-text")]
+pub use date_time_edit::DateTimeEdit;
+#[cfg(feature = "rich-text")]
+pub use time_edit::{SecondsMode, TimeEdit, TimeFormat};
 pub use checkbox::{CheckState, Checkbox};
 pub use combo_box::ComboBox;
 pub use dialog::{Dialog, DialogContent, ModalContainer};

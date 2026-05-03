@@ -36,9 +36,10 @@ use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole};
 
 use crate::button::InteractionState;
-use crate::primitives::text_input_field::TextInputField;
+use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
+use crate::primitives::validation_strip::ValidationStrip;
 use crate::primitives::{
-    Expand, HStack, MinSize, Padding, RectWidget, TextWidget, ZStack,
+    Expand, HStack, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack,
 };
 use crate::tooltip::{self, RichTooltipSource};
 
@@ -49,6 +50,12 @@ pub enum ValidationState {
     None,
     Error(String),
     Warning(String),
+    /// Last commit was auto-corrected; the field's value has already
+    /// been replaced with the normalized form. The composite renders
+    /// the message in secondary text and tints the border accent
+    /// briefly (decay-managed by the framework's frame loop, not a
+    /// concern of this enum).
+    Corrected(String),
 }
 
 /// Styled single-line text input composite.
@@ -72,6 +79,9 @@ pub struct TextInput {
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
     validation: Signal<ValidationState>,
+    /// Set by `.bind_validation_feedback(...)`; wired via `ctx.effect`
+    /// in `build()` so the bridge outlives construction.
+    feedback_to_bridge: Option<Signal<ValidationFeedback>>,
     tooltip_text: Option<String>,
     rich_tooltip_source: Option<RichTooltipSource>,
 
@@ -107,6 +117,7 @@ impl TextInput {
             leading_slot: None,
             trailing_slot: None,
             validation: Signal::new(ValidationState::None),
+            feedback_to_bridge: None,
             tooltip_text: None,
             rich_tooltip_source: None,
             interaction: Signal::new(InteractionState::Idle),
@@ -195,6 +206,28 @@ impl TextInput {
 
     pub fn validation(mut self, validation: Signal<ValidationState>) -> Self {
         self.validation = validation;
+        self
+    }
+
+    /// Bridge a `Signal<ValidationFeedback>` (typically from a
+    /// validator-equipped widget like `DateEdit::validation_feedback_signal`
+    /// or a custom `TextInputField`) into this composite's
+    /// `ValidationState`. The feedback is mirrored on every change,
+    /// translating outcomes into the composite's display vocabulary:
+    ///
+    /// - `Pristine` / `Valid` → `ValidationState::None`
+    /// - `Corrected { message, .. }` → `ValidationState::Corrected(message)`
+    /// - `Invalid { message }` → `ValidationState::Error(message)`
+    pub fn bind_validation_feedback(
+        mut self,
+        feedback: Signal<ValidationFeedback>,
+    ) -> Self {
+        let target = self.validation.clone();
+        // Snapshot once now so we observe the current state at construction
+        // time too (subsequent changes flow via the field's own commit
+        // pipeline; ctx.effect installed in build() does the live tracking).
+        target.set(feedback_to_state(&feedback.get()));
+        self.feedback_to_bridge = Some(feedback);
         self
     }
 
@@ -400,8 +433,35 @@ impl Widget for TextInput {
         let zstack = ZStack::new().add_child(bg_id).add_child(padded_id);
         let zstack_id = ctx.add(zstack);
 
-        let root_id = ctx.add(
+        let frame_id = ctx.add(
             MinSize::new(65.0, field_style.height).child_id(zstack_id),
+        );
+
+        // ── Inline validation strip ────────────────────────────────
+        // Maps `Signal<ValidationState>` to the `Signal<ValidationFeedback>`
+        // that `ValidationStrip` consumes. Empty/Pristine renders nothing
+        // (zero height) so the layout doesn't reflow.
+        let strip_feedback: Signal<ValidationFeedback> =
+            self.validation.map(|v| match v {
+                ValidationState::None => ValidationFeedback::Pristine,
+                ValidationState::Error(msg) | ValidationState::Warning(msg) => {
+                    ValidationFeedback::Invalid {
+                        message: msg.clone(),
+                    }
+                }
+                ValidationState::Corrected(msg) => ValidationFeedback::Corrected {
+                    message: msg.clone(),
+                    since: std::time::Instant::now(),
+                },
+            });
+        let strip_id = ctx.add(ValidationStrip::new(strip_feedback));
+
+        // Wrap frame + strip in a VStack with the configured gap.
+        let root_id = ctx.add(
+            VStack::new()
+                .spacing(field_style.validation_strip_gap)
+                .add_child(frame_id)
+                .add_child(strip_id),
         );
 
         // Tooltip.
@@ -421,6 +481,17 @@ impl Widget for TextInput {
 
         if !self.enabled {
             self.interaction.set(InteractionState::Disabled);
+        }
+
+        // Bridge `bind_validation_feedback` source → composite state.
+        // No dedupe — each commit changes the feedback identity even
+        // when the user-visible message stays the same (e.g. repeated
+        // Invalid commits), and the strip is cheap to repaint.
+        if let Some(src) = self.feedback_to_bridge.clone() {
+            let target = self.validation.clone();
+            ctx.effect(&src, move |fb| {
+                target.set(feedback_to_state(fb));
+            });
         }
 
         self.root_child_id = Some(root_id);
@@ -463,6 +534,23 @@ impl Widget for TextInput {
     }
 }
 
+/// Project a `ValidationFeedback` (validator-pipeline outcome) onto a
+/// `ValidationState` (composite display state). `Pristine` and `Valid`
+/// both clear; `Corrected` and `Invalid` carry their messages through.
+fn feedback_to_state(fb: &ValidationFeedback) -> ValidationState {
+    match fb {
+        ValidationFeedback::Pristine | ValidationFeedback::Valid => {
+            ValidationState::None
+        }
+        ValidationFeedback::Corrected { message, .. } => {
+            ValidationState::Corrected(message.clone())
+        }
+        ValidationFeedback::Invalid { message } => {
+            ValidationState::Error(message.clone())
+        }
+    }
+}
+
 /// Derive the border role from interaction state and validation state.
 /// The paint-time resolver converts the role to a `Color` against the
 /// current theme, so runtime theme switches refresh the border without
@@ -473,7 +561,12 @@ fn derive_border_role(
     combined.map(|(state, val)| match val {
         ValidationState::Error(_) => BorderRole::Error,
         ValidationState::Warning(_) => BorderRole::Warning,
-        _ => match *state {
+        // Corrected: tint accent (matches Int UI's "we changed
+        // something — look here briefly" cue). The plan describes a
+        // ~1.5 s decay; until that pulse animation is wired, this
+        // simply persists while the composite holds Corrected.
+        ValidationState::Corrected(_) => BorderRole::Focused,
+        ValidationState::None => match *state {
             InteractionState::Focused => BorderRole::Focused,
             _ => BorderRole::Default,
         },

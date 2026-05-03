@@ -134,3 +134,104 @@ privacy-fetch-error-title = Impossible de récupérer vos données
 privacy-inspect-title = Inspecter les données envoyées ({ $count } événement(s) en mémoire)
 privacy-inspect-empty = Aucun événement n'a encore été émis dans cette session. Interagissez avec l'application — clics, menus et raccourcis passent tous par ici.
 privacy-inspect-summary = Affichage des { $count } derniers événements, du plus récent au plus ancien.
+
+# Calendrier / DateEdit / TimeEdit / DateTimeEdit. Voir
+# crates/fern-widgets/src/{calendar,date_edit,time_edit,date_time_edit}.rs
+# et les modules communs sous crates/fern-widgets/src/common/datetime/.
+calendar-month-long-january = janvier
+calendar-month-long-february = février
+calendar-month-long-march = mars
+calendar-month-long-april = avril
+calendar-month-long-may = mai
+calendar-month-long-june = juin
+calendar-month-long-july = juillet
+calendar-month-long-august = août
+calendar-month-long-september = septembre
+calendar-month-long-october = octobre
+calendar-month-long-november = novembre
+calendar-month-long-december = décembre
+
+calendar-month-short-january = janv.
+calendar-month-short-february = févr.
+calendar-month-short-march = mars
+calendar-month-short-april = avr.
+calendar-month-short-may = mai
+calendar-month-short-june = juin
+calendar-month-short-july = juil.
+calendar-month-short-august = août
+calendar-month-short-september = sept.
+calendar-month-short-october = oct.
+calendar-month-short-november = nov.
+calendar-month-short-december = déc.
+
+calendar-weekday-long-monday = lundi
+calendar-weekday-long-tuesday = mardi
+calendar-weekday-long-wednesday = mercredi
+calendar-weekday-long-thursday = jeudi
+calendar-weekday-long-friday = vendredi
+calendar-weekday-long-saturday = samedi
+calendar-weekday-long-sunday = dimanche
+
+calendar-weekday-short-monday = lun.
+calendar-weekday-short-tuesday = mar.
+calendar-weekday-short-wednesday = mer.
+calendar-weekday-short-thursday = jeu.
+calendar-weekday-short-friday = ven.
+calendar-weekday-short-saturday = sam.
+calendar-weekday-short-sunday = dim.
+
+calendar-weekday-narrow-monday = L
+calendar-weekday-narrow-tuesday = M
+calendar-weekday-narrow-wednesday = M
+calendar-weekday-narrow-thursday = J
+calendar-weekday-narrow-friday = V
+calendar-weekday-narrow-saturday = S
+calendar-weekday-narrow-sunday = D
+
+calendar-button-previous-month = Mois précédent
+calendar-button-next-month = Mois suivant
+calendar-button-previous-year = Année précédente
+calendar-button-next-year = Année suivante
+calendar-button-today = Aujourd'hui
+calendar-button-month-picker = Choisir le mois
+calendar-button-year-picker = Choisir l'année
+calendar-week-number-column = Sem.
+calendar-name = Calendrier
+calendar-name-with-month = Calendrier, { $month } { $year }
+calendar-cell-name = { $weekday } { $day } { $month } { $year }
+calendar-range-status = Sélection : { $start } – { $end }
+
+date-edit-segment-year = Année
+date-edit-segment-month = Mois
+date-edit-segment-day = Jour
+date-edit-calendar-button = Choisir une date
+date-edit-name = Date
+date-edit-placeholder = Sélectionner une date
+
+time-edit-segment-hour = Heure
+time-edit-segment-minute = Minute
+time-edit-segment-second = Seconde
+time-edit-segment-period = AM/PM
+time-edit-period-am = AM
+time-edit-period-pm = PM
+time-edit-name = Heure
+time-edit-placeholder = Sélectionner une heure
+
+date-time-edit-name = Date et heure
+date-time-edit-placeholder = Sélectionner la date et l'heure
+
+# Validation feedback (TextInputField + DateEdit/TimeEdit)
+validation-corrected-to = Corrigé en { $value }
+validation-corrected-with-notes = Corrigé : { $notes }
+validation-segment-clamped = { $segment } { $raw } → { $clamped }
+validation-day-clamped-to-month = jour { $raw } → { $clamped } (dernier jour du mois)
+validation-clamped-to-range = ramené à la plage autorisée
+validation-segment-year = année
+validation-segment-month = mois
+validation-segment-day = jour
+validation-segment-hour = heure
+validation-segment-minute = minute
+validation-segment-second = seconde
+validation-segment-value = valeur
+date-edit-validation-not-a-date = Date invalide
+time-edit-validation-not-a-time = Heure invalide

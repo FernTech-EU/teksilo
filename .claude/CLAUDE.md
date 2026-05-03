@@ -30,6 +30,7 @@ cargo run -p tool_box                          # Tool box widget demo
 cargo run -p fern-widgets-previewer            # Widget catalog previewer
 cargo run -p data-grid                          # TableView showcase (1k rows × 6 cols)
 cargo run -p tree-table                         # TreeTable showcase (mock filesystem)
+cargo run -p datetime-pickers                   # Calendar / DateEdit / TimeEdit / DateTimeEdit gallery
 ```
 
 ## Tools

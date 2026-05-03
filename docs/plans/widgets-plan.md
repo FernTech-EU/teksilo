@@ -110,10 +110,22 @@ and Qt offers them as `QFoo`.
    `Signal<T>` which handles the common case, but a cross-subtree coordinator
    makes the intent explicit and feeds a11y `set_member_of`.
 
-6. **Calendar widget** — `QCalendarWidget`. Month grid with day cells, month
-   navigation, week number column, today highlight. Standalone, not tied to a
-   date field — so it can ship before text-input lands and be wired into a
-   date picker later. **Medium effort.**
+6. **Calendar widget** — `QCalendarWidget`. **Shipped** as
+   [Calendar](crates/fern-widgets/src/calendar.rs). Month grid with
+   navigation header, weekday row, 6×7 day cells, today ring, optional
+   ISO week-number column, optional Today footer button. Single mode
+   (`Calendar::single(Signal<Option<Date>>)`) and Range mode
+   (`Calendar::range(Signal<Option<DateRange>>)`). Keyboard navigation
+   matches the WAI-ARIA grid pattern (arrows, Home/End, Ctrl+Home/End,
+   PageUp/Down, Shift+PageUp/Down for ±year, Enter/Space to commit,
+   T to jump to today). AccessKit `Role::Grid` container with
+   `Role::ColumnHeader` weekday cells and `Role::GridCell` per day,
+   `Live::Polite` for month-change announcements, `aria_current=Date`
+   on the focused cell. Locale-derived first day of week + format
+   pattern (overridable via builder); month/weekday names via Fluent
+   keys (`calendar-*` in `crates/fern-widgets/locales/`). Backed by
+   `jiff` civil types via the `common::datetime` shared module. Demo:
+   [datetime_pickers](examples/datetime_pickers/).
 
 7. **ColorPicker (swatch + HSV canvas)** — Qt bundles this inside
    `QColorDialog`. The swatch grid and HSV triangle/wheel are standalone
@@ -431,8 +443,24 @@ exhaustive and nothing is forgotten:
   up/down buttons and an editable text cell). Demo:
   [examples/spin_box](examples/spin_box/).
 - **DateEdit / TimeEdit / DateTimeEdit** — `QDateEdit`, `QTimeEdit`,
-  `QDateTimeEdit`. Spin-box-style editors for temporal values. The Calendar
-  widget (Gap 2 item 6) can ship standalone and plug in as the popover here.
+  `QDateTimeEdit`. **Shipped** as
+  [DateEdit](crates/fern-widgets/src/date_edit.rs),
+  [TimeEdit](crates/fern-widgets/src/time_edit.rs), and
+  [DateTimeEdit](crates/fern-widgets/src/date_time_edit.rs). Each binds
+  to a nullable signal (`Signal<Option<Date>>` /
+  `Signal<Option<Time>>` / `Signal<Option<DateTime>>`) with a
+  `::required(...)` constructor for non-nullable callers. DateEdit
+  ships with a trailing calendar-icon trigger that opens the
+  Calendar widget as a popover (`OverlayPlacement::BelowPreferred`,
+  cascading dismissal, fade animation). All three honour
+  locale-derived format patterns (strftime subset) plus a
+  `format_pattern(...)` override; preview-pass arrow keys step the
+  value (DateEdit: ±1 day, Shift = ±7; TimeEdit: ±step_minutes,
+  Shift = ×10; PageUp/Down in either case). Accessibility uses the
+  dedicated AccessKit roles `Role::DateInput` / `Role::TimeInput` /
+  `Role::DateTimeInput`, `set_value` formatted as ISO, and
+  `HasPopup::Grid` on the calendar trigger button. Demo:
+  [datetime_pickers](examples/datetime_pickers/).
 - **SearchField** — specialized TextField with magnifier icon, clear button,
   history dropdown, optional scoped-search chips. IntelliJ's is distinctive.
 - **Path / FilePicker field** — TextField + browse button that opens a file

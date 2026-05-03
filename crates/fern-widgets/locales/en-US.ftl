@@ -150,3 +150,106 @@ privacy-fetch-error-title = Couldn't fetch your data
 privacy-inspect-title = Inspect data sent ({ $count } event(s) buffered)
 privacy-inspect-empty = No events have been emitted in this session yet. Try interacting with the app — clicks, menus, and shortcuts all flow through here.
 privacy-inspect-summary = Showing the last { $count } event(s), newest first.
+
+# Calendar / DateEdit / TimeEdit / DateTimeEdit. Strings consumed by
+# crates/fern-widgets/src/{calendar,date_edit,time_edit,date_time_edit}.rs
+# and the shared modules under crates/fern-widgets/src/common/datetime/.
+# Month and weekday names use long/short/narrow widths; the widget picks
+# the variant that fits the available cell width.
+calendar-month-long-january = January
+calendar-month-long-february = February
+calendar-month-long-march = March
+calendar-month-long-april = April
+calendar-month-long-may = May
+calendar-month-long-june = June
+calendar-month-long-july = July
+calendar-month-long-august = August
+calendar-month-long-september = September
+calendar-month-long-october = October
+calendar-month-long-november = November
+calendar-month-long-december = December
+
+calendar-month-short-january = Jan
+calendar-month-short-february = Feb
+calendar-month-short-march = Mar
+calendar-month-short-april = Apr
+calendar-month-short-may = May
+calendar-month-short-june = Jun
+calendar-month-short-july = Jul
+calendar-month-short-august = Aug
+calendar-month-short-september = Sep
+calendar-month-short-october = Oct
+calendar-month-short-november = Nov
+calendar-month-short-december = Dec
+
+calendar-weekday-long-monday = Monday
+calendar-weekday-long-tuesday = Tuesday
+calendar-weekday-long-wednesday = Wednesday
+calendar-weekday-long-thursday = Thursday
+calendar-weekday-long-friday = Friday
+calendar-weekday-long-saturday = Saturday
+calendar-weekday-long-sunday = Sunday
+
+calendar-weekday-short-monday = Mon
+calendar-weekday-short-tuesday = Tue
+calendar-weekday-short-wednesday = Wed
+calendar-weekday-short-thursday = Thu
+calendar-weekday-short-friday = Fri
+calendar-weekday-short-saturday = Sat
+calendar-weekday-short-sunday = Sun
+
+calendar-weekday-narrow-monday = M
+calendar-weekday-narrow-tuesday = T
+calendar-weekday-narrow-wednesday = W
+calendar-weekday-narrow-thursday = T
+calendar-weekday-narrow-friday = F
+calendar-weekday-narrow-saturday = S
+calendar-weekday-narrow-sunday = S
+
+calendar-button-previous-month = Previous month
+calendar-button-next-month = Next month
+calendar-button-previous-year = Previous year
+calendar-button-next-year = Next year
+calendar-button-today = Today
+calendar-button-month-picker = Pick month
+calendar-button-year-picker = Pick year
+calendar-week-number-column = Week
+calendar-name = Calendar
+calendar-name-with-month = Calendar, { $month } { $year }
+calendar-cell-name = { $weekday }, { $month } { $day }, { $year }
+calendar-range-status = Selected: { $start } – { $end }
+
+date-edit-segment-year = Year
+date-edit-segment-month = Month
+date-edit-segment-day = Day
+date-edit-calendar-button = Choose date
+date-edit-name = Date
+date-edit-placeholder = Select a date
+
+time-edit-segment-hour = Hour
+time-edit-segment-minute = Minute
+time-edit-segment-second = Second
+time-edit-segment-period = AM/PM
+time-edit-period-am = AM
+time-edit-period-pm = PM
+time-edit-name = Time
+time-edit-placeholder = Select a time
+
+date-time-edit-name = Date and time
+date-time-edit-placeholder = Select date and time
+
+# Validation feedback (TextInputField + DateEdit/TimeEdit)
+validation-corrected-to = Auto-corrected to { $value }
+validation-corrected-with-notes = Auto-corrected: { $notes }
+validation-segment-clamped = { $segment } { $raw } → { $clamped }
+validation-day-clamped-to-month = day { $raw } → { $clamped } (last day of month)
+validation-clamped-to-range = clamped to allowed range
+validation-segment-year = year
+validation-segment-month = month
+validation-segment-day = day
+validation-segment-hour = hour
+validation-segment-minute = minute
+validation-segment-second = second
+validation-segment-value = value
+date-edit-validation-not-a-date = Not a valid date
+time-edit-validation-not-a-time = Not a valid time

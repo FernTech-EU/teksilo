@@ -719,15 +719,26 @@ impl OverlayManager {
 
     /// Handle a click-outside event: if the click is outside all overlays
     /// with ClickOutside dismiss behavior, dismiss them.
-    /// Returns the content widget IDs of dismissed overlays (empty if none).
-    pub fn handle_click_outside(&mut self, point: Point) -> Vec<WidgetId> {
+    /// Returns the content widget IDs of dismissed overlays (empty if none)
+    /// and the focus-restore target — the widget that was focused before
+    /// the *bottommost* dismissed overlay opened. Topmost overlays'
+    /// `focus_restore` would point inside an overlay that's also being
+    /// dismissed in the same pass, which would leave focus on a
+    /// dormant widget; the bottommost target represents focus before
+    /// any of the dismissed overlays opened. Aligns the click-outside
+    /// path with the Esc / ArrowLeft-cascade paths, both of which
+    /// already restore focus from the dismissed overlay.
+    pub fn handle_click_outside(
+        &mut self,
+        point: Point,
+    ) -> (Vec<WidgetId>, Option<WidgetId>) {
         if self.stack.is_empty() {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         // Check if the point is inside any overlay
         if self.hit_test(point).is_some() {
-            return Vec::new();
+            return (Vec::new(), None);
         }
 
         // Dismiss all overlays that should close on an outside click.
@@ -746,14 +757,20 @@ impl OverlayManager {
             .collect();
 
         if to_dismiss.is_empty() {
-            return Vec::new();
+            return (Vec::new(), None);
         }
+
+        let focus_restore = self
+            .stack
+            .iter()
+            .find(|o| to_dismiss.contains(&o.id))
+            .and_then(|o| o.focus_restore);
 
         let mut all_dismissed = Vec::new();
         for id in to_dismiss {
             all_dismissed.extend(self.dismiss(id));
         }
-        all_dismissed
+        (all_dismissed, focus_restore)
     }
 
     /// Compute overlay positions based on anchor bounds.
@@ -1023,15 +1040,78 @@ mod tests {
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
 
         // Click inside — no dismiss
-        assert!(mgr.handle_click_outside(Point::new(50.0, 25.0)).is_empty());
+        let (dismissed, _) = mgr.handle_click_outside(Point::new(50.0, 25.0));
+        assert!(dismissed.is_empty());
         assert_eq!(mgr.len(), 1);
 
         // Click outside — dismissed
-        assert!(
-            !mgr.handle_click_outside(Point::new(500.0, 500.0))
-                .is_empty()
-        );
+        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        assert!(!dismissed.is_empty());
         assert!(mgr.is_empty());
+    }
+
+    #[test]
+    fn click_outside_returns_focus_restore() {
+        let mut mgr = OverlayManager::new();
+        let trigger = fake_id(99);
+        mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        let id = mgr.active_ids()[0];
+        mgr.set_content_bounds(id, Size::new(100.0, 50.0));
+        mgr.set_top_focus_restore(trigger);
+
+        let (dismissed, focus_restore) =
+            mgr.handle_click_outside(Point::new(500.0, 500.0));
+        assert_eq!(dismissed.len(), 1);
+        assert_eq!(focus_restore, Some(trigger));
+    }
+
+    #[test]
+    fn click_outside_focus_restore_picks_bottommost() {
+        // When click-outside dismisses several stacked top-level
+        // overlays in one pass, focus should land on the *oldest*
+        // overlay's restore target — the focus state from before any
+        // overlay opened. The topmost overlay's restore target points
+        // inside the (now-dismissed) overlay below it.
+        let mut mgr = OverlayManager::new();
+        let pre_overlay_focus = fake_id(99);
+        let inside_a = fake_id(50);
+        let a = mgr.show(OverlayRequest {
+            content_id: fake_id(10),
+            anchor: fake_id(1),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        mgr.set_content_bounds(a, Size::new(100.0, 50.0));
+        mgr.set_top_focus_restore(pre_overlay_focus);
+        let b = mgr.show(OverlayRequest {
+            content_id: fake_id(11),
+            anchor: fake_id(2),
+            placement: OverlayPlacement::Below,
+            dismiss: DismissBehavior::ClickOutside,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        mgr.set_content_bounds(b, Size::new(100.0, 50.0));
+        mgr.set_top_focus_restore(inside_a);
+
+        let (_, focus_restore) =
+            mgr.handle_click_outside(Point::new(500.0, 500.0));
+        assert_eq!(focus_restore, Some(pre_overlay_focus));
     }
 
     #[test]
@@ -1048,10 +1128,8 @@ mod tests {
             fade_duration: None,
         });
 
-        assert!(
-            mgr.handle_click_outside(Point::new(500.0, 500.0))
-                .is_empty()
-        );
+        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        assert!(dismissed.is_empty());
         assert_eq!(mgr.len(), 1);
     }
 
@@ -1147,10 +1225,8 @@ mod tests {
         let id = mgr.active_ids()[0];
         mgr.set_content_bounds(id, Size::new(100.0, 50.0));
 
-        assert!(
-            !mgr.handle_click_outside(Point::new(500.0, 500.0))
-                .is_empty()
-        );
+        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        assert!(!dismissed.is_empty());
         assert!(mgr.is_empty());
     }
 
@@ -1168,10 +1244,8 @@ mod tests {
             fade_duration: None,
         });
 
-        assert!(
-            mgr.handle_click_outside(Point::new(500.0, 500.0))
-                .is_empty()
-        );
+        let (dismissed, _) = mgr.handle_click_outside(Point::new(500.0, 500.0));
+        assert!(dismissed.is_empty());
         assert_eq!(mgr.len(), 1);
     }
 

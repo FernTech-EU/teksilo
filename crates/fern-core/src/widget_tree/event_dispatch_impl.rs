@@ -101,9 +101,15 @@ impl WidgetTree {
             position, button, ..
         } = &event
         {
-            let dismissed = self.overlay_manager.handle_click_outside(*position);
+            let (dismissed, focus_restore) =
+                self.overlay_manager.handle_click_outside(*position);
             if !dismissed.is_empty() {
                 self.dormant_dismissed_content(&dismissed, &mut *ops);
+                if let Some(restore_id) = focus_restore {
+                    if self.arena.is_active(restore_id) {
+                        self.focus_ops(restore_id, &mut *ops);
+                    }
+                }
                 if *button != PointerButton::Secondary {
                     return;
                 }

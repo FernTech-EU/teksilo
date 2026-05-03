@@ -50,8 +50,10 @@
 //! [`SpinBox`]: crate::spin_box::SpinBox
 
 mod keyboard;
+pub mod mask;
 mod mouse;
 pub(crate) mod state;
+pub mod validator;
 
 use std::rc::Rc;
 
@@ -73,6 +75,9 @@ use crate::rich_text::paint::{PaintParams, paint_frame};
 
 pub(crate) use self::state::{CharFilter, CommandFactory};
 use self::state::{SharedState, TextInputConfig, TextInputState, sync_cursor_signals};
+
+pub use self::mask::{InputMask, MaskClass, MaskError, MaskPosition};
+pub use self::validator::{ValidationFeedback, ValidationOutcome, ValidatorFn};
 
 /// Caret blink half-period (same as RichTextEditor).
 const CARET_BLINK_INTERVAL: f32 = 0.5;
@@ -115,6 +120,24 @@ pub struct TextInputField {
     text_height: Option<f32>,
     external_interaction: Option<Signal<InteractionState>>,
 
+    /// Optional input mask. When set, the field auto-derives a
+    /// placeholder template (`__/__/____` for `99/99/9999`) and
+    /// rejects non-fitting characters via a position-aware filter
+    /// composed with the user's `char_filter`. See [`InputMask`] for
+    /// the grammar.
+    mask: Option<InputMask>,
+    /// Visible char used for unfilled editable positions in the mask
+    /// template. Defaults to the theme's
+    /// `text_field.mask_placeholder_char` (typically `_`).
+    mask_placeholder_override: Option<char>,
+    /// Validator closure called on every commit (Enter, Tab-out,
+    /// blur). Returns a [`ValidationOutcome`] that drives
+    /// [`feedback`](Self::validation_feedback_signal).
+    validator: Option<ValidatorFn>,
+    /// Published feedback signal. Composites bind to this to render
+    /// the inline validation strip below the field.
+    feedback: Signal<ValidationFeedback>,
+
     // ── Internal (set during build) ─────────────────────────────────
     state: Option<SharedState>,
     /// Interaction signal actually used at runtime. Either the one
@@ -150,6 +173,10 @@ impl TextInputField {
             suffix: Prop::Static(String::new()),
             text_height: None,
             external_interaction: None,
+            mask: None,
+            mask_placeholder_override: None,
+            validator: None,
+            feedback: Signal::new(ValidationFeedback::Pristine),
             state: None,
             interaction: Signal::new(InteractionState::Idle),
         }
@@ -265,6 +292,57 @@ impl TextInputField {
         self
     }
 
+    /// Set an input mask (Qt grammar). Constrains accepted characters
+    /// per position, auto-derives the empty-state template
+    /// (`__/__/____` for `99/99/9999`), and routes typed chars
+    /// through the mask's class filter.
+    ///
+    /// Composes with [`char_filter`](Self::char_filter): a char must
+    /// pass *both* the mask's per-position class AND the user's
+    /// `char_filter` to be accepted.
+    ///
+    /// On parse error (only the trailing-backslash case in practice),
+    /// the mask is silently dropped — the field falls back to its
+    /// no-mask behaviour rather than panicking.
+    pub fn input_mask(mut self, mask: impl AsRef<str>) -> Self {
+        match InputMask::parse(mask.as_ref()) {
+            Ok(m) => self.mask = Some(m),
+            Err(_) => self.mask = None,
+        }
+        self
+    }
+
+    /// Override the visible character used for unfilled editable mask
+    /// positions. Default: the theme's
+    /// `text_field.mask_placeholder_char` (typically `_`).
+    pub fn mask_placeholder(mut self, c: char) -> Self {
+        self.mask_placeholder_override = Some(c);
+        self
+    }
+
+    /// Install a validator. The closure runs on every commit (Enter,
+    /// Tab-out, focus loss) and returns a [`ValidationOutcome`] that
+    /// drives [`validation_feedback_signal`](Self::validation_feedback_signal).
+    ///
+    /// **Does not run per-keystroke** — that's [`char_filter`](Self::char_filter)'s
+    /// job. Mixing per-keystroke text rewriting with validation
+    /// produces caret-jump bugs and is explicitly out of scope.
+    pub fn validator(
+        mut self,
+        f: impl Fn(&str) -> ValidationOutcome + 'static,
+    ) -> Self {
+        self.validator = Some(Rc::new(f));
+        self
+    }
+
+    /// Reactive handle on the published [`ValidationFeedback`] state.
+    /// Composites bind to this to render the inline feedback strip
+    /// below the field. Always present; reads `Pristine` until the
+    /// first commit (or forever if no validator is installed).
+    pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback> {
+        self.feedback.clone()
+    }
+
     /// The `Signal<String>` this field is bound to.
     pub fn text(&self) -> Signal<String> {
         self.text.clone()
@@ -284,9 +362,89 @@ impl Widget for TextInputField {
             self.interaction = signal;
         }
 
+        // Resolve the mask placeholder character. Caller override wins;
+        // otherwise pull from the theme.
+        let theme_snapshot = ctx.theme_signal().get();
+        let mask_placeholder_char = self
+            .mask_placeholder_override
+            .unwrap_or(theme_snapshot.components.text_field.mask_placeholder_char);
+
+        // Auto-derive placeholder from mask when none was explicitly
+        // set: an empty masked field paints `__/__/____` rather than
+        // a blank surface, giving the user a self-documenting template.
+        if self.placeholder.is_empty() {
+            if let Some(ref m) = self.mask {
+                self.placeholder = m.empty_template(mask_placeholder_char);
+            }
+        }
+
+        // Compose the user's char_filter with the mask's class filter.
+        // The mask doesn't know the cursor position here (this is a
+        // pre-position filter), so it accepts any char that fits *any*
+        // editable position class — a permissive gate that catches
+        // gross mismatches (typing "a" into a digits-only mask) without
+        // requiring per-keystroke position tracking. Per-position
+        // gating happens at commit time via the validator.
+        if let Some(ref mask) = self.mask {
+            let mask_for_filter = mask.clone();
+            let user_filter = self.char_filter.take();
+            let combined: CharFilter = Rc::new(move |c: char| {
+                // Always allow fixed-separator characters (they're
+                // legitimate input even if user types them — the
+                // formatter consumes them).
+                let in_mask_class = mask_for_filter.positions().any(|p| match p {
+                    MaskPosition::Editable { class, .. } => class.accepts(c),
+                    MaskPosition::Fixed(sep) => *sep == c,
+                });
+                if !in_mask_class {
+                    return false;
+                }
+                match user_filter.as_ref() {
+                    Some(f) => f(c),
+                    None => true,
+                }
+            });
+            self.char_filter = Some(combined);
+        }
+
         // Build the shared state from the configured builder values.
-        let on_submit = self.on_submit.take().map(Rc::new);
-        let on_blur = self.on_blur.take().map(Rc::new);
+        let mut on_submit = self.on_submit.take().map(Rc::new);
+        let mut on_blur = self.on_blur.take().map(Rc::new);
+
+        // Wrap commit callbacks with the validator pipeline. The
+        // wrapping closure: snapshots the bound text, runs the
+        // validator, applies the outcome (writes feedback, mutates
+        // text on `Corrected`), then chains the user's callback so
+        // composites can react to the now-updated state.
+        if let Some(validator) = self.validator.clone() {
+            let bound_text = self.text.clone();
+            let feedback = self.feedback.clone();
+            let prev_on_blur = on_blur.take();
+            on_blur = Some(Rc::new(Box::new({
+                let validator = validator.clone();
+                let feedback = feedback.clone();
+                let bound_text = bound_text.clone();
+                move |evt_ctx: &mut EventContext| {
+                    run_validator_and_apply(&validator, &bound_text, &feedback);
+                    if let Some(cb) = prev_on_blur.as_ref() {
+                        cb(evt_ctx);
+                    }
+                }
+            }) as CommandFactory));
+            let prev_on_submit = on_submit.take();
+            on_submit = Some(Rc::new(Box::new({
+                let validator = validator.clone();
+                let feedback = feedback.clone();
+                let bound_text = bound_text.clone();
+                move |evt_ctx: &mut EventContext| {
+                    run_validator_and_apply(&validator, &bound_text, &feedback);
+                    if let Some(cb) = prev_on_submit.as_ref() {
+                        cb(evt_ctx);
+                    }
+                }
+            }) as CommandFactory));
+        }
+
         let initial_text = self.text.get();
         let read_only_effective = self.read_only || !self.enabled;
 
@@ -302,6 +460,30 @@ impl Widget for TextInputField {
             suffix: initial_suffix,
         });
         self.state = Some(shared_state.clone());
+
+        // Reset feedback to Pristine whenever the user types — prior
+        // Invalid / Corrected announcements should clear as soon as
+        // the user starts editing again so they don't shout stale
+        // errors at someone trying to fix them.
+        {
+            let feedback = self.feedback.clone();
+            ctx.effect(&self.text, move |_| {
+                if !matches!(feedback.get(), ValidationFeedback::Pristine) {
+                    feedback.set(ValidationFeedback::Pristine);
+                }
+            });
+        }
+
+        // Bind feedback at AccessibilityOnly so the field's AT node
+        // refreshes its `set_invalid` state when feedback changes.
+        {
+            let self_id = ctx.self_id();
+            self.feedback.bind_to(
+                self_id,
+                ctx.binding_registry(),
+                fern_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
 
         let text_signal = shared_state.borrow().text_signal.clone();
 
@@ -756,6 +938,18 @@ impl Widget for TextInputField {
             builder.add_action(Action::ReplaceSelectedText);
         }
         builder.add_action(Action::SetTextSelection);
+
+        // Validation feedback → accesskit `aria-invalid`. Surface
+        // `Invalid` as `Invalid::True`; `Corrected` doesn't carry an
+        // invalid marker (the data is now valid) but the composite's
+        // Live region announces the correction. The framework's
+        // AccessNodeBuilder doesn't yet wrap `set_invalid`, so reach
+        // through `inner_mut()` which is the documented escape hatch.
+        if self.feedback.get().is_invalid() {
+            builder
+                .inner_mut()
+                .set_invalid(fern_core::accesskit::Invalid::True);
+        }
     }
 }
 
@@ -1033,4 +1227,43 @@ fn build_context_menu(ctx: &mut BuildContext, state: &SharedState) -> WidgetId {
     let menu_id = ctx.add(menu);
     ctx.set_dormant(menu_id);
     menu_id
+}
+
+/// Run the validator on the bound text and update the feedback signal.
+///
+/// On `Corrected`, also writes the corrected text back to the bound
+/// signal — the field's external→internal sync effect picks this up
+/// and rewrites the document in the next frame. On `Invalid`, the
+/// text is left as-typed; composites that want a "revert on invalid"
+/// behaviour observe the feedback signal and rewrite the text from
+/// their own source of truth (e.g., `DateEdit` reformats from its
+/// `Signal<Option<Date>>`).
+fn run_validator_and_apply(
+    validator: &ValidatorFn,
+    bound_text: &Signal<String>,
+    feedback: &Signal<ValidationFeedback>,
+) {
+    let raw = bound_text.get();
+    match validator(&raw) {
+        ValidationOutcome::Valid => {
+            feedback.set(ValidationFeedback::Valid);
+        }
+        ValidationOutcome::Corrected { corrected, message } => {
+            // Write the corrected text first so observers of the
+            // bound signal see the new value before the feedback
+            // signal flips. Composites that bind to BOTH signals
+            // (rare) will see a consistent pair: text + correction
+            // notice describing the change.
+            if bound_text.get() != corrected {
+                bound_text.set(corrected);
+            }
+            feedback.set(ValidationFeedback::Corrected {
+                message,
+                since: std::time::Instant::now(),
+            });
+        }
+        ValidationOutcome::Invalid { message } => {
+            feedback.set(ValidationFeedback::Invalid { message });
+        }
+    }
 }

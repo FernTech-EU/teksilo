@@ -25,6 +25,8 @@ pub mod text_widget;
 /// inline editable text.
 #[cfg(feature = "rich-text")]
 pub mod text_input_field;
+#[cfg(feature = "rich-text")]
+pub mod validation_strip;
 pub mod vstack;
 pub mod wrap;
 pub mod zstack;
@@ -50,6 +52,8 @@ pub use switcher::Switcher;
 pub use text_widget::TextWidget;
 #[cfg(feature = "rich-text")]
 pub use text_input_field::TextInputField;
+#[cfg(feature = "rich-text")]
+pub use validation_strip::ValidationStrip;
 pub use vstack::VStack;
 pub use wrap::Wrap;
 pub use zstack::ZStack;
