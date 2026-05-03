@@ -21,6 +21,11 @@ pub(crate) struct SceneEntry {
     pub(crate) id: ItemId,
     pub(crate) scene_rect: Rect,
     pub(crate) kind: SceneEntryKind,
+    /// Z-order for paint — higher values paint *later* (on top).
+    /// Default `0.0`. Equal-z entries fall back to insertion order
+    /// for a stable result. Lightweight-tier only; heavyweight
+    /// widget z-order is governed by the arena's child order.
+    pub(crate) z: f32,
 }
 
 pub(crate) enum SceneEntryKind {
@@ -122,6 +127,7 @@ impl Scene {
             kind: SceneEntryKind::Widget {
                 pending: Some(Box::new(widget)),
             },
+            z: 0.0,
         });
         self.entry_index.insert(id, pos);
         self.index.insert(id, scene_rect);
@@ -148,10 +154,44 @@ impl Scene {
             id,
             scene_rect,
             kind: SceneEntryKind::Item(Box::new(item)),
+            z: 0.0,
         });
         self.entry_index.insert(id, pos);
         self.index.insert(id, scene_rect);
         id
+    }
+
+    /// Set the z-order of an entry. Higher z values paint *later*
+    /// (on top of lower z). Equal-z entries fall back to insertion
+    /// order — stable. Default `0.0`. No-op if the id is unknown.
+    ///
+    /// Affects lightweight items only; heavyweight widget z-order
+    /// is governed by the arena's child order (= insertion order
+    /// at `add_widget` time). To re-stack a heavyweight widget,
+    /// remove and re-add it.
+    pub fn set_z(&mut self, id: ItemId, z: f32) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].z = z;
+        }
+    }
+
+    /// Read an entry's z-order. Returns `None` if unknown.
+    pub fn z(&self, id: ItemId) -> Option<f32> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries.get(pos)?.z)
+    }
+
+    /// Crate-private: helper for `SceneView::paint` to walk visible
+    /// items in z-order. Sorts the input ids by their `z` (ascending,
+    /// stable for equal values), so callers can iterate in paint
+    /// order. Heavyweight ids are still included so callers can
+    /// dispatch — they typically filter to lightweights downstream.
+    pub(crate) fn sort_by_z(&self, ids: &mut Vec<ItemId>) {
+        ids.sort_by(|a, b| {
+            let za = self.z(*a).unwrap_or(0.0);
+            let zb = self.z(*b).unwrap_or(0.0);
+            za.partial_cmp(&zb).unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     /// Borrow a lightweight [`SceneItem`] by id. Returns `None` if the

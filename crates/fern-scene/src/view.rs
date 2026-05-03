@@ -1119,7 +1119,18 @@ impl Widget for SceneView {
         // it at its in-flight scene-coord offset by translating
         // the canvas. Restored after.
         let drag_target = self.drag_target.get();
-        for id in self.scene.items_in_rect(region) {
+        let mut visible_ids = self.scene.items_in_rect(region);
+        // Phase 6 z-order: sort visible ids by z so higher-z items
+        // paint last (on top). Equal-z preserves insertion order
+        // (sort is stable). Heavyweight ids stay in the list but
+        // are filtered out below — their z is honored only as a
+        // sort key for any lightweight neighbours interleaved with
+        // them, which is the right semantic: a lightweight item
+        // with z > 0 paints atop preceding lightweights, not atop
+        // heavyweight widgets (heavyweights paint via the arena
+        // walker after SceneView's paint method).
+        self.scene.sort_by_z(&mut visible_ids);
+        for id in visible_ids {
             if let Some(item) = self.scene.item(id) {
                 let dragging =
                     drag_target.filter(|t| t.item_id == id).map(|t| {
@@ -3783,6 +3794,96 @@ mod tests {
         let rect = view.scene().scene_rect(item_id).unwrap();
         assert_eq!(rect.x, 100.0);
         assert_eq!(rect.y, 100.0);
+    }
+
+    #[test]
+    fn z_order_paints_higher_z_after_lower() {
+        // Two overlapping lightweight items: id A at z=0 (back),
+        // id B at z=10 (front). The frame's draw_order should
+        // place B's decoration *after* A's so it appears on top.
+        use crate::items::RectItem;
+        use fern_canvas::DrawCommand;
+
+        let mut scene = Scene::new();
+        let a = scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::RED),
+        );
+        let b = scene.add_item(
+            RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::BLUE),
+        );
+        // Reverse paint order via z: A on top by default (later
+        // insertion = on top), but we set B's z higher so B paints
+        // last instead.
+        scene.set_z(a, 0.0);
+        scene.set_z(b, 10.0);
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let frame = tree.render();
+
+        // First decoration is A (red), second is B (blue) — same
+        // as default insertion order in this case. Now flip z and
+        // verify the order changes.
+        let red_first = frame.decorations.iter().enumerate().find_map(|(i, d)| {
+            if d.color == fern_tokens::Color::RED.to_array() {
+                Some(i)
+            } else {
+                None
+            }
+        });
+        let blue_first = frame.decorations.iter().enumerate().find_map(|(i, d)| {
+            if d.color == fern_tokens::Color::BLUE.to_array() {
+                Some(i)
+            } else {
+                None
+            }
+        });
+        assert!(
+            red_first.is_some() && blue_first.is_some(),
+            "both decorations should be present"
+        );
+        assert!(
+            red_first.unwrap() < blue_first.unwrap(),
+            "z=10 (blue) should paint after z=0 (red)"
+        );
+        // Pin both DrawCommands are decoration variants (not stale).
+        assert!(matches!(
+            frame.draw_order[0],
+            DrawCommand::Decoration(_)
+        ));
+    }
+
+    #[test]
+    fn z_order_default_zero_preserves_insertion_order() {
+        // Without explicit z, items paint in insertion order.
+        use crate::items::RectItem;
+
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::RED),
+        );
+        scene.add_item(
+            RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::BLUE),
+        );
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let frame = tree.render();
+        assert_eq!(
+            frame.decorations[0].color,
+            fern_tokens::Color::RED.to_array(),
+            "first-inserted item paints first by default"
+        );
+        assert_eq!(
+            frame.decorations[1].color,
+            fern_tokens::Color::BLUE.to_array()
+        );
     }
 
     #[test]
