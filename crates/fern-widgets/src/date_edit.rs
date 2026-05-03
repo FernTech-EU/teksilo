@@ -80,9 +80,31 @@ use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome}
 use crate::primitives::IconWidget;
 use crate::text_input::TextInput;
 
-const DEFAULT_WIDTH: f32 = 144.0;
-
 type OnValueChanged = Rc<dyn Fn(Option<Date>, &mut EventContext)>;
+
+/// How a datetime widget claims horizontal space.
+///
+/// Shared across `DateEdit`, `TimeEdit`, `DateRangeEdit`, and
+/// `DateTimeEdit`. For the two-half widgets the policy applies to
+/// the *trailing* half only — the leading half always sizes to its
+/// mask-derived natural width so the date never reflows when only
+/// the time half changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WidthPolicy {
+    /// **Default.** The widget claims its natural width, which is
+    /// the mask-derived empty template (`__/__/____` for ISO date,
+    /// `__:__` for 24h time) measured in the theme body font plus
+    /// the surrounding chrome (padding, trailing trigger button).
+    /// The widget reports a fixed footprint that doesn't reflow as
+    /// the user types — Int UI form-density convention.
+    #[default]
+    Default,
+    /// The widget expands to fill the horizontal space its parent
+    /// offers, instead of capping at the natural width. Use inside
+    /// toolbars, inspector panels, or an `Expand::horizontal` column
+    /// that should stretch with the surrounding layout.
+    Fill,
+}
 
 /// How the date editor reacts to out-of-range input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -119,6 +141,10 @@ pub struct DateEdit {
     read_only: bool,
     /// How parse failures are surfaced. Default `AutoCorrect`.
     validation_behavior: ValidationBehavior,
+    /// How the field claims horizontal space. Default
+    /// [`WidthPolicy::Default`] — the field sizes to its natural
+    /// mask-derived width and stays put.
+    width_policy: WidthPolicy,
     label: Option<String>,
     on_value_changed: Option<OnValueChanged>,
     /// Live feedback signal mirrored from the inner field, owned by
@@ -165,6 +191,7 @@ impl DateEdit {
             enabled: true,
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
+            width_policy: WidthPolicy::Default,
             label: None,
             on_value_changed: None,
             feedback: Signal::new(ValidationFeedback::Pristine),
@@ -241,6 +268,16 @@ impl DateEdit {
     /// contexts.
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
+        self
+    }
+
+    /// How the widget claims horizontal space. Default
+    /// [`WidthPolicy::Default`] — the field sizes to its natural
+    /// mask-derived width. Switch to [`WidthPolicy::Fill`] to make
+    /// the field stretch to fill the parent's offered width
+    /// (toolbar / inspector pattern).
+    pub fn width_policy(mut self, policy: WidthPolicy) -> Self {
+        self.width_policy = policy;
         self
     }
 
@@ -581,7 +618,6 @@ impl Widget for DateEdit {
             .placeholder(placeholder.clone())
             .enabled(enabled)
             .read_only(read_only)
-            .min_width(DEFAULT_WIDTH)
             .input_mask(mask_string)
             .validator({
                 let v = validator.clone();
@@ -636,7 +672,19 @@ impl Widget for DateEdit {
             });
         }
 
-        let root_id = ctx.add(text_input);
+        // Apply width policy. `Default` adds nothing — the field
+        // reports its natural mask-derived width via TextInputField.
+        // `Fill` wraps in an intrinsic-respecting Expand so the
+        // composite stretches to its parent's offered width while
+        // still reporting the natural width when unconstrained
+        // (matches SpinBox's `.fill_width()` semantics).
+        let root_id = match self.width_policy {
+            WidthPolicy::Default => ctx.add(text_input),
+            WidthPolicy::Fill => {
+                let inner_id = ctx.add(text_input);
+                ctx.add(crate::primitives::Expand::horizontal().respect_intrinsic().child_id(inner_id))
+            }
+        };
         self.root_child_id = Some(root_id);
 
         // ── Segment-stepping helper — captured by the on_key_preview
@@ -732,13 +780,16 @@ impl Widget for DateEdit {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
+        // Forward the full LayoutResponse — including flex — from the
+        // child. When `WidthPolicy::Fill` is active, the inner Expand
+        // wrapper reports flex=1; without forwarding it here, parent
+        // HStacks see flex=0 and the field never grows.
         match self.root_child_id {
             Some(id) => ctx
-                .child_size(id, proposal)
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
-            None => proposal.resolve(0.0, 0.0),
+                .child_layout_response(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into()),
+            None => proposal.resolve(0.0, 0.0).into(),
         }
-        .into()
     }
 
     fn place_children(

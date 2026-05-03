@@ -67,6 +67,7 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_text::text_document::{SelectionType, TextDocument};
 use fern_text::{CursorDisplay, RichTextEngine, SharedTypesetter};
+use fern_tokens::TextStyle;
 
 use crate::button::InteractionState;
 use crate::menu_item::MenuItem;
@@ -159,6 +160,15 @@ pub struct TextInputField {
     /// but the composing widget loses ownership of `self` once it
     /// hands the field to `ctx.add(...)`.
     state_slot: std::rc::Rc<std::cell::RefCell<Option<SharedState>>>,
+    /// Natural intrinsic width in logical pixels, cached at the end
+    /// of `build()`. When an [`InputMask`] is set, this measures the
+    /// mask's empty template (e.g. `__/__/____`) in the theme body
+    /// font and adds a small caret slack — so a date / time / phone
+    /// field reports a width that matches its content envelope
+    /// instead of the generic 200 dp fallback. Composing widgets
+    /// like `DateEdit` rely on this so their unconstrained natural
+    /// width tracks the format pattern.
+    natural_width: f32,
 }
 
 impl std::fmt::Debug for TextInputField {
@@ -194,6 +204,7 @@ impl TextInputField {
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
             state_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            natural_width: 200.0,
         }
     }
 
@@ -429,6 +440,25 @@ impl Widget for TextInputField {
             if let Some(ref m) = self.mask {
                 self.placeholder = m.empty_template(mask_placeholder_char);
             }
+        }
+
+        // Cache mask-aware natural width. When a mask is set, the
+        // visual content envelope is exactly the empty template
+        // (`__/__/____` for `99/99/9999`); measure it in the theme
+        // body font + a small caret slack so the field's intrinsic
+        // tracks its real content instead of the generic 200 dp
+        // fallback. This is what lets composing widgets like
+        // `DateEdit` report a natural width that follows the format
+        // pattern instead of the 200 dp default. Without a mask the
+        // 200 dp fallback (set in `new()`) stays.
+        if let Some(ref m) = self.mask {
+            let template = m.empty_template(mask_placeholder_char);
+            let style = &theme_snapshot.typography.body;
+            let measured = measure_width_px(ctx, &template, style);
+            // Slack: half a digit so the caret never sits flush against
+            // the right border on the last position.
+            let slack = style.size * 0.3;
+            self.natural_width = measured + slack;
         }
 
         // Compose the user's char_filter with the mask's class filter.
@@ -874,7 +904,13 @@ impl Widget for TextInputField {
     }
 
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
-        let w = proposal.width.unwrap_or(200.0).max(0.0);
+        // Default unwrap is the cached natural width (mask-aware when
+        // a mask is set; 200 dp fallback otherwise). Composing widgets
+        // that wrap us in a constraint pass `Some(width)` and we use
+        // that; the natural width is what surfaces in unconstrained
+        // intrinsic queries (ZStack measurement with `unspecified()`,
+        // etc.) so the chain reports a sensible content size.
+        let w = proposal.width.unwrap_or(self.natural_width).max(0.0);
         let h = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(0.0);
         Size::new(w, h).into()
     }
@@ -1340,4 +1376,22 @@ fn run_validator_and_apply(
             feedback.set(ValidationFeedback::Invalid { message });
         }
     }
+}
+
+/// Measure the advance width of `text` in logical pixels using the
+/// app-wide `SharedTypesetter` (the same backend the field paints
+/// with). Falls back to a rough heuristic when no typesetter is
+/// installed (headless tests) so the caller still gets a non-zero
+/// width and any cap / floor logic behaves reasonably. Mirrors the
+/// helper SpinBox uses for `width_chars` measurement.
+fn measure_width_px(ctx: &mut BuildContext, text: &str, style: &TextStyle) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    if let Some(ts) = ctx.app_state::<SharedTypesetter>() {
+        let backend = ts.as_text_backend();
+        let layout = backend.borrow_mut().layout_single_line(text, style, None);
+        return layout.width;
+    }
+    text.chars().count() as f32 * style.size * 0.55
 }

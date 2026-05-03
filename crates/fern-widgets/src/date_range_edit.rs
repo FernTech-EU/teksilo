@@ -83,8 +83,6 @@ use crate::primitives::{
 
 type OnRangeChanged = Rc<dyn Fn(Option<DateRange>, &mut EventContext)>;
 
-const DEFAULT_HALF_WIDTH: f32 = 110.0;
-
 /// Two-handle date picker over `Signal<Option<DateRange>>`. See the
 /// [module docs](self) for the visual layout and behaviour.
 pub struct DateRangeEdit {
@@ -105,6 +103,13 @@ pub struct DateRangeEdit {
     read_only: bool,
     label: Option<String>,
     validation_behavior: ValidationBehavior,
+    /// How the trailing (end) half claims horizontal space. The
+    /// leading (start) half always sizes to its mask-derived
+    /// natural width — the start date stays put while the end half
+    /// either matches that natural width
+    /// ([`WidthPolicy::Default`]) or absorbs whatever extra space
+    /// the parent offers ([`WidthPolicy::Fill`]).
+    end_width_policy: crate::date_edit::WidthPolicy,
     /// Composed validation feedback (severity-merged from both halves).
     feedback: Signal<ValidationFeedback>,
     /// `true` while either half holds keyboard focus — drives the
@@ -144,6 +149,7 @@ impl DateRangeEdit {
             read_only: false,
             label: None,
             validation_behavior: ValidationBehavior::AutoCorrect,
+            end_width_policy: crate::date_edit::WidthPolicy::Default,
             feedback: Signal::new(ValidationFeedback::Pristine),
             focused: Signal::new(false),
             range_popover_open: Signal::new(false),
@@ -199,6 +205,17 @@ impl DateRangeEdit {
 
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
+        self
+    }
+
+    /// How the trailing (end) half claims horizontal space. The
+    /// leading (start) half always sizes to its natural mask width;
+    /// the end half follows this policy. Default
+    /// [`WidthPolicy::Default`] (natural width); pass
+    /// [`WidthPolicy::Fill`] to make the end half absorb extra
+    /// space the parent offers.
+    pub fn end_width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self {
+        self.end_width_policy = policy;
         self
     }
 
@@ -480,13 +497,22 @@ impl Widget for DateRangeEdit {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        match self.root_child_id {
+        // Forward the inner LayoutResponse, then overlay flex=1 when
+        // the end half is Fill — the inner HStack consumes its
+        // children's flex internally and reports flex=0 to its
+        // parents, so the outer wrapper has to advertise flex
+        // explicitly for parent stacks to allocate slack.
+        let response = match self.root_child_id {
             Some(id) => ctx
-                .child_size(id, proposal)
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
-            None => proposal.resolve(0.0, 0.0),
+                .child_layout_response(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into()),
+            None => proposal.resolve(0.0, 0.0).into(),
+        };
+        if self.end_width_policy == crate::date_edit::WidthPolicy::Fill {
+            fern_core::widget::LayoutResponse::flexible(response.size, 1.0)
+        } else {
+            response
         }
-        .into()
     }
 
     fn place_children(
@@ -730,9 +756,18 @@ impl DateRangeEdit {
             )
             .child_id(field_id),
         );
-        let sized_field_id = ctx.add(
-            MinSize::new(DEFAULT_HALF_WIDTH, 0.0).child_id(padded_field_id),
-        );
+        // Width policy: start half is always at its natural mask
+        // width (so the start date doesn't reflow when only the end
+        // changes); end half follows `end_width_policy`. `Default`
+        // matches the start (fixed). `Fill` wraps in an
+        // `Expand::horizontal()` (zero-basis flex=1) so the end
+        // half absorbs the unified frame's leftover width.
+        let sized_field_id = match (kind, self.end_width_policy) {
+            (HalfKind::End, crate::date_edit::WidthPolicy::Fill) => {
+                ctx.add(crate::primitives::Expand::horizontal().child_id(padded_field_id))
+            }
+            _ => padded_field_id,
+        };
 
         // ── Segment-stepping (Up/Down on focused segment) ──────
         let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {

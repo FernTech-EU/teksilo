@@ -88,9 +88,6 @@ use crate::time_edit::{
 
 type OnValueChanged = Rc<dyn Fn(Option<DateTime>, &mut EventContext)>;
 
-const DEFAULT_DATE_HALF_WIDTH: f32 = 110.0;
-const DEFAULT_TIME_HALF_WIDTH: f32 = 70.0;
-
 /// Single unified datetime picker over `Signal<Option<DateTime>>`. See
 /// the [module docs](self) for the visual layout and behaviour.
 pub struct DateTimeEdit {
@@ -123,6 +120,12 @@ pub struct DateTimeEdit {
     read_only: bool,
     label: Option<String>,
     validation_behavior: ValidationBehavior,
+    /// How the trailing (time) half claims horizontal space. The
+    /// leading (date) half always sizes to its mask-derived natural
+    /// width — the date stays put while the time half either matches
+    /// that natural width ([`WidthPolicy::Default`]) or absorbs
+    /// extra space ([`WidthPolicy::Fill`]).
+    time_width_policy: crate::date_edit::WidthPolicy,
     /// Composed validation feedback (severity-merged from both halves).
     feedback: Signal<ValidationFeedback>,
     /// `true` while either half holds keyboard focus — drives the
@@ -168,6 +171,7 @@ impl DateTimeEdit {
             read_only: false,
             label: None,
             validation_behavior: ValidationBehavior::AutoCorrect,
+            time_width_policy: crate::date_edit::WidthPolicy::Default,
             feedback: Signal::new(ValidationFeedback::Pristine),
             focused: Signal::new(false),
             calendar_popover_open: Signal::new(false),
@@ -260,6 +264,17 @@ impl DateTimeEdit {
     /// each half uses the same behaviour.
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
+        self
+    }
+
+    /// How the trailing (time) half claims horizontal space. The
+    /// leading (date) half always sizes to its natural mask width;
+    /// the time half follows this policy. Default
+    /// [`WidthPolicy::Default`] (natural width); pass
+    /// [`WidthPolicy::Fill`] to make the time half absorb extra
+    /// space the parent offers.
+    pub fn time_width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self {
+        self.time_width_policy = policy;
         self
     }
 
@@ -632,13 +647,21 @@ impl Widget for DateTimeEdit {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        match self.root_child_id {
+        // Forward the inner LayoutResponse, then overlay flex=1 when
+        // the time half is Fill — the inner HStack consumes the
+        // Expand's flex and reports flex=0 to its parent, so the
+        // outer wrapper has to advertise flex explicitly.
+        let response = match self.root_child_id {
             Some(id) => ctx
-                .child_size(id, proposal)
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
-            None => proposal.resolve(0.0, 0.0),
+                .child_layout_response(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into()),
+            None => proposal.resolve(0.0, 0.0).into(),
+        };
+        if self.time_width_policy == crate::date_edit::WidthPolicy::Fill {
+            fern_core::widget::LayoutResponse::flexible(response.size, 1.0)
+        } else {
+            response
         }
-        .into()
     }
 
     fn place_children(
@@ -780,7 +803,6 @@ impl DateTimeEdit {
             validator,
             self.placeholder.clone(),
             commit,
-            DEFAULT_DATE_HALF_WIDTH,
             "date-time-edit-date-name",
             Role::DateInput,
             DateTimeHalfKind::Date {
@@ -861,7 +883,6 @@ impl DateTimeEdit {
             validator,
             String::new(),
             commit,
-            DEFAULT_TIME_HALF_WIDTH,
             "date-time-edit-time-name",
             Role::TimeInput,
             DateTimeHalfKind::Time {
@@ -889,7 +910,6 @@ impl DateTimeEdit {
         validator: crate::primitives::text_input_field::ValidatorFn,
         placeholder: String,
         commit: Rc<dyn Fn(&mut EventContext)>,
-        half_min_width: f32,
         a11y_label_key: &str,
         a11y_role: Role,
         kind: DateTimeHalfKind,
@@ -970,9 +990,19 @@ impl DateTimeEdit {
             )
             .child_id(field_id),
         );
-        let sized_field_id = ctx.add(
-            MinSize::new(half_min_width, 0.0).child_id(padded_field_id),
-        );
+        // Width policy: date (leading) half is always at its natural
+        // mask width; time (trailing) half follows `time_width_policy`.
+        // `Default` matches the date — the time stays fixed. `Fill`
+        // wraps in `Expand::horizontal()` (zero-basis flex=1) so the
+        // time half absorbs the unified frame's leftover width.
+        let is_time = matches!(kind, DateTimeHalfKind::Time { .. });
+        let sized_field_id = if is_time
+            && self.time_width_policy == crate::date_edit::WidthPolicy::Fill
+        {
+            ctx.add(crate::primitives::Expand::horizontal().child_id(padded_field_id))
+        } else {
+            padded_field_id
+        };
 
         // ── Segment-stepping (Up/Down/PageUp/PageDown on focused
         //    segment) ─────────────────────────────────────────

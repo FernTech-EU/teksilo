@@ -50,8 +50,6 @@ use crate::date_edit::ValidationBehavior;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 use crate::text_input::TextInput;
 
-const DEFAULT_WIDTH: f32 = 96.0;
-
 /// 12h vs 24h time formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimeFormat {
@@ -92,6 +90,7 @@ pub struct TimeEdit {
     enabled: bool,
     read_only: bool,
     validation_behavior: ValidationBehavior,
+    width_policy: crate::date_edit::WidthPolicy,
     label: Option<String>,
     on_value_changed: Option<OnValueChanged>,
     text_signal: Signal<String>,
@@ -124,6 +123,7 @@ impl TimeEdit {
             enabled: true,
             read_only: false,
             validation_behavior: ValidationBehavior::AutoCorrect,
+            width_policy: crate::date_edit::WidthPolicy::Default,
             label: None,
             on_value_changed: None,
             text_signal: Signal::new(String::new()),
@@ -193,6 +193,14 @@ impl TimeEdit {
     /// [`ValidationBehavior`](crate::date_edit::ValidationBehavior).
     pub fn validation_behavior(mut self, behavior: ValidationBehavior) -> Self {
         self.validation_behavior = behavior;
+        self
+    }
+
+    /// How the widget claims horizontal space. See
+    /// [`WidthPolicy`](crate::date_edit::WidthPolicy). Default
+    /// `Default` (natural mask-derived width).
+    pub fn width_policy(mut self, policy: crate::date_edit::WidthPolicy) -> Self {
+        self.width_policy = policy;
         self
     }
 
@@ -413,7 +421,6 @@ impl Widget for TimeEdit {
             .placeholder(self.placeholder.clone())
             .enabled(enabled)
             .read_only(read_only)
-            .min_width(DEFAULT_WIDTH)
             .input_mask(mask_string)
             .validator({
                 let v = validator.clone();
@@ -460,7 +467,17 @@ impl Widget for TimeEdit {
             });
         }
 
-        let root_id = ctx.add(text_input);
+        // Apply width policy. Default → natural mask-derived width.
+        // Fill → wrap in intrinsic-respecting Expand so the field
+        // stretches to its parent's offered width while still
+        // reporting natural width when unconstrained.
+        let root_id = match self.width_policy {
+            crate::date_edit::WidthPolicy::Default => ctx.add(text_input),
+            crate::date_edit::WidthPolicy::Fill => {
+                let inner_id = ctx.add(text_input);
+                ctx.add(crate::primitives::Expand::horizontal().respect_intrinsic().child_id(inner_id))
+            }
+        };
         self.root_child_id = Some(root_id);
 
         // ── Segment-stepping helper ───────────────────────────
@@ -539,13 +556,15 @@ impl Widget for TimeEdit {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
+        // Forward the full LayoutResponse from the inner widget so the
+        // flex from `WidthPolicy::Fill`'s Expand wrapper survives. See
+        // the matching note in `date_edit::DateEdit::layout_response`.
         match self.root_child_id {
             Some(id) => ctx
-                .child_size(id, proposal)
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
-            None => proposal.resolve(0.0, 0.0),
+                .child_layout_response(id, proposal)
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into()),
+            None => proposal.resolve(0.0, 0.0).into(),
         }
-        .into()
     }
 
     fn place_children(
