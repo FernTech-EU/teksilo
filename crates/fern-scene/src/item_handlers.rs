@@ -126,8 +126,19 @@ impl SceneItemHandlerSet {
         self
     }
 
-    /// Set a tooltip string (already-resolved literal).
+    /// Set a tooltip string. The regular variant accepts whatever
+    /// resolves into `String` — including, in a future i18n
+    /// integration, `LocalizedString` (the type produced by `tr!`).
     pub fn tooltip(&mut self, t: impl Into<String>) -> &mut Self {
+        self.tooltip = Some(t.into());
+        self
+    }
+
+    /// Untranslated twin of [`tooltip`](Self::tooltip). Same runtime
+    /// behavior; use as a grep-able marker for explicitly-untranslated
+    /// tooltip strings (debug demos, engine-internal copy).
+    #[doc(hidden)]
+    pub fn tooltip_literal(&mut self, t: impl Into<String>) -> &mut Self {
         self.tooltip = Some(t.into());
         self
     }

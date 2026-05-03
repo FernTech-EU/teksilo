@@ -108,8 +108,28 @@ macro_rules! item_a11y_builders {
             self
         }
 
+        /// Untranslated twin of [`access_label`](Self::access_label).
+        /// Use for grep-able marker that the string is intentionally
+        /// not flowing through any future i18n pipeline (debug demos,
+        /// engine-internal labels). Same runtime behavior.
+        #[doc(hidden)]
+        pub fn access_label_literal(mut self, label: impl Into<String>) -> Self {
+            self.a11y.label = Some(label.into());
+            self
+        }
+
         /// Long-form context appended to the item's announcement.
         pub fn access_description(mut self, description: impl Into<String>) -> Self {
+            self.a11y.description = Some(description.into());
+            self
+        }
+
+        /// Untranslated twin of [`access_description`](Self::access_description).
+        #[doc(hidden)]
+        pub fn access_description_literal(
+            mut self,
+            description: impl Into<String>,
+        ) -> Self {
             self.a11y.description = Some(description.into());
             self
         }
@@ -198,6 +218,13 @@ impl RectItem {
 
     /// Human-readable label used for debug and the default AT name.
     pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Untranslated twin of [`label`](Self::label).
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
@@ -302,6 +329,13 @@ impl PathItem {
 
     /// Human-readable label.
     pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Untranslated twin of [`label`](Self::label).
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
@@ -451,6 +485,13 @@ impl ImageItem {
         self
     }
 
+    /// Untranslated twin of [`label`](Self::label).
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
     /// Opt the image into drag-to-move.
     pub fn draggable(mut self, draggable: bool) -> Self {
         self.flags.set(crate::flags::ItemFlags::IS_DRAGGABLE, draggable);
@@ -523,6 +564,15 @@ impl TextItem {
         }
     }
 
+    /// Untranslated twin of [`new`](Self::new). Same runtime behavior;
+    /// use as a grep-able marker that the text is intentionally not
+    /// flowing through any future i18n pipeline (engine-internal
+    /// debug labels, glyph atlas previews, etc.).
+    #[doc(hidden)]
+    pub fn new_literal(text: impl Into<String>, local_bounds: Rect) -> Self {
+        Self::new(text, local_bounds)
+    }
+
     /// A text item whose content is driven by a `Signal<String>`.
     /// `register_bindings` ties the signal to the SceneView at
     /// `BindingLevel::RepaintOnly` so changes dirty paint and the
@@ -552,6 +602,13 @@ impl TextItem {
 
     /// Override the AT label (defaults to the current text content).
     pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Untranslated twin of [`label`](Self::label).
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
@@ -649,6 +706,13 @@ impl GroupItem {
     /// Human-readable label, used as the default AT group name and
     /// (when `show_label` is enabled) rendered inline at top-leading.
     pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Untranslated twin of [`label`](Self::label).
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
@@ -789,6 +853,40 @@ impl SceneItem for GroupItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_twins_match_translated_setters() {
+        // Each `_literal` twin must produce the same internal state
+        // as its translated counterpart — they're a grep-marker for
+        // explicitly-untranslated call sites, not a behavior split.
+        // Reach into the private fields directly (test module ⇒
+        // same-crate access) since builders shadow the getter name.
+        let r = Rect::new(0.0, 0.0, 10.0, 10.0);
+
+        let a = RectItem::new(r)
+            .label("Hello")
+            .access_label("AT")
+            .access_description("desc");
+        let b = RectItem::new(r)
+            .label_literal("Hello")
+            .access_label_literal("AT")
+            .access_description_literal("desc");
+        assert_eq!(a.label, b.label);
+        assert_eq!(a.a11y.label, b.a11y.label);
+        assert_eq!(a.a11y.description, b.a11y.description);
+
+        // TextItem ::new vs ::new_literal.
+        let t1 = TextItem::new("hi", r);
+        let t2 = TextItem::new_literal("hi", r);
+        assert_eq!(t1.local_bounds(), t2.local_bounds());
+
+        // SceneItemHandlerSet tooltip vs tooltip_literal.
+        let mut h1 = crate::item_handlers::SceneItemHandlerSet::new();
+        h1.tooltip("Tip");
+        let mut h2 = crate::item_handlers::SceneItemHandlerSet::new();
+        h2.tooltip_literal("Tip");
+        assert_eq!(h1.tooltip, h2.tooltip);
+    }
 
     #[test]
     fn access_subtree_mode_round_trips() {

@@ -128,6 +128,13 @@ impl A11yGroupBuilder {
         self
     }
 
+    /// Untranslated twin of [`label`](Self::label).
+    #[doc(hidden)]
+    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
     /// Override the AccessKit role. Default: `Role::Group`. Apps
     /// commonly use `Role::Region` for landmark-style groups.
     pub fn role(mut self, role: accesskit::Role) -> Self {

@@ -617,6 +617,13 @@ impl SceneView {
         self
     }
 
+    /// Untranslated twin of [`a11y_label`](Self::a11y_label).
+    #[doc(hidden)]
+    pub fn a11y_label_literal(mut self, label: impl Into<String>) -> Self {
+        self.a11y_label = Some(label.into());
+        self
+    }
+
     /// Whether the SceneView is currently marked as logically
     /// nested. Read-only accessor for tests / diagnostics.
     pub fn is_nested(&self) -> bool {
