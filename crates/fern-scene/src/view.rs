@@ -192,7 +192,9 @@ pub struct SceneView {
     /// Latest viewport size observed during layout. Cached so
     /// imperative methods like [`SceneView::fit_to_content`] can
     /// reason about the visible rectangle without re-running layout.
-    last_viewport: Cell<Size>,
+    /// `Rc<Cell>` so event-handler closures (e.g. Ctrl+wheel zoom-
+    /// about-viewport-center) can read it without touching `&mut self`.
+    last_viewport: Rc<Cell<Size>>,
 
     // --- Phase 2 view transform state ---------------------------------
     pan_x: Signal<f32>,
@@ -264,6 +266,15 @@ pub struct SceneView {
     /// drags via the spatial-index mutation triggering relayout.
     /// Avoids forcing `Scene` into an `Rc<RefCell>`.
     lightweight_bounds_snapshot: Rc<RefCell<Vec<(ItemId, Rect)>>>,
+    /// Bumped by the on_drag closure on `Ended` after posting a
+    /// `pending_item_move`. SceneView binds to this at
+    /// `BindingLevel::Rebuild` in `build`, so the next build
+    /// cycle drains the pending move and calls
+    /// `Scene::move_item` (which requires `&mut self.scene`,
+    /// only available inside `build`). Without this signal, the
+    /// move was queued but never applied — items "snapped back"
+    /// to their original positions on drag release.
+    drag_dirty: Signal<u64>,
 
     /// App-supplied focus-order callback. When set, the public
     /// [`next_focus`](Self::next_focus) /
@@ -358,7 +369,7 @@ impl SceneView {
             materialized: HashMap::new(),
             widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
-            last_viewport: Cell::new(Size::new(800.0, 600.0)),
+            last_viewport: Rc::new(Cell::new(Size::new(800.0, 600.0))),
             pan_x,
             pan_y,
             zoom,
@@ -382,6 +393,7 @@ impl SceneView {
             drag_target: Rc::new(Cell::new(None)),
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
+            drag_dirty: Signal::new(0),
             focus_order_callback: None,
             a11y_nested: false,
             a11y_label: None,
@@ -913,6 +925,25 @@ impl SceneView {
 
 impl Widget for SceneView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Drain any pending drag-to-move commit. The drop closure
+        // queued `(item_id, new_bounds)` and bumped `drag_dirty`,
+        // which flagged this widget for rebuild. Now we have
+        // `&mut self.scene` so `move_item` can re-bucket the
+        // spatial index.
+        if let Some((item_id, new_bounds)) = self.pending_item_move.take() {
+            self.scene.move_item(item_id, new_bounds);
+            self.drag_target.set(None);
+        }
+
+        // Bind the drag-rebuild signal so the next drop triggers a
+        // rebuild and the drain above runs. `BindingLevel::Rebuild`
+        // is the level that re-runs `build()` on signal change.
+        self.drag_dirty.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Rebuild,
+        );
+
         // Materialise pending widgets (drained the first time, idempotent
         // afterwards). Phase 3 also keeps the reverse lookup
         // `widget_to_item` in sync so place_children's cull is `O(1)`
@@ -1017,14 +1048,74 @@ impl Widget for SceneView {
         {
             let pan_x = self.pan_x.clone();
             let pan_y = self.pan_y.clone();
+            let zoom = self.zoom.clone();
+            let rotation = self.rotation.clone();
+            let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
+            let last_viewport_for_scroll = self.last_viewport.clone();
+            let zoom_dur = self.zoom_anim_duration;
             handlers = handlers.on_scroll(move |event, _ctx| {
-                let WidgetEvent::Scroll { delta } = event else {
+                let WidgetEvent::Scroll { delta, modifiers } = event else {
                     return EventResponse::Ignored;
                 };
                 let (dx, dy) = match delta {
                     ScrollDelta::Pixels { x, y } => (*x, *y),
                     ScrollDelta::Lines { x, y } => (*x * line_height, *y * line_height),
                 };
+                // Ctrl+wheel = zoom about the viewport center.
+                // Unmodified wheel / trackpad pan = pan the view.
+                if modifiers.ctrl() {
+                    // Zoom magnitude scales with vertical scroll
+                    // distance. Sign convention: scroll up (negative
+                    // ScrollDelta after platform negation) → zoom in.
+                    // Pixels deltas are large; rescale so the
+                    // step size matches one wheel notch.
+                    let step_px = match delta {
+                        ScrollDelta::Pixels { y, .. } => *y / 60.0,
+                        ScrollDelta::Lines { y, .. } => *y,
+                    };
+                    if step_px == 0.0 {
+                        return EventResponse::Handled;
+                    }
+                    let factor = (1.0_f32).copysign(-step_px) * 0.0;
+                    let _ = factor;
+                    // Compute multiplicative factor: each notch = 1.1×
+                    // (or 1/1.1 for zoom-out). Using exp-form keeps
+                    // repeated notches consistent.
+                    let factor = (-step_px * 0.1).exp();
+                    let z_old = zoom.get();
+                    let r_now = rotation.get();
+                    let z_new = (z_old * factor).clamp(min_zoom, max_zoom);
+                    if (z_new - z_old).abs() < 1e-6 {
+                        return EventResponse::Handled;
+                    }
+                    let viewport_size = last_viewport_for_scroll.get();
+                    let bo = bounds_origin_for_scroll.get();
+                    let center_screen = fern_canvas::Point::new(
+                        bo.x + viewport_size.width * 0.5,
+                        bo.y + viewport_size.height * 0.5,
+                    );
+                    let pan_old = Vec2::new(pan_x.get(), pan_y.get());
+                    let new_pan = anchor_pan_for_pinch(
+                        center_screen,
+                        pan_old,
+                        z_old,
+                        r_now,
+                        z_new,
+                        r_now,
+                        bo,
+                    )
+                    .unwrap_or(pan_old);
+                    if prefers_reduced {
+                        zoom.set(z_new);
+                        pan_x.set(new_pan.x);
+                        pan_y.set(new_pan.y);
+                    } else {
+                        zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
+                        pan_x.animate_to(new_pan.x, zoom_dur, Easing::EaseOut);
+                        pan_y.animate_to(new_pan.y, zoom_dur, Easing::EaseOut);
+                    }
+                    return EventResponse::Handled;
+                }
                 // Convention: positive scroll delta on the y-axis
                 // means content scrolls "up" in the viewport, which
                 // is equivalent to panning the *view* down — i.e. the
@@ -1220,6 +1311,7 @@ impl Widget for SceneView {
             let pending_marquee_commit = self.pending_marquee_commit.clone();
             let drag_target = self.drag_target.clone();
             let pending_item_move = self.pending_item_move.clone();
+            let drag_dirty = self.drag_dirty.clone();
             let view_xform_signal = self.view_transform_signal.clone();
             let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
             handlers = handlers.on_drag(move |phase, _ctx| {
@@ -1299,6 +1391,12 @@ impl Widget for SceneView {
                                 target.original_bounds.height,
                             );
                             pending_item_move.set(Some((target.item_id, new_bounds)));
+                            // Bump the rebuild signal so SceneView's
+                            // `build()` runs and drains the pending
+                            // move (where `&mut self.scene` is
+                            // available and `Scene::move_item` can
+                            // commit + re-bucket the spatial index).
+                            drag_dirty.set(drag_dirty.get().wrapping_add(1));
                             return;
                         }
                         // Marquee commit path (unchanged).
@@ -2359,6 +2457,7 @@ mod tests {
         tree.pointer_move(Point::new(400.0, 300.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 50.0, y: 30.0 },
+            modifiers: Default::default(),
         });
 
         // The animation has started but not finished — `animation_target`
@@ -2388,6 +2487,7 @@ mod tests {
         tree.pointer_move(Point::new(400.0, 300.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            modifiers: Default::default(),
         });
 
         let view = view_handle(&tree, view_id);
@@ -2460,6 +2560,7 @@ mod tests {
         tree.pointer_move(Point::new(400.0, 300.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 50.0, y: 30.0 },
+            modifiers: Default::default(),
         });
 
         let view = view_handle(&tree, view_id);
@@ -3711,6 +3812,7 @@ mod tests {
         tree.pointer_move(Point::new(100.0, 100.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 50.0, y: 50.0 },
+            modifiers: Default::default(),
         });
 
         let view = view_handle(&tree, view_id);
@@ -3737,6 +3839,7 @@ mod tests {
         tree.pointer_move(Point::new(100.0, 100.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 50.0, y: 0.0 },
+            modifiers: Default::default(),
         });
 
         let view = view_handle(&tree, view_id);

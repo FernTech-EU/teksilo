@@ -1884,6 +1884,7 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 25.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: crate::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            modifiers: Default::default(),
         });
     }
 
@@ -3359,6 +3360,7 @@ mod tests {
         // stale hover from before the drag started).
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: crate::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+            modifiers: Default::default(),
         });
         assert_eq!(
             scroll_count.get(),

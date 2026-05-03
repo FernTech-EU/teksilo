@@ -507,12 +507,17 @@ impl SceneItem for TextItem {
 
     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
         let text = self.text.current();
-        canvas.draw_text(
-            &text,
-            self.bounds,
-            &fern_tokens::TextStyle::default(),
-            self.color,
-        );
+        // `draw_paragraph` wraps `text` to fit the bounds rect and
+        // returns laid-out glyphs at scene coords. Falls back to
+        // single-line `draw_text` when the canvas has no text
+        // backend configured (e.g. headless tests without
+        // `MockTextBackend`).
+        let style = fern_tokens::TextStyle::default();
+        if canvas.text_backend().is_some() {
+            canvas.draw_paragraph(&text, self.bounds, &style, self.color, None);
+        } else {
+            canvas.draw_text(&text, self.bounds, &style, self.color);
+        }
     }
 
     fn label(&self) -> Option<String> {

@@ -203,6 +203,7 @@ pub fn translate_mouse_wheel(
     };
     Some(WidgetEvent::Scroll {
         delta: scroll_delta,
+        modifiers: state.current_modifiers,
     })
 }
 

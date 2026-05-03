@@ -836,6 +836,7 @@ mod tests {
         // Scroll down 100px
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
@@ -871,6 +872,7 @@ mod tests {
         // Scroll way past the end
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -917,6 +919,7 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 0.0, y: 50.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1121,6 +1124,7 @@ mod tests {
         // Scroll right via horizontal wheel
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 80.0, y: 0.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1300,6 +1304,7 @@ mod tests {
         // Scroll via line-based wheel (should animate)
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Lines { x: 0.0, y: 5.0 },
+            modifiers: Default::default(),
         });
 
         // The animation target was set but not yet ticked — the state
@@ -1341,6 +1346,7 @@ mod tests {
 
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Lines { x: 0.0, y: 5.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1416,6 +1422,7 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1492,6 +1499,7 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -1558,6 +1566,7 @@ mod tests {
         tree.pointer_move(Point::new(100.0, 100.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(200.0, 250.0));
 

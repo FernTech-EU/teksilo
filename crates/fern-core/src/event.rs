@@ -269,6 +269,13 @@ pub enum WidgetEvent {
     PointerLeave,
     Scroll {
         delta: ScrollDelta,
+        /// Modifier keys held at the time of the scroll event.
+        /// Defaults to `Modifiers::NONE` for synthesized events
+        /// (tests, keyboard-driven scroll requests). Real-platform
+        /// scroll events populate this from the platform's tracked
+        /// modifier state — apps detect Ctrl-wheel-to-zoom by
+        /// inspecting `modifiers.ctrl()`.
+        modifiers: Modifiers,
     },
     KeyDown {
         key: Key,
