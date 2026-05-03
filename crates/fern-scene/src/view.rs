@@ -705,6 +705,43 @@ impl SceneView {
             .animate_to(target_radians, duration, Easing::EaseOut);
     }
 
+    /// Snap rotation to `target` without animation.
+    pub fn set_rotation(&self, target_radians: f32) {
+        self.rotation.set(target_radians);
+    }
+
+    /// Snapshot the current pan / zoom / rotation as a
+    /// [`SceneViewState`](crate::SceneViewState). Designed for
+    /// persistence: store the snapshot in your settings layer on
+    /// app exit, restore it via [`restore_state`](Self::restore_state)
+    /// on next launch.
+    ///
+    /// The snapshot reflects the *current* signal values — if a
+    /// pan/zoom animation is in flight, the captured values are
+    /// the in-flight tween position, not the eventual target.
+    /// Apps that want to capture the target should query
+    /// [`pan_x_animation_target`](Self::pan_x_animation_target) /
+    /// friends manually.
+    pub fn state(&self) -> crate::SceneViewState {
+        crate::SceneViewState {
+            pan_x: self.pan_x.get(),
+            pan_y: self.pan_y.get(),
+            zoom: self.zoom.get(),
+            rotation: self.rotation.get(),
+        }
+    }
+
+    /// Restore a previously captured [`SceneViewState`](crate::SceneViewState).
+    /// Snaps each signal to the saved value (no animation —
+    /// pan/zoom/rotation jump to the persisted state immediately).
+    /// Zoom is clamped to `[min_zoom, max_zoom]`.
+    pub fn restore_state(&self, state: crate::SceneViewState) {
+        self.pan_x.set(state.pan_x);
+        self.pan_y.set(state.pan_y);
+        self.zoom.set(state.zoom.clamp(self.min_zoom, self.max_zoom));
+        self.rotation.set(state.rotation);
+    }
+
     /// Latest viewport size observed during layout. Useful for
     /// imperative `fit_*` calls.
     pub fn viewport_size(&self) -> Size {
@@ -4383,5 +4420,63 @@ mod tests {
         assert!(!view.is_nested());
         let view = view.nested_a11y(true);
         assert!(view.is_nested());
+    }
+
+    // -- View-state persistence ----------------------------------------
+
+    #[test]
+    fn state_snapshot_reflects_current_view() {
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let view = view_handle(&tree, view_id);
+        view.set_pan(Vec2::new(100.0, 50.0));
+        view.set_zoom(2.0);
+        view.set_rotation(0.5);
+
+        let s = view.state();
+        assert_eq!(s.pan_x, 100.0);
+        assert_eq!(s.pan_y, 50.0);
+        assert_eq!(s.zoom, 2.0);
+        assert_eq!(s.rotation, 0.5);
+    }
+
+    #[test]
+    fn restore_state_round_trip() {
+        let saved = crate::SceneViewState::new(Vec2::new(42.0, -17.0), 1.5, 0.25);
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let view = view_handle(&tree, view_id);
+
+        view.restore_state(saved);
+        assert_eq!(view.pan(), Vec2::new(42.0, -17.0));
+        assert_eq!(view.zoom(), 1.5);
+        assert_eq!(view.rotation(), 0.25);
+
+        // Round-trip: snapshot equals the restored input.
+        assert_eq!(view.state(), saved);
+    }
+
+    #[test]
+    fn restore_state_clamps_zoom() {
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()).max_zoom(5.0));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let view = view_handle(&tree, view_id);
+
+        // Saved zoom of 100.0 (e.g. corrupted settings) is clamped
+        // to max_zoom on restore — apps don't end up with an
+        // unusable infinitely-zoomed view from a stale config.
+        let saved = crate::SceneViewState::new(Vec2::ZERO, 100.0, 0.0);
+        view.restore_state(saved);
+        assert_eq!(view.zoom(), 5.0);
+    }
+
+    #[test]
+    fn identity_state_is_default() {
+        let s: crate::SceneViewState = Default::default();
+        assert!(s.is_identity());
     }
 }

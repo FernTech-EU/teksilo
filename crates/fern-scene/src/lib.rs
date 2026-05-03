@@ -50,6 +50,7 @@ pub mod items;
 pub mod minimap;
 pub mod scene;
 pub mod selection;
+pub mod state;
 pub mod transform;
 pub mod view;
 
@@ -61,6 +62,7 @@ pub use index::{GridHashIndex, SpatialIndex};
 pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
 pub use minimap::SceneMinimap;
+pub use state::SceneViewState;
 pub use scene::Scene;
 pub use selection::{SceneSelection, SceneSelectionMode};
 pub use view::{FocusDirection, SceneView};
