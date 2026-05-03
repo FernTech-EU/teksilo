@@ -152,6 +152,11 @@ impl Widget for PropertiesRows {
             });
         let menu = MenuList::new().item(copy_item);
         let menu_id = ctx.add(menu);
+        // Critical: orphan widgets (no parent) are treated as active
+        // tree roots and get rendered. We park the menu dormant so it
+        // doesn't appear until the secondary-click handler activates +
+        // `show_overlay`s it. Same pattern as `ComboBox`'s dropdown.
+        ctx.set_dormant(menu_id);
         self.context_menu_id.set(Some(menu_id));
 
         // Right-click handler: stash the row's value into the shared
