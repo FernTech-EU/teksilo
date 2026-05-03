@@ -228,17 +228,44 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Declare this widget's accessibility identity.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 
+    /// Whether this widget wants the AT walker to consult its
+    /// [`a11y_redirect_descendant`](Self::a11y_redirect_descendant)
+    /// hook for *every* descendant during AT tree emission, not
+    /// just its direct arena children.
+    ///
+    /// Returning `true` opts this widget into ancestor-chain
+    /// queries: as the walker iterates each descendant's parent
+    /// to decide where the descendant's `NodeId` lands in the AT
+    /// tree, it walks up the arena from that parent and asks
+    /// every ancestor with this flag set. First `Some(_)` wins
+    /// (closest ancestor takes priority — same precedence as a
+    /// CSS-like cascade).
+    ///
+    /// Returning `false` (the default) makes the walker pay the
+    /// O(depth) ancestor walk only for trees that genuinely need
+    /// it. Only opt in if your widget actively places
+    /// non-direct-child descendant `NodeId`s in its own
+    /// `accessibility()` emission — `fern_scene::SceneView` is
+    /// the canonical example.
+    ///
+    /// Default: `false`.
+    fn wants_descendant_redirects(&self) -> bool {
+        false
+    }
+
     /// Optional redirection hook for AT-tree placement of a child.
     ///
-    /// The accessibility walker calls this for each arena child of
-    /// `self_id` while building the parent's AT children list. The
-    /// default returns `None` — the walker emits the child as a
-    /// normal direct AT child of this widget. Returning `Some(_)`
-    /// tells the walker that this widget has *already* placed
-    /// `descendant`'s `NodeId` somewhere else (typically under a
-    /// synthetic node it emitted in its own `accessibility()`
-    /// call), and the walker should NOT add it to this widget's
-    /// own children list.
+    /// The accessibility walker calls this on the immediate arena
+    /// parent of each child — and, if the parent
+    /// [`wants_descendant_redirects`](Self::wants_descendant_redirects)
+    /// returns `false`, on every opt-in ancestor walking up the
+    /// arena from that parent. First `Some(_)` wins, scanned
+    /// bottom-up (closest ancestor takes priority). Returning
+    /// `Some(_)` tells the walker that this widget has *already*
+    /// placed `descendant`'s `NodeId` somewhere else (typically
+    /// under a synthetic node it emitted in its own
+    /// `accessibility()` call), and the walker should NOT add it
+    /// to its arena parent's children list.
     ///
     /// The returned `NodeId` is informational — it identifies the
     /// new logical parent in case the walker wants to bookkeep
@@ -309,6 +336,16 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// The trait already bounds on `std::any::Any` so concrete types
     /// satisfy the `'static` requirement.
     fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
+
+    /// Mutable counterpart of [`as_any`](Self::as_any). Default
+    /// returns `None`; widgets that want to expose mutable state to
+    /// tests (e.g. so a test can mutate a `Scene` inside a
+    /// `SceneView` post-layout) override with `Some(self)`. Should
+    /// follow the same opt-in pattern as `as_any`: only widgets
+    /// that opt into `&` introspection should opt into `&mut`.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         None
     }
 

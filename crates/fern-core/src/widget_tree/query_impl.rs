@@ -19,6 +19,20 @@ impl WidgetTree {
         self.arena.get(id).and_then(|node| node.widget.as_any())
     }
 
+    /// Mutable variant of [`widget_as_any`](Self::widget_as_any).
+    /// Widgets opt in by overriding `Widget::as_any_mut`. Used by
+    /// tests that need to mutate widget state post-layout (e.g.
+    /// declaring a logical AT parent on a `SceneView` after the
+    /// arena allocated the inner widget's `WidgetId`).
+    pub fn widget_as_any_mut(
+        &mut self,
+        id: WidgetId,
+    ) -> Option<&mut dyn std::any::Any> {
+        self.arena
+            .get_mut(id)
+            .and_then(|node| node.widget.as_any_mut())
+    }
+
     pub fn children(&self, id: WidgetId) -> Vec<WidgetId> {
         self.arena.children(id).to_vec()
     }

@@ -735,6 +735,16 @@ impl Widget for SceneView {
         true
     }
 
+    fn wants_descendant_redirects(&self) -> bool {
+        // SceneView opts into the ancestor-chain query so
+        // `A11yNode::Widget(widget_id)` declarations work for
+        // widgets at any arena depth — not just direct children
+        // of SceneView. The walker pays the ancestor walk only
+        // when at least one ancestor opts in, so the cost is
+        // contained to subtrees that actually need it.
+        true
+    }
+
     fn a11y_redirect_descendant(
         &self,
         _self_id: WidgetId,
@@ -946,6 +956,10 @@ impl Widget for SceneView {
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }
 }
@@ -2548,6 +2562,250 @@ mod tests {
             Widget::a11y_redirect_descendant(view, view_widget_id, view_widget_id)
                 .is_none(),
             "redirect hook returns None when no declaration is in place"
+        );
+    }
+
+    /// A trivial container widget: takes one child via `build`,
+    /// reports it through `children()`, lays it out at full
+    /// proposed size, paints nothing, opts OUT of descendant
+    /// redirects (default false). Used by deep-descendant tests
+    /// to insert an extra arena level between SceneView and the
+    /// inner widget so we can verify the ancestor-chain walk
+    /// reaches SceneView even past a non-opting intermediate.
+    #[derive(Debug)]
+    struct PlainContainer {
+        inner_id: Option<WidgetId>,
+    }
+    impl PlainContainer {
+        fn new() -> Self {
+            Self { inner_id: None }
+        }
+    }
+    impl Widget for PlainContainer {
+        fn build(
+            &mut self,
+            ctx: &mut fern_core::build_context::BuildContext,
+        ) -> Vec<WidgetId> {
+            let id = ctx.add(LabelledFill { label: "inner" });
+            self.inner_id = Some(id);
+            vec![id]
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(40.0, 40.0).into()
+        }
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [fern_core::widget::WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for placement in children.iter_mut() {
+                placement.origin = Point::new(bounds.x, bounds.y);
+                placement.size = Size::new(bounds.width, bounds.height);
+            }
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            self.inner_id.into_iter().collect()
+        }
+    }
+
+    #[test]
+    fn auto_graft_deep_descendant_under_scene_view_group() {
+        // The headline deep-descendant test. Arena shape:
+        //   SceneView → PlainContainer → LabelledFill (inner)
+        //
+        // PlainContainer opts OUT of `wants_descendant_redirects`
+        // (default false). SceneView opts IN. Declaring
+        // `A11yNode::Widget(inner_id)` causes the framework
+        // walker — when iterating PlainContainer's children — to
+        // walk up the arena, skip PlainContainer (opt-out), find
+        // SceneView (opt-in), and consult its hook. SceneView
+        // returns `Some(group_node_id)` and the walker skips the
+        // default push.
+        //
+        // Result: inner's NodeId appears in the declared group's
+        // children list, NOT in PlainContainer's. The widget's
+        // own AccessKit Node still emits via the recursive walk
+        // and lands in `nodes`.
+        use crate::a11y::{A11yGroup, A11yNode};
+        use fern_core::accessibility::{
+            synthetic_node_id, widget_id_to_node_id, SyntheticKind,
+        };
+
+        // Stage 1: add a PlainContainer scene-entry, layout once
+        // to learn the inner widget's allocated `WidgetId`.
+        let mut scene = Scene::new();
+        let group = scene.add_a11y_group(A11yGroup::builder().label("Tools"));
+        scene.add_widget(
+            PlainContainer::new(),
+            Rect::new(10.0, 10.0, 40.0, 40.0),
+        );
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let container_id = tree.children(view_id)[0];
+        let inner_id = tree.children(container_id)[0];
+
+        // Stage 2: declare the deep-descendant relocation via
+        // `scene_mut()` reached through `widget_as_any_mut`. The
+        // arena assigned `inner_id` during layout; use it.
+        let scene_view = tree
+            .widget_as_any_mut(view_id)
+            .and_then(|a| a.downcast_mut::<SceneView>())
+            .expect("downcast SceneView mut");
+        scene_view.scene_mut().set_a11y_parent(
+            A11yNode::Widget(inner_id),
+            Some(A11yNode::Group(group)),
+        );
+
+        // Stage 3: re-layout (so AT walker sees the new
+        // declaration via the next sync_accessibility) and verify.
+        // Re-layout marks dirty; the arena state stays stable so
+        // `inner_id` is still valid.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        let group_node_id =
+            synthetic_node_id(view_id, group.as_u64(), SyntheticKind::SceneGroup);
+        let inner_node_id = widget_id_to_node_id(inner_id);
+        let container_node_id = widget_id_to_node_id(container_id);
+
+        let find = |id: accesskit::NodeId| {
+            update
+                .nodes
+                .iter()
+                .find(|(n, _)| *n == id)
+                .map(|(_, n)| n)
+        };
+        let group_node = find(group_node_id).expect("group emitted");
+        let container_node = find(container_node_id).expect("container emitted");
+        let _inner_node = find(inner_node_id).expect("inner widget still emitted");
+
+        assert!(
+            group_node.children().contains(&inner_node_id),
+            "inner widget must appear under its declared logical group, \
+             not under its arena parent"
+        );
+        assert!(
+            !container_node.children().contains(&inner_node_id),
+            "inner widget must NOT appear under PlainContainer (its arena \
+             parent) — the redirect skipped that push"
+        );
+    }
+
+    #[test]
+    fn auto_graft_deep_descendant_no_op_without_optin_ancestor() {
+        // If no ancestor opts into `wants_descendant_redirects`,
+        // the ancestor-chain walk is a no-op (each ancestor's
+        // flag is checked, fast-path returns false), and the
+        // descendant emits normally as a child of its arena
+        // parent. This pins the opt-in semantic: the cost of the
+        // ancestor walk is bounded to subtrees that genuinely
+        // need it.
+        //
+        // We can't run a clean test with no SceneView at all
+        // (the auto-graft surface doesn't apply), so instead we
+        // verify that without a `set_a11y_parent` declaration,
+        // the inner widget appears under its arena parent
+        // (PlainContainer) — confirming the SceneView opt-in
+        // doesn't accidentally claim every descendant.
+        use fern_core::accessibility::widget_id_to_node_id;
+
+        let mut scene = Scene::new();
+        scene.add_widget(
+            PlainContainer::new(),
+            Rect::new(10.0, 10.0, 40.0, 40.0),
+        );
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let container_id = tree.children(view_id)[0];
+        let inner_id = tree.children(container_id)[0];
+
+        let update = tree.sync_accessibility();
+        let container_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == widget_id_to_node_id(container_id))
+            .map(|(_, n)| n)
+            .expect("container emitted");
+        assert!(
+            container_node
+                .children()
+                .contains(&widget_id_to_node_id(inner_id)),
+            "without a redirect declaration, inner widget appears under \
+             its arena parent — opt-in does not claim every descendant"
+        );
+    }
+
+    #[test]
+    fn ancestor_chain_walk_skips_optout_intermediate() {
+        // Arena shape: SceneView → PlainContainer → LabelledFill.
+        // PlainContainer is `wants_descendant_redirects = false`
+        // (default). The walker, iterating PlainContainer's
+        // children, must skip past it and reach SceneView for
+        // the redirect query — proving the opt-out flag doesn't
+        // halt the walk. Distinct from the headline test in
+        // that we explicitly target the intermediate's opt-out
+        // behaviour.
+        use crate::a11y::{A11yGroup, A11yNode};
+        use fern_core::accessibility::{
+            synthetic_node_id, widget_id_to_node_id, SyntheticKind,
+        };
+
+        let mut scene = Scene::new();
+        let group = scene.add_a11y_group(A11yGroup::builder().label("G"));
+        scene.add_widget(
+            PlainContainer::new(),
+            Rect::new(10.0, 10.0, 40.0, 40.0),
+        );
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let container_id = tree.children(view_id)[0];
+        let inner_id = tree.children(container_id)[0];
+
+        // Sanity: PlainContainer opts out (default).
+        assert!(
+            !PlainContainer::new().wants_descendant_redirects(),
+            "PlainContainer must default to opt-out for this test to be meaningful"
+        );
+
+        let scene_view = tree
+            .widget_as_any_mut(view_id)
+            .and_then(|a| a.downcast_mut::<SceneView>())
+            .unwrap();
+        scene_view.scene_mut().set_a11y_parent(
+            A11yNode::Widget(inner_id),
+            Some(A11yNode::Group(group)),
+        );
+
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        let group_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| {
+                *id == synthetic_node_id(
+                    view_id,
+                    group.as_u64(),
+                    SyntheticKind::SceneGroup,
+                )
+            })
+            .map(|(_, n)| n)
+            .unwrap();
+        assert!(
+            group_node.children().contains(&widget_id_to_node_id(inner_id)),
+            "ancestor walk must reach SceneView past the opt-out \
+             intermediate"
         );
     }
 }

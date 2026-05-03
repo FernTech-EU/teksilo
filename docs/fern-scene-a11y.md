@@ -39,7 +39,8 @@ below.
 |-------|------|--------|
 | 5a | Visual-default a11y + keyboard navigation | ✅ landed |
 | 5b core | Logical tree (groups, parents, relations, live, landmarks, categories) | ✅ landed |
-| 5b auto-graft | Widget descendants routed through declared logical parents | ✅ landed |
+| 5b auto-graft (direct) | `add_widget`-managed cards routed via `A11yNode::Item` | ✅ landed |
+| 5b auto-graft (deep) | Deeply-nested widgets routed via `A11yNode::Widget` + ancestor walk | ✅ landed |
 | 5b modes | `A11yMode::Cooperative` / `StrictlyParallel` | ✅ landed |
 | 5b callbacks | `focus_order(...)` / `directional_navigation(...)` | not yet |
 
@@ -190,16 +191,105 @@ machinery intact.
 prefer `A11yNode::Item(item_id)` — same ergonomics, and
 auto-graft handles them.
 
-> **Limitation.** The `Widget::a11y_redirect_descendant` hook is
-> consulted only on the **direct** arena parent of a child during
-> AT walk. So `A11yNode::Widget(widget_id)` only takes effect
-> when `widget_id` is a direct child of `SceneView`. Relocating
-> a *deeply nested* widget (a `ComboBox` two arena-levels inside
-> a Card) would require ancestor-chain queries from the walker,
-> which is a planned extension. Apps that need this today should
-> structure the widget so the relocation target is a direct
-> SceneView child, or expose the inner widget's id and add it to
-> the Scene as its own `add_widget` entry.
+### Deep-descendant `A11yNode::Widget(...)` relocation
+
+The `Widget::a11y_redirect_descendant` hook supports relocating
+widgets at any arena depth. To opt in, a container widget
+overrides `Widget::wants_descendant_redirects` to return `true`;
+the framework then walks up the ancestor chain at every child
+push during AT emission and asks each opted-in ancestor whether
+it claims the descendant. First `Some` wins, scanned bottom-up
+(closest ancestor takes priority — same precedence rule as CSS
+cascade). `SceneView` opts in; most widgets stay at the default
+`false` so the cost is paid only by containers that need it.
+
+**Risks and edge cases — read these before relying on the
+feature.**
+
+- **Performance.** Every child push at every arena depth makes
+  one ancestor-chain walk. The walk early-exits at the first
+  opted-in ancestor that claims the descendant; for trees with
+  no opted-in ancestors, it walks to root. In practice this is
+  bounded by tree depth (rarely > 20) and small constant work
+  per ancestor, so the cost is negligible — but it is non-zero.
+  The opt-in flag means widgets that don't care pay nothing.
+
+- **Conflict resolution: closest-ancestor-wins.** If an
+  outer `SceneView` and an inner `SceneView` both declare the
+  same descendant, the *inner* one's claim takes effect (it's
+  closer). Document your domain's expectation; ambiguity here
+  is a future-bug factory.
+
+- **Stale declarations.** `set_a11y_parent(A11yNode::Widget(w),
+  ...)` records a `WidgetId` snapshot. If subsequent code
+  removes that widget from the arena, `SceneView`'s pre-emit
+  attaches a `NodeId` that no `(NodeId, Node)` entry exists for
+  in the final `TreeUpdate` — AccessKit receives an orphan
+  child reference. Apps are responsible for clearing
+  declarations when they remove widgets:
+  `scene.set_a11y_parent(A11yNode::Widget(w), None)`.
+
+- **Cross-`SceneView` pollution.** Two `SceneView`s in the same
+  window. `SceneView A` declares `A11yNode::Widget(w)` where
+  `w` is actually a descendant of `SceneView B`. Pre-emit on
+  `SceneView A` attaches `w`'s `NodeId` to one of A's synthetic
+  groups; the walker, descending into B's subtree, also emits
+  `w` under its true natural parent. `w` ends up referenced
+  from two parents in the AT tree. **The framework does not
+  detect or resolve this** — it's an app bug, on a par with
+  declaring a stale widget. Validate at app level that any
+  `A11yNode::Widget(w)` declaration on a given `SceneView`
+  references a true arena descendant of *that* `SceneView`.
+
+- **`seen_children` invariant.** When an ancestor claims a
+  descendant via the redirect hook, the immediate-parent's
+  push is skipped. The walker still records the claim in
+  `seen_children` so a *third* ancestor double-claiming the
+  same descendant trips the duplicate-child detector.
+
+- **Modal / overlay surfaces.** Tooltips, popovers, and modals
+  live in parallel arena scopes that the walker emits at the
+  top level. The redirect hook applies to in-tree ancestors
+  only; an overlay anchored inside a Scene card is not seen as
+  a descendant of `SceneView` by the ancestor walk because the
+  arena `parent()` chain breaks at the overlay scope. Treat
+  overlays as their own emission roots.
+
+- **Bounds and focus stay correct.** The widget's screen
+  bounds come from `arena.bounds(id)`, set by the framework
+  walker on the widget's own `Node`. The redirect only changes
+  AT-tree position, not arena position — Tab order, keyboard
+  handling, action dispatch all use the arena tree (unchanged).
+  AT users navigate the AT tree (changed). This is the
+  intended split.
+
+- **Descendant must exist before declaration.** The user
+  supplies a `WidgetId`, which is allocated only after the
+  arena materialises the widget (at `tree.add(...)` /
+  `tree.layout(...)` time). Declarations made before the
+  widget exists silently store a `WidgetId` value that may
+  collide with a future allocation in the same slot. Practical
+  guidance: build the tree, query the arena for the
+  `WidgetId`, then declare via `scene_mut().set_a11y_parent(...)`.
+
+- **Emission order.** `SceneView::accessibility()` runs when
+  the walker visits `SceneView`, which is *before* the walker
+  descends into descendants. The pre-emit step attaches
+  descendant `NodeId`s to synthetic groups' children lists at
+  that moment. AccessKit doesn't require child-NodeId entries
+  in `nodes` to appear before the parent that references them;
+  it only requires referential integrity once the `TreeUpdate`
+  is complete. So the descendant's full `(NodeId, Node)` entry
+  landing later via the recursive walker emission is fine. A
+  walker refactor that *did* require declaration-before-use
+  ordering would break this — pinned by the
+  `auto_graft_deep_descendant_under_scene_view_group` test.
+
+If your app's relocation pattern is hitting any of these edge
+cases in practice, file an issue with a repro — the fix will
+likely be a framework-side improvement (stale-declaration
+validation, cross-scene-view detection) rather than an
+app-level workaround.
 
 ## Parallel structural layer (Phase 5b)
 

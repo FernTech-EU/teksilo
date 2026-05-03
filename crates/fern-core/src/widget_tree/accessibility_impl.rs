@@ -186,17 +186,25 @@ impl WidgetTree {
                 for &child_id in children {
                     if self.arena.is_active(child_id) {
                         let child_nid = widget_id_to_node_id(child_id);
-                        // AT-redirect hook: the parent widget can claim
-                        // it has already placed this descendant under a
-                        // different parent in its own `accessibility()`
-                        // emission (typically `fern_scene::SceneView`
-                        // grafting a heavyweight item into a declared
-                        // logical group). When that happens, skip the
-                        // push so the descendant doesn't appear as a
-                        // duplicate child of this widget. Still record
-                        // in `seen_children` so a sibling can't
-                        // independently claim the same NodeId.
-                        if node.widget.a11y_redirect_descendant(id, child_id).is_some() {
+                        // AT-redirect hook (Phase 5b auto-graft):
+                        // walk up the arena from `id` asking every
+                        // opted-in ancestor whether it claims this
+                        // descendant. First `Some(_)` wins, scanned
+                        // bottom-up so closest ancestor takes
+                        // priority. The immediate parent is queried
+                        // first if it opts in — direct-child
+                        // relocation is the special case of an
+                        // ancestor walk of length zero.
+                        //
+                        // Performance: most widgets default
+                        // `wants_descendant_redirects = false` and
+                        // are skipped without calling the hook, so
+                        // the walk is O(opted-in ancestors) per
+                        // child push, typically 0 or 1 for a
+                        // SceneView-rooted subtree.
+                        if self.ancestor_chain_redirects(id, child_id) {
+                            // Still record so a sibling can't
+                            // double-claim the same descendant.
                             seen_children.insert(child_nid, id);
                             continue;
                         }
@@ -277,6 +285,41 @@ impl WidgetTree {
                 );
             }
         }
+    }
+
+    /// Walk the arena from `parent_id` up through ancestors, asking
+    /// each opted-in widget whether it claims `descendant` via
+    /// [`Widget::a11y_redirect_descendant`]. First widget that
+    /// returns `Some(_)` wins (closest-ancestor-first scan). Returns
+    /// `true` if any ancestor claimed the descendant — the caller
+    /// then skips the default child-list push.
+    ///
+    /// Cost: bounded by arena depth, but most widgets default
+    /// `wants_descendant_redirects = false` and short-circuit
+    /// without invoking the redirect hook itself. Trees with no
+    /// opted-in ancestors pay one `is_active` + one `Widget::
+    /// wants_descendant_redirects` call per ancestor — both
+    /// trivial — and walk to root.
+    ///
+    /// `parent_id` is queried *first* — direct-child relocation is
+    /// just the special case of an ancestor walk of length one.
+    fn ancestor_chain_redirects(&self, parent_id: WidgetId, descendant: WidgetId) -> bool {
+        let mut current = Some(parent_id);
+        while let Some(curr) = current {
+            let Some(curr_node) = self.arena.get(curr) else {
+                break;
+            };
+            if curr_node.widget.wants_descendant_redirects()
+                && curr_node
+                    .widget
+                    .a11y_redirect_descendant(curr, descendant)
+                    .is_some()
+            {
+                return true;
+            }
+            current = self.arena.parent(curr);
+        }
+        false
     }
 
     /// Build a builder representing the widget's full a11y state at this
