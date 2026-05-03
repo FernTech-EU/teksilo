@@ -12,7 +12,7 @@
 use fern_core::signal::Signal;
 use fern_settings::SettingsStore;
 
-use crate::state::{InspectorState, OverlayMode};
+use crate::state::{InspectorState, NUM_TABS, OverlayMode};
 
 const KEY_OPEN: &str = "__fern_inspector.open";
 const KEY_BOUNDS_MODE: &str = "__fern_inspector.bounds_mode";
@@ -80,10 +80,16 @@ fn bridge_overlay_mode(state_sig: &Signal<OverlayMode>, store: &SettingsStore) {
 
 fn bridge_active_tab(state_sig: &Signal<usize>, store: &SettingsStore) {
     // Stored as i64 because TOML lacks unsigned integers and `usize`'s
-    // width varies by target. Out-of-range / negative values seed at 0.
+    // width varies by target. Negative or out-of-range values seed at
+    // 0 — TabWidget gracefully no-ops on a stale index, but the panel
+    // would render blank, which is worse than starting on the Tree
+    // tab.
     let initial = state_sig.get() as i64;
     let persisted = store.signal::<i64>(KEY_ACTIVE_TAB, initial);
-    let parsed = usize::try_from(persisted.get()).unwrap_or(0);
+    let parsed = usize::try_from(persisted.get())
+        .ok()
+        .filter(|i| *i < NUM_TABS)
+        .unwrap_or(0);
     if parsed != state_sig.get() {
         state_sig.set(parsed);
     }

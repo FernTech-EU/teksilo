@@ -10,6 +10,11 @@ use fern_core::widget_id::WidgetId;
 
 use crate::shell::InspectorShell;
 
+/// Number of tabs registered by `build_panel` in `shell.rs`. Single
+/// source of truth so persistence can clamp loaded values that would
+/// otherwise leave the panel showing nothing.
+pub(crate) const NUM_TABS: usize = 9;
+
 /// How the bounds-overlay layer renders.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OverlayMode {
