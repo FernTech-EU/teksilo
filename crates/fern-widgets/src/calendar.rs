@@ -576,10 +576,28 @@ impl Widget for Calendar {
         // without forcing a layout/repaint.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
+        // Mode changes (Days → Months → Years header zoom) trigger a
+        // full Calendar rebuild because the header label is captured
+        // eagerly at build time (Button doesn't take a reactive
+        // label). The cost — re-creating the day/months/years bodies
+        // — is acceptable since mode flips are user-initiated and
+        // infrequent. The bound rebuild also lets the Switcher's
+        // active body refresh its internal state cleanly.
+        self.mode.bind_to(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::Relayout,
+        );
+        // visible_month at Relayout for the same reason as `mode`:
+        // the header Button's label is captured eagerly, and changing
+        // the visible month (chevron click, Page keys) needs the
+        // header label to refresh. AccessibilityOnly is too weak —
+        // it would update the AT name without redrawing the visible
+        // text.
         self.visible_month.bind_to(
             self_id,
             registry,
-            fern_core::binding::BindingLevel::AccessibilityOnly,
+            fern_core::binding::BindingLevel::Relayout,
         );
         self.focused_date.bind_to(
             self_id,

@@ -10,12 +10,12 @@ use fern_core::widget::{CursorIcon, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole, TextRole, TextStyleRole};
+use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::YearMonth;
 use crate::common::datetime::Date;
-use crate::primitives::{Center, Expand, FixedSize, HStack, IconWidget, RectWidget, TextWidget, ZStack};
+use crate::primitives::{Center, Expand, FixedSize, HStack, IconWidget, RectWidget, ZStack};
 
 use super::{CalendarMode, OnMonthChanged};
 
@@ -140,29 +140,39 @@ impl Widget for CalendarHeader {
             move |ctx_evt| step_dbl_next(1, ctx_evt),
         ));
 
-        // Center label — clickable button that demotes the mode
-        // (Days → Months → Years; Years stays). Text reflects the
-        // current mode: "May 2026" / "2026" / "2020 — 2029".
-        let mode_for_label = self.mode.clone();
-        let visible_for_label = self.visible_month.clone();
-        let label_signal = visible_for_label.zip(&mode_for_label).map(|(ym, m)| match m {
+        // Center label — a Flat Button that demotes the mode on
+        // click (Days → Months → Years; Years stays). The label is
+        // computed eagerly from the current mode + visible_month and
+        // captured by the Button (Button doesn't take a reactive
+        // label). The Calendar rebuilds whenever `mode` changes
+        // (mode signal bound at Relayout in `Calendar::build`), so
+        // a freshly-built Button picks up the right label after
+        // each demotion.
+        let cur_mode = self.mode.get();
+        let cur_ym = self.visible_month.get();
+        let label_text = match cur_mode {
             CalendarMode::Days => {
-                let month_name = resolve_message_widget(month_long_key(ym.month()), &[]);
-                format!("{} {}", month_name, ym.year())
+                let month_name = resolve_message_widget(month_long_key(cur_ym.month()), &[]);
+                format!("{} {}", month_name, cur_ym.year())
             }
-            CalendarMode::Months => format!("{}", ym.year()),
+            CalendarMode::Months => format!("{}", cur_ym.year()),
             CalendarMode::Years => {
-                let start = (ym.year() / 10) * 10;
+                let start = (cur_ym.year() / 10) * 10;
                 format!("{} — {}", start, start + 9)
             }
-        });
-        // Title button stretches to fill the full Expand width — its
-        // own layout_response claims `proposal.width`. The visible
-        // text is centered inside that wide button by an internal
-        // Center widget, so the entire centered band is one big
-        // clickable target instead of a tiny natural-width region.
-        let title_label = TitleButton::new(label_signal, self.mode.clone());
-        let title_id = ctx.add(title_label);
+        };
+        let mode_for_action = self.mode.clone();
+        let title_btn = crate::button::Button::new_literal(label_text)
+            .style(crate::button::ButtonVariant::Flat)
+            .on_activate_fn(move |ctx_evt| {
+                let cur = mode_for_action.get();
+                let next = cur.demote();
+                if next != cur {
+                    mode_for_action.set(next);
+                    ctx_evt.request_frame();
+                }
+            });
+        let title_id = ctx.add(title_btn);
         let label_centered = ctx.add(Expand::horizontal().child_id(title_id));
 
         let row = HStack::new()
@@ -211,169 +221,6 @@ impl Widget for CalendarHeader {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::Group);
         builder.set_hidden();
-    }
-}
-
-// ── TitleButton — clickable header label that demotes mode ───────────
-
-/// Center label of the header. Renders as plain bold text in `Years`
-/// mode (no further demote available); renders as a hover-reactive
-/// button in `Days` / `Months` mode that demotes the mode on click
-/// (Days → Months, Months → Years). The label text is always the
-/// `label_signal` value — the parent computes it per-mode so this
-/// widget stays mode-agnostic for paint.
-struct TitleButton {
-    label_signal: Signal<String>,
-    mode: Signal<CalendarMode>,
-    root_id: Option<WidgetId>,
-}
-
-impl std::fmt::Debug for TitleButton {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TitleButton").finish()
-    }
-}
-
-impl TitleButton {
-    fn new(label_signal: Signal<String>, mode: Signal<CalendarMode>) -> Self {
-        Self {
-            label_signal,
-            mode,
-            root_id: None,
-        }
-    }
-}
-
-impl Widget for TitleButton {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let hover = ctx.signal(false);
-        let focused = ctx.signal(false);
-        let focus_ring_width = ctx.theme_signal().get().shape.focus_ring_width;
-
-        let bg_role = hover.map(|h| {
-            if *h {
-                SurfaceRole::Hover
-            } else {
-                SurfaceRole::Transparent
-            }
-        });
-        let border_role = focused.map(|f| {
-            if *f {
-                BorderRole::Focused
-            } else {
-                BorderRole::Transparent
-            }
-        });
-        let border_width = focused.map(move |f| if *f { focus_ring_width } else { 0.0 });
-
-        let bg = RectWidget::new()
-            .background(fern_core::color_prop::ColorProp::DynamicSurfaceRole(bg_role))
-            .border_color(border_role)
-            .border_width(border_width)
-            .corner_radius(CornerRadius::uniform(4.0));
-        let bg_id = ctx.add(bg);
-
-        let text = TextWidget::new_literal("")
-            .style(TextStyleRole::BodyBold)
-            .color(TextRole::Primary)
-            .bind_text(self.label_signal.clone())
-            .single_line()
-            .a11y_hidden();
-        let text_id = ctx.add(text);
-        // Center the text inside the button's full horizontal extent
-        // so hover/click target spans the entire band the parent
-        // header allots us — not just the natural text width. Without
-        // this the visible button is only a few characters wide and
-        // users miss-click into the surrounding space.
-        let centered_text = ctx.add(
-            crate::primitives::Center::new().child(
-                crate::primitives::Padding::new(2.0, 8.0, 2.0, 8.0).child_id(text_id),
-            ),
-        );
-        let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered_text));
-
-        // Self handlers. The button only fires when mode != Years
-        // (Years has no further demote target). Keyboard activation
-        // mirrors `NavArrow`: Enter / Space → demote.
-        let mode_for_tap = self.mode.clone();
-        let mode_for_key = self.mode.clone();
-        let hover_for_handler = hover.clone();
-        let focused_for_handler = focused.clone();
-        let handlers = HandlerSet::new()
-            .focusable(true)
-            .cursor(CursorIcon::Pointer)
-            .on_hover(move |entered, _| hover_for_handler.set(entered))
-            .on_focus(move |has_focus, _| focused_for_handler.set(has_focus))
-            .on_tap(move |_pos, ctx_evt| {
-                let cur = mode_for_tap.get();
-                let next = cur.demote();
-                if next != cur {
-                    mode_for_tap.set(next);
-                    ctx_evt.request_frame();
-                }
-            })
-            .on_key(move |event, ctx_evt| {
-                use fern_core::event::{EventResponse, Key, WidgetEvent};
-                let WidgetEvent::KeyDown { key, .. } = event else {
-                    return EventResponse::Ignored;
-                };
-                if matches!(key, Key::Enter | Key::Space) {
-                    let cur = mode_for_key.get();
-                    let next = cur.demote();
-                    if next != cur {
-                        mode_for_key.set(next);
-                        ctx_evt.request_frame();
-                    }
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            });
-        ctx.apply_self_handlers(handlers);
-        self.root_id = Some(z);
-        vec![z]
-    }
-
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> fern_core::widget::LayoutResponse {
-        // Always claim the full offered width so the click target
-        // spans the entire band the parent allocates. Without this
-        // the title button's bounds equal its natural text width,
-        // making the surrounding "May 2026" whitespace look
-        // clickable but actually be a no-op (mis-click hell).
-        // Height stays at the inner content's natural height.
-        let inner_size = self
-            .root_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
-        let width = proposal.width.unwrap_or(inner_size.width);
-        fern_canvas::Size::new(width, inner_size.height).into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
-        }
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        self.root_id.into_iter().collect()
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(Role::Button);
-        builder.set_name(self.label_signal.get());
-        builder.add_action(Action::Click);
     }
 }
 
