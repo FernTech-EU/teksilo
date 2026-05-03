@@ -1724,6 +1724,21 @@ impl Widget for SceneView {
         true
     }
 
+    fn preserves_children_on_rebuild(&self) -> bool {
+        // SceneView's children come from `Scene::add_widget` calls,
+        // materialised once on the first build via
+        // `ctx.add_boxed(pending.take())`. Subsequent rebuilds —
+        // triggered by `drag_dirty` to drain pending drag-to-move /
+        // marquee commits — re-push the same `WidgetId`s without
+        // calling `ctx.add_boxed` again (the `pending` slot is
+        // already taken). The default rebuild semantics would
+        // destroy the children's subtrees before build runs, so
+        // the re-pushed IDs would dangle and the cards / nested
+        // SceneViews would visibly disappear after every drag-end.
+        // Opt out of the destruction so children stay attached.
+        true
+    }
+
     fn wants_descendant_redirects(&self) -> bool {
         // SceneView opts into the ancestor-chain query so
         // `A11yNode::Widget(widget_id)` declarations work for
@@ -4157,6 +4172,85 @@ mod tests {
         );
     }
 
+    #[test]
+    fn nested_scene_view_geometry_after_paint() {
+        // After the first paint, an inner SceneView placed at
+        // scene_rect (X, Y, W, H) inside an outer SceneView must
+        // have its `bounds_origin_signal` updated to (X, Y) so its
+        // own view_transform places its lightweight items at the
+        // expected screen position. Without this sync (which lives
+        // in `paint()`), the inner SceneView would draw at the
+        // outer's scene origin instead of at its own scene_rect.
+        //
+        // Regression for "no embedded scene visible" — the inner
+        // never received a `place_children` call (it has zero
+        // widget children) and bounds_origin_signal stayed at the
+        // default (0, 0).
+        use crate::items::RectItem;
+        use fern_tokens::Color;
+
+        // Inner: one small RectItem at scene-coord (10, 10).
+        let mut inner_scene = Scene::new();
+        inner_scene
+            .add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED));
+        let inner = SceneView::new(inner_scene).default_size(50.0, 40.0);
+
+        // Outer holds the inner at scene-coord (200, 150, 50, 40).
+        let mut outer_scene = Scene::new();
+        let inner_id =
+            outer_scene.add_widget(inner, Rect::new(200.0, 150.0, 50.0, 40.0));
+        let outer = SceneView::new(outer_scene);
+
+        let mut tree = WidgetTree::new();
+        let outer_id = tree.add(outer);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // Render once to drive paint, which is where the inner's
+        // `bounds_origin_signal` gets synced.
+        let _ = tree.render();
+
+        // Verify inner widget id resolved.
+        let outer_view = view_handle(&tree, outer_id);
+        let inner_widget_id = outer_view
+            .widget_id_for(inner_id)
+            .expect("inner SceneView materialised under outer");
+
+        // Inspect the inner SceneView's view_transform_signal —
+        // it should reflect the placement origin (200, 150).
+        let inner_view = tree
+            .widget_as_any(inner_widget_id)
+            .and_then(|a| a.downcast_ref::<SceneView>())
+            .expect("inner widget is a SceneView");
+
+        let xform = inner_view.view_transform_signal().get();
+        // Origin (0, 0) in inner-scene-coord must project to
+        // (200, 150) in outer-scene-coord (= screen, since outer
+        // is at zoom 1, pan 0).
+        let projected = xform.apply_point(Point::ZERO);
+        assert!(
+            (projected.x - 200.0).abs() < 0.5,
+            "inner origin must project to outer scene_rect.x = 200 (got {})",
+            projected.x
+        );
+        assert!(
+            (projected.y - 150.0).abs() < 0.5,
+            "inner origin must project to outer scene_rect.y = 150 (got {})",
+            projected.y
+        );
+
+        // And inner-scene (10, 10) must project to (210, 160).
+        let projected_dot = xform.apply_point(Point::new(10.0, 10.0));
+        assert!(
+            (projected_dot.x - 210.0).abs() < 0.5,
+            "inner item at (10,10) must project to (210, ...) — got {}",
+            projected_dot.x
+        );
+        assert!(
+            (projected_dot.y - 160.0).abs() < 0.5,
+            "inner item at (10,10) must project to (..., 160) — got {}",
+            projected_dot.y
+        );
+    }
+
     // -- Phase 6: selection + marquee -----------------------------------
 
     #[test]
@@ -4584,6 +4678,64 @@ mod tests {
 
         let view = view_handle(&tree, view_id);
         assert_eq!(view.selection().count(), 0);
+    }
+
+    #[test]
+    fn marquee_does_not_unmount_heavyweight_children() {
+        // Regression: dragging a marquee in empty space used to make
+        // heavyweight children "disappear" because the drag-end path
+        // bumped a Rebuild-level signal, and rebuilding SceneView
+        // re-pushed materialised WidgetIds to child_ids without
+        // re-attaching them via ctx.add_boxed — the framework's
+        // rebuild reconciliation pruned them. The fix routes the
+        // marquee drain through Relayout (place_children) instead.
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        let widget_item =
+            scene.add_widget(FillWidget::new(), Rect::new(50.0, 50.0, 80.0, 60.0));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Confirm the widget is in the arena before any drag.
+        let view = view_handle(&tree, view_id);
+        let materialised_id =
+            view.widget_id_for(widget_item).expect("widget materialised");
+        assert!(tree.children(view_id).contains(&materialised_id));
+
+        // Drag a marquee in empty space (above the widget).
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(200.0, 10.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(260.0, 30.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(260.0, 30.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+
+        // After marquee end the framework processes any dirty
+        // signals — drive a layout to give place_children a chance
+        // to drain.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Heavyweight child must still be a child of the SceneView.
+        assert!(
+            tree.children(view_id).contains(&materialised_id),
+            "marquee end must NOT unmount heavyweight children — \
+             children: {:?}, expected to contain: {:?}",
+            tree.children(view_id),
+            materialised_id,
+        );
     }
 
     // -- Focus-order traversal -----------------------------------------

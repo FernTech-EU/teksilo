@@ -1143,9 +1143,23 @@ impl WidgetTree {
                 .remove(&sub_id);
         }
 
-        let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
-        for child_id in old_children {
-            self.destroy_subtree(child_id);
+        // Tear down existing children unless the widget opts into
+        // preserving them (`Widget::preserves_children_on_rebuild`).
+        // Stable-child widgets like `SceneView` re-push the same
+        // `WidgetId`s on every rebuild — destroying them here would
+        // unmount cards / nested SceneViews on every drag-to-move
+        // or marquee commit (the rebuild signal that drains pending
+        // mutations).
+        let preserve_children = self
+            .arena
+            .get(widget_id)
+            .map(|n| n.widget.preserves_children_on_rebuild())
+            .unwrap_or(false);
+        if !preserve_children {
+            let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
+            for child_id in old_children {
+                self.destroy_subtree(child_id);
+            }
         }
 
         let mut widget_box = match self.arena.take_widget(widget_id) {

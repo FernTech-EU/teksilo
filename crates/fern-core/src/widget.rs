@@ -354,6 +354,37 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Whether `rebuild_single_widget` should **preserve** existing
+    /// children (skip the destroy-subtree-then-rebuild dance) when
+    /// re-running this widget's `build()`.
+    ///
+    /// Default `false` — rebuild is a "tear down and reconstruct"
+    /// operation, the right semantic for data-driven widgets like
+    /// `Repeater` / `ListView` where every rebuild constructs fresh
+    /// children from current model state.
+    ///
+    /// Override to `true` for widgets whose children are stable
+    /// across rebuilds — they were created once at first build via
+    /// `ctx.add` / `ctx.add_boxed`, and subsequent rebuilds just
+    /// re-push the same `WidgetId`s. `SceneView` is the canonical
+    /// example: heavyweight scene widgets are materialised on first
+    /// build from `Scene::add_widget` pending entries; subsequent
+    /// rebuilds (triggered to drain pending drag-to-move / marquee
+    /// commits) MUST keep those widgets attached or the user sees
+    /// the cards / nested SceneView "disappear" on every drag end.
+    ///
+    /// When `true`, `build()` is responsible for returning a
+    /// children vec that contains every `WidgetId` it wants to
+    /// keep attached — the framework still updates the parent's
+    /// `children` field from that return value, so any IDs not in
+    /// the returned vec are orphaned (still in the arena, no
+    /// parent), exactly as if `false`. The opt-in only skips the
+    /// active `destroy_subtree` step that would tear them down
+    /// and unmount their state.
+    fn preserves_children_on_rebuild(&self) -> bool {
+        false
+    }
+
     /// Extract attached handler set from a `WidgetWithHandlers` wrapper.
     /// Called during arena insertion to transfer handlers to the `WidgetNode`.
     /// Default: returns `None` (no attached handlers).
