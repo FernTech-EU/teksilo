@@ -79,6 +79,21 @@ pub struct LayoutContext<'a> {
     pub text_backend: Option<&'a std::rc::Rc<std::cell::RefCell<dyn fern_canvas::TextBackend>>>,
     /// Arena reference for querying child widget sizes.
     pub(crate) arena: Option<&'a crate::arena::WidgetArena>,
+    /// Optional bundle of read-only tree state (focus, shortcuts,
+    /// overlays). Carried through layout for debug-tooling consumers
+    /// like the inspector's Focus / Shortcuts / Overlays tabs. `None`
+    /// in test contexts.
+    pub(crate) extras: Option<LayoutExtras<'a>>,
+}
+
+/// Read-only handles to tree-level state that some widgets (notably
+/// the debug inspector) want to query from `layout_response`. Threaded
+/// through the recursive layout pass alongside the arena.
+#[derive(Clone, Copy)]
+pub(crate) struct LayoutExtras<'a> {
+    pub focused: Option<WidgetId>,
+    pub shortcut_registry: Option<&'a crate::shortcut::ShortcutRegistry>,
+    pub overlay_manager: Option<&'a crate::overlay::OverlayManager>,
 }
 
 impl<'a> LayoutContext<'a> {
@@ -89,7 +104,28 @@ impl<'a> LayoutContext<'a> {
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
             text_backend: None,
             arena: None,
+            extras: None,
         }
+    }
+
+    /// The currently focused widget id, if any. Returns `None` when
+    /// the layout pass is unrelated to a tree (test contexts).
+    pub fn focused(&self) -> Option<WidgetId> {
+        self.extras.as_ref().and_then(|e| e.focused)
+    }
+
+    /// Borrow the tree's shortcut registry. Returns `None` outside a
+    /// real layout pass. Intended for read-only inspection by the
+    /// debug inspector.
+    pub fn shortcut_registry(&self) -> Option<&crate::shortcut::ShortcutRegistry> {
+        self.extras.as_ref().and_then(|e| e.shortcut_registry)
+    }
+
+    /// Borrow the tree's overlay manager. Returns `None` outside a
+    /// real layout pass. Intended for read-only inspection by the
+    /// debug inspector.
+    pub fn overlay_manager(&self) -> Option<&crate::overlay::OverlayManager> {
+        self.extras.as_ref().and_then(|e| e.overlay_manager)
     }
 
     /// Query a child widget's full layout response (wanted size + flex weight).

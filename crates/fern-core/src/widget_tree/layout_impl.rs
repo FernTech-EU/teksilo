@@ -201,10 +201,16 @@ impl WidgetTree {
 
         let overlay_content_ids = self.overlay_manager.active_content_ids();
         let roots: Vec<WidgetId> = self.arena.roots();
+        let focused = self.focused;
         for root_id in roots {
             if overlay_content_ids.contains(&root_id) {
                 continue;
             }
+            let extras = crate::widget::LayoutExtras {
+                focused,
+                shortcut_registry: Some(&self.shortcut_registry),
+                overlay_manager: Some(&self.overlay_manager),
+            };
             layout_widget_recursive(
                 &mut self.arena,
                 root_id,
@@ -213,6 +219,7 @@ impl WidgetTree {
                 &base_theme,
                 self.layout_direction,
                 self.text_backend.as_ref(),
+                Some(extras),
             );
         }
 
@@ -232,11 +239,17 @@ impl WidgetTree {
             let overlay_id = self.overlay_manager.find_by_content(*content_id);
             let intrinsic = {
                 let resolved_theme = self.arena.resolve_theme(*content_id, &base_theme);
+                let extras = crate::widget::LayoutExtras {
+                    focused: self.focused,
+                    shortcut_registry: Some(&self.shortcut_registry),
+                    overlay_manager: Some(&self.overlay_manager),
+                };
                 let ctx = LayoutContext {
                     theme: &resolved_theme,
                     layout_direction: self.layout_direction,
                     text_backend: self.text_backend.as_ref(),
                     arena: Some(&self.arena),
+                    extras: Some(extras),
                 };
                 let node = self.arena.get(*content_id).unwrap();
                 node.widget
@@ -276,6 +289,11 @@ impl WidgetTree {
             // strip inside it. All other placements return
             // overlay_bounds.size() == intrinsic, so this is a no-op there.
             let content_proposal = SizeProposal::exact(overlay_bounds.width, overlay_bounds.height);
+            let extras = crate::widget::LayoutExtras {
+                focused: self.focused,
+                shortcut_registry: Some(&self.shortcut_registry),
+                overlay_manager: Some(&self.overlay_manager),
+            };
             layout_widget_recursive(
                 &mut self.arena,
                 *content_id,
@@ -284,6 +302,7 @@ impl WidgetTree {
                 &base_theme,
                 self.layout_direction,
                 self.text_backend.as_ref(),
+                Some(extras),
             );
         }
 
@@ -333,6 +352,7 @@ fn layout_widget_recursive(
     base_theme: &fern_tokens::Theme,
     layout_direction: crate::environment::LayoutDirection,
     text_backend: Option<&std::rc::Rc<std::cell::RefCell<dyn fern_canvas::TextBackend>>>,
+    extras: Option<crate::widget::LayoutExtras<'_>>,
 ) {
     if !arena.is_active(id) {
         return;
@@ -346,6 +366,7 @@ fn layout_widget_recursive(
             layout_direction,
             text_backend,
             arena: Some(arena),
+            extras,
         };
         let node = arena.get(id).unwrap();
         node.widget.layout_response(proposal, &ctx).size
@@ -388,6 +409,7 @@ fn layout_widget_recursive(
                 layout_direction,
                 text_backend,
                 arena: Some(arena),
+                extras,
             };
             let node = arena.get(id).unwrap();
             node.widget
@@ -415,6 +437,7 @@ fn layout_widget_recursive(
                     base_theme,
                     layout_direction,
                     text_backend,
+                    extras,
                 );
             }
         }

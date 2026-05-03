@@ -1,7 +1,10 @@
 //! Inspector panel tabs.
 
 pub(crate) mod accessibility;
+pub(crate) mod focus;
+pub(crate) mod overlays;
 pub(crate) mod properties;
+pub(crate) mod shortcuts;
 pub(crate) mod tree;
 
 /// Last `::`-separated segment of a fully-qualified Rust type name.

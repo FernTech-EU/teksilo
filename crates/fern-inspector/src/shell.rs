@@ -29,13 +29,16 @@ use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_widgets::primitives::{Expand, FixedSize, HStack, Padding, VStack, ZStack};
-use fern_widgets::{Button, Panel, TabWidget};
+use fern_widgets::{Button, Panel, SegmentedControl, Slider, TabWidget};
 
 use crate::highlight::{BoundsTracker, HighlightLayer};
 use crate::picker::{PickResolver, PickerOverlay};
-use crate::state::InspectorState;
+use crate::state::{InspectorState, OverlayMode};
 use crate::tabs::accessibility::A11yTab;
+use crate::tabs::focus::FocusTab;
+use crate::tabs::overlays::OverlaysTab;
 use crate::tabs::properties::PropertiesTab;
+use crate::tabs::shortcuts::ShortcutsTab;
 use crate::tabs::tree::TreeTab;
 
 const PANEL_HEIGHT: f32 = 280.0;
@@ -143,14 +146,17 @@ fn empty_filler() -> impl Widget + 'static {
     FixedSize::new().bind_width(Signal::new(0.0_f32)).bind_height(Signal::new(0.0_f32))
 }
 
-/// Build the inspector panel's content. Toolbar (Pick / Close) above
-/// a `TabWidget` with three tabs, all inside a `Panel`.
+/// Build the inspector panel's content. Toolbar above a `TabWidget`
+/// with six tabs, all inside a `Panel`.
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
     let active_tab = Signal::new(0_usize);
     let tabs = TabWidget::new(active_tab)
         .tab_literal("Tree", scrollable_tab(TreeTab::new(state.clone())))
         .tab_literal("Properties", scrollable_tab(PropertiesTab::new(state.clone())))
-        .tab_literal("Accessibility", scrollable_tab(A11yTab::new(state.clone())));
+        .tab_literal("Accessibility", scrollable_tab(A11yTab::new(state.clone())))
+        .tab_literal("Focus", scrollable_tab(FocusTab::new(state.clone())))
+        .tab_literal("Shortcuts", scrollable_tab(ShortcutsTab::new(state.clone())))
+        .tab_literal("Overlays", scrollable_tab(OverlaysTab::new(state.clone())));
 
     let toolbar = build_toolbar(state.clone());
 
@@ -165,8 +171,8 @@ fn build_panel(state: InspectorState) -> impl Widget + 'static {
         .child(body)
 }
 
-/// Toolbar above the tabs: Pick toggle on the leading side, Close (×)
-/// on the trailing side.
+/// Toolbar above the tabs:
+/// `[Pick] [Bounds: Off|Sel|All] [Opacity slider] ··· [×]`.
 fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
     let picker_state_for_label = state.picker_mode.clone();
     let picker_label_signal = picker_state_for_label.map(|active| {
@@ -185,6 +191,42 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
             picker_state_for_click.set(next);
         });
 
+    // Bounds-overlay segmented control. `SegmentedControl` is driven
+    // by a `Signal<usize>`. We bridge it to `OverlayMode` via two
+    // observers (one each direction) so toggling either side syncs
+    // the other. The observer handles are attached to the bridge
+    // signal so they live as long as the toolbar.
+    let bounds_index = Signal::new(overlay_mode_to_index(state.overlay_mode.get()));
+    {
+        let bounds_index_target = bounds_index.clone();
+        let h = state.overlay_mode.observe(move |mode| {
+            let new_idx = overlay_mode_to_index(*mode);
+            if bounds_index_target.get() != new_idx {
+                bounds_index_target.set(new_idx);
+            }
+        });
+        bounds_index.attach_keepalive(h);
+    }
+    {
+        let mode_target = state.overlay_mode.clone();
+        let h = bounds_index.observe(move |idx| {
+            let new_mode = index_to_overlay_mode(*idx);
+            if mode_target.get() != new_mode {
+                mode_target.set(new_mode);
+            }
+        });
+        bounds_index.attach_keepalive(h);
+    }
+    let bounds_seg = SegmentedControl::new(
+        vec!["Off".to_string(), "Sel".to_string(), "All".to_string()],
+        bounds_index,
+    );
+
+    let opacity_slider =
+        FixedSize::new()
+            .bind_width(Signal::new(120.0_f32))
+            .child(Slider::new(state.overlay_opacity.clone(), 0.1, 1.0));
+
     let open_state_for_close = state.open.clone();
     let close_button = Button::new_literal("×").on_activate_fn(move |_ctx| {
         open_state_for_close.set(false);
@@ -194,9 +236,27 @@ fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
         HStack::new()
             .spacing(6.0)
             .child(pick_button)
+            .child(bounds_seg)
+            .child(opacity_slider)
             .child(Expand::new().flex(1.0).child(empty_filler()))
             .child(close_button),
     )
+}
+
+fn overlay_mode_to_index(mode: OverlayMode) -> usize {
+    match mode {
+        OverlayMode::Off => 0,
+        OverlayMode::SelectionOnly => 1,
+        OverlayMode::AllBounds => 2,
+    }
+}
+
+fn index_to_overlay_mode(idx: usize) -> OverlayMode {
+    match idx {
+        0 => OverlayMode::Off,
+        1 => OverlayMode::SelectionOnly,
+        _ => OverlayMode::AllBounds,
+    }
 }
 
 /// Wrap a tab leaf widget in a `ScrollArea` so long content scrolls

@@ -10,6 +10,31 @@ use fern_core::widget_id::WidgetId;
 
 use crate::shell::InspectorShell;
 
+/// How the bounds-overlay layer renders.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OverlayMode {
+    /// No overlay drawing at all.
+    Off,
+    /// Draw a stroke around the currently selected widget only.
+    SelectionOnly,
+    /// Draw every active widget's outline. Layout primitives in cyan,
+    /// content widgets in magenta. Useful for visualizing layout
+    /// structure.
+    AllBounds,
+}
+
+impl OverlayMode {
+    /// Cycle Off → Selection → All → Off. Used by the toolbar's
+    /// keyboard-friendly Tab cycle.
+    pub fn next(self) -> Self {
+        match self {
+            OverlayMode::Off => OverlayMode::SelectionOnly,
+            OverlayMode::SelectionOnly => OverlayMode::AllBounds,
+            OverlayMode::AllBounds => OverlayMode::Off,
+        }
+    }
+}
+
 /// Shared, app-wide state for the debug inspector.
 ///
 /// A single instance is registered into `app_state` by
@@ -47,6 +72,17 @@ pub struct InspectorState {
     /// reads this on the next pass, divides by row height, and updates
     /// `selected_id`.
     pub pending_tree_click_y: Signal<Option<f32>>,
+    /// Bounds-overlay rendering mode. Drives `HighlightLayer`. Toggled
+    /// by the toolbar's `SegmentedControl`.
+    pub overlay_mode: Signal<OverlayMode>,
+    /// Opacity multiplier (0.1..1.0) applied to bounds-overlay strokes
+    /// and tints. Lets the user dim a busy overlay on dense UIs.
+    pub overlay_opacity: Signal<f32>,
+    /// Snapshot of every widget's bounds + layout/content
+    /// classification. Repopulated by `BoundsTracker` on every layout
+    /// pass when `overlay_mode == AllBounds`; consumed by
+    /// `HighlightLayer::paint`.
+    pub(crate) bounds_snapshot: Signal<Vec<crate::highlight::BoundsEntry>>,
 }
 
 impl InspectorState {
@@ -59,6 +95,9 @@ impl InspectorState {
             pending_pick_point: Signal::new(None),
             shell_root_id: Signal::new(None),
             pending_tree_click_y: Signal::new(None),
+            overlay_mode: Signal::new(OverlayMode::SelectionOnly),
+            overlay_opacity: Signal::new(0.7),
+            bounds_snapshot: Signal::new(Vec::new()),
         }
     }
 }
