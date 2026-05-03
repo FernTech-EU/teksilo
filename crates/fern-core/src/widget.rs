@@ -118,6 +118,41 @@ impl<'a> LayoutContext<'a> {
             .map(|r| r.size)
     }
 
+    /// Query the laid-out bounds of any active widget. Returns `None`
+    /// when the arena is not available (test contexts) — otherwise
+    /// returns the widget's current bounds (`Rect::ZERO` if unknown).
+    /// Useful for inspector-style widgets that need to mirror another
+    /// widget's geometry into a `Signal` during the layout pass.
+    pub fn widget_bounds(&self, id: WidgetId) -> Option<fern_canvas::Rect> {
+        let arena = self.arena?;
+        if !arena.is_active(id) {
+            return None;
+        }
+        Some(arena.bounds(id))
+    }
+
+    /// Hit-test the active widget tree at `point` and return the
+    /// deepest widget under it. Honors `event_pass_through`. The
+    /// `exclude` argument lets the caller skip a specific subtree
+    /// (e.g. the inspector's picker overlay so it doesn't pick
+    /// itself). Returns `None` outside layout (no arena available).
+    pub fn widget_at_point(
+        &self,
+        point: fern_canvas::Point,
+        exclude: Option<WidgetId>,
+    ) -> Option<WidgetId> {
+        let arena = self.arena?;
+        arena.hit_test_at(point, exclude)
+    }
+
+    /// Borrow the underlying arena. Returns `None` outside a layout
+    /// pass (test contexts). Intended for read-only introspection by
+    /// debug tooling (the inspector's tree view) — use the typed
+    /// accessors above when possible.
+    pub fn arena(&self) -> Option<&crate::arena::WidgetArena> {
+        self.arena
+    }
+
     /// Query a child's per-widget alignment override, if any.
     pub fn child_alignment(&self, child_id: WidgetId) -> Option<fern_tokens::Alignment> {
         let arena = self.arena?;

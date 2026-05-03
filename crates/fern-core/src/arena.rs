@@ -409,6 +409,56 @@ impl WidgetArena {
         }
     }
 
+    /// Walk the active widget tree at `point` and return the deepest
+    /// widget under it (the front-most hit, last child wins). Honors
+    /// `event_pass_through` (such nodes pass through to whatever sits
+    /// behind them but their descendants are still hit-testable). Does
+    /// not consider overlays — for the full pointer-routing hit-test
+    /// see [`WidgetTree::hit_test`].
+    ///
+    /// `exclude`: if `Some(id)`, that widget (and any descendants
+    /// within its subtree) are skipped during the walk. Used by the
+    /// debug inspector's picker tool to ignore the picker overlay
+    /// itself, and by drag-and-drop to ignore the drag preview.
+    pub fn hit_test_at(
+        &self,
+        point: fern_canvas::Point,
+        exclude: Option<WidgetId>,
+    ) -> Option<WidgetId> {
+        for &root in self.roots().iter().rev() {
+            if let Some(hit) = self.hit_test_recursive(root, point, exclude) {
+                return Some(hit);
+            }
+        }
+        None
+    }
+
+    fn hit_test_recursive(
+        &self,
+        id: WidgetId,
+        point: fern_canvas::Point,
+        exclude: Option<WidgetId>,
+    ) -> Option<WidgetId> {
+        if !self.is_active(id) || Some(id) == exclude {
+            return None;
+        }
+        let bounds = self.bounds(id);
+        if !bounds.contains(point) {
+            return None;
+        }
+        let pass_through = self.get(id).map(|n| n.event_pass_through).unwrap_or(false);
+        let children: Vec<WidgetId> = self.children(id).to_vec();
+        for &child in children.iter().rev() {
+            if let Some(hit) = self.hit_test_recursive(child, point, exclude) {
+                return Some(hit);
+            }
+        }
+        if pass_through {
+            return None;
+        }
+        Some(id)
+    }
+
     /// Iterate over all active widget IDs.
     pub fn active_ids(&self) -> Vec<WidgetId> {
         self.nodes

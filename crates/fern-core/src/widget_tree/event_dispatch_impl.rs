@@ -1736,19 +1736,15 @@ impl WidgetTree {
             return None;
         }
 
-        let roots = self.arena.roots();
-        for &root in roots.iter().rev() {
-            if Some(root) == exclude_widget {
-                continue;
-            }
-            if let Some(hit) = self.hit_test_recursive_excluding(root, point, exclude_widget) {
-                return Some(hit);
-            }
-        }
-        None
+        // Delegates to WidgetArena::hit_test_at, which honors
+        // event_pass_through and clips_children correctly.
+        self.arena.hit_test_at(point, exclude_widget)
     }
 
     fn hit_test_recursive_excluding(&self, id: WidgetId, point: Point, exclude: Option<WidgetId>) -> Option<WidgetId> {
+        // Subtree hit-test from a specific root — used by the overlay
+        // path. Delegates to a tiny wrapper around the arena's recursion
+        // by walking from `id` only.
         if !self.arena.is_active(id) || Some(id) == exclude {
             return None;
         }
@@ -1756,10 +1752,6 @@ impl WidgetTree {
         if !bounds.contains(point) {
             return None;
         }
-        // event_pass_through nodes still let descendants be hit (in case
-        // they themselves are interactive), but the node itself is
-        // invisible to hit-testing — so we recurse into children even
-        // here, and only return `Some(id)` for non-pass-through nodes.
         let pass_through = self
             .arena
             .get(id)
@@ -1777,10 +1769,6 @@ impl WidgetTree {
         Some(id)
     }
 
-    /// Legacy recursive hit-test without exclusion.
-    fn hit_test_recursive(&self, id: WidgetId, point: Point) -> Option<WidgetId> {
-        self.hit_test_recursive_excluding(id, point, None)
-    }
 }
 
 #[cfg(test)]

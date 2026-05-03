@@ -24,7 +24,10 @@ repository.workspace = true
 # `FERN_INSPECTOR=1`.
 
 [dependencies]
+fern-canvas = { workspace = true }
 fern-core = { workspace = true }
 fern-app = { workspace = true }
+fern-tokens = { workspace = true }
+fern-widgets = { workspace = true }
 
 [dev-dependencies]

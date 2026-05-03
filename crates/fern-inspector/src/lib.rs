@@ -7,7 +7,15 @@
 //! without `#[cfg]` lines.
 
 #[cfg(debug_assertions)]
+mod highlight;
+#[cfg(debug_assertions)]
+mod picker;
+#[cfg(debug_assertions)]
+mod shell;
+#[cfg(debug_assertions)]
 mod state;
+#[cfg(debug_assertions)]
+mod tabs;
 
 #[cfg(debug_assertions)]
 pub use state::InspectorState;

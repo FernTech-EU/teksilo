@@ -1369,7 +1369,10 @@ name = "fern-inspector"
 version = "0.1.0"
 dependencies = [
  "fern-app",
+ "fern-canvas",
  "fern-core",
+ "fern-tokens",
+ "fern-widgets",
 ]
 
 [[package]]
