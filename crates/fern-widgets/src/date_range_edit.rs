@@ -38,18 +38,20 @@ use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::accesskit::{Action, Role};
 use fern_core::build_context::BuildContext;
-use fern_core::overlay::OverlayPlacement;
+use fern_core::overlay::{
+    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+};
 use fern_core::signal::Signal;
 use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
 use jiff::civil::Weekday;
 
-use crate::calendar::DateRange;
+use crate::calendar::{Calendar, DateRange};
 use crate::common::datetime::Date;
-use crate::date_edit::{DateEdit, ValidationBehavior};
+use crate::date_edit::{CalendarTriggerButton, DateEdit, ValidationBehavior};
 use crate::primitives::text_input_field::ValidationFeedback;
-use crate::primitives::{HStack, TextWidget};
+use crate::primitives::{Divider, HStack, Padding, TextWidget};
 
 type OnRangeChanged = Rc<dyn Fn(Option<DateRange>, &mut EventContext)>;
 
@@ -70,6 +72,15 @@ pub struct DateRangeEdit {
     separator: String,
     first_day_of_week: Option<Weekday>,
     show_calendar_button: bool,
+    /// Whether to render a trailing range-calendar button to the
+    /// right of the end DateEdit. The button opens a single popover
+    /// hosting `Calendar::range` bound to `self.value`. Default
+    /// `true`. Set to `false` to suppress the trailing button when
+    /// the per-half calendar buttons are sufficient.
+    show_range_calendar_button: bool,
+    /// Live state of the range-calendar popover for the trailing
+    /// trigger. Bound to `set_expanded` on the trigger's AT node.
+    range_popover_open: Signal<bool>,
     enabled: bool,
     read_only: bool,
     label: Option<String>,
@@ -104,6 +115,8 @@ impl DateRangeEdit {
             separator: " – ".to_string(),
             first_day_of_week: None,
             show_calendar_button: true,
+            show_range_calendar_button: true,
+            range_popover_open: Signal::new(false),
             enabled: true,
             read_only: false,
             label: None,
@@ -153,6 +166,16 @@ impl DateRangeEdit {
 
     pub fn show_calendar_button(mut self, show: bool) -> Self {
         self.show_calendar_button = show;
+        self
+    }
+
+    /// Whether to render a trailing single calendar button (right of
+    /// the end half) that opens a shared `Calendar::range` popover.
+    /// Default `true`. The per-half single-date calendar buttons
+    /// (controlled by [`Self::show_calendar_button`]) remain
+    /// independent — disabling one doesn't disable the other.
+    pub fn show_range_calendar_button(mut self, show: bool) -> Self {
+        self.show_range_calendar_button = show;
         self
     }
 
@@ -316,11 +339,101 @@ impl Widget for DateRangeEdit {
             .a11y_hidden();
         let separator_id = ctx.add(separator);
 
-        let row = HStack::new()
+        // ── Trailing range-calendar button + popover ─────────
+        // One shared `Calendar::range` overlay, anchored to the
+        // wrapper, that lets the user pick start + end dates with
+        // the calendar's two-anchor input model. The per-half
+        // single-date calendar buttons stay independent — this is
+        // an additional affordance, not a replacement.
+        let range_trigger_id_opt = if self.show_range_calendar_button {
+            // Pre-build the dormant range calendar (mounted only
+            // while the popover is open).
+            let value_for_cal = self.value.clone();
+            let popover_open = self.range_popover_open.clone();
+            let mut cal = Calendar::range(value_for_cal.clone()).on_range_changed(
+                move |new_range, ctx_evt| {
+                    // Once both anchors are picked, the calendar
+                    // commits a `DateRange`; close the popover and
+                    // return focus to the trigger via the same
+                    // request-focus path DateEdit uses.
+                    if new_range.is_some() {
+                        popover_open.set(false);
+                        ctx_evt.dismiss_all_overlays();
+                        ctx_evt.request_frame();
+                    }
+                },
+            );
+            if let Some(min) = self.min_date {
+                cal = cal.min_date(min);
+            }
+            if let Some(max) = self.max_date {
+                cal = cal.max_date(max);
+            }
+            if let Some(fdow) = self.first_day_of_week {
+                cal = cal.first_day_of_week(fdow);
+            }
+            let cal_id = ctx.add(cal);
+            ctx.set_dormant(cal_id);
+
+            // Trigger button.
+            let popover_open = self.range_popover_open.clone();
+            let self_ref = ctx.self_id();
+            let dismiss_cb: OverlayDismissCallback = {
+                let popover_open = popover_open.clone();
+                std::rc::Rc::new(move || {
+                    popover_open.set(false);
+                })
+            };
+            // Style the trigger like the per-half buttons (same
+            // CalendarTriggerButton primitive that `DateEdit` uses).
+            // Width / icon size match Int UI conventions used by
+            // DateEdit so the three buttons align visually.
+            let trigger_widget = CalendarTriggerButton::new(
+                28.0,
+                14.0,
+                enabled && !read_only,
+                std::rc::Rc::new(move |ctx_evt: &mut EventContext| {
+                    if popover_open.get() {
+                        popover_open.set(false);
+                        ctx_evt.dismiss_all_overlays();
+                    } else {
+                        popover_open.set(true);
+                        ctx_evt.activate(cal_id);
+                        ctx_evt.show_overlay(OverlayRequest {
+                            content_id: cal_id,
+                            anchor: self_ref,
+                            placement: OverlayPlacement::BelowPreferred,
+                            dismiss: DismissBehavior::EscapeOrClickOutside,
+                            layer: OverlayLayer::InTree,
+                            parent_overlay: None,
+                            on_dismiss: Some(dismiss_cb.clone()),
+                            fade_duration: None,
+                        });
+                        ctx_evt.request_focus(cal_id);
+                    }
+                }),
+            );
+            // Tiny vertical divider between end DateEdit and the
+            // trailing trigger so it visually reads as a sibling
+            // affordance, not part of the end field's frame.
+            let div = ctx.add(
+                Padding::new(2.0, 0.0, 2.0, 0.0)
+                    .child(Divider::vertical().thickness(1.0)),
+            );
+            let trigger_id = ctx.add(trigger_widget);
+            Some((div, trigger_id))
+        } else {
+            None
+        };
+
+        let mut row = HStack::new()
             .spacing(4.0)
             .add_child(start_id)
             .add_child(separator_id)
             .add_child(end_id);
+        if let Some((div, trigger)) = range_trigger_id_opt {
+            row = row.add_child(div).add_child(trigger);
+        }
         let row_id = ctx.add(row);
         self.root_child_id = Some(row_id);
 

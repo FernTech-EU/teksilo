@@ -156,9 +156,14 @@ impl Widget for CalendarHeader {
                 format!("{} — {}", start, start + 9)
             }
         });
+        // Title button stretches to fill the full Expand width — its
+        // own layout_response claims `proposal.width`. The visible
+        // text is centered inside that wide button by an internal
+        // Center widget, so the entire centered band is one big
+        // clickable target instead of a tiny natural-width region.
         let title_label = TitleButton::new(label_signal, self.mode.clone());
         let title_id = ctx.add(title_label);
-        let label_centered = ctx.add(Expand::horizontal().child(Center::new().child_id(title_id)));
+        let label_centered = ctx.add(Expand::horizontal().child_id(title_id));
 
         let row = HStack::new()
             .spacing(4.0)
@@ -275,8 +280,17 @@ impl Widget for TitleButton {
             .single_line()
             .a11y_hidden();
         let text_id = ctx.add(text);
-        let padded = ctx.add(crate::primitives::Padding::new(2.0, 8.0, 2.0, 8.0).child_id(text_id));
-        let z = ctx.add(ZStack::new().add_child(bg_id).add_child(padded));
+        // Center the text inside the button's full horizontal extent
+        // so hover/click target spans the entire band the parent
+        // header allots us — not just the natural text width. Without
+        // this the visible button is only a few characters wide and
+        // users miss-click into the surrounding space.
+        let centered_text = ctx.add(
+            crate::primitives::Center::new().child(
+                crate::primitives::Padding::new(2.0, 8.0, 2.0, 8.0).child_id(text_id),
+            ),
+        );
+        let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered_text));
 
         // Self handlers. The button only fires when mode != Years
         // (Years has no further demote target). Keyboard activation
@@ -325,13 +339,18 @@ impl Widget for TitleButton {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        match self.root_id {
-            Some(id) => ctx
-                .child_size(id, proposal)
-                .unwrap_or_else(|| proposal.resolve(0.0, 0.0)),
-            None => proposal.resolve(0.0, 0.0),
-        }
-        .into()
+        // Always claim the full offered width so the click target
+        // spans the entire band the parent allocates. Without this
+        // the title button's bounds equal its natural text width,
+        // making the surrounding "May 2026" whitespace look
+        // clickable but actually be a no-op (mis-click hell).
+        // Height stays at the inner content's natural height.
+        let inner_size = self
+            .root_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
+        let width = proposal.width.unwrap_or(inner_size.width);
+        fern_canvas::Size::new(width, inner_size.height).into()
     }
 
     fn place_children(

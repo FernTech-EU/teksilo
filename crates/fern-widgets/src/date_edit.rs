@@ -456,33 +456,10 @@ impl Widget for DateEdit {
             })
         };
 
-        // Step closure (±days).
-        let step: Rc<dyn Fn(i64, &mut EventContext)> = {
-            let value_signal = self.value.clone();
-            let text_signal = self.text_signal.clone();
-            let pattern = pattern_rc.clone();
-            let on_value_changed = on_value_changed.clone();
-            Rc::new(move |delta_days: i64, ctx_evt: &mut EventContext| {
-                if read_only {
-                    return;
-                }
-                let cur = value_signal.get().unwrap_or_else(|| Date::constant(2026, 1, 1));
-                let next = cur
-                    .checked_add(jiff::Span::new().days(delta_days))
-                    .unwrap_or(cur);
-                let next = clamp_date(next, min, max);
-                if Some(next) == value_signal.get() {
-                    return;
-                }
-                value_signal.set(Some(next));
-                let formatted = format_value(&pattern, Some(next), None);
-                text_signal.set(formatted);
-                if let Some(cb) = on_value_changed.as_ref() {
-                    cb(Some(next), ctx_evt);
-                }
-                ctx_evt.request_frame();
-            })
-        };
+        // No standalone day-step closure — segment-aware stepping is
+        // installed inside the on_key_preview self handler below
+        // (replaces the pre-segment ±day stepping that used to live
+        // here).
 
         // ── Inner editing field ───────────────────────────────
         let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
@@ -542,8 +519,9 @@ impl Widget for DateEdit {
         }
 
         // Capture caret signal BEFORE moving the field into the tree
-        // so the segment-stepping handler below can read live caret
-        // position. Bridged to the inner state inside `build()`.
+        // so the segment-stepping handler installed on `self` (below,
+        // via `apply_self_handlers`) can read live caret position.
+        // Bridged to the inner state inside `TextInputField::build`.
         let caret_for_step = field.caret_position();
 
         // A11y override on the field: AT users who tab into the
@@ -558,34 +536,36 @@ impl Widget for DateEdit {
         let field_id = ctx.add(field_with_a11y);
         self.field_id = Some(field_id);
 
-        // ── Segment-stepping (Qt-style ↑/↓ on focused segment) ────
-        //
-        // `on_key_preview` on a strict ancestor of the field claims
-        // ArrowUp/ArrowDown/PageUp/PageDown BEFORE the field's own
-        // `on_key` runs. The field never binds these keys today, but
-        // attaching at preview makes the contract explicit so future
-        // field changes (multi-line caret motion, etc.) cannot
-        // silently break stepping. Mirrors the SpinBox pattern.
-        let pattern_for_step = pattern_rc.clone();
-        let value_for_step = self.value.clone();
-        let text_for_step = self.text_signal.clone();
-        let on_changed_for_step = on_value_changed.clone();
-        let min_for_step = self.min_date;
-        let max_for_step = self.max_date;
-        let segment_step = move |delta: i32, ctx_evt: &mut EventContext| {
-            let caret = caret_for_step.get();
-            let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret) else {
-                return;
-            };
-            let current = value_for_step.get().unwrap_or_else(today_local);
-            let stepped = step_date_field(current, kind, delta);
-            let clamped = clamp_date(stepped, min_for_step, max_for_step);
-            value_for_step.set(Some(clamped));
-            text_for_step.set(format_value(&pattern_for_step, Some(clamped), None));
-            if let Some(cb) = on_changed_for_step.as_ref() {
-                cb(Some(clamped), ctx_evt);
-            }
-            ctx_evt.request_frame();
+        // ── Segment-stepping helper — captured by the on_key_preview
+        // self handler below. Reads live caret position, looks up the
+        // segment under the caret, and applies a single field step
+        // (year / month / day / hour / minute / second / period).
+        // Wrapped in `Rc` so the closure is reusable from the self-
+        // attached HandlerSet without capturing-and-moving once.
+        let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {
+            let pattern_for_step = pattern_rc.clone();
+            let value_for_step = self.value.clone();
+            let text_for_step = self.text_signal.clone();
+            let on_changed_for_step = on_value_changed.clone();
+            let min_for_step = self.min_date;
+            let max_for_step = self.max_date;
+            let caret_for_step = caret_for_step.clone();
+            Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
+                let caret = caret_for_step.get();
+                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
+                else {
+                    return;
+                };
+                let current = value_for_step.get().unwrap_or_else(today_local);
+                let stepped = step_date_field(current, kind, delta);
+                let clamped = clamp_date(stepped, min_for_step, max_for_step);
+                value_for_step.set(Some(clamped));
+                text_for_step.set(format_value(&pattern_for_step, Some(clamped), None));
+                if let Some(cb) = on_changed_for_step.as_ref() {
+                    cb(Some(clamped), ctx_evt);
+                }
+                ctx_evt.request_frame();
+            })
         };
 
         let padded_field_id = ctx.add(
@@ -595,24 +575,7 @@ impl Widget for DateEdit {
                 field_style.padding_vertical,
                 0.0,
             )
-            .child_id(field_id)
-            .on_key_preview(move |event, ctx_evt| {
-                if !enabled || read_only {
-                    return EventResponse::Ignored;
-                }
-                let WidgetEvent::KeyDown { key, .. } = event else {
-                    return EventResponse::Ignored;
-                };
-                let delta = match key {
-                    Key::ArrowUp => 1,
-                    Key::ArrowDown => -1,
-                    Key::PageUp => 10,
-                    Key::PageDown => -10,
-                    _ => return EventResponse::Ignored,
-                };
-                segment_step(delta, ctx_evt);
-                EventResponse::Handled
-            }),
+            .child_id(field_id),
         );
         let expanded_field_id = ctx.add(
             crate::primitives::Expand::horizontal().child_id(padded_field_id),
@@ -790,8 +753,15 @@ impl Widget for DateEdit {
         );
         self.root_child_id = Some(root_with_strip);
 
-        // ── Self handlers: focus_within + step keys ───────────
-        let step_for_key = step.clone();
+        // ── Self handlers: focus_within + segment-step keys ────
+        // `on_key_preview` on SELF (DateEdit, an actual ancestor of
+        // the inner field) claims ArrowUp/ArrowDown/PageUp/PageDown
+        // BEFORE the focused field's `on_key` runs. The step targets
+        // the segment under the caret (year/month/day) — Qt-style
+        // segment-stepping. Shift multiplies the unit step by 10 so
+        // power users can sweep faster (e.g. ±10 years on the year
+        // segment).
+        let step_for_key = segment_step.clone();
         let handlers = HandlerSet::new()
             .focus_within(self.focused.clone())
             .on_key_preview(move |event, ctx_evt| {
@@ -801,26 +771,16 @@ impl Widget for DateEdit {
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
                 };
-                let shift = modifiers.shift();
-                match key {
-                    Key::ArrowUp => {
-                        step_for_key(if shift { 7 } else { 1 }, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    Key::ArrowDown => {
-                        step_for_key(if shift { -7 } else { -1 }, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    Key::PageUp => {
-                        step_for_key(if shift { 365 } else { 30 }, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    Key::PageDown => {
-                        step_for_key(if shift { -365 } else { -30 }, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
+                let mult = if modifiers.shift() { 10 } else { 1 };
+                let delta = match key {
+                    Key::ArrowUp => mult,
+                    Key::ArrowDown => -mult,
+                    Key::PageUp => 10 * mult,
+                    Key::PageDown => -10 * mult,
+                    _ => return EventResponse::Ignored,
+                };
+                step_for_key(delta, ctx_evt);
+                EventResponse::Handled
             });
         ctx.apply_self_handlers(handlers);
 
@@ -921,7 +881,7 @@ impl Widget for DateEdit {
 
 // ── Calendar trigger button (icon-only, in-frame) ─────────────────────
 
-struct CalendarTriggerButton {
+pub(crate) struct CalendarTriggerButton {
     width: f32,
     icon_size: f32,
     enabled: bool,
@@ -938,7 +898,7 @@ impl std::fmt::Debug for CalendarTriggerButton {
 }
 
 impl CalendarTriggerButton {
-    fn new(width: f32, icon_size: f32, enabled: bool, on_activate: Rc<dyn Fn(&mut EventContext)>) -> Self {
+    pub(crate) fn new(width: f32, icon_size: f32, enabled: bool, on_activate: Rc<dyn Fn(&mut EventContext)>) -> Self {
         Self {
             width,
             icon_size,
@@ -1051,7 +1011,7 @@ impl Widget for CalendarTriggerButton {
     }
 }
 
-fn calendar_glyph_icon(size: f32) -> IconWidget {
+pub(crate) fn calendar_glyph_icon(size: f32) -> IconWidget {
     let mut path = Path::new();
     let s = size;
     // Outer rounded rectangle suggesting a calendar.

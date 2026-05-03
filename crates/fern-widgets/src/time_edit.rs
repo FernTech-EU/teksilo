@@ -390,35 +390,14 @@ impl Widget for TimeEdit {
             })
         };
 
-        // Step closure (±minutes).
-        let step: Rc<dyn Fn(i64, &mut EventContext)> = {
-            let value_signal = self.value.clone();
-            let text_signal = self.text_signal.clone();
-            let pattern = pattern_rc.clone();
-            let on_value_changed = on_value_changed.clone();
-            Rc::new(move |delta_min: i64, ctx_evt: &mut EventContext| {
-                if read_only {
-                    return;
-                }
-                let cur = value_signal.get().unwrap_or_else(|| Time::midnight());
-                let total_minutes = cur.hour() as i64 * 60 + cur.minute() as i64 + delta_min;
-                let wrapped = ((total_minutes % (24 * 60)) + (24 * 60)) % (24 * 60);
-                let h = (wrapped / 60) as i8;
-                let m = (wrapped % 60) as i8;
-                let next = Time::new(h, m, cur.second(), 0).unwrap_or(cur);
-                let next = clamp_time(next, min, max);
-                if Some(next) == value_signal.get() {
-                    return;
-                }
-                value_signal.set(Some(next));
-                let formatted = format_value(&pattern, None, Some(next));
-                text_signal.set(formatted);
-                if let Some(cb) = on_value_changed.as_ref() {
-                    cb(Some(next), ctx_evt);
-                }
-                ctx_evt.request_frame();
-            })
-        };
+        // No standalone ±minute-step closure — segment-aware
+        // stepping replaces the pre-segment behaviour. The
+        // `step_minutes` builder is kept on the public surface for
+        // callers that pre-configured it (it now functions as a
+        // hint for future per-segment custom steps; today the segment
+        // step is always ±1 unit / ±10 with shift / ±10 / ±100 on
+        // page keys).
+        let _ = step_minutes;
 
         // ── Inner editing field ───────────────────────────────
         let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
@@ -486,27 +465,35 @@ impl Widget for TimeEdit {
         let field_id = ctx.add(field_with_a11y);
         self.field_id = Some(field_id);
 
-        // ── Segment-stepping (Qt-style ↑/↓ on focused segment) ────
-        let pattern_for_step = pattern_rc.clone();
-        let value_for_step = self.value.clone();
-        let text_for_step = self.text_signal.clone();
-        let on_changed_for_step = self.on_value_changed.clone();
-        let min_for_step = self.min_time;
-        let max_for_step = self.max_time;
-        let segment_step = move |delta: i32, ctx_evt: &mut EventContext| {
-            let caret = caret_for_step.get();
-            let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret) else {
-                return;
-            };
-            let current = value_for_step.get().unwrap_or_else(Time::midnight);
-            let stepped = step_time_field(current, kind, delta);
-            let clamped = clamp_time(stepped, min_for_step, max_for_step);
-            value_for_step.set(Some(clamped));
-            text_for_step.set(format_value(&pattern_for_step, None, Some(clamped)));
-            if let Some(cb) = on_changed_for_step.as_ref() {
-                cb(Some(clamped), ctx_evt);
-            }
-            ctx_evt.request_frame();
+        // ── Segment-stepping helper — installed into the on_key_preview
+        // self handler below. Reads live caret position, looks up the
+        // segment under the caret (hour/minute/second/period), and
+        // applies a single field step. Wrapped in `Rc` so the closure
+        // is reusable from the self-attached HandlerSet.
+        let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {
+            let pattern_for_step = pattern_rc.clone();
+            let value_for_step = self.value.clone();
+            let text_for_step = self.text_signal.clone();
+            let on_changed_for_step = self.on_value_changed.clone();
+            let min_for_step = self.min_time;
+            let max_for_step = self.max_time;
+            let caret_for_step = caret_for_step.clone();
+            Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
+                let caret = caret_for_step.get();
+                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
+                else {
+                    return;
+                };
+                let current = value_for_step.get().unwrap_or_else(Time::midnight);
+                let stepped = step_time_field(current, kind, delta);
+                let clamped = clamp_time(stepped, min_for_step, max_for_step);
+                value_for_step.set(Some(clamped));
+                text_for_step.set(format_value(&pattern_for_step, None, Some(clamped)));
+                if let Some(cb) = on_changed_for_step.as_ref() {
+                    cb(Some(clamped), ctx_evt);
+                }
+                ctx_evt.request_frame();
+            })
         };
 
         let padded_field_id = ctx.add(
@@ -516,24 +503,7 @@ impl Widget for TimeEdit {
                 field_style.padding_vertical,
                 field_style.padding_horizontal,
             )
-            .child_id(field_id)
-            .on_key_preview(move |event, ctx_evt| {
-                if !enabled || read_only {
-                    return EventResponse::Ignored;
-                }
-                let WidgetEvent::KeyDown { key, .. } = event else {
-                    return EventResponse::Ignored;
-                };
-                let delta = match key {
-                    Key::ArrowUp => 1,
-                    Key::ArrowDown => -1,
-                    Key::PageUp => 10,
-                    Key::PageDown => -10,
-                    _ => return EventResponse::Ignored,
-                };
-                segment_step(delta, ctx_evt);
-                EventResponse::Handled
-            }),
+            .child_id(field_id),
         );
 
         // Frame.
@@ -575,7 +545,12 @@ impl Widget for TimeEdit {
         );
         self.root_child_id = Some(root_with_strip);
 
-        let step_for_key = step.clone();
+        // ── Self handlers: focus_within + segment-step keys ────
+        // Self-attached `on_key_preview` claims arrow / page keys
+        // BEFORE the focused field's `on_key`. Step targets the
+        // segment under the caret (hour/minute/second/period). Shift
+        // multiplies the unit by 10 for power-user sweeps.
+        let step_for_key = segment_step.clone();
         let handlers = HandlerSet::new()
             .focus_within(self.focused.clone())
             .on_key_preview(move |event, ctx_evt| {
@@ -586,25 +561,15 @@ impl Widget for TimeEdit {
                     return EventResponse::Ignored;
                 };
                 let mult = if modifiers.shift() { 10 } else { 1 };
-                match key {
-                    Key::ArrowUp => {
-                        step_for_key(step_minutes * mult, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    Key::ArrowDown => {
-                        step_for_key(-step_minutes * mult, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    Key::PageUp => {
-                        step_for_key(60 * mult, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    Key::PageDown => {
-                        step_for_key(-60 * mult, ctx_evt);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
+                let delta = match key {
+                    Key::ArrowUp => mult,
+                    Key::ArrowDown => -mult,
+                    Key::PageUp => 10 * mult,
+                    Key::PageDown => -10 * mult,
+                    _ => return EventResponse::Ignored,
+                };
+                step_for_key(delta, ctx_evt);
+                EventResponse::Handled
             });
         ctx.apply_self_handlers(handlers);
 
