@@ -109,9 +109,22 @@ struct DragTarget {
     current_scene: Point,
 }
 
+/// Direction passed to a [`SceneView::focus_order`] callback when the
+/// app wants to override the default Tab cycle.
+///
+/// `Forward` corresponds to Tab; `Backward` to Shift+Tab. The default
+/// SceneView focus traversal is scene insertion order — apps that
+/// need data-flow order (graph editor), story-order (corkboard with
+/// Acts), chronological order (timeline), etc. install a callback
+/// that receives the current focus and returns the next id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusDirection {
+    Forward,
+    Backward,
+}
+
 /// A pannable/zoomable viewport hosting a [`Scene`]'s items at scene
 /// coordinates.
-#[derive(Debug)]
 pub struct SceneView {
     scene: Scene,
     /// Materialisation map populated during `build`. Stable across
@@ -211,6 +224,14 @@ pub struct SceneView {
     /// Avoids forcing `Scene` into an `Rc<RefCell>`.
     lightweight_bounds_snapshot: Rc<RefCell<Vec<(ItemId, Rect)>>>,
 
+    /// App-supplied focus-order callback. When set, the public
+    /// [`next_focus`](Self::next_focus) /
+    /// [`previous_focus`](Self::previous_focus) accessors route
+    /// through it instead of falling back to insertion order.
+    /// `Rc<dyn Fn>` so callers can clone the SceneView while
+    /// keeping the closure shared.
+    focus_order_callback: Option<Rc<dyn Fn(&Scene, FocusDirection, Option<ItemId>) -> Option<ItemId>>>,
+
     // --- Cached derived signals ---------------------------------------
     /// `view_transform` as a derived `Signal<Transform2D>`,
     /// constructed once in `new()` and reused across rebuilds.
@@ -218,6 +239,25 @@ pub struct SceneView {
     /// so consumers (e.g. axis labels in a parent SceneView) can
     /// bind to it reactively without taking a snapshot every paint.
     view_transform_signal: Signal<Transform2D>,
+}
+
+impl std::fmt::Debug for SceneView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Manual impl: `focus_order_callback` is `Rc<dyn Fn>` and
+        // therefore not `Debug`. Render it as a presence flag instead.
+        f.debug_struct("SceneView")
+            .field("scene", &self.scene)
+            .field("materialized_count", &self.materialized.len())
+            .field("default_size", &self.default_size)
+            .field("interactive", &self.interactive)
+            .field("min_zoom", &self.min_zoom)
+            .field("max_zoom", &self.max_zoom)
+            .field("a11y_mode", &self.a11y_mode)
+            .field("a11y_off_screen_mode", &self.a11y_off_screen_mode)
+            .field("selection_mode", &self.selection.mode())
+            .field("focus_order_callback", &self.focus_order_callback.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl SceneView {
@@ -269,6 +309,7 @@ impl SceneView {
             drag_target: Rc::new(Cell::new(None)),
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
+            focus_order_callback: None,
         }
     }
 
@@ -338,6 +379,84 @@ impl SceneView {
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
         self
+    }
+
+    /// Install a custom focus-order callback. When set,
+    /// [`next_focus`](Self::next_focus) /
+    /// [`previous_focus`](Self::previous_focus) route through the
+    /// closure instead of falling back to scene insertion order.
+    ///
+    /// Apps wire this to a Tab / Shift+Tab handler in their root
+    /// shortcut/action map. Typical implementations:
+    ///
+    /// - **Graph editor:** walk outgoing-port connections from the
+    ///   current node, return the connected-node `ItemId`.
+    /// - **Corkboard with Acts:** walk a parallel `BTreeMap<ActId,
+    ///   Vec<CardId>>` declared by the app and Tab through cards in
+    ///   story order, not reading order.
+    /// - **Timeline:** sort items by `start_time`, return the next.
+    ///
+    /// The callback receives the full [`Scene`] (read-only), the
+    /// requested [`FocusDirection`], and the currently focused item
+    /// (`None` on the first Tab into the scene). Return `None` to
+    /// signal "no next item" (the framework can then advance focus
+    /// outside the SceneView).
+    ///
+    /// Calling [`next_focus`](Self::next_focus) /
+    /// [`previous_focus`](Self::previous_focus) without a callback
+    /// installed walks scene insertion order — adequate for simple
+    /// scenes; replace as needed.
+    pub fn focus_order<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&Scene, FocusDirection, Option<ItemId>) -> Option<ItemId> + 'static,
+    {
+        self.focus_order_callback = Some(Rc::new(callback));
+        self
+    }
+
+    /// Compute the next item the focus should advance to in the
+    /// given direction. If a [`focus_order`](Self::focus_order)
+    /// callback is installed, routes through it; otherwise falls
+    /// back to scene insertion order — `Forward` returns the item
+    /// after `current` (or the first if `current` is `None`),
+    /// `Backward` returns the previous (or the last if `current`
+    /// is `None`).
+    pub fn focus_in_direction(
+        &self,
+        direction: FocusDirection,
+        current: Option<ItemId>,
+    ) -> Option<ItemId> {
+        if let Some(cb) = &self.focus_order_callback {
+            return cb(&self.scene, direction, current);
+        }
+        let ids = self.scene.ids();
+        if ids.is_empty() {
+            return None;
+        }
+        match (direction, current) {
+            (FocusDirection::Forward, None) => ids.first().copied(),
+            (FocusDirection::Backward, None) => ids.last().copied(),
+            (FocusDirection::Forward, Some(cur)) => ids
+                .iter()
+                .position(|id| *id == cur)
+                .and_then(|i| ids.get(i + 1).copied()),
+            (FocusDirection::Backward, Some(cur)) => ids
+                .iter()
+                .position(|id| *id == cur)
+                .and_then(|i| if i == 0 { None } else { ids.get(i - 1).copied() }),
+        }
+    }
+
+    /// Convenience: forward-Tab traversal. See
+    /// [`focus_in_direction`](Self::focus_in_direction).
+    pub fn next_focus(&self, current: Option<ItemId>) -> Option<ItemId> {
+        self.focus_in_direction(FocusDirection::Forward, current)
+    }
+
+    /// Convenience: backward-Tab (Shift+Tab) traversal. See
+    /// [`focus_in_direction`](Self::focus_in_direction).
+    pub fn previous_focus(&self, current: Option<ItemId>) -> Option<ItemId> {
+        self.focus_in_direction(FocusDirection::Backward, current)
     }
 
     /// Live `Signal<f32>` for the X pan offset. Use this from a
@@ -3915,5 +4034,124 @@ mod tests {
 
         let view = view_handle(&tree, view_id);
         assert_eq!(view.selection().count(), 0);
+    }
+
+    // -- Focus-order traversal -----------------------------------------
+
+    fn rect_item_at(x: f32, y: f32) -> crate::items::RectItem {
+        use fern_tokens::Color;
+        crate::items::RectItem::new(Rect::new(x, y, 10.0, 10.0)).fill(Color::RED)
+    }
+
+    #[test]
+    fn focus_order_default_walks_insertion_order_forward() {
+        let mut scene = Scene::new();
+        let a = scene.add_item(rect_item_at(0.0, 0.0));
+        let b = scene.add_item(rect_item_at(20.0, 0.0));
+        let c = scene.add_item(rect_item_at(40.0, 0.0));
+
+        let view = SceneView::new(scene);
+        // None → first
+        assert_eq!(view.next_focus(None), Some(a));
+        // a → b → c → None (no wrap)
+        assert_eq!(view.next_focus(Some(a)), Some(b));
+        assert_eq!(view.next_focus(Some(b)), Some(c));
+        assert_eq!(view.next_focus(Some(c)), None);
+    }
+
+    #[test]
+    fn focus_order_default_walks_insertion_order_backward() {
+        let mut scene = Scene::new();
+        let a = scene.add_item(rect_item_at(0.0, 0.0));
+        let b = scene.add_item(rect_item_at(20.0, 0.0));
+        let c = scene.add_item(rect_item_at(40.0, 0.0));
+
+        let view = SceneView::new(scene);
+        // None → last
+        assert_eq!(view.previous_focus(None), Some(c));
+        // c → b → a → None
+        assert_eq!(view.previous_focus(Some(c)), Some(b));
+        assert_eq!(view.previous_focus(Some(b)), Some(a));
+        assert_eq!(view.previous_focus(Some(a)), None);
+    }
+
+    #[test]
+    fn focus_order_empty_scene_returns_none() {
+        let view = SceneView::new(Scene::new());
+        assert_eq!(view.next_focus(None), None);
+        assert_eq!(view.previous_focus(None), None);
+    }
+
+    #[test]
+    fn focus_order_callback_overrides_default() {
+        // App-supplied callback returns items in REVERSE insertion
+        // order on Forward — proves the callback overrides the
+        // built-in walk and isn't merely augmenting it.
+        let mut scene = Scene::new();
+        let a = scene.add_item(rect_item_at(0.0, 0.0));
+        let b = scene.add_item(rect_item_at(20.0, 0.0));
+        let c = scene.add_item(rect_item_at(40.0, 0.0));
+
+        let view = SceneView::new(scene).focus_order(move |scene, dir, current| {
+            let mut ids = scene.ids();
+            if matches!(dir, FocusDirection::Forward) {
+                ids.reverse();
+            }
+            match current {
+                None => ids.first().copied(),
+                Some(cur) => ids
+                    .iter()
+                    .position(|id| *id == cur)
+                    .and_then(|i| ids.get(i + 1).copied()),
+            }
+        });
+
+        // Forward starts at last (c) and walks toward a.
+        assert_eq!(view.next_focus(None), Some(c));
+        assert_eq!(view.next_focus(Some(c)), Some(b));
+        assert_eq!(view.next_focus(Some(b)), Some(a));
+        assert_eq!(view.next_focus(Some(a)), None);
+    }
+
+    #[test]
+    fn focus_order_callback_can_skip_items() {
+        // App-supplied callback only Tab-cycles between odd-indexed
+        // items — exercises the "domain-specific traversal" use case
+        // (e.g. graph editor that only tabs through nodes, not
+        // connectors).
+        let mut scene = Scene::new();
+        let _skip0 = scene.add_item(rect_item_at(0.0, 0.0));
+        let keep1 = scene.add_item(rect_item_at(20.0, 0.0));
+        let _skip2 = scene.add_item(rect_item_at(40.0, 0.0));
+        let keep3 = scene.add_item(rect_item_at(60.0, 0.0));
+
+        let allowed = vec![keep1, keep3];
+        let view = SceneView::new(scene).focus_order(move |_scene, dir, current| {
+            match current {
+                None => match dir {
+                    FocusDirection::Forward => allowed.first().copied(),
+                    FocusDirection::Backward => allowed.last().copied(),
+                },
+                Some(cur) => {
+                    let pos = allowed.iter().position(|id| *id == cur)?;
+                    match dir {
+                        FocusDirection::Forward => allowed.get(pos + 1).copied(),
+                        FocusDirection::Backward => {
+                            if pos == 0 {
+                                None
+                            } else {
+                                allowed.get(pos - 1).copied()
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        assert_eq!(view.next_focus(None), Some(keep1));
+        assert_eq!(view.next_focus(Some(keep1)), Some(keep3));
+        assert_eq!(view.next_focus(Some(keep3)), None);
+        assert_eq!(view.previous_focus(None), Some(keep3));
+        assert_eq!(view.previous_focus(Some(keep3)), Some(keep1));
     }
 }
