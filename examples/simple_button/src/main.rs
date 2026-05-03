@@ -2,12 +2,14 @@
 //!
 //! Run with: `cargo run -p simple-button`
 
+use fern_inspector::FernAppBuilderInspectorExt;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{Button, ButtonVariant};
 
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
+        .install_inspector_in_debug()
         .initial_window(
             WindowConfig::new()
                 .title("FernUI — Simple Button")

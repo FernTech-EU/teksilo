@@ -64,6 +64,15 @@ impl WidgetTree {
         self.current_cursor
     }
 
+    /// The widget currently under the pointer, if any. The framework
+    /// updates this on `PointerMove` / hover routing; widgets that have
+    /// captured the pointer or that opt out via `event_pass_through`
+    /// affect what shows up here. Mirrors the private `hovered` field
+    /// for read-only consumers (debug inspector, layout introspection).
+    pub fn hovered(&self) -> Option<WidgetId> {
+        self.hovered
+    }
+
     /// Drain and run all pending idle callbacks with the given time budget.
     /// Called by the event loop during idle periods between frames.
     pub fn run_idle_callbacks(&mut self, budget: std::time::Duration) {

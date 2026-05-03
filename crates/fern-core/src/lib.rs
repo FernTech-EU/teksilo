@@ -85,8 +85,9 @@ pub use widget_builder_branching::{
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
 pub use window::{
-    DecorationsMode, FernWindowId, ModalConfig, NoopWindowOps, RootBuilder, UserAttentionKind,
-    WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement, WindowState,
+    DecorationsMode, FernWindowId, ModalConfig, NoopWindowOps, PostRootBuilder, RootBuilder,
+    UserAttentionKind, WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement,
+    WindowState,
 };
 pub use window::state::WindowStateInit;
 pub use window_chrome::{

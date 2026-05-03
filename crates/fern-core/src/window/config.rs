@@ -38,6 +38,13 @@ pub struct ModalConfig {
 /// signals (placement, title, size, …).
 pub type RootBuilder = Box<dyn FnOnce(&mut WidgetTree, WindowState) -> WidgetId>;
 
+/// Per-window post-root hook. Runs after the user's `root_builder`
+/// returns, with the resulting `WidgetId`. The hook may wrap the user
+/// root in another widget and return the wrapper's id, or simply return
+/// the original id unchanged. Used by the debug inspector to splice an
+/// inspector shell around every window's root in debug builds.
+pub type PostRootBuilder = Box<dyn FnOnce(&mut WidgetTree, WidgetId) -> WidgetId>;
+
 /// Configuration for creating a new window.
 pub struct WindowConfig {
     pub title: String,
@@ -54,6 +61,10 @@ pub struct WindowConfig {
     pub icon: Option<WindowIcon>,
     pub modal: Option<ModalConfig>,
     pub root_builder: Option<RootBuilder>,
+    /// Optional post-root wrapper. When set, the framework calls it
+    /// after `root_builder` and uses the returned id as the window's
+    /// effective root. See [`PostRootBuilder`].
+    pub post_root_builder: Option<PostRootBuilder>,
 }
 
 impl std::fmt::Debug for WindowConfig {
@@ -73,6 +84,10 @@ impl std::fmt::Debug for WindowConfig {
             .field("icon", &self.icon.as_ref().map(|i| (i.width, i.height)))
             .field("modal", &self.modal)
             .field("root_builder", &self.root_builder.as_ref().map(|_| "<closure>"))
+            .field(
+                "post_root_builder",
+                &self.post_root_builder.as_ref().map(|_| "<closure>"),
+            )
             .finish()
     }
 }
@@ -99,6 +114,7 @@ impl WindowConfig {
             icon: None,
             modal: None,
             root_builder: None,
+            post_root_builder: None,
         }
     }
 
@@ -231,6 +247,27 @@ impl WindowConfig {
     /// `create_window`.
     pub fn take_root_builder(&mut self) -> Option<RootBuilder> {
         self.root_builder.take()
+    }
+
+    /// Attach a per-window post-root hook. Runs after the user's
+    /// `root_builder` returns; receives the user's root id and may
+    /// return either the same id or a wrapper's id. The framework uses
+    /// the returned id as the window's effective root.
+    ///
+    /// Typically used by the debug inspector. Apps that want to
+    /// install a default wrapper across all windows should use the
+    /// app-level mechanism instead of setting this per-config.
+    pub fn post_root(
+        mut self,
+        builder: impl FnOnce(&mut WidgetTree, WidgetId) -> WidgetId + 'static,
+    ) -> Self {
+        self.post_root_builder = Some(Box::new(builder));
+        self
+    }
+
+    /// Take the post-root builder out of the config.
+    pub fn take_post_root_builder(&mut self) -> Option<PostRootBuilder> {
+        self.post_root_builder.take()
     }
 
     pub fn is_modal(&self) -> bool {

@@ -5,4 +5,4 @@
 //! `use fern_app::WindowConfig` / `fern_app::FernWindowId` imports
 //! continue to work unchanged.
 
-pub use fern_core::{FernWindowId, ModalConfig, RootBuilder, WindowConfig};
+pub use fern_core::{FernWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};

@@ -8,3 +8,4 @@ publish = false
 
 [dependencies]
 fern-ui = { workspace = true }
+fern-inspector = { workspace = true }

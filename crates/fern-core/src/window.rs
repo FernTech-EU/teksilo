@@ -26,7 +26,7 @@ pub mod placement;
 pub mod state;
 
 pub use command::{UserAttentionKind, WindowCommand};
-pub use config::{ModalConfig, RootBuilder, WindowConfig};
+pub use config::{ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};
 pub use decorations::DecorationsMode;
 pub use icon::WindowIcon;
 pub use id::FernWindowId;

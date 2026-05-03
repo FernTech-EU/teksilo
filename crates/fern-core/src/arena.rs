@@ -80,6 +80,14 @@ pub struct WidgetNode {
     /// When true, the paint pass clips child rendering to this widget's bounds.
     /// Set by scroll areas and overflow-hidden containers.
     pub clips_children: bool,
+    /// When true, hit-testing skips this node — pointer events fall
+    /// through to whatever sits behind it. Descendants are still
+    /// hit-tested normally (the recursion walks into children before
+    /// the pass-through check), so an interactive subtree under a
+    /// pass-through wrapper stays usable. Used by the debug inspector's
+    /// `HighlightLayer` and `HoverProbe` to paint over the user's
+    /// content without absorbing clicks. Default `false`.
+    pub event_pass_through: bool,
     /// Optional opacity multiplier (0..1) applied to this widget's
     /// entire subtree during paint. The render walker emits
     /// `SetOpacity(value)` before walking the widget's own paint and
@@ -256,6 +264,7 @@ impl WidgetArena {
             hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
+            event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
             blur_prop: None,
@@ -312,6 +321,7 @@ impl WidgetArena {
             hover_within_signal: None,
             alignment_override: None,
             clips_children: false,
+            event_pass_through: false,
             opacity_prop: None,
             transform_prop: None,
             blur_prop: None,
@@ -616,6 +626,9 @@ impl WidgetArena {
             }
             if let Some(clips) = handler_set.clips_children {
                 node.clips_children = clips;
+            }
+            if let Some(pass_through) = handler_set.event_pass_through {
+                node.event_pass_through = pass_through;
             }
             if handler_set.context_menu_factory.is_some() {
                 node.context_menu_factory = handler_set.context_menu_factory;

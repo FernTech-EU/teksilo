@@ -256,6 +256,10 @@ pub struct HandlerSet {
     pub(crate) tab_index: Option<i32>,
     pub(crate) cursor: Option<CursorIcon>,
     pub(crate) clips_children: Option<bool>,
+    /// When `Some(true)`, the widget node is invisible to pointer
+    /// hit-testing — events fall through to whatever sits behind it.
+    /// Used by the debug inspector's overlay widgets.
+    pub(crate) event_pass_through: Option<bool>,
     pub(crate) context_menu_factory: Option<ContextMenuFactory>,
     /// User-bound signal that the framework writes whenever the
     /// focused widget is a strict descendant of this node. See
@@ -287,6 +291,7 @@ impl HandlerSet {
             tab_index: None,
             cursor: None,
             clips_children: None,
+            event_pass_through: None,
             context_menu_factory: None,
             focus_within: None,
             hover_within: None,
@@ -455,6 +460,16 @@ impl HandlerSet {
     /// Set the clips_children flag.
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.clips_children = Some(clips);
+        self
+    }
+
+    /// Make the widget invisible to pointer hit-testing. With
+    /// `pass_through = true`, pointer events traverse this node as if
+    /// it were not there — useful for purely decorative overlays that
+    /// must not absorb clicks (the debug inspector's `HighlightLayer`
+    /// and `HoverProbe` use this).
+    pub fn event_pass_through(mut self, pass_through: bool) -> Self {
+        self.event_pass_through = Some(pass_through);
         self
     }
 
@@ -713,6 +728,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
 
     pub fn clips_children(mut self, clips: bool) -> Self {
         self.handler_set.clips_children = Some(clips);
+        self
+    }
+
+    /// Make the widget invisible to pointer hit-testing. See
+    /// [`HandlerSet::event_pass_through`].
+    pub fn event_pass_through(mut self, pass_through: bool) -> Self {
+        self.handler_set.event_pass_through = Some(pass_through);
         self
     }
 
@@ -1348,6 +1370,12 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 
     fn clips_children_on(self, clips: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).clips_children(clips)
+    }
+
+    /// Make the widget invisible to pointer hit-testing. See
+    /// [`HandlerSet::event_pass_through`].
+    fn event_pass_through(self, pass_through: bool) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).event_pass_through(pass_through)
     }
 
     fn context_menu(

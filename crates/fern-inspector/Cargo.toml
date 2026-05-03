@@ -1,0 +1,30 @@
+[package]
+name = "fern-inspector"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# In-app debug inspector for FernUI. Active only in debug builds
+# (`cfg(debug_assertions)`); release builds compile to no-ops.
+#
+# Apps wire it in with one line:
+#
+# ```rust
+# use fern_inspector::FernAppBuilderInspectorExt;
+# FernAppBuilder::new()
+#     .install_inspector_in_debug()   // no-op in release
+#     .initial_window(...)
+#     .run();
+# ```
+#
+# Toggle at runtime with F12, at launch with `--fern-inspector` or
+# `FERN_INSPECTOR=1`.
+
+[dependencies]
+fern-core = { workspace = true }
+fern-app = { workspace = true }
+
+[dev-dependencies]

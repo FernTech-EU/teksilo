@@ -1756,11 +1756,23 @@ impl WidgetTree {
         if !bounds.contains(point) {
             return None;
         }
+        // event_pass_through nodes still let descendants be hit (in case
+        // they themselves are interactive), but the node itself is
+        // invisible to hit-testing — so we recurse into children even
+        // here, and only return `Some(id)` for non-pass-through nodes.
+        let pass_through = self
+            .arena
+            .get(id)
+            .map(|n| n.event_pass_through)
+            .unwrap_or(false);
         let children = self.arena.children(id).to_vec();
         for &child in children.iter().rev() {
             if let Some(hit) = self.hit_test_recursive_excluding(child, point, exclude) {
                 return Some(hit);
             }
+        }
+        if pass_through {
+            return None;
         }
         Some(id)
     }

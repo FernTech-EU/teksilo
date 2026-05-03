@@ -1,10 +1,12 @@
 pub mod app;
+pub mod default_post_root;
 pub(crate) mod window_persist;
 pub mod window_config;
 pub mod window_manager;
 
 pub use app::{AppEventProxy, FernAppBuilder, HeadlessApp, ThemeMode};
-pub use window_config::{FernWindowId, ModalConfig, RootBuilder, WindowConfig};
+pub use default_post_root::DefaultPostRoot;
+pub use window_config::{FernWindowId, ModalConfig, PostRootBuilder, RootBuilder, WindowConfig};
 pub use window_manager::WindowManager;
 
 // Re-export the fern-core multi-window types so `use fern_app::...`

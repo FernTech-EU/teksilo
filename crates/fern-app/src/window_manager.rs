@@ -466,7 +466,24 @@ impl WindowManager {
         tree.set_window_state(state.clone());
 
         if let Some(root_builder) = config.take_root_builder() {
-            let root_id = root_builder(&mut tree, state.clone());
+            let mut root_id = root_builder(&mut tree, state.clone());
+
+            // Apply post-root wrapping: per-window override takes
+            // precedence; otherwise fall back to the app-wide
+            // `DefaultPostRoot` registered via `app_state` (e.g. the
+            // debug inspector's shell wrapper). The wrapped id becomes
+            // the window's effective root for modal-focus lookup, since
+            // the wrapper still descends into the user's tree.
+            if let Some(post_root) = config.take_post_root_builder() {
+                root_id = post_root(&mut tree, root_id);
+            } else if let Some(default_post_root) = self
+                .app_context_template
+                .as_ref()
+                .and_then(|t| t.app_state::<crate::DefaultPostRoot>().cloned())
+            {
+                root_id = (default_post_root.0)(&mut tree, root_id);
+            }
+
             if is_modal {
                 let focus_target = modal_focus_target
                     .filter(|id| tree.is_active(*id))
