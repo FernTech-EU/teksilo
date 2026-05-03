@@ -174,6 +174,72 @@ impl SceneItem for PulsingDot {
 }
 
 // ---------------------------------------------------------------------------
+// DragCard — a custom SceneItem that renders a labelled rectangle as ONE
+// unit. The framework's built-in `RectItem` and `TextItem` are separate
+// items with separate bounds, so dragging the rect leaves the text behind.
+// `DragCard` paints both in a single `paint()` call; the whole card moves
+// together when grabbed.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct DragCard {
+    bounds: Rect,
+    fill: Color,
+    label: String,
+}
+
+impl DragCard {
+    fn new(bounds: Rect, fill: Color, label: impl Into<String>) -> Self {
+        Self {
+            bounds,
+            fill,
+            label: label.into(),
+        }
+    }
+}
+
+impl SceneItem for DragCard {
+    fn bounds_in_scene(&self) -> Rect {
+        self.bounds
+    }
+
+    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+        canvas.fill_rect(self.bounds, self.fill);
+        canvas.stroke_rect(self.bounds, ink(), StrokeStyle::solid(1.5));
+        // Inline label, centered vertically. `draw_paragraph` wraps
+        // to the inner rect so multi-word labels stay in the card.
+        let inset_x = 10.0;
+        let inset_y = (self.bounds.height - 22.0).max(0.0) * 0.5;
+        let label_rect = Rect::new(
+            self.bounds.x + inset_x,
+            self.bounds.y + inset_y,
+            (self.bounds.width - 2.0 * inset_x).max(1.0),
+            22.0,
+        );
+        if canvas.text_backend().is_some() {
+            canvas.draw_paragraph(
+                &self.label,
+                label_rect,
+                &fern_ui::tokens::TextStyle::default(),
+                ink(),
+                Some(1),
+            );
+        } else {
+            canvas.draw_text(
+                &self.label,
+                label_rect,
+                &fern_ui::tokens::TextStyle::default(),
+                ink(),
+            );
+        }
+    }
+
+    fn is_draggable(&self) -> bool {
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Scene-internal header
 // ---------------------------------------------------------------------------
 
@@ -522,21 +588,11 @@ fn build_drag_section(scene: &mut Scene) {
             85.0,
             70.0,
         );
-        // .draggable(true) opts this rect into drag-to-move.
-        scene.add_item(
-            RectItem::new(rect)
-                .fill(*color)
-                .stroke(ink(), 1.5)
-                .draggable(true)
-                .access_label(format!("draggable {}", i + 1)),
-        );
-        scene.add_item(
-            TextItem::new(
-                *label,
-                Rect::new(rect.x + 8.0, rect.y + 24.0, rect.width - 16.0, 28.0),
-            )
-            .color(ink()),
-        );
+        // `DragCard` is a single SceneItem holding rect + label,
+        // so the label moves with the rect during drag. Built-in
+        // `RectItem` + separate `TextItem` would leave the text
+        // behind because they're independent items.
+        scene.add_item(DragCard::new(rect, *color, *label));
     }
 }
 

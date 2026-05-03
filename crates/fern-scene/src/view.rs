@@ -1067,19 +1067,44 @@ impl Widget for SceneView {
         // stays put). Updated even when not interactive — the
         // outer SceneView in a nested chart still benefits from
         // knowing where the mouse is.
+        //
+        // Also flips the system cursor to `Move` whenever the
+        // pointer is over a draggable lightweight item, and back
+        // to `Default` otherwise. The visual hint matches the
+        // user's affordance check ("can I grab this?") without
+        // forcing app-side wiring.
         {
             let cursor_pos = self.cursor_pos.clone();
-            handlers = handlers.on_pointer_event(move |ev, _ctx| {
+            let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
+            let view_xform_signal = self.view_transform_signal.clone();
+            handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use fern_core::event::WidgetEvent as Ev;
                 match ev {
                     Ev::PointerMove { position, .. } => {
                         cursor_pos.set(Some(*position));
+                        // Project to scene coords and check the
+                        // draggable snapshot for hover.
+                        let xform = view_xform_signal.get();
+                        let scene_pt = match xform.inverse() {
+                            Some(inv) => inv.apply_point(*position),
+                            None => Point::ZERO,
+                        };
+                        let snap = bounds_snapshot.borrow();
+                        let over_draggable = snap
+                            .iter()
+                            .any(|(_, rect)| rect.contains(scene_pt));
+                        ctx.set_cursor(if over_draggable {
+                            fern_core::widget::CursorIcon::Move
+                        } else {
+                            fern_core::widget::CursorIcon::Default
+                        });
                     }
                     Ev::PointerDown { position, .. } => {
                         cursor_pos.set(Some(*position));
                     }
                     Ev::PointerLeave => {
                         cursor_pos.set(None);
+                        ctx.set_cursor(fern_core::widget::CursorIcon::Default);
                     }
                     _ => {}
                 }
