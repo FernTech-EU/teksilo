@@ -93,14 +93,13 @@ impl MarqueeState {
 }
 
 /// A drag-to-move in flight: which lightweight item is being
-/// translated, in scene coords. `original_bounds` is the item's
-/// `scene_rect` when the drag started — the new bounds at
-/// `Ended` time are `original_bounds.translate(current_scene -
-/// anchor_scene)`.
+/// translated, in scene coords. The committed delta on `Ended`
+/// is `current_scene - anchor_scene`; that delta is applied to
+/// the target item *and* every declared descendant via
+/// `Scene::collect_descendants`.
 #[derive(Debug, Clone, Copy)]
 struct DragTarget {
     item_id: ItemId,
-    original_bounds: Rect,
     /// Scene-coord position where the drag started.
     anchor_scene: Point,
     /// Current scene-coord position (updated on each Moved /
@@ -254,11 +253,13 @@ pub struct SceneView {
     /// `current - anchor` and posted to `pending_item_move`.
     /// `Rc<Cell>` so the on_drag closure can mutate via `&self`.
     drag_target: Rc<Cell<Option<DragTarget>>>,
-    /// Pending drag-to-move commit: `(item_id, new_bounds)` set
-    /// by the on_drag `Ended` branch, drained in `place_children`
-    /// and applied via `Scene::move_item` (which keeps the
-    /// spatial index in sync).
-    pending_item_move: Rc<Cell<Option<(ItemId, Rect)>>>,
+    /// Pending drag-to-move commit: `(target_id, delta)` set by
+    /// the on_drag `Ended` branch, drained in `build`. The drain
+    /// code translates the target item AND every descendant
+    /// (declared via `Scene::set_item_parent`) by the same delta
+    /// — so a labelled rectangle (Rect parent + TextItem child)
+    /// moves as one unit, QGraphicsScene-style.
+    pending_item_move: Rc<Cell<Option<(ItemId, Vec2)>>>,
     /// Snapshot of lightweight scene items + their bounds, used
     /// by the on_drag closure for hit-test. Refreshed in
     /// `place_children` each layout pass — the snapshot stays
@@ -454,8 +455,20 @@ impl SceneView {
     /// rely on the next layout cycle (which will eventually need
     /// `&mut Scene` access via `scene_mut`).
     pub fn flush_pending_item_move(&mut self) -> bool {
-        if let Some((item_id, new_bounds)) = self.pending_item_move.take() {
-            self.scene.move_item(item_id, new_bounds);
+        if let Some((target_id, delta)) = self.pending_item_move.take() {
+            let mut to_move: Vec<ItemId> = vec![target_id];
+            self.scene.collect_descendants(target_id, &mut to_move);
+            for id in to_move {
+                if let Some(rect) = self.scene.scene_rect(id) {
+                    let new_bounds = Rect::new(
+                        rect.x + delta.x,
+                        rect.y + delta.y,
+                        rect.width,
+                        rect.height,
+                    );
+                    self.scene.move_item(id, new_bounds);
+                }
+            }
             self.drag_target.set(None);
             true
         } else {
@@ -936,7 +949,7 @@ impl SceneView {
 impl Widget for SceneView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Drain any pending drag-to-move commit. The drop closure
-        // queued `(item_id, new_bounds)` and bumped `drag_dirty`,
+        // queued `(target_id, delta)` and bumped `drag_dirty`,
         // which flagged this widget for rebuild. Now we have
         // `&mut self.scene` so `move_item` can re-bucket the
         // spatial index. Clear `drag_target` here (not in the
@@ -945,8 +958,26 @@ impl Widget for SceneView {
         // lands — without this, between drag-end and the rebuild
         // the item would visibly "snap back" to its pre-drag
         // bounds for one or more frames.
-        if let Some((item_id, new_bounds)) = self.pending_item_move.take() {
-            self.scene.move_item(item_id, new_bounds);
+        //
+        // QGraphicsScene-style cascade: the dragged item's
+        // declared descendants (via `Scene::set_item_parent`)
+        // move by the same delta. So a Rect parent + TextItem
+        // child relationship lets the label follow the rect when
+        // the rect is dragged.
+        if let Some((target_id, delta)) = self.pending_item_move.take() {
+            let mut to_move: Vec<ItemId> = vec![target_id];
+            self.scene.collect_descendants(target_id, &mut to_move);
+            for id in to_move {
+                if let Some(rect) = self.scene.scene_rect(id) {
+                    let new_bounds = Rect::new(
+                        rect.x + delta.x,
+                        rect.y + delta.y,
+                        rect.width,
+                        rect.height,
+                    );
+                    self.scene.move_item(id, new_bounds);
+                }
+            }
             self.drag_target.set(None);
         }
 
@@ -1073,12 +1104,30 @@ impl Widget for SceneView {
         // to `Default` otherwise. The visual hint matches the
         // user's affordance check ("can I grab this?") without
         // forcing app-side wiring.
+        // Track the latest pointer position so Ctrl+wheel can
+        // zoom-about-pointer (the scene point under the cursor
+        // stays put). Updated even when not interactive — the
+        // outer SceneView in a nested chart still benefits from
+        // knowing where the mouse is.
+        //
+        // Also flips the system cursor based on the standard
+        // grab/grabbing convention:
+        //   - Pointer over a draggable item, no active drag → `Grab`
+        //     (open hand, "you can pick this up")
+        //   - Active drag in progress                       → `Grabbing`
+        //     (closed fist, "you are holding it")
+        //   - Anywhere else                                 → `Default`
+        // Hover detection uses the same draggable-bounds snapshot
+        // the on_drag::Started path consults, so the cursor and
+        // the hit-test agree on what's draggable.
         {
             let cursor_pos = self.cursor_pos.clone();
             let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
             let view_xform_signal = self.view_transform_signal.clone();
+            let drag_target_for_cursor = self.drag_target.clone();
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use fern_core::event::WidgetEvent as Ev;
+                use fern_core::widget::CursorIcon;
                 match ev {
                     Ev::PointerMove { position, .. } => {
                         cursor_pos.set(Some(*position));
@@ -1093,18 +1142,21 @@ impl Widget for SceneView {
                         let over_draggable = snap
                             .iter()
                             .any(|(_, rect)| rect.contains(scene_pt));
-                        ctx.set_cursor(if over_draggable {
-                            fern_core::widget::CursorIcon::Move
+                        let cursor = if drag_target_for_cursor.get().is_some() {
+                            CursorIcon::Grabbing
+                        } else if over_draggable {
+                            CursorIcon::Grab
                         } else {
-                            fern_core::widget::CursorIcon::Default
-                        });
+                            CursorIcon::Default
+                        };
+                        ctx.set_cursor(cursor);
                     }
                     Ev::PointerDown { position, .. } => {
                         cursor_pos.set(Some(*position));
                     }
                     Ev::PointerLeave => {
                         cursor_pos.set(None);
-                        ctx.set_cursor(fern_core::widget::CursorIcon::Default);
+                        ctx.set_cursor(CursorIcon::Default);
                     }
                     _ => {}
                 }
@@ -1426,12 +1478,11 @@ impl Widget for SceneView {
                             .iter()
                             .rev()
                             .find(|(_, rect)| rect.contains(scene_press));
-                        if let Some(&(item_id, original_bounds)) = hit {
+                        if let Some(&(item_id, _)) = hit {
                             // Drag-to-move: enter that mode,
                             // not marquee.
                             drag_target.set(Some(DragTarget {
                                 item_id,
-                                original_bounds,
                                 anchor_scene: scene_press,
                                 current_scene: scene_press,
                             }));
@@ -1461,20 +1512,18 @@ impl Widget for SceneView {
                     }
                     DragPhase::Ended { position } => {
                         if let Some(mut target) = drag_target.get() {
-                            // Drag-to-move commit: compute new
-                            // bounds = original + (current −
-                            // anchor) in scene coords.
+                            // Drag-to-move commit: compute the
+                            // delta (current − anchor) in scene
+                            // coords and post (id, delta) so the
+                            // drain code can apply the same delta
+                            // to every descendant.
                             let xform = view_xform_signal.get();
                             if let Some(inv) = xform.inverse() {
                                 target.current_scene = inv.apply_point(position);
                             }
-                            let dx = target.current_scene.x - target.anchor_scene.x;
-                            let dy = target.current_scene.y - target.anchor_scene.y;
-                            let new_bounds = Rect::new(
-                                target.original_bounds.x + dx,
-                                target.original_bounds.y + dy,
-                                target.original_bounds.width,
-                                target.original_bounds.height,
+                            let delta = Vec2::new(
+                                target.current_scene.x - target.anchor_scene.x,
+                                target.current_scene.y - target.anchor_scene.y,
                             );
                             // Keep `drag_target` set with the final
                             // current_scene so `paint` continues to
@@ -1491,7 +1540,7 @@ impl Widget for SceneView {
                             // current_scene so the visual delta
                             // stays right.
                             drag_target.set(Some(target));
-                            pending_item_move.set(Some((target.item_id, new_bounds)));
+                            pending_item_move.set(Some((target.item_id, delta)));
                             // Bump the rebuild signal so SceneView's
                             // `build()` runs and drains the pending
                             // move (where `&mut self.scene` is
@@ -1709,8 +1758,14 @@ impl Widget for SceneView {
         self.scene.sort_by_z(&mut visible_ids);
         for id in visible_ids {
             if let Some(item) = self.scene.item(id) {
-                let dragging =
-                    drag_target.filter(|t| t.item_id == id).map(|t| {
+                // An item paints with the drag offset when it is
+                // either the drag target itself OR a declared
+                // descendant of the drag target — so a TextItem
+                // parented to a draggable Rect follows the rect
+                // visually during the drag.
+                let dragging = drag_target
+                    .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
+                    .map(|t| {
                         Vec2::new(
                             t.current_scene.x - t.anchor_scene.x,
                             t.current_scene.y - t.anchor_scene.y,
@@ -4670,6 +4725,78 @@ mod tests {
             (after_second.y - 130.0).abs() < 1e-3,
             "second drag must compose with first (expected y=130, got {})",
             after_second.y
+        );
+    }
+
+    #[test]
+    fn drag_cascades_to_declared_descendants() {
+        // QGraphicsScene-style: a child item declared via
+        // `Scene::set_item_parent` moves with its parent on drag.
+        // Apps build labelled-rect compounds (a TextItem child of
+        // a draggable RectItem) without writing custom items.
+        use crate::items::{RectItem, TextItem};
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        // Heavyweight child to flip `has_built_children`.
+        scene.add_widget(FillWidget::new(), Rect::new(300.0, 300.0, 50.0, 50.0));
+        let parent_rect = scene.add_item(
+            RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
+                .fill(fern_tokens::Color::RED)
+                .draggable(true),
+        );
+        let label = scene.add_item(TextItem::new(
+            "child",
+            Rect::new(58.0, 70.0, 64.0, 20.0),
+        ));
+        scene.set_item_parent(label, Some(parent_rect));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Drag the parent (60, 60) → (100, 100) — delta = +40 x +40.
+        tree.pointer_move(Point::new(60.0, 60.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(60.0, 60.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 100.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 100.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let view = view_handle(&tree, view_id);
+        let parent_after = view
+            .scene()
+            .scene_rect(parent_rect)
+            .expect("parent still exists");
+        let label_after = view
+            .scene()
+            .scene_rect(label)
+            .expect("label still exists");
+
+        // Parent moved (50,50) → (90,90).
+        assert!(
+            (parent_after.x - 90.0).abs() < 1e-3 && (parent_after.y - 90.0).abs() < 1e-3,
+            "parent must move by drag delta (got {:?})",
+            parent_after
+        );
+        // Label is a declared child — must have moved by the SAME
+        // delta (+40, +40). Original label at (58, 70) → (98, 110).
+        assert!(
+            (label_after.x - 98.0).abs() < 1e-3 && (label_after.y - 110.0).abs() < 1e-3,
+            "child must cascade with parent's delta (got {:?})",
+            label_after
         );
     }
 

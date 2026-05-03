@@ -26,6 +26,13 @@ pub(crate) struct SceneEntry {
     /// for a stable result. Lightweight-tier only; heavyweight
     /// widget z-order is governed by the arena's child order.
     pub(crate) z: f32,
+    /// Optional parent item. When set, dragging the parent moves
+    /// this child by the same delta (QGraphicsScene-style scene
+    /// graph). The child's `scene_rect` stays in absolute scene
+    /// coordinates — the parent link governs *cascading* moves
+    /// only, not coordinate transforms. Set via
+    /// [`Scene::set_item_parent`].
+    pub(crate) parent: Option<ItemId>,
 }
 
 pub(crate) enum SceneEntryKind {
@@ -128,6 +135,7 @@ impl Scene {
                 pending: Some(Box::new(widget)),
             },
             z: 0.0,
+            parent: None,
         });
         self.entry_index.insert(id, pos);
         self.index.insert(id, scene_rect);
@@ -155,6 +163,7 @@ impl Scene {
             scene_rect,
             kind: SceneEntryKind::Item(Box::new(item)),
             z: 0.0,
+            parent: None,
         });
         self.entry_index.insert(id, pos);
         self.index.insert(id, scene_rect);
@@ -179,6 +188,71 @@ impl Scene {
     pub fn z(&self, id: ItemId) -> Option<f32> {
         let pos = *self.entry_index.get(&id)?;
         Some(self.entries.get(pos)?.z)
+    }
+
+    /// Declare a parent/child relationship between two scene items.
+    /// Modeled after `QGraphicsItem::setParentItem` — the `child`
+    /// becomes a logical descendant of `parent`. The visible
+    /// behaviour right now is **drag cascade**: dragging `parent`
+    /// (or any ancestor) translates `child` by the same delta, so
+    /// a labelled rectangle (Rect parent + TextItem child) moves
+    /// as one unit. Coordinates remain in absolute scene-space —
+    /// the link does NOT make the child's `scene_rect` relative
+    /// to the parent (a deliberate simplification; relative
+    /// coords + transform inheritance is a future addition if an
+    /// app needs it).
+    ///
+    /// Pass `parent = None` to detach. No-op if `child` is unknown.
+    /// No cycle check — apps that wire parent loops get UB-free
+    /// infinite descendant traversal in `descendants_of`; the API
+    /// trusts callers not to do this (same contract as a tree
+    /// structure: the caller owns acyclicity).
+    pub fn set_item_parent(&mut self, child: ItemId, parent: Option<ItemId>) {
+        if let Some(&pos) = self.entry_index.get(&child) {
+            self.entries[pos].parent = parent;
+        }
+    }
+
+    /// Parent of `id`, if any.
+    pub fn parent_of(&self, id: ItemId) -> Option<ItemId> {
+        let pos = *self.entry_index.get(&id)?;
+        self.entries.get(pos)?.parent
+    }
+
+    /// Whether `id`'s ancestor chain contains `ancestor`. Walks up
+    /// `parent` links; bounded by the entry count to avoid infinite
+    /// loops if the caller has wired a cycle.
+    pub fn is_descendant_of(&self, id: ItemId, ancestor: ItemId) -> bool {
+        let mut cur = self.parent_of(id);
+        let cap = self.entries.len();
+        let mut hops = 0;
+        while let Some(p) = cur {
+            if p == ancestor {
+                return true;
+            }
+            cur = self.parent_of(p);
+            hops += 1;
+            if hops > cap {
+                break;
+            }
+        }
+        false
+    }
+
+    /// Append every direct + transitive descendant of `id` into
+    /// `out`. The order is breadth-first across declaration order.
+    /// The dragged-item itself is NOT included — the caller adds
+    /// it to a moves-list explicitly.
+    pub fn collect_descendants(&self, id: ItemId, out: &mut Vec<ItemId>) {
+        let mut frontier: Vec<ItemId> = vec![id];
+        while let Some(parent) = frontier.pop() {
+            for entry in &self.entries {
+                if entry.parent == Some(parent) {
+                    out.push(entry.id);
+                    frontier.push(entry.id);
+                }
+            }
+        }
     }
 
     /// Crate-private: helper for `SceneView::paint` to walk visible
