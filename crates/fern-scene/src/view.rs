@@ -40,7 +40,7 @@
 //!   on the empty viewport surface.
 //! - Phase 5 layers a11y on top.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
@@ -90,6 +90,23 @@ impl MarqueeState {
         let h = (self.origin.y - self.current.y).abs();
         Rect::new(x, y, w, h)
     }
+}
+
+/// A drag-to-move in flight: which lightweight item is being
+/// translated, in scene coords. `original_bounds` is the item's
+/// `scene_rect` when the drag started — the new bounds at
+/// `Ended` time are `original_bounds.translate(current_scene -
+/// anchor_scene)`.
+#[derive(Debug, Clone, Copy)]
+struct DragTarget {
+    item_id: ItemId,
+    original_bounds: Rect,
+    /// Scene-coord position where the drag started.
+    anchor_scene: Point,
+    /// Current scene-coord position (updated on each Moved /
+    /// Ended). Allows paint to render the in-flight offset for
+    /// live visual feedback.
+    current_scene: Point,
 }
 
 /// A pannable/zoomable viewport hosting a [`Scene`]'s items at scene
@@ -175,6 +192,24 @@ pub struct SceneView {
     /// via `self`). This indirection avoids forcing `Scene` into
     /// an `Rc<RefCell>`.
     pending_marquee_commit: Rc<Cell<Option<(Rect, bool)>>>,
+    /// In-flight drag-to-move state: which item is being dragged
+    /// and the scene-coord anchor where the drag started. The
+    /// total scene-coord delta is computed at `Ended` from
+    /// `current - anchor` and posted to `pending_item_move`.
+    /// `Rc<Cell>` so the on_drag closure can mutate via `&self`.
+    drag_target: Rc<Cell<Option<DragTarget>>>,
+    /// Pending drag-to-move commit: `(item_id, new_bounds)` set
+    /// by the on_drag `Ended` branch, drained in `place_children`
+    /// and applied via `Scene::move_item` (which keeps the
+    /// spatial index in sync).
+    pending_item_move: Rc<Cell<Option<(ItemId, Rect)>>>,
+    /// Snapshot of lightweight scene items + their bounds, used
+    /// by the on_drag closure for hit-test. Refreshed in
+    /// `place_children` each layout pass — the snapshot stays
+    /// consistent within a single drag and refreshes between
+    /// drags via the spatial-index mutation triggering relayout.
+    /// Avoids forcing `Scene` into an `Rc<RefCell>`.
+    lightweight_bounds_snapshot: Rc<RefCell<Vec<(ItemId, Rect)>>>,
 
     // --- Cached derived signals ---------------------------------------
     /// `view_transform` as a derived `Signal<Transform2D>`,
@@ -231,6 +266,9 @@ impl SceneView {
             ),
             marquee: Rc::new(Cell::new(None)),
             pending_marquee_commit: Rc::new(Cell::new(None)),
+            drag_target: Rc::new(Cell::new(None)),
+            pending_item_move: Rc::new(Cell::new(None)),
+            lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -262,6 +300,23 @@ impl SceneView {
         if let Some((rect, additive)) = self.pending_marquee_commit.take() {
             self.selection.commit_marquee(&self.scene, rect, additive);
             self.marquee.set(None);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Drain any pending drag-to-move commit, applying the new
+    /// bounds via `Scene::move_item` (which keeps the spatial
+    /// index in sync). Requires `&mut self` because the move
+    /// mutates the scene. Tests call this after driving on_drag;
+    /// real apps wire it in their post-event-dispatch path or
+    /// rely on the next layout cycle (which will eventually need
+    /// `&mut Scene` access via `scene_mut`).
+    pub fn flush_pending_item_move(&mut self) -> bool {
+        if let Some((item_id, new_bounds)) = self.pending_item_move.take() {
+            self.scene.move_item(item_id, new_bounds);
+            self.drag_target.set(None);
             true
         } else {
             false
@@ -818,8 +873,11 @@ impl Widget for SceneView {
             crate::selection::SceneSelectionMode::None
         ) {
             let marquee = self.marquee.clone();
-            let pending_commit = self.pending_marquee_commit.clone();
+            let pending_marquee_commit = self.pending_marquee_commit.clone();
+            let drag_target = self.drag_target.clone();
+            let pending_item_move = self.pending_item_move.clone();
             let view_xform_signal = self.view_transform_signal.clone();
+            let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
             handlers = handlers.on_drag(move |phase, _ctx| {
                 use fern_core::gesture::DragPhase;
                 match phase {
@@ -830,31 +888,76 @@ impl Widget for SceneView {
                         ) {
                             return;
                         }
-                        // Store screen-coord origin/current. We
-                        // project to scene coords on commit using
-                        // the current view_transform — pan/zoom
-                        // mid-drag is uncommon and the small
-                        // alignment artifact is acceptable.
-                        marquee.set(Some(MarqueeState {
-                            origin: position,
-                            current: position,
-                            additive: false,
-                        }));
+                        // Project screen press to scene coords for
+                        // hit-test against the snapshot.
+                        let xform = view_xform_signal.get();
+                        let scene_press = match xform.inverse() {
+                            Some(inv) => inv.apply_point(position),
+                            None => Point::ZERO,
+                        };
+                        // Hit-test scene items in reverse insertion
+                        // order so items painted on top get
+                        // priority. The snapshot is refreshed each
+                        // layout pass — see `place_children`.
+                        let snap = bounds_snapshot.borrow();
+                        let hit = snap
+                            .iter()
+                            .rev()
+                            .find(|(_, rect)| rect.contains(scene_press));
+                        if let Some(&(item_id, original_bounds)) = hit {
+                            // Drag-to-move: enter that mode,
+                            // not marquee.
+                            drag_target.set(Some(DragTarget {
+                                item_id,
+                                original_bounds,
+                                anchor_scene: scene_press,
+                                current_scene: scene_press,
+                            }));
+                        } else {
+                            // Empty area — start a marquee.
+                            marquee.set(Some(MarqueeState {
+                                origin: position,
+                                current: position,
+                                additive: false,
+                            }));
+                        }
                     }
                     DragPhase::Moved { position, .. } => {
-                        if let Some(mut state) = marquee.get() {
+                        if let Some(mut target) = drag_target.get() {
+                            // Update current scene-coord position
+                            // for live paint feedback (the paint
+                            // method will pick this up).
+                            let xform = view_xform_signal.get();
+                            if let Some(inv) = xform.inverse() {
+                                target.current_scene = inv.apply_point(position);
+                                drag_target.set(Some(target));
+                            }
+                        } else if let Some(mut state) = marquee.get() {
                             state.current = position;
                             marquee.set(Some(state));
                         }
                     }
                     DragPhase::Ended { position } => {
-                        // Update `current` to the release position
-                        // — necessary for cases where the drag
-                        // recognizer fires only `Started` (on
-                        // threshold crossing) and `Ended` without
-                        // an intervening `Moved` (single-jump
-                        // drags). Without this, the marquee rect
-                        // would be a degenerate point.
+                        if let Some(mut target) = drag_target.take() {
+                            // Drag-to-move commit: compute new
+                            // bounds = original + (current −
+                            // anchor) in scene coords.
+                            let xform = view_xform_signal.get();
+                            if let Some(inv) = xform.inverse() {
+                                target.current_scene = inv.apply_point(position);
+                            }
+                            let dx = target.current_scene.x - target.anchor_scene.x;
+                            let dy = target.current_scene.y - target.anchor_scene.y;
+                            let new_bounds = Rect::new(
+                                target.original_bounds.x + dx,
+                                target.original_bounds.y + dy,
+                                target.original_bounds.width,
+                                target.original_bounds.height,
+                            );
+                            pending_item_move.set(Some((target.item_id, new_bounds)));
+                            return;
+                        }
+                        // Marquee commit path (unchanged).
                         let Some(mut state) = marquee.get() else {
                             return;
                         };
@@ -865,7 +968,8 @@ impl Widget for SceneView {
                             Some(inv) => inv.apply_rect(screen_rect),
                             None => Rect::ZERO,
                         };
-                        pending_commit.set(Some((scene_rect, state.additive)));
+                        pending_marquee_commit
+                            .set(Some((scene_rect, state.additive)));
                     }
                 }
             });
@@ -884,6 +988,24 @@ impl Widget for SceneView {
         // apps, since an empty SceneView doesn't render anything to
         // interact with.
         self.last_viewport.set(size);
+
+        // Phase 6: refresh the lightweight-bounds snapshot used
+        // by the on_drag closure for hit-test. Done here (rather
+        // than in `place_children`) because `place_children` only
+        // runs when the SceneView has at least one heavyweight
+        // child — a scene with only lightweight items would never
+        // get its snapshot populated. `layout_response` runs every
+        // layout pass regardless.
+        {
+            let mut snapshot = self.lightweight_bounds_snapshot.borrow_mut();
+            snapshot.clear();
+            for entry in &self.scene.entries {
+                if matches!(&entry.kind, crate::scene::SceneEntryKind::Item(_)) {
+                    snapshot.push((entry.id, entry.scene_rect));
+                }
+            }
+        }
+
         LayoutResponse::rigid(size)
     }
 
@@ -915,6 +1037,23 @@ impl Widget for SceneView {
             self.selection.commit_marquee(&self.scene, rect, additive);
             self.marquee.set(None);
         }
+
+        // Phase 6: drain any pending drag-to-move commit, applied
+        // via the public `flush_pending_mutations` helper to keep
+        // the borrow tractable (`place_children` takes `&self`,
+        // and `Scene::move_item` needs `&mut Scene`). The
+        // framework calls layout from `&mut tree`, which gives
+        // `&mut self` access elsewhere — but inside this trait
+        // method we have only `&self`. Defer to a separate
+        // `flush_pending_mutations(&mut self)` step instead. For
+        // headless tests that drive the closure directly, the
+        // public `flush_marquee_commit` / `flush_pending_mutations`
+        // methods materialise the result.
+
+        // (Lightweight-bounds snapshot is refreshed in
+        // `layout_response` so it's available even when the
+        // SceneView has zero heavyweight children — see comment
+        // there.)
 
         // Place each child at its **pure scene coordinate** — not
         // offset by `bounds.origin`. The renderer's transform stack
@@ -975,9 +1114,27 @@ impl Widget for SceneView {
         // intersect the visible region. We filter to the lightweight
         // tier here — heavyweights are painted by the arena walker via
         // their own widget paint methods.
+        //
+        // Phase 6 drag-to-move: if an item is being dragged, paint
+        // it at its in-flight scene-coord offset by translating
+        // the canvas. Restored after.
+        let drag_target = self.drag_target.get();
         for id in self.scene.items_in_rect(region) {
             if let Some(item) = self.scene.item(id) {
-                item.paint(canvas, &item_ctx);
+                let dragging =
+                    drag_target.filter(|t| t.item_id == id).map(|t| {
+                        Vec2::new(
+                            t.current_scene.x - t.anchor_scene.x,
+                            t.current_scene.y - t.anchor_scene.y,
+                        )
+                    });
+                if let Some(delta) = dragging {
+                    canvas.translate(delta.x, delta.y);
+                    item.paint(canvas, &item_ctx);
+                    canvas.translate(-delta.x, -delta.y);
+                } else {
+                    item.paint(canvas, &item_ctx);
+                }
             }
         }
 
@@ -3491,6 +3648,141 @@ mod tests {
             !selected.contains(&outside),
             "marquee not enclosing `outside` must not select it"
         );
+    }
+
+    #[test]
+    fn drag_to_move_translates_lightweight_item() {
+        // Pointer-down inside a lightweight item, drag, release →
+        // the item's bounds in the scene shift by the drag delta.
+        // The hit-test snapshot used by on_drag is refreshed in
+        // place_children; the test calls layout once before
+        // dragging so the snapshot is populated.
+        use crate::items::RectItem;
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        let item_id = scene.add_item(
+            RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
+                .fill(fern_tokens::Color::RED),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        // First layout populates the lightweight bounds snapshot.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Press inside the item (60, 60), drag to (100, 100), release.
+        tree.pointer_move(Point::new(60.0, 60.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(60.0, 60.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 100.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 100.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+
+        // Diagnostic: verify the snapshot was populated, and
+        // check whether drag_target or marquee was selected.
+        {
+            let view = view_handle(&tree, view_id);
+            let snap = view.lightweight_bounds_snapshot.borrow();
+            let drag = view.drag_target.get();
+            let marq = view.marquee.get();
+            let pending_move = view.pending_item_move.get();
+            let pending_marq = view.pending_marquee_commit.get();
+            assert!(
+                drag.is_some() || pending_move.is_some(),
+                "expected drag_target or pending_move set; \
+                 snap={:?} drag={:?} marquee={:?} pending_move={:?} pending_marq={:?}",
+                snap, drag, marq, pending_move, pending_marq
+            );
+        }
+
+        // Drain the pending move via the public &mut helper.
+        let view = tree
+            .widget_as_any_mut(view_id)
+            .and_then(|a| a.downcast_mut::<SceneView>())
+            .expect("downcast");
+        let flushed = view.flush_pending_item_move();
+        assert!(flushed, "drag-to-move should post a pending commit");
+
+        // The item bounds now reflect the drag delta (+40 on each axis).
+        let new_rect = view
+            .scene()
+            .scene_rect(item_id)
+            .expect("item still exists");
+        assert!(
+            (new_rect.x - 90.0).abs() < 1e-3,
+            "item x moved by drag delta (expected 90, got {})",
+            new_rect.x
+        );
+        assert!(
+            (new_rect.y - 90.0).abs() < 1e-3,
+            "item y moved by drag delta (expected 90, got {})",
+            new_rect.y
+        );
+        // Size unchanged.
+        assert_eq!(new_rect.width, 30.0);
+        assert_eq!(new_rect.height, 30.0);
+    }
+
+    #[test]
+    fn drag_in_empty_area_starts_marquee_not_move() {
+        // Press in empty scene area (no item underneath) → marquee
+        // mode wins; dragging across an item selects it instead of
+        // moving it.
+        use crate::items::RectItem;
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        let item_id = scene.add_item(
+            RectItem::new(Rect::new(100.0, 100.0, 30.0, 30.0))
+                .fill(fern_tokens::Color::RED),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Press at (10, 10) — empty area. Drag to (200, 200) —
+        // crosses the item. Release.
+        tree.pointer_move(Point::new(10.0, 10.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(10.0, 10.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(200.0, 200.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(200.0, 200.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+
+        let view = view_handle(&tree, view_id);
+        view.flush_marquee_commit();
+        assert!(
+            view.selection().is_selected(item_id),
+            "marquee enclosing the item must select it"
+        );
+        // Item bounds unchanged (no drag-to-move happened).
+        let rect = view.scene().scene_rect(item_id).unwrap();
+        assert_eq!(rect.x, 100.0);
+        assert_eq!(rect.y, 100.0);
     }
 
     #[test]
