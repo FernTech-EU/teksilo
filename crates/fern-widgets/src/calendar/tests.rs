@@ -303,6 +303,60 @@ fn calendar_title_button_click_demotes_mode() {
 }
 
 #[test]
+fn calendar_months_body_does_not_collapse_to_left_edge() {
+    // Regression for the zoom-mode "body collapses to leading edge"
+    // bug: in Months / Years mode, cells were rendered at zero
+    // wanted-width, the row's natural width fell to ~spacing, and
+    // the parent VStack assigned cross-axis width = wanted (small).
+    // Visually the body shrank to a tiny column on the left.
+    //
+    // Fix: each zoom cell is wrapped in `FixedSize(cell_width,
+    // cell_height)` so the row reports a real natural width.
+    // Verify by checking that descendants of the calendar in zoom
+    // mode have bounds spanning a meaningful fraction of the
+    // calendar's width (not collapsed to ~zero).
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = Calendar::single(date);
+    let mode = cal.mode_signal();
+    mode.set(CalendarMode::Months);
+    let mut tree = light_tree();
+    let id = tree.add(cal);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    // Second pass settles visibility / activation flips.
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+
+    // Walk the tree; the maximum-x cell across all descendants
+    // should land beyond ~50% of the calendar's width if the months
+    // grid distributes its cells. Pre-fix the rightmost descendant
+    // sat near x=8 (just inside the outer padding).
+    let cal_bounds = tree.bounds(id);
+    let mut max_right: f32 = 0.0;
+    let mut stack = vec![id];
+    while let Some(node_id) = stack.pop() {
+        let b = tree.bounds(node_id);
+        if b.width > 0.0 {
+            max_right = max_right.max(b.right());
+        }
+        for child in tree.children(node_id) {
+            stack.push(child);
+        }
+    }
+    let half_width = cal_bounds.x + cal_bounds.width * 0.5;
+    assert!(
+        max_right > half_width,
+        "in Months mode the zoom body should distribute past the centre — \
+         max-right child x = {max_right}, calendar mid x = {half_width}, \
+         cal_bounds = {cal_bounds:?}"
+    );
+}
+
+#[test]
 fn calendar_title_button_clickable_across_centered_band() {
     // Verify the click target spans the full width between the
     // chevron buttons — the bug fix's whole point. Clicks at three

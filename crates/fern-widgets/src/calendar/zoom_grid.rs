@@ -45,6 +45,7 @@ pub(crate) struct MonthsGrid {
     visible_month: Signal<YearMonth>,
     mode: Signal<CalendarMode>,
     enabled: bool,
+    cell_width: f32,
     cell_height: f32,
     root_id: Option<WidgetId>,
 }
@@ -60,12 +61,14 @@ impl MonthsGrid {
         visible_month: Signal<YearMonth>,
         mode: Signal<CalendarMode>,
         enabled: bool,
+        cell_width: f32,
         cell_height: f32,
     ) -> Self {
         Self {
             visible_month,
             mode,
             enabled,
+            cell_width,
             cell_height,
             root_id: None,
         }
@@ -97,14 +100,19 @@ impl Widget for MonthsGrid {
                     }),
                 );
                 let cell_id = ctx.add(cell);
-                // Wrap each cell in Expand so the COLUMNS cells share
-                // the row's width equally. Without this the HStack
-                // would lay them out at their natural text width and
-                // they'd bunch up on the leading edge.
-                let expanded_cell_id = ctx.add(
-                    crate::primitives::Expand::horizontal().child_id(cell_id),
+                // Fix the cell's footprint so the row reports a real
+                // natural width (3 × cell_width + 2 × spacing). Without
+                // this, the row would advertise zero wanted width to
+                // the parent VStack — which uses children's *wanted*
+                // widths for cross-axis sizing, regardless of flex —
+                // and the body would collapse to the leading edge.
+                let sized_cell_id = ctx.add(
+                    crate::primitives::FixedSize::new()
+                        .bind_width(self.cell_width)
+                        .bind_height(self.cell_height)
+                        .child_id(cell_id),
                 );
-                row = row.add_child(expanded_cell_id);
+                row = row.add_child(sized_cell_id);
             }
             rows.push(ctx.add(row));
         }
@@ -160,6 +168,7 @@ pub(crate) struct YearsGrid {
     visible_month: Signal<YearMonth>,
     mode: Signal<CalendarMode>,
     enabled: bool,
+    cell_width: f32,
     cell_height: f32,
     root_id: Option<WidgetId>,
 }
@@ -175,12 +184,14 @@ impl YearsGrid {
         visible_month: Signal<YearMonth>,
         mode: Signal<CalendarMode>,
         enabled: bool,
+        cell_width: f32,
         cell_height: f32,
     ) -> Self {
         Self {
             visible_month,
             mode,
             enabled,
+            cell_width,
             cell_height,
             root_id: None,
         }
@@ -225,12 +236,17 @@ impl Widget for YearsGrid {
                     }),
                 );
                 let cell_id = ctx.add(cell);
-                // Wrap each cell in Expand so the COLUMNS cells share
-                // the row's width equally (same fix as `MonthsGrid`).
-                let expanded_cell_id = ctx.add(
-                    crate::primitives::Expand::horizontal().child_id(cell_id),
+                // Fix the cell's footprint — see the matching note in
+                // `MonthsGrid` for why this is required (the row's
+                // wanted width must be non-zero to survive the parent
+                // VStack's cross-axis sizing).
+                let sized_cell_id = ctx.add(
+                    crate::primitives::FixedSize::new()
+                        .bind_width(self.cell_width)
+                        .bind_height(self.cell_height)
+                        .child_id(cell_id),
                 );
-                row = row.add_child(expanded_cell_id);
+                row = row.add_child(sized_cell_id);
             }
             rows.push(ctx.add(row));
         }

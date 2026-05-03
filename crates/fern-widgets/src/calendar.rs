@@ -449,13 +449,26 @@ impl Widget for Calendar {
             on_activate: self.on_activate.clone(),
             range_status: self.range_status.clone(),
         });
-        // Cell height for zoom modes derived from day grid cell size
-        // so the body footprint stays roughly constant across modes.
+        // Cell footprint for zoom modes derived from day grid cell
+        // size so the body's overall width matches the day grid (7
+        // day cells worth, divided across 3 zoom columns) and the
+        // calendar's outer width stays constant across mode flips.
         let zoom_cell_height = (style.cell_size * 1.4).max(36.0);
-        let months_body =
-            zoom_grid::MonthsGrid::new(self.visible_month.clone(), self.mode.clone(), enabled, zoom_cell_height);
-        let years_body =
-            zoom_grid::YearsGrid::new(self.visible_month.clone(), self.mode.clone(), enabled, zoom_cell_height);
+        let zoom_cell_width = (style.cell_size * 7.0 / 3.0).max(64.0);
+        let months_body = zoom_grid::MonthsGrid::new(
+            self.visible_month.clone(),
+            self.mode.clone(),
+            enabled,
+            zoom_cell_width,
+            zoom_cell_height,
+        );
+        let years_body = zoom_grid::YearsGrid::new(
+            self.visible_month.clone(),
+            self.mode.clone(),
+            enabled,
+            zoom_cell_width,
+            zoom_cell_height,
+        );
         let mode_index = self
             .mode
             .map(|m| match m {
