@@ -53,7 +53,7 @@ mod tests;
 
 use std::rc::Rc;
 
-use fern_canvas::{Path, Point, Rect, Size, SizeProposal};
+use fern_canvas::{Path, Point, Rect, SizeProposal};
 use fern_core::accessibility::{widget_id_to_node_id, AccessNodeBuilder};
 use fern_core::accesskit::{Action, HasPopup, Role};
 use fern_core::build_context::BuildContext;
@@ -62,13 +62,13 @@ use fern_core::overlay::{
     DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
 };
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
+use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
-use fern_tokens::{CornerRadius, SurfaceRole};
 use jiff::civil::Weekday;
 
+use crate::built_in_button::{BuiltInButton, BuiltInButtonSize};
 use crate::calendar::Calendar;
 use crate::common::datetime::pattern::{
     format_value, mask_for_pattern, parse_value, segment_at_position, step_date_field,
@@ -77,7 +77,7 @@ use crate::common::datetime::pattern::{
 use crate::common::datetime::types::{today_local, YearMonth};
 use crate::common::datetime::Date;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
-use crate::primitives::{Center, FixedSize, IconWidget, RectWidget, ZStack};
+use crate::primitives::IconWidget;
 use crate::text_input::TextInput;
 
 const DEFAULT_WIDTH: f32 = 144.0;
@@ -519,7 +519,11 @@ impl Widget for DateEdit {
 
         // ── Calendar trigger button (built as a value, dropped into
         //    the TextInput's trailing slot) ──────────────────────
-        let trigger_widget_opt: Option<CalendarTriggerButton> = if self.show_calendar_button {
+        // Same Int UI `BuiltInButton` the other datetime widgets
+        // (DateRangeEdit, DateTimeEdit) use, so the visual treatment
+        // — hover/pressed background, icon size, focus halo — stays
+        // consistent across the family.
+        let trigger_widget_opt: Option<BuiltInButton> = if self.show_calendar_button {
             let popover_open = self.popover_open.clone();
             let calendar_id = calendar_id_opt.expect("calendar built when button enabled");
             let placement = self.calendar_popover_placement.clone();
@@ -530,36 +534,37 @@ impl Widget for DateEdit {
                     popover_open.set(false);
                 })
             };
-            Some(CalendarTriggerButton::new(
-                date_style.calendar_button_width,
-                date_style.calendar_icon_size,
-                enabled && !read_only,
-                Rc::new(move |ctx_evt: &mut EventContext| {
-                    if popover_open.get() {
-                        popover_open.set(false);
-                        ctx_evt.dismiss_all_overlays();
-                    } else {
-                        popover_open.set(true);
-                        ctx_evt.activate(calendar_id);
-                        ctx_evt.show_overlay(OverlayRequest {
-                            content_id: calendar_id,
-                            anchor: self_ref,
-                            placement: placement.clone(),
-                            dismiss: DismissBehavior::EscapeOrClickOutside,
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                            on_dismiss: Some(dismiss_cb.clone()),
-                            fade_duration: None,
-                        });
-                        // Move focus into the calendar so arrow keys
-                        // navigate cells immediately — standard date-
-                        // picker UX (macOS Calendar, JetBrains, etc.).
-                        // Without this the user must Tab through
-                        // unrelated widgets first.
-                        ctx_evt.request_focus(calendar_id);
-                    }
-                }),
-            ))
+            Some(
+                BuiltInButton::new(calendar_glyph_icon(date_style.calendar_icon_size))
+                    .size(BuiltInButtonSize::Default)
+                    .enabled(enabled && !read_only)
+                    .tooltip(resolve_message_widget("date-edit-trigger-tooltip", &[]))
+                    .on_activate_fn(move |ctx_evt: &mut EventContext| {
+                        if popover_open.get() {
+                            popover_open.set(false);
+                            ctx_evt.dismiss_all_overlays();
+                        } else {
+                            popover_open.set(true);
+                            ctx_evt.activate(calendar_id);
+                            ctx_evt.show_overlay(OverlayRequest {
+                                content_id: calendar_id,
+                                anchor: self_ref,
+                                placement: placement.clone(),
+                                dismiss: DismissBehavior::EscapeOrClickOutside,
+                                layer: OverlayLayer::InTree,
+                                parent_overlay: None,
+                                on_dismiss: Some(dismiss_cb.clone()),
+                                fade_duration: None,
+                            });
+                            // Move focus into the calendar so arrow keys
+                            // navigate cells immediately — standard date-
+                            // picker UX (macOS Calendar, JetBrains, etc.).
+                            // Without this the user must Tab through
+                            // unrelated widgets first.
+                            ctx_evt.request_focus(calendar_id);
+                        }
+                    }),
+            )
         } else {
             None
         };
@@ -792,138 +797,6 @@ impl Widget for DateEdit {
         // its NodeId is valid.
         if let Some(cal_id) = self.calendar_id {
             builder.push_controlled(widget_id_to_node_id(cal_id));
-        }
-    }
-}
-
-// ── Calendar trigger button (icon-only, in-frame) ─────────────────────
-
-pub(crate) struct CalendarTriggerButton {
-    width: f32,
-    icon_size: f32,
-    enabled: bool,
-    on_activate: Rc<dyn Fn(&mut EventContext)>,
-    root_id: Option<WidgetId>,
-}
-
-impl std::fmt::Debug for CalendarTriggerButton {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CalendarTriggerButton")
-            .field("width", &self.width)
-            .finish()
-    }
-}
-
-impl CalendarTriggerButton {
-    pub(crate) fn new(width: f32, icon_size: f32, enabled: bool, on_activate: Rc<dyn Fn(&mut EventContext)>) -> Self {
-        Self {
-            width,
-            icon_size,
-            enabled,
-            on_activate,
-            root_id: None,
-        }
-    }
-}
-
-impl Widget for CalendarTriggerButton {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let icon = ctx.add(calendar_glyph_icon(self.icon_size));
-        let centered = ctx.add(Center::new().child_id(icon));
-        let bg = ctx.add(
-            RectWidget::new()
-                .background(SurfaceRole::Transparent)
-                .corner_radius(CornerRadius::uniform(2.0)),
-        );
-        let z = ctx.add(ZStack::new().add_child(bg).add_child(centered));
-        let sized = ctx.add(
-            FixedSize::new()
-                .bind_width(self.width)
-                .bind_height(self.width)
-                .child_id(z),
-        );
-
-        let tap_action = self.on_activate.clone();
-        let key_action = self.on_activate.clone();
-        let access_action = self.on_activate.clone();
-        let enabled = self.enabled;
-        let handlers = HandlerSet::new()
-            .focusable(enabled)
-            .cursor(if enabled { CursorIcon::Pointer } else { CursorIcon::Default })
-            .on_tap(move |_pos, ctx_evt| {
-                if enabled {
-                    tap_action(ctx_evt);
-                }
-            })
-            .on_key(move |event, ctx_evt| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
-                if let WidgetEvent::KeyDown { key, .. } = event {
-                    if matches!(key, Key::Enter | Key::Space) {
-                        key_action(ctx_evt);
-                        return EventResponse::Handled;
-                    }
-                }
-                EventResponse::Ignored
-            })
-            .on_access_action(move |action, ctx_evt| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
-                if matches!(action, Action::Click) {
-                    access_action(ctx_evt);
-                    EventResponse::Handled
-                } else {
-                    EventResponse::Ignored
-                }
-            });
-        ctx.apply_self_handlers(handlers);
-
-        self.root_id = Some(sized);
-        vec![sized]
-    }
-
-    fn layout_response(
-        &self,
-        _proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> fern_core::widget::LayoutResponse {
-        match self.root_id {
-            Some(id) => ctx
-                .child_size(id, SizeProposal::unspecified())
-                .unwrap_or_else(|| Size::new(self.width, self.width)),
-            None => Size::new(self.width, self.width),
-        }
-        .into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
-        }
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        self.root_id.into_iter().collect()
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(Role::Button);
-        builder.set_name(resolve_message_widget("date-edit-calendar-button", &[]));
-        builder.set_has_popup(HasPopup::Grid);
-        if self.enabled {
-            builder.add_action(Action::Click);
-            builder.add_action(Action::Focus);
-        } else {
-            builder.set_disabled();
         }
     }
 }

@@ -225,6 +225,7 @@ date-edit-segment-year = Year
 date-edit-segment-month = Month
 date-edit-segment-day = Day
 date-edit-calendar-button = Choose date
+date-edit-trigger-tooltip = Open calendar
 date-edit-name = Date
 date-edit-placeholder = Select a date
 
