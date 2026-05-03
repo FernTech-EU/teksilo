@@ -337,7 +337,7 @@ impl WidgetTree {
                 if let Some(new) = new_target {
                     self.dispatch_to_widget(new, &WidgetEvent::PointerEnter, &mut *ops);
                 }
-                self.hovered = new_target;
+                self.set_hovered(new_target);
             }
         }
     }

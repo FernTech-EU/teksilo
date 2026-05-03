@@ -829,7 +829,7 @@ impl WidgetTree {
 
             if hovered_in_subtree.is_some() {
                 let old = self.hovered;
-                self.hovered = None;
+                self.set_hovered(None);
                 self.update_hover_within_signals(old, None);
             }
         }

@@ -77,6 +77,19 @@ pub struct InspectorState {
     /// reads this on the next pass, divides by row height, and updates
     /// `selected_id`.
     pub pending_tree_click_y: Signal<Option<f32>>,
+    /// Reactive mirror of `WidgetTree::hovered()`. Bridged once per
+    /// process by `state::install`'s post-root closure: an observer on
+    /// the tree's hover signal forwards every change here. None until
+    /// the bridge is wired (apps without inspector wiring see no
+    /// behavior change).
+    pub hover_id: Signal<Option<WidgetId>>,
+    /// Resolved hover descriptor — type name + bounds — for the
+    /// widget under the cursor. Populated by `BoundsTracker` from
+    /// `hover_id` during AllBounds layout passes; consumed by
+    /// `HighlightLayer` to paint a floating tooltip near the cursor.
+    /// `None` outside AllBounds mode or when the cursor is over the
+    /// inspector's own subtree.
+    pub(crate) hover_info: Signal<Option<crate::highlight::HoverInfo>>,
     /// Bounds-overlay rendering mode. Drives `HighlightLayer`. Toggled
     /// by the toolbar's `SegmentedControl`.
     pub overlay_mode: Signal<OverlayMode>,
@@ -121,6 +134,8 @@ impl InspectorState {
             active_tab: Signal::new(0),
             selected_model_index: Signal::new(None),
             pending_models_click_y: Signal::new(None),
+            hover_id: Signal::new(None),
+            hover_info: Signal::new(None),
         }
     }
 }
@@ -153,6 +168,7 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
     let toggle_for_post_root = state.open.clone();
     let state_for_post_root = state.clone();
     let persistence_wired = std::rc::Rc::new(std::cell::Cell::new(false));
+    let hover_bridge_wired = std::rc::Rc::new(std::cell::Cell::new(false));
 
     let post_root = DefaultPostRoot::new(move |tree, root_id| {
         // Register F12 toggle. Owner is the user's root widget so the
@@ -179,6 +195,23 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
             {
                 crate::persistence::wire(&state_for_post_root, store);
             }
+        }
+
+        // First time only: bridge `tree.hovered_signal()` →
+        // `state.hover_id` so the AllBounds tooltip (and any future
+        // hover-driven inspector UI) can react to hover changes via a
+        // signal binding rather than polling. Same idempotent guard
+        // pattern as persistence; the keepalive lives on the tree's
+        // own signal so it dies with the tree.
+        if !hover_bridge_wired.replace(true) {
+            let hover_target = state_for_post_root.hover_id.clone();
+            let tree_hover = tree.hovered_signal();
+            let h = tree_hover.observe(move |id| {
+                if hover_target.get() != *id {
+                    hover_target.set(*id);
+                }
+            });
+            tree_hover.attach_keepalive(h);
         }
 
         // Wrap the user root in an InspectorShell. The shell owns the

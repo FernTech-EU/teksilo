@@ -75,7 +75,8 @@ It is also shown dimmed in the inspector's Shortcuts tab.
   widget under the cursor. The picker auto-exits after one pick.
 - **Bounds overlay** — `Off` (no overlay), `Sel` (stroke around the
   selected widget only), `All` (stroke every widget; layout
-  primitives in cyan, content widgets in magenta).
+  primitives in cyan, content widgets in magenta; cursor-following
+  tooltip with type + size — see *Bounds overlay color legend*).
 - **Opacity slider** — dims the bounds-overlay strokes for dense UIs.
   Range 0.1 .. 1.0.
 - **×** — closes the panel.
@@ -165,6 +166,16 @@ When the bounds overlay is set to **All**:
 - **Magenta** strokes — *content widgets* (everything else).
 - **Blue accent** — the currently selected widget, drawn 2 px on top.
 
+A small **cursor-following tooltip** also follows the mouse in
+`All` mode, showing the deepest widget under the pointer and its
+laid-out size — for example `Button · 96×32`. Background tint matches
+the bounds-stroke color (cyan for layout primitives, magenta for
+content widgets); positioned above the widget by default, flipping
+below or shifting left if it would clip the user-root area. Suppressed
+when the cursor is over the inspector's own panel. Driven off the
+framework's `WidgetTree::hovered_signal()` (added in slice 6) — no
+polling.
+
 Padding/gap visualization (tinted bands inside `Padding` and between
 stack siblings) is queued for a later slice.
 
@@ -203,6 +214,9 @@ but are not gated by `cfg` — they are useful for any tooling that
 wants to introspect a running tree:
 
 - `WidgetTree::hovered() -> Option<WidgetId>`
+- `WidgetTree::hovered_signal() -> Signal<Option<WidgetId>>` — reactive
+  mirror updated at every hover change (added in slice 6 to drive the
+  AllBounds tooltip without polling)
 - `WidgetTree::hit_test(point)` (delegates to `WidgetArena::hit_test_at`)
 - `WidgetArena::hit_test_at(point, exclude)`
 - `WidgetBuilder::event_pass_through(bool)` and the corresponding

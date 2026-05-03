@@ -73,6 +73,16 @@ impl WidgetTree {
         self.hovered
     }
 
+    /// Reactive handle to the hovered widget id. Cheap clone — the
+    /// underlying `Signal` is shared. Set whenever `hovered` changes
+    /// during dispatch, post-layout hover recovery, widget destruction,
+    /// or overlay subtree dormancy. Intended for debug tooling that
+    /// wants to react to hover without polling (the inspector's hover
+    /// tooltip).
+    pub fn hovered_signal(&self) -> crate::signal::Signal<Option<WidgetId>> {
+        self.hovered_signal.clone()
+    }
+
     /// Drain and run all pending idle callbacks with the given time budget.
     /// Called by the event loop during idle periods between frames.
     pub fn run_idle_callbacks(&mut self, budget: std::time::Duration) {

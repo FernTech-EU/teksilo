@@ -63,6 +63,11 @@ pub struct WidgetTree {
     text_backend: Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
     focused: Option<WidgetId>,
     hovered: Option<WidgetId>,
+    /// Reactive mirror of `hovered`. Set whenever `hovered` changes
+    /// during dispatch / hit-test recovery so external observers
+    /// (notably the debug inspector's hover tooltip) can react without
+    /// polling. Held by handle so the field is a cheap clone.
+    hovered_signal: crate::signal::Signal<Option<WidgetId>>,
     /// Last known pointer position from `PointerMove`. Used by
     /// `revalidate_interaction_state` to re-hit-test the hover after
     /// a rebuild shifts content under a stationary cursor — without
@@ -283,6 +288,7 @@ impl WidgetTree {
             text_backend: None,
             focused: None,
             hovered: None,
+            hovered_signal: crate::signal::Signal::new(None),
             last_pointer_position: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
@@ -1040,7 +1046,7 @@ impl WidgetTree {
             && !self.arena.is_active(id)
         {
             let old = self.hovered;
-            self.hovered = None;
+            self.set_hovered(None);
             self.update_hover_within_signals(old, None);
         }
         // Pointer capture anchored at a destroyed widget would otherwise
@@ -1224,7 +1230,7 @@ impl WidgetTree {
         }
         if self.hovered == Some(widget_id) {
             let old = self.hovered;
-            self.hovered = None;
+            self.set_hovered(None);
             self.update_hover_within_signals(old, None);
         }
         self.arena.destroy(widget_id);

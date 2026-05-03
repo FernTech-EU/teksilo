@@ -429,7 +429,7 @@ impl WidgetTree {
                 self.dispatch_to_widget(new, &WidgetEvent::PointerEnter, &mut *ops);
                 self.tooltip_pointer_enter(new);
             }
-            self.hovered = target;
+            self.set_hovered(target);
             self.update_hover_within_signals(previously_hovered, target);
         }
 
