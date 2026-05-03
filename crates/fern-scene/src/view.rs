@@ -1439,11 +1439,21 @@ impl Widget for SceneView {
         // get its snapshot populated. `layout_response` runs every
         // layout pass regardless.
         {
+            // Snapshot of *draggable* lightweight items. Decorative
+            // items (background tiles, group chrome, connector paths,
+            // captions) opt into drag via `.draggable(true)` on the
+            // built-in builders or by overriding `is_draggable()` on
+            // a custom impl; everything else stays anchored, which
+            // is the default. Without this filter, every visible
+            // RectItem would respond to drags and the scene would
+            // feel unstable to the user.
             let mut snapshot = self.lightweight_bounds_snapshot.borrow_mut();
             snapshot.clear();
             for entry in &self.scene.entries {
-                if matches!(&entry.kind, crate::scene::SceneEntryKind::Item(_)) {
-                    snapshot.push((entry.id, entry.scene_rect));
+                if let crate::scene::SceneEntryKind::Item(item) = &entry.kind {
+                    if item.is_draggable() {
+                        snapshot.push((entry.id, entry.scene_rect));
+                    }
                 }
             }
         }
@@ -4197,7 +4207,8 @@ mod tests {
         let mut scene = Scene::new();
         let item_id = scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
-                .fill(fern_tokens::Color::RED),
+                .fill(fern_tokens::Color::RED)
+                .draggable(true),
         );
 
         let mut tree = WidgetTree::new();

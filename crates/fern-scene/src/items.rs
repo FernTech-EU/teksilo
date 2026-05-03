@@ -136,6 +136,7 @@ pub struct RectItem {
     fill: Option<Color>,
     stroke: Option<(Color, f32)>,
     label: Option<String>,
+    draggable: bool,
     a11y: ItemA11yOverrides,
 }
 
@@ -148,6 +149,7 @@ impl RectItem {
             fill: None,
             stroke: None,
             label: None,
+            draggable: false,
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -172,6 +174,16 @@ impl RectItem {
         self
     }
 
+    /// Whether this rectangle participates in drag-to-move. Default
+    /// `false` — decorative rects (background tiles, group chrome,
+    /// connectors) don't move when grabbed, so the user can
+    /// marquee-select over them. Pass `true` for items the user is
+    /// expected to reposition (story-corkboard cards, graph nodes).
+    pub fn draggable(mut self, draggable: bool) -> Self {
+        self.draggable = draggable;
+        self
+    }
+
     item_a11y_builders!();
 }
 
@@ -191,6 +203,10 @@ impl SceneItem for RectItem {
 
     fn label(&self) -> Option<String> {
         self.label.clone()
+    }
+
+    fn is_draggable(&self) -> bool {
+        self.draggable
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -223,6 +239,7 @@ pub struct PathItem {
     fill: Option<Color>,
     stroke: Option<(Color, f32)>,
     label: Option<String>,
+    draggable: bool,
     a11y: ItemA11yOverrides,
 }
 
@@ -240,6 +257,7 @@ impl PathItem {
             fill: None,
             stroke: None,
             label: None,
+            draggable: false,
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -259,6 +277,15 @@ impl PathItem {
     /// Human-readable label.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Whether this path participates in drag-to-move. Default
+    /// `false` — connector / decorative paths typically aren't
+    /// movable. Set `true` for paths the user is meant to grab and
+    /// reposition.
+    pub fn draggable(mut self, draggable: bool) -> Self {
+        self.draggable = draggable;
         self
     }
 
@@ -337,6 +364,10 @@ impl SceneItem for PathItem {
         self.label.clone()
     }
 
+    fn is_draggable(&self) -> bool {
+        self.draggable
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
         builder.set_role(accesskit::Role::GraphicsObject);
         if let Some(label) = self.label() {
@@ -382,6 +413,7 @@ pub struct ImageItem {
     bounds: Rect,
     name: String,
     label: Option<String>,
+    draggable: bool,
     a11y: ItemA11yOverrides,
 }
 
@@ -393,6 +425,7 @@ impl ImageItem {
             bounds,
             name: name.into(),
             label: None,
+            draggable: false,
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -400,6 +433,13 @@ impl ImageItem {
     /// Human-readable label.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Whether this image participates in drag-to-move. Default
+    /// `false`.
+    pub fn draggable(mut self, draggable: bool) -> Self {
+        self.draggable = draggable;
         self
     }
 
@@ -417,6 +457,10 @@ impl SceneItem for ImageItem {
 
     fn label(&self) -> Option<String> {
         self.label.clone()
+    }
+
+    fn is_draggable(&self) -> bool {
+        self.draggable
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -445,6 +489,7 @@ pub struct TextItem {
     bounds: Rect,
     color: Color,
     label: Option<String>,
+    draggable: bool,
     a11y: ItemA11yOverrides,
 }
 
@@ -459,6 +504,7 @@ impl TextItem {
             bounds,
             color: Color::BLACK,
             label: None,
+            draggable: false,
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -478,8 +524,17 @@ impl TextItem {
             bounds,
             color: Color::BLACK,
             label: None,
+            draggable: false,
             a11y: ItemA11yOverrides::default(),
         }
+    }
+
+    /// Whether this text item participates in drag-to-move.
+    /// Default `false` — captions and inline labels rarely need
+    /// to move.
+    pub fn draggable(mut self, draggable: bool) -> Self {
+        self.draggable = draggable;
+        self
     }
 
     /// Override the foreground color.
@@ -525,6 +580,10 @@ impl SceneItem for TextItem {
         // current text value (a fresh snapshot of the signal for
         // bound items, a clone of the static string otherwise).
         self.label.clone().or_else(|| Some(self.text.current()))
+    }
+
+    fn is_draggable(&self) -> bool {
+        self.draggable
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {

@@ -1,11 +1,10 @@
 //! `scene-showcase` — comprehensive demo of every `fern-scene` capability.
 //!
-//! One big pannable / zoomable scene divided into seven labelled sections.
+//! One pannable / zoomable scene divided into eight labelled sections.
 //! Pan with two-finger trackpad / mouse wheel; zoom with Ctrl+wheel or
-//! pinch (where supported by the OS). Click a heavyweight card to focus
-//! it; Ctrl-click to toggle. Drag in empty space to marquee box-select.
-//! Drag any lightweight rectangle to move it — the new position persists
-//! (no snap-back).
+//! pinch (where the OS supports it). Click a heavyweight card to focus
+//! it; Ctrl-click to toggle. Drag in empty space to marquee. Drag a
+//! "drag me" rectangle to move it — the new position persists.
 //!
 //! What this exercises:
 //!
@@ -13,44 +12,48 @@
 //!   `ComboBox` widgets inside (Section 4).
 //! - **Lightweight tier:** `RectItem`, `PathItem`, `TextItem`,
 //!   `GroupItem` painted from the SceneView without arena overhead.
-//! - **`GroupItem` visual chrome:** fill + stroke + corner-radius +
-//!   inline label.
-//! - **Z-order:** explicit `Scene::set_z` ordering for overlapping items.
-//! - **Selection:** `SceneSelectionMode::Multi`, click + Ctrl-click +
-//!   marquee.
-//! - **Drag-to-move:** dragging any lightweight rect translates it; the
-//!   spatial index re-buckets at drag end (no snap-back).
-//! - **Nested SceneView:** an inner read-only SceneView placed inside the
-//!   outer one (Section 7) — chart-style pattern, mini-map style pattern.
+//! - **`GroupItem` chrome:** fill + stroke + corner-radius + inline label.
+//! - **Selective drag:** items default to NOT draggable. Apps opt in via
+//!   `.draggable(true)`. Section 5 shows the difference: only the three
+//!   labelled rects move; everything else stays put.
+//! - **Z-order:** explicit `Scene::set_z` for overlapping items.
+//! - **Selection:** `SceneSelectionMode::Multi` — click + Ctrl-click +
+//!   marquee box-select.
+//! - **Nested SceneView:** an inner SceneView inside the outer one.
 //! - **Logical a11y groups:** `Scene::add_a11y_group` + `set_a11y_parent`
-//!   place cards under named "Acts" so screen readers announce the
-//!   logical structure independent of visual placement.
+//!   place cards under named "Acts" so screen readers announce a logical
+//!   structure independent of visual placement.
+//! - **Custom SceneItem:** Section 8 ships a `PulsingDot` impl that
+//!   owns a `Signal<f32>` and uses `register_animated_item_signal` +
+//!   `animate_looping` to drive a continuous opacity pulse.
 //! - **Reactive view-transform signals:** `pan_x_signal` /
 //!   `pan_y_signal` / `zoom_signal` drive the live readout in the header.
-//! - **Animations:** pan / zoom / inertial fling all flow through
-//!   animated `Signal<f32>`s — the framework's idle scheduler handles
-//!   them automatically.
 //!
 //! Run with: `cargo run -p scene-showcase`
 
+use std::time::Duration;
+
 use fern_scene::{
     A11yGroup, A11yNode, GroupItem, ItemId, PathItem, RectItem, Scene,
-    SceneSelectionMode, SceneView, TextItem,
+    SceneItem, SceneItemPaintContext, SceneSelectionMode, SceneView, TextItem,
+    register_animated_item_signal,
 };
-use fern_ui::canvas::{Path, Point, Rect};
+use fern_ui::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
+use fern_ui::core::binding::BindingLevel;
 use fern_ui::prelude::*;
+use fern_ui::tokens::Easing;
 use fern_ui::widgets::{Button, ComboBox, HStack, Panel, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
-// Scene layout: 4 columns × 2 rows of sections, with generous gutters so
-// marquee dragging in empty space is easy.
+// Scene layout: tight 4×2 grid that fits naturally in a 1500×950 window
+// without forcing the user to pan to find content.
 // ---------------------------------------------------------------------------
 
-const SECTION_W: f32 = 460.0;
-const SECTION_H: f32 = 360.0;
-const GUTTER: f32 = 70.0;
-const HEADER_H: f32 = 130.0;
-const SCENE_PAD: f32 = 40.0;
+const SECTION_W: f32 = 320.0;
+const SECTION_H: f32 = 280.0;
+const GUTTER: f32 = 50.0;
+const HEADER_H: f32 = 110.0;
+const SCENE_PAD: f32 = 30.0;
 
 fn section_origin(col: usize, row: usize) -> Point {
     Point::new(
@@ -101,13 +104,77 @@ fn faint_grid() -> Color {
     Color::new(0.85, 0.85, 0.88, 0.5)
 }
 fn connector_color() -> Color {
-    // Saturated blue — must contrast strongly with the faint
-    // background grid so connectors are obviously visible.
     Color::new(0.20, 0.45, 0.85, 1.0)
 }
 
 // ---------------------------------------------------------------------------
-// Scene-internal header — one big paragraph at the top spanning all columns.
+// PulsingDot — a custom SceneItem demonstrating item-level animations.
+// Shows the full pattern an app would use to ship its own animated items:
+//   1. Own a `Signal<f32>` (here: opacity).
+//   2. In `register_bindings`: register the signal with the SceneView's
+//      animation scheduler, bind it at `RepaintOnly` so changes dirty
+//      paint, then kick off `animate_looping`.
+//   3. In `paint`: read the current signal value and paint accordingly.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct PulsingDot {
+    bounds: Rect,
+    base_color: Color,
+    /// Goes 0.0 → 1.0 → 0.0 → … via `animate_looping`. We map it to
+    /// an opacity range of [0.25, 1.0] so the dot never fully
+    /// disappears (visibility tracking).
+    phase: Signal<f32>,
+}
+
+impl PulsingDot {
+    fn new(bounds: Rect, base_color: Color) -> Self {
+        Self {
+            bounds,
+            base_color,
+            phase: Signal::new_animated(0.0),
+        }
+    }
+}
+
+impl SceneItem for PulsingDot {
+    fn bounds_in_scene(&self) -> Rect {
+        self.bounds
+    }
+
+    fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+        // Phase signal goes 0..1 looped. Triangle-wave-shape it so
+        // the dot pulses smoothly: dim → bright → dim → …
+        let phase = self.phase.get().clamp(0.0, 1.0);
+        let triangle = 1.0 - (2.0 * phase - 1.0).abs();
+        let alpha = (0.25 + 0.75 * triangle) * self.base_color.a();
+        let c = self.base_color.with_alpha(alpha);
+        canvas.fill_rect(self.bounds, c);
+        canvas.stroke_rect(self.bounds, ink(), StrokeStyle::solid(1.0));
+    }
+
+    fn register_bindings(&self, ctx: &mut BuildContext, scene_view_id: WidgetId) {
+        // Hook into the scheduler so the framework's idle gates apply.
+        register_animated_item_signal(ctx, &self.phase);
+        // Repaint on each phase tick.
+        self.phase.bind_to(
+            scene_view_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        // Kick off the loop. Idempotent — re-registering on rebuild
+        // doesn't restart, the framework dedups via signal id.
+        self.phase.animate_looping(
+            1.0,
+            Duration::from_millis(1400),
+            Easing::Linear,
+            None,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scene-internal header
 // ---------------------------------------------------------------------------
 
 fn add_scene_header(scene: &mut Scene) {
@@ -116,8 +183,8 @@ fn add_scene_header(scene: &mut Scene) {
 
     scene.add_item(
         TextItem::new(
-            "fern-scene showcase",
-            Rect::new(SCENE_PAD, SCENE_PAD, usable_w, 38.0),
+            "fern-scene showcase — eight labelled sections, all visible at zoom 1.0",
+            Rect::new(SCENE_PAD, SCENE_PAD, usable_w, 30.0),
         )
         .color(ink()),
     );
@@ -125,16 +192,16 @@ fn add_scene_header(scene: &mut Scene) {
         TextItem::new(
             "Scroll wheel / two-finger trackpad: PAN.   Ctrl+wheel: ZOOM about viewport center.   \
              Pinch (macOS / Win precision touchpad): ZOOM about gesture center.   \
-             Click a card: SELECT.   Ctrl-click: TOGGLE.   Drag empty space: MARQUEE.   \
-             Drag any rect: MOVE (and the new position persists).",
-            Rect::new(SCENE_PAD, SCENE_PAD + 44.0, usable_w, 80.0),
+             Click card: SELECT.   Ctrl-click: TOGGLE.   Drag empty space: MARQUEE.   \
+             Drag a 'drag me' rect: MOVE.   Other items stay put — drag is opt-in via .draggable(true).",
+            Rect::new(SCENE_PAD, SCENE_PAD + 36.0, usable_w, 70.0),
         )
         .color(dim_ink()),
     );
 }
 
 // ---------------------------------------------------------------------------
-// Per-section helpers — visible chrome (GroupItem) + wrapped caption.
+// Section helpers
 // ---------------------------------------------------------------------------
 
 fn add_section_frame(scene: &mut Scene, col: usize, row: usize, title: &str) {
@@ -143,30 +210,27 @@ fn add_section_frame(scene: &mut Scene, col: usize, row: usize, title: &str) {
         GroupItem::new(r)
             .label(title)
             .show_label(true)
-            .label_inset(16.0, 8.0)
+            .label_inset(12.0, 6.0)
             .label_color(ink())
             .fill(Color::new(0.99, 0.99, 1.00, 1.0))
             .stroke(Color::new(0.55, 0.55, 0.65, 1.0), 1.5)
-            .corner_radius(12.0),
+            .corner_radius(10.0),
     );
 }
 
 fn add_section_caption(scene: &mut Scene, col: usize, row: usize, body: &str) {
     let r = section_rect(col, row);
-    // Caption rect is wide and ~110 px tall — TextItem now uses
-    // `draw_paragraph` which wraps to fit, so multi-line captions
-    // render correctly.
     scene.add_item(
         TextItem::new(
             body,
-            Rect::new(r.x + 16.0, r.y + 38.0, r.width - 32.0, 110.0),
+            Rect::new(r.x + 12.0, r.y + 30.0, r.width - 24.0, 90.0),
         )
         .color(dim_ink()),
     );
 }
 
 // ---------------------------------------------------------------------------
-// Section 1 — Lightweight items (RectItem grid + decorative PathItem)
+// Section 1 — Lightweight items
 // ---------------------------------------------------------------------------
 
 fn build_lightweight_items_section(scene: &mut Scene) {
@@ -175,20 +239,20 @@ fn build_lightweight_items_section(scene: &mut Scene) {
         scene,
         0,
         0,
-        "RectItem, PathItem, TextItem, GroupItem are painted from \
-         SceneView::paint without arena overhead. The spatial-index \
-         culls off-screen items before they enter the paint walk, so \
-         thousands per scene render cheaply.",
+        "RectItem, PathItem, TextItem, GroupItem paint from \
+         SceneView without arena overhead. The spatial-index culls \
+         off-screen items before paint.",
     );
 
     let r = section_rect(0, 0);
-    let area_y = r.y + 160.0;
+    let area_y = r.y + 130.0;
 
-    let cols = 4;
+    // 5×2 colored tile grid.
+    let cols = 5;
     let rows = 2;
-    let cell_w = 36.0;
-    let cell_h = 36.0;
-    let cell_gap = 10.0;
+    let cell_w = 30.0;
+    let cell_h = 30.0;
+    let cell_gap = 6.0;
     let palette = [
         pastel_red(),
         pastel_blue(),
@@ -196,7 +260,7 @@ fn build_lightweight_items_section(scene: &mut Scene) {
         pastel_yellow(),
         pastel_purple(),
     ];
-    let grid_x = r.x + 24.0;
+    let grid_x = r.x + 16.0;
     for row_idx in 0..rows {
         for col_idx in 0..cols {
             let i = row_idx * cols + col_idx;
@@ -216,36 +280,34 @@ fn build_lightweight_items_section(scene: &mut Scene) {
         }
     }
 
-    // Decorative zigzag PathItem.
-    let path_x = r.x + 240.0;
-    let path_y = area_y + 8.0;
+    // Decorative zigzag PathItem on the right half.
+    let path_x = r.x + 200.0;
+    let path_y = area_y + 4.0;
     let mut zigzag = Path::new();
     zigzag.move_to(Point::new(path_x, path_y));
-    let segments = 5;
+    let segments = 4;
     for s in 0..segments {
-        let dx = (s as f32 + 1.0) * 28.0;
-        let dy = if s % 2 == 0 { 60.0 } else { 0.0 };
+        let dx = (s as f32 + 1.0) * 22.0;
+        let dy = if s % 2 == 0 { 50.0 } else { 0.0 };
         zigzag.line_to(Point::new(path_x + dx, path_y + dy));
     }
-    let path_bounds = Rect::new(path_x - 2.0, path_y - 2.0, 28.0 * 6.0, 64.0);
+    let path_bounds = Rect::new(path_x - 2.0, path_y - 2.0, 22.0 * 5.0, 54.0);
     scene.add_item(
         PathItem::new(zigzag, path_bounds)
             .stroke(pastel_purple(), 3.0)
             .access_label("decorative zigzag"),
     );
-
     scene.add_item(
         TextItem::new(
-            "Stroke-only PathItems get per-segment hit-test with \
-             stroke-width tolerance. Filled paths use AABB.",
-            Rect::new(path_x, path_y + 80.0, 200.0, 60.0),
+            "Stroke-only paths get per-segment hit-test.",
+            Rect::new(path_x - 4.0, path_y + 60.0, 130.0, 60.0),
         )
         .color(dim_ink()),
     );
 }
 
 // ---------------------------------------------------------------------------
-// Section 2 — Visual GroupItem with nested content
+// Section 2 — GroupItem chrome
 // ---------------------------------------------------------------------------
 
 fn build_groupitem_section(scene: &mut Scene) {
@@ -254,15 +316,14 @@ fn build_groupitem_section(scene: &mut Scene) {
         scene,
         1,
         0,
-        "GroupItem can paint its own fill / rounded stroke / inline \
-         label, giving you a labelled box around a set of items. \
-         With no chrome it stays logical-only — invisible but still \
-         a parent in the a11y tree.",
+        "GroupItem can paint fill + stroke + inline label. With no \
+         chrome it stays logical-only — invisible, but still a parent \
+         in the a11y tree.",
     );
 
     let r = section_rect(1, 0);
 
-    let inner = Rect::new(r.x + 24.0, r.y + 170.0, 200.0, 160.0);
+    let inner = Rect::new(r.x + 16.0, r.y + 130.0, 140.0, 130.0);
     scene.add_item(
         GroupItem::new(inner)
             .label("Visible group")
@@ -273,9 +334,9 @@ fn build_groupitem_section(scene: &mut Scene) {
             .stroke(pastel_blue(), 2.0)
             .corner_radius(10.0),
     );
-    let items_y = inner.y + 30.0;
+    let items_y = inner.y + 28.0;
     for i in 0..3 {
-        let dot = Rect::new(inner.x + 12.0 + i as f32 * 56.0, items_y, 44.0, 44.0);
+        let dot = Rect::new(inner.x + 10.0 + i as f32 * 42.0, items_y, 32.0, 32.0);
         scene.add_item(
             RectItem::new(dot)
                 .fill(pastel_red())
@@ -283,16 +344,15 @@ fn build_groupitem_section(scene: &mut Scene) {
                 .access_label(format!("inner item {}", i + 1)),
         );
     }
-    let dot2 = Rect::new(inner.x + 12.0, items_y + 60.0, 100.0, 30.0);
+    let dot2 = Rect::new(inner.x + 10.0, items_y + 50.0, 90.0, 26.0);
     scene.add_item(RectItem::new(dot2).fill(pastel_yellow()).stroke(ink(), 1.0));
 
-    let invisible = Rect::new(r.x + 240.0, r.y + 170.0, 200.0, 160.0);
+    let invisible = Rect::new(r.x + 168.0, r.y + 130.0, 138.0, 130.0);
     scene.add_item(GroupItem::new(invisible).label("Logical-only group"));
     scene.add_item(
         TextItem::new(
-            "Same Rect → group with NO chrome. Paints nothing, but \
-             Scene::set_a11y_parent(_, this) still works for declaring \
-             AT structure independent of visuals.",
+            "Same Rect as a group with NO chrome. Paints nothing, but \
+             set_a11y_parent still works.",
             Rect::new(invisible.x + 6.0, invisible.y + 6.0, invisible.width - 12.0, invisible.height - 12.0),
         )
         .color(dim_ink()),
@@ -300,7 +360,7 @@ fn build_groupitem_section(scene: &mut Scene) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 3 — Z-order with overlapping items
+// Section 3 — Z-order
 // ---------------------------------------------------------------------------
 
 fn build_zorder_section(scene: &mut Scene) {
@@ -310,17 +370,20 @@ fn build_zorder_section(scene: &mut Scene) {
         2,
         0,
         "Scene::set_z(item, z) controls paint and hit-test ordering. \
-         Higher z paints on top (and hit-tests first). Equal z preserves \
-         insertion order — stable sort.",
+         Higher z paints on top. Equal z preserves insertion order.",
     );
 
     let r = section_rect(2, 0);
-    let base_x = r.x + 80.0;
-    let base_y = r.y + 175.0;
-    let size = 130.0;
-    let stagger = 38.0;
+    let base_x = r.x + 60.0;
+    let base_y = r.y + 130.0;
+    let size = 110.0;
+    let stagger = 30.0;
 
-    let entries = [(0, pastel_red(), "z=0"), (1, pastel_green(), "z=1"), (2, pastel_blue(), "z=2")];
+    let entries = [
+        (0, pastel_red(), "z=0"),
+        (1, pastel_green(), "z=1"),
+        (2, pastel_blue(), "z=2"),
+    ];
     for (i, (z, color, label)) in entries.iter().enumerate() {
         let rect = Rect::new(
             base_x + i as f32 * stagger,
@@ -338,7 +401,7 @@ fn build_zorder_section(scene: &mut Scene) {
         scene.add_item(
             TextItem::new(
                 *label,
-                Rect::new(rect.x + 10.0, rect.y + 8.0, rect.width - 20.0, 24.0),
+                Rect::new(rect.x + 8.0, rect.y + 6.0, rect.width - 16.0, 22.0),
             )
             .color(ink()),
         );
@@ -346,21 +409,18 @@ fn build_zorder_section(scene: &mut Scene) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 4 — Heavyweight cards with real interactive widgets inside
+// Section 4 — Heavyweight cards (with Button + ComboBox inside)
 // ---------------------------------------------------------------------------
 
 fn build_card_with_button() -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
-            .spacing(8.0)
+            .spacing(4.0)
             .child(TextWidget::new_literal("Card with Button").style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal("Real widget machinery — focus, keyboard, a11y.").style(TextStyleRole::Body))
             .child(
-                Button::new_literal("Click me")
-                    .on_activate_fn(|_ctx| {
-                        // Demo button — just prove it's interactive.
-                        eprintln!("[scene-showcase] Card-A button clicked");
-                    }),
+                Button::new_literal("Click me").on_activate_fn(|_ctx| {
+                    eprintln!("[scene-showcase] button clicked");
+                }),
             ),
     )
 }
@@ -369,9 +429,8 @@ fn build_card_with_combo() -> impl Widget + 'static {
     let selected: Signal<Option<String>> = Signal::new(Some("Apple".to_string()));
     Panel::new().child(
         VStack::new()
-            .spacing(8.0)
+            .spacing(4.0)
             .child(TextWidget::new_literal("Card with ComboBox").style(TextStyleRole::BodyBold))
-            .child(TextWidget::new_literal("Heavyweight widgets work normally inside scene_rect.").style(TextStyleRole::Body))
             .child(ComboBox::new(
                 vec!["Apple", "Banana", "Cherry", "Date"],
                 selected,
@@ -382,49 +441,45 @@ fn build_card_with_combo() -> impl Widget + 'static {
 fn build_card_plain(title: &str, body: &str) -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
-            .spacing(6.0)
+            .spacing(2.0)
             .child(TextWidget::new_literal(title).style(TextStyleRole::BodyBold))
             .child(TextWidget::new_literal(body).style(TextStyleRole::Body)),
     )
 }
 
-/// Returns the heavyweight card item-ids so caller can wire them
-/// into logical AT groups in Section 6.
 fn build_heavyweight_section(scene: &mut Scene) -> Vec<ItemId> {
     add_section_frame(scene, 3, 0, "4. Heavyweight cards");
     add_section_caption(
         scene,
         3,
         0,
-        "Scene::add_widget puts a real Widget at a scene_rect — \
-         here, three Panel cards. The first holds an interactive \
-         Button; the second a ComboBox. Click to focus, Tab to \
-         move focus, Ctrl-click to toggle selection.",
+        "Scene::add_widget puts a real Widget at a scene_rect. Each \
+         card here holds an interactive widget. Click to focus.",
     );
 
     let r = section_rect(3, 0);
-    let card_w = 380.0;
-    let card_h = 60.0;
-    let card_x = r.x + 20.0;
+    let card_w = r.width - 24.0;
+    let card_h = 50.0;
+    let card_x = r.x + 12.0;
+    let first_y = r.y + 130.0;
 
     let id_a = scene.add_widget(
         build_card_with_button(),
-        Rect::new(card_x, r.y + 160.0, card_w, card_h + 30.0),
+        Rect::new(card_x, first_y, card_w, card_h),
     );
     let id_b = scene.add_widget(
         build_card_with_combo(),
-        Rect::new(card_x, r.y + 160.0 + (card_h + 40.0), card_w, card_h + 30.0),
+        Rect::new(card_x, first_y + (card_h + 8.0), card_w, card_h),
     );
     let id_c = scene.add_widget(
-        build_card_plain("Plain Card", "Drag empty space below for marquee box-select."),
-        Rect::new(card_x, r.y + 160.0 + 2.0 * (card_h + 40.0), card_w, card_h),
+        build_card_plain("Plain card", "Click to focus, Ctrl-click to toggle selection."),
+        Rect::new(card_x, first_y + 2.0 * (card_h + 8.0), card_w, card_h),
     );
-
     vec![id_a, id_b, id_c]
 }
 
 // ---------------------------------------------------------------------------
-// Section 5 — Drag-to-move sandbox
+// Section 5 — Drag-to-move (only here are items draggable)
 // ---------------------------------------------------------------------------
 
 fn build_drag_section(scene: &mut Scene) {
@@ -433,9 +488,9 @@ fn build_drag_section(scene: &mut Scene) {
         scene,
         0,
         1,
-        "Lightweight items are draggable when selection is on. Drag \
-         end calls Scene::move_item which re-buckets the spatial \
-         index — the new position persists, no snap-back.",
+        "Items default to NOT draggable. Apps opt in with \
+         .draggable(true). Drag end calls Scene::move_item which \
+         re-buckets the spatial index — the new position persists.",
     );
 
     let r = section_rect(0, 1);
@@ -443,21 +498,23 @@ fn build_drag_section(scene: &mut Scene) {
     let colors = [pastel_blue(), pastel_green(), pastel_yellow()];
     for (i, (label, color)) in labels.iter().zip(colors.iter()).enumerate() {
         let rect = Rect::new(
-            r.x + 30.0 + i as f32 * 130.0,
-            r.y + 200.0,
-            110.0,
+            r.x + 16.0 + i as f32 * 100.0,
+            r.y + 160.0,
+            85.0,
             70.0,
         );
+        // .draggable(true) opts this rect into drag-to-move.
         scene.add_item(
             RectItem::new(rect)
                 .fill(*color)
                 .stroke(ink(), 1.5)
+                .draggable(true)
                 .access_label(format!("draggable {}", i + 1)),
         );
         scene.add_item(
             TextItem::new(
                 *label,
-                Rect::new(rect.x + 12.0, rect.y + 26.0, rect.width - 24.0, 30.0),
+                Rect::new(rect.x + 8.0, rect.y + 24.0, rect.width - 16.0, 28.0),
             )
             .color(ink()),
         );
@@ -465,7 +522,7 @@ fn build_drag_section(scene: &mut Scene) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 6 — Logical a11y groups (declared here, point at cards in §4)
+// Section 6 — Logical a11y groups
 // ---------------------------------------------------------------------------
 
 fn build_a11y_groups_section(scene: &mut Scene, card_ids: &[ItemId]) {
@@ -474,9 +531,9 @@ fn build_a11y_groups_section(scene: &mut Scene, card_ids: &[ItemId]) {
         scene,
         1,
         1,
-        "Three Acts as virtual A11yGroups. The cards from Section 4 \
-         are parented under each Act so screen readers announce \
-         'Act I, contains: Card A' regardless of visual position.",
+        "Three Acts as virtual A11yGroups parent the cards from §4. \
+         Screen readers announce 'Act I, contains: Card A' regardless \
+         of visual placement.",
     );
 
     let r = section_rect(1, 1);
@@ -491,21 +548,21 @@ fn build_a11y_groups_section(scene: &mut Scene, card_ids: &[ItemId]) {
         scene.set_a11y_parent(A11yNode::Item(*card_id), Some(A11yNode::Group(act)));
     }
 
-    // Visual hint stripes (not part of the AT tree — pure decoration).
-    let stripe_w = (r.width - 40.0) / 3.0;
+    // Visual hint stripes (decoration only — not in the AT tree).
+    let stripe_w = (r.width - 32.0) / 3.0;
     for (i, color) in [pastel_red(), pastel_yellow(), pastel_green()].iter().enumerate() {
         let stripe = Rect::new(
-            r.x + 20.0 + i as f32 * stripe_w,
-            r.y + 220.0,
-            stripe_w - 8.0,
-            50.0,
+            r.x + 16.0 + i as f32 * stripe_w,
+            r.y + 160.0,
+            stripe_w - 6.0,
+            44.0,
         );
         scene.add_item(RectItem::new(stripe).fill(*color).stroke(ink(), 1.0));
         let label_text = ["Act I", "Act II", "Act III"][i];
         scene.add_item(
             TextItem::new(
                 label_text,
-                Rect::new(stripe.x + 12.0, stripe.y + 14.0, stripe.width - 24.0, 28.0),
+                Rect::new(stripe.x + 8.0, stripe.y + 12.0, stripe.width - 16.0, 24.0),
             )
             .color(ink()),
         );
@@ -513,63 +570,42 @@ fn build_a11y_groups_section(scene: &mut Scene, card_ids: &[ItemId]) {
 
     scene.add_item(
         TextItem::new(
-            "Visually the cards stay in Section 4; logically the AT \
-             tree shows them under Act I/II/III declared here. Open \
-             with NVDA / VoiceOver / Orca to hear it.",
-            Rect::new(r.x + 16.0, r.y + 285.0, r.width - 32.0, 80.0),
+            "Visual placement vs logical AT tree: the cards stay in §4; \
+             the AT walker reports them under these Acts.",
+            Rect::new(r.x + 12.0, r.y + 215.0, r.width - 24.0, 60.0),
         )
         .color(dim_ink()),
     );
 }
 
 // ---------------------------------------------------------------------------
-// Section 7 — Nested SceneView (scene-in-a-scene)
+// Section 7 — Nested SceneView
 // ---------------------------------------------------------------------------
-//
-// A second SceneView placed inside the outer one as a heavyweight widget.
-// The inner view runs its own pan/zoom/selection — the user can scroll
-// over the inner area to pan it independently. We disable interactivity
-// to keep it as a static preview here, but `interactive(true)` works
-// (useful for chart-style nested-scene patterns).
 
 fn build_inner_scene() -> impl Widget + 'static {
     let mut inner = Scene::new();
     let palette = [pastel_red(), pastel_blue(), pastel_green(), pastel_yellow(), pastel_purple()];
-    // 5×4 dot grid.
-    for row in 0..4 {
-        for col in 0..5 {
-            let color = palette[(row * 5 + col) % palette.len()];
-            let dot = Rect::new(20.0 + col as f32 * 30.0, 20.0 + row as f32 * 30.0, 22.0, 22.0);
-            inner.add_item(
-                RectItem::new(dot)
-                    .fill(color)
-                    .stroke(ink(), 1.0),
-            );
+    for row in 0..3 {
+        for col in 0..4 {
+            let color = palette[(row * 4 + col) % palette.len()];
+            let dot = Rect::new(15.0 + col as f32 * 28.0, 14.0 + row as f32 * 26.0, 22.0, 22.0);
+            inner.add_item(RectItem::new(dot).fill(color).stroke(ink(), 1.0));
         }
     }
-    // A connector through the dots.
     let mut path = Path::new();
-    path.move_to(Point::new(31.0, 31.0))
-        .line_to(Point::new(151.0, 31.0))
-        .line_to(Point::new(151.0, 121.0))
-        .line_to(Point::new(31.0, 121.0))
+    path.move_to(Point::new(26.0, 25.0))
+        .line_to(Point::new(110.0, 25.0))
+        .line_to(Point::new(110.0, 77.0))
+        .line_to(Point::new(26.0, 77.0))
         .close();
     inner.add_item(
-        PathItem::new(path, Rect::new(28.0, 28.0, 130.0, 100.0))
-            .stroke(connector_color(), 2.5),
-    );
-    // Big label at top of inner scene.
-    inner.add_item(
-        TextItem::new(
-            "INNER SCENE",
-            Rect::new(20.0, 0.0, 200.0, 18.0),
-        )
-        .color(ink()),
+        PathItem::new(path, Rect::new(24.0, 22.0, 90.0, 60.0))
+            .stroke(connector_color(), 2.0),
     );
     SceneView::new(inner)
         .nested_a11y(true)
         .a11y_label("Inner scene")
-        .default_size(220.0, 160.0)
+        .default_size(135.0, 105.0)
 }
 
 fn build_nested_scene_section(scene: &mut Scene) {
@@ -578,73 +614,63 @@ fn build_nested_scene_section(scene: &mut Scene) {
         scene,
         2,
         1,
-        "A second SceneView placed inside this one via Scene::add_widget. \
-         Each inner view runs its own pan / zoom independently. \
-         `nested_a11y(true)` flips the inner from Pane to Region for \
-         screen readers, plus `a11y_label(...)` names it.",
+        "A second SceneView placed inside via Scene::add_widget runs \
+         its own pan/zoom. nested_a11y(true) flips Pane → Region.",
     );
 
     let r = section_rect(2, 1);
-    let inner_rect = Rect::new(r.x + 30.0, r.y + 170.0, 220.0, 160.0);
+    let inner_rect = Rect::new(r.x + 16.0, r.y + 140.0, 135.0, 105.0);
     scene.add_widget(build_inner_scene(), inner_rect);
 
-    // Caption to the right of the inner scene.
     scene.add_item(
         TextItem::new(
-            "← Pan-zoom this inner scene independently. \
-             The chart-style pattern: outer SceneView holds axis \
-             chrome (TextItems reading the inner's pan/zoom signals); \
-             inner SceneView holds the data and accepts user input.",
-            Rect::new(inner_rect.x + inner_rect.width + 10.0, inner_rect.y, 165.0, inner_rect.height),
+            "← Pan inside that inner viewport — independent of the \
+             outer one. Chart-style pattern.",
+            Rect::new(inner_rect.x + inner_rect.width + 8.0, inner_rect.y, 145.0, inner_rect.height),
         )
         .color(dim_ink()),
     );
 }
 
 // ---------------------------------------------------------------------------
-// Section 8 — Animation hint
+// Section 8 — Animated PulsingDot (custom SceneItem)
 // ---------------------------------------------------------------------------
 
 fn build_animation_section(scene: &mut Scene) {
-    add_section_frame(scene, 3, 1, "8. Animations & idle gates");
+    add_section_frame(scene, 3, 1, "8. Animated items");
     add_section_caption(
         scene,
         3,
         1,
-        "Pan / zoom / inertial fling are animated Signal<f32>s. The \
-         framework's idle scheduler handles them: animations stop \
-         when paused, reduced-motion preference snaps instead of \
-         tweens, no CPU/GPU drain at rest.",
+        "PulsingDot is a custom SceneItem that owns a Signal<f32> \
+         and uses register_animated_item_signal + animate_looping in \
+         register_bindings. Watch them pulse independently.",
     );
 
     let r = section_rect(3, 1);
-
-    // A trio of static rects — the "animation" lives entirely in
-    // the user-driven view-transform changes (pan/zoom).
-    for i in 0..3 {
+    // Three dots that all pulse — each one is its own SceneItem
+    // with its own animated signal, scheduled by the framework.
+    for (i, color) in [pastel_red(), pastel_yellow(), pastel_green()].iter().enumerate() {
         let dot = Rect::new(
-            r.x + 30.0 + i as f32 * 80.0,
-            r.y + 200.0,
-            60.0,
-            60.0,
+            r.x + 30.0 + i as f32 * 90.0,
+            r.y + 160.0,
+            70.0,
+            70.0,
         );
-        let color = [pastel_red(), pastel_yellow(), pastel_green()][i];
-        scene.add_item(RectItem::new(dot).fill(color).stroke(ink(), 1.5));
+        scene.add_item(PulsingDot::new(dot, *color));
     }
-
     scene.add_item(
         TextItem::new(
-            "Try Ctrl+wheel — zoom animates with EaseOut and respects \
-             min/max clamps. Apps drive item-level animations via \
-             register_animated_item_signal + pulse_once helpers.",
-            Rect::new(r.x + 16.0, r.y + 280.0, r.width - 32.0, 70.0),
+            "Idle scheduler still applies: tab-out the window, \
+             ticks pause; no CPU/GPU drain when not visible.",
+            Rect::new(r.x + 12.0, r.y + 240.0, r.width - 24.0, 50.0),
         )
         .color(dim_ink()),
     );
 }
 
 // ---------------------------------------------------------------------------
-// Decorative connectors — saturated blue, NOT background-grid color.
+// Decorative connectors
 // ---------------------------------------------------------------------------
 
 fn add_section_connector(scene: &mut Scene, from_section: (usize, usize), to_section: (usize, usize)) {
@@ -673,7 +699,7 @@ fn add_section_connector(scene: &mut Scene, from_section: (usize, usize), to_sec
 }
 
 // ---------------------------------------------------------------------------
-// Background grid (z = -100 keeps it behind everything else).
+// Background grid
 // ---------------------------------------------------------------------------
 
 fn add_background_grid(scene: &mut Scene) {
@@ -709,7 +735,6 @@ fn build_showcase_view() -> SceneView {
     build_nested_scene_section(&mut scene);
     build_animation_section(&mut scene);
 
-    // Connectors weaving each row together.
     add_section_connector(&mut scene, (0, 0), (1, 0));
     add_section_connector(&mut scene, (1, 0), (2, 0));
     add_section_connector(&mut scene, (2, 0), (3, 0));
@@ -724,7 +749,7 @@ fn build_showcase_view() -> SceneView {
 }
 
 // ---------------------------------------------------------------------------
-// Reactive header bar — live pan/zoom/selection readout.
+// Reactive header
 // ---------------------------------------------------------------------------
 
 fn build_status_row(view: &SceneView) -> impl Widget + 'static {
@@ -757,10 +782,6 @@ fn build_status_row(view: &SceneView) -> impl Widget + 'static {
                 .style(TextStyleRole::Body),
         )
 }
-
-// ---------------------------------------------------------------------------
-// Root composition
-// ---------------------------------------------------------------------------
 
 fn build_root() -> impl Widget + 'static {
     let view = build_showcase_view();
@@ -802,16 +823,20 @@ mod tests {
 
     #[test]
     fn outer_scene_has_one_inner_scene_widget() {
-        // The outer SceneView contains: 3 cards (§4) + 1 inner
-        // SceneView (§7) = 4 heavyweight children.
+        // 3 cards (§4) + 1 inner SceneView (§7) = 4 heavyweight children.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let view_id = tree.add(build_showcase_view());
         tree.layout(SizeProposal::exact(1500.0, 950.0));
         let kids = tree.children(view_id);
-        assert_eq!(
-            kids.len(),
-            4,
-            "outer scene must have 3 cards + 1 nested SceneView"
-        );
+        assert_eq!(kids.len(), 4);
+    }
+
+    #[test]
+    fn scene_extent_fits_the_default_window() {
+        // Showcase claim: at zoom 1.0 the entire scene fits in
+        // ~1500×950 minus header. Verify the math.
+        let (w, h) = scene_extent();
+        assert!(w <= 1500.0, "scene width {} must fit in 1500 window", w);
+        assert!(h <= 870.0, "scene height {} must fit below ~80px header", h);
     }
 }

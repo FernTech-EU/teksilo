@@ -106,6 +106,21 @@ pub trait SceneItem: std::fmt::Debug + 'static {
         self.bounds_in_scene().contains(scene_point)
     }
 
+    /// Whether this item participates in drag-to-move. Default
+    /// `false` — items do **not** drag by default, so a scene
+    /// covered in decorative `RectItem`s and connector `PathItem`s
+    /// stays stable, and the user can marquee-select on the empty
+    /// space they cover.
+    ///
+    /// Items that *should* be draggable (cards, freely-positioned
+    /// nodes in a graph, story-corkboard scene cards) opt in by
+    /// returning `true`. Built-in items expose a fluent
+    /// `.draggable(true)` builder; custom item types override this
+    /// method.
+    fn is_draggable(&self) -> bool {
+        false
+    }
+
     /// Optional human-readable label, shown by debug introspection
     /// and used by the default `accessibility` impl as the AT name
     /// when an item author hasn't overridden it via
