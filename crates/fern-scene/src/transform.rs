@@ -1,14 +1,19 @@
-//! View-transform helpers for `SceneView`.
+//! Transform helpers for `SceneView` and `Scene`.
 //!
-//! The view transform maps a scene-coordinate point to its visually-
-//! displayed screen point. It's composed from four `Signal<f32>`s on
-//! `SceneView` — `pan_x`, `pan_y`, `zoom`, `rotation` — kept separate so
-//! each animates independently with its own epsilon (sub-pixel for
-//! pan, sub-perceptual log-multiplier for zoom, sub-degree for
-//! rotation).
+//! Two flavours of transform live in fern-scene:
+//!
+//! * The **view transform** (this module's [`compose_view`]) maps a
+//!   scene-coord point to its screen position. Composed from four
+//!   `Signal<f32>` — `pan_x`, `pan_y`, `zoom`, `rotation` — kept
+//!   separate so each animates independently with its own epsilon.
+//! * The **item transform chain** ([`local_to_scene`]) walks a
+//!   scene-graph item's parent chain composing per-item local→parent
+//!   transforms into a single local→scene affine. Used by hit-test,
+//!   paint and the spatial index to project an item's local-coord
+//!   geometry into scene space.
 
 pub use fern_canvas::Transform2D;
-use fern_canvas::Vec2;
+use fern_canvas::{Point, Vec2};
 
 /// Compose `pan`, `zoom`, and `rotation` into a single 2D affine view
 /// transform. The composition order — scale → rotate → translate —
@@ -75,6 +80,30 @@ pub fn anchor_pan_for_pinch(
         screen_anchor.x - projected.x - bounds_origin.x,
         screen_anchor.y - projected.y - bounds_origin.y,
     ))
+}
+
+/// Compose a single per-item local→parent transform from `local_pos` and
+/// an optional rotation/scale `transform`. The item's local origin maps
+/// to `local_pos` in parent coords; rotation/scale apply around the
+/// local origin, then the result is translated.
+///
+/// Equivalent to `Translate(local_pos) ∘ transform` under the
+/// renderer's stack-top compose semantic.
+pub fn local_to_parent(local_pos: Point, transform: &Transform2D) -> Transform2D {
+    transform.then(&Transform2D::translate(local_pos.x, local_pos.y))
+}
+
+/// Compose a chain of per-item local→parent transforms into one
+/// local→scene transform. `chain` is ordered from the **leaf** item up
+/// to (but not including) the scene root — i.e. the leaf's transform
+/// is at index 0 and its parent's is at index 1, etc. An empty chain
+/// is the identity.
+pub fn compose_chain(chain: &[Transform2D]) -> Transform2D {
+    let mut acc = Transform2D::identity();
+    for t in chain {
+        acc = acc.then(t);
+    }
+    acc
 }
 
 #[cfg(test)]

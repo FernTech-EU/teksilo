@@ -123,7 +123,7 @@ fn build_corkboard() -> SceneView {
         for c in 0..cols {
             // Draw only the cell border to keep the tile pattern airy.
             let cell = Rect::new(c as f32 * tile, r as f32 * tile, tile, tile);
-            scene.add_item(RectItem::new(cell).stroke(grid_color, 1.0));
+            scene.add_item(RectItem::new(cell).stroke(grid_color, 1.0), Point::ZERO);
         }
     }
 
@@ -193,7 +193,7 @@ fn build_corkboard() -> SceneView {
         let connector_id = scene.add_item(
             PathItem::new(path, bounds)
                 .stroke(connector_color, stroke_w)
-                .access_label(format!("connector {} → {}", i + 1, i + 2)),
+                .access_label(format!("connector {} → {}", i + 1, i + 2)), Point::ZERO
         );
         // Phase 5b: parent the connector under the act its source
         // card belongs to. Screen-reader users walking the AT tree

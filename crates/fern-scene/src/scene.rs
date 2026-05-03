@@ -1,92 +1,91 @@
-//! The [`Scene`] data model — items + scene-rect placement, queryable
-//! by rectangle. Phase 3 routes queries through a pluggable
-//! [`SpatialIndex`] (grid-hash by default — see [`GridHashIndex`]),
-//! and mirrors all mutations into it so `items_in_rect` and the
-//! viewport-cull path in [`SceneView`](crate::SceneView) are both
-//! `O(visible)` instead of `O(N)`.
+//! The [`Scene`] data model.
+//!
+//! Scene holds a flat list of items (heavyweight `Widget`s and
+//! lightweight `SceneItem`s) in a parent-relative scene-graph plus a
+//! pluggable [`SpatialIndex`] for rectangular queries. Items are
+//! positioned by `local_pos` (in parent coords) and an optional
+//! `transform` (rotation/scale around the local origin); the Scene
+//! composes those up the parent chain to derive each item's
+//! `scene_transform` and AABB for hit-test, paint and culling.
 
 use std::collections::HashMap;
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
 use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::{ItemId, SceneItem};
-use fern_canvas::Rect;
+use crate::transform::local_to_parent;
+use fern_canvas::{Point, Rect, Transform2D};
 use fern_core::widget::Widget;
 
-/// A single entry in a [`Scene`]. The two variants reflect the two
+/// A single entry in a [`Scene`]. The two variants mirror the two
 /// content tiers: heavyweight `Widget`s consumed into the arena at
-/// build time, and lightweight `SceneItem`s that live in the scene
-/// permanently and are painted directly from `SceneView::paint`.
+/// build time, and lightweight `SceneItem`s painted directly from the
+/// SceneView's paint walk.
 pub(crate) struct SceneEntry {
     pub(crate) id: ItemId,
-    pub(crate) scene_rect: Rect,
+    /// Origin of the item's local coordinate frame, in **parent**
+    /// coordinates (or scene coords if `parent == None`).
+    pub(crate) local_pos: Point,
+    /// Item's AABB in **local** coordinates. For lightweight items
+    /// this is read once at insert time from `SceneItem::local_bounds`
+    /// and tracked through `Scene::set_local_bounds`. For widgets it
+    /// records the size requested at `add_widget` time, anchored at
+    /// the origin: `Rect::new(0, 0, w, h)`.
+    pub(crate) local_bounds: Rect,
+    /// Optional rotation/scale applied around the local origin
+    /// before translating by `local_pos`. Default identity.
+    pub(crate) transform: Transform2D,
     pub(crate) kind: SceneEntryKind,
     /// Z-order for paint — higher values paint *later* (on top).
-    /// Default `0.0`. Equal-z entries fall back to insertion order
-    /// for a stable result. Lightweight-tier only; heavyweight
-    /// widget z-order is governed by the arena's child order.
+    /// Equal-z entries fall back to insertion order. Lightweight
+    /// tier only; heavyweight widget z-order is governed by the
+    /// arena's child order.
     pub(crate) z: f32,
-    /// Optional parent item. When set, dragging the parent moves
-    /// this child by the same delta (QGraphicsScene-style scene
-    /// graph). The child's `scene_rect` stays in absolute scene
-    /// coordinates — the parent link governs *cascading* moves
-    /// only, not coordinate transforms. Set via
-    /// [`Scene::set_item_parent`].
+    /// Logical parent. `None` means the item is rooted directly in
+    /// the Scene. Composes coordinate frames: a child's `local_pos`
+    /// is in the parent's local frame, and the child's
+    /// `scene_transform` is the parent's `scene_transform` composed
+    /// with the child's `local_to_parent`.
     pub(crate) parent: Option<ItemId>,
 }
 
 pub(crate) enum SceneEntryKind {
     /// A heavyweight `Widget` to materialise into the arena. `Some`
-    /// until [`SceneView::build`](crate::view::SceneView) consumes
-    /// it via `BuildContext::add_boxed`; `None` afterwards.
+    /// until `SceneView::build` consumes it via
+    /// [`fern_core::build_context::BuildContext::add_boxed`]; `None`
+    /// afterwards.
     Widget {
         pending: Option<Box<dyn Widget>>,
     },
-    /// A lightweight `SceneItem`. Stays in the scene permanently —
-    /// `SceneView::paint` walks visible items each frame and calls
-    /// `item.paint` with the canvas.
+    /// A lightweight `SceneItem` that lives in the scene
+    /// permanently; painted by the SceneView's paint walk.
     Item(Box<dyn SceneItem>),
 }
 
-/// The data model behind a `SceneView`: a collection of items at
-/// scene coordinates plus a [`SpatialIndex`] for fast rectangular
-/// queries. The Scene itself does no rendering or layout — it's a
-/// passive container the view reads from at build / place / paint
-/// time.
+/// The data model behind a `SceneView`: a flat list of entries in a
+/// parent-relative scene-graph plus a [`SpatialIndex`] for rectangular
+/// queries. The Scene itself does no rendering — it's a passive
+/// container the view reads from at build / place / paint time.
 ///
-/// All mutators (`add_widget`, `move_item`, `remove`) update the
-/// index in lockstep, so `items_in_rect` and SceneView's viewport-
-/// cull path are both `O(visible)` instead of `O(N)`. Insertion
-/// order is preserved by `entries` and exposed via [`Scene::ids`].
-///
-/// Full runtime mutation (mutate-after-`build`) is deferred to
-/// Phase 6 — this Phase 3 surface assumes scenes are built up
-/// before being handed to a `SceneView`.
+/// Mutations (`add_widget`, `add_item`, `set_local_pos`,
+/// `set_transform`, `set_local_bounds`, `remove`) update the spatial
+/// index in lockstep, so `items_in_rect`, `item_at`, and SceneView's
+/// viewport-cull path are all `O(visible)` instead of `O(N)`. When a
+/// parent's `local_pos` or `transform` changes, every descendant's
+/// scene-AABB shifts; the Scene re-buckets the entire subtree.
 pub struct Scene {
     pub(crate) entries: Vec<SceneEntry>,
-    /// `ItemId` → index into `entries` for O(1) `scene_rect` lookup.
-    /// Maintained in lockstep with `entries`; rebuilt on `remove` to
-    /// keep indices accurate after the `retain`-driven shift.
+    /// `ItemId` → index into `entries` for O(1) lookup.
     entry_index: HashMap<ItemId, usize>,
     index: Box<dyn SpatialIndex>,
 
-    // --- Phase 5b logical AT structure ----------------------------------
-    /// Logical AT groups declared by the app. Insertion-ordered so
-    /// the walker emits them in declaration order under their
-    /// declared parents.
+    // --- logical AT structure ----------------------------------------
     pub(crate) a11y_groups: Vec<A11yGroup>,
-    /// `A11yGroupId` → index into `a11y_groups`.
     pub(crate) a11y_group_index: HashMap<A11yGroupId, usize>,
-    /// Logical-parent declarations: `child → parent`. `parent = None`
-    /// (i.e. absent from the map) means "default to SceneView root".
     pub(crate) a11y_parents: HashMap<A11yNode, A11yNode>,
-    /// AT relationships in declaration order.
     pub(crate) a11y_relations: Vec<(A11yNode, A11yRelation, A11yNode)>,
-    /// Live-region declarations.
     pub(crate) a11y_live: HashMap<A11yNode, accesskit::Live>,
-    /// Landmark declarations (role replacement).
     pub(crate) a11y_landmarks: HashMap<A11yNode, accesskit::Role>,
-    /// Per-node category tags (rotor / quick-nav).
     pub(crate) a11y_categories: HashMap<A11yNode, Vec<A11yCategory>>,
 }
 
@@ -96,14 +95,7 @@ impl Scene {
         Self::with_index(Box::new(GridHashIndex::default()))
     }
 
-    /// An empty scene with a custom [`SpatialIndex`]. Use this to
-    /// pre-tune `cell_size` for scenes with unusual item density, or
-    /// to swap in an alternative index implementation (Phase 7 will
-    /// ship an R-tree under the same trait).
-    ///
-    /// ```ignore
-    /// let scene = Scene::with_index(Box::new(GridHashIndex::new(128.0)));
-    /// ```
+    /// An empty scene with a custom [`SpatialIndex`].
     pub fn with_index(index: Box<dyn SpatialIndex>) -> Self {
         Self {
             entries: Vec::new(),
@@ -119,109 +111,248 @@ impl Scene {
         }
     }
 
-    /// Place a heavyweight `Widget` at a scene-coord rectangle.
-    /// Returns the [`ItemId`] used to address the item later (move,
-    /// remove, query). The widget is consumed at SceneView build time
-    /// and added to the arena as a real interactive child — focus,
-    /// keyboard, gestures, animations, accessibility all work
-    /// unchanged.
-    pub fn add_widget<W: Widget + 'static>(&mut self, widget: W, scene_rect: Rect) -> ItemId {
+    // -----------------------------------------------------------------
+    // Insertion
+    // -----------------------------------------------------------------
+
+    /// Place a heavyweight `Widget` at `local_rect`'s origin, sized
+    /// `local_rect.size`. The rect is interpreted as
+    /// `(local_pos = local_rect.origin, local_bounds = (0, 0, w, h))`.
+    /// Returns the [`ItemId`] for later mutation. The widget is
+    /// consumed at SceneView build time and added to the arena.
+    pub fn add_widget<W: Widget + 'static>(&mut self, widget: W, local_rect: Rect) -> ItemId {
         let id = ItemId::next();
-        let pos = self.entries.len();
-        self.entries.push(SceneEntry {
+        let local_pos = Point::new(local_rect.x, local_rect.y);
+        let local_bounds = Rect::new(0.0, 0.0, local_rect.width, local_rect.height);
+        let entry = SceneEntry {
             id,
-            scene_rect,
+            local_pos,
+            local_bounds,
+            transform: Transform2D::identity(),
             kind: SceneEntryKind::Widget {
                 pending: Some(Box::new(widget)),
             },
             z: 0.0,
             parent: None,
-        });
-        self.entry_index.insert(id, pos);
-        self.index.insert(id, scene_rect);
-        id
+        };
+        self.push_entry(entry)
     }
 
-    /// Place a lightweight [`SceneItem`] in the scene. Returns the
-    /// [`ItemId`] used to address it later (move, remove, query). The
-    /// item is **not** added to the arena — it has no widget id, no
-    /// focus, no per-item event handling. `SceneView::paint` walks
-    /// visible items each frame and calls `item.paint` with the
-    /// canvas. Use this tier for the "background furniture" of a
-    /// scene — connector lines, tile patterns, decorations — where
-    /// thousands of items need to render cheaply.
-    ///
-    /// The item's `bounds_in_scene()` is captured at insertion time
-    /// for the spatial index. If the item changes its bounds later,
-    /// call [`Scene::move_item`] with the new rect to re-bucket it.
-    pub fn add_item<I: SceneItem + 'static>(&mut self, item: I) -> ItemId {
-        let scene_rect = item.bounds_in_scene();
+    /// Place a lightweight [`SceneItem`] at `local_pos`. The item's
+    /// `local_bounds` is read once at insert time for the spatial
+    /// index. The item is **not** added to the arena — it's painted
+    /// directly from `SceneView::paint`.
+    pub fn add_item<I: SceneItem + 'static>(&mut self, item: I, local_pos: Point) -> ItemId {
         let id = ItemId::next();
-        let pos = self.entries.len();
-        self.entries.push(SceneEntry {
+        let local_bounds = item.local_bounds();
+        let entry = SceneEntry {
             id,
-            scene_rect,
+            local_pos,
+            local_bounds,
+            transform: Transform2D::identity(),
             kind: SceneEntryKind::Item(Box::new(item)),
             z: 0.0,
             parent: None,
-        });
+        };
+        self.push_entry(entry)
+    }
+
+    fn push_entry(&mut self, entry: SceneEntry) -> ItemId {
+        let id = entry.id;
+        let pos = self.entries.len();
+        self.entries.push(entry);
         self.entry_index.insert(id, pos);
-        self.index.insert(id, scene_rect);
+        let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
+        self.index.insert(id, aabb);
         id
     }
 
-    /// Set the z-order of an entry. Higher z values paint *later*
-    /// (on top of lower z). Equal-z entries fall back to insertion
-    /// order — stable. Default `0.0`. No-op if the id is unknown.
-    ///
-    /// Affects lightweight items only; heavyweight widget z-order
-    /// is governed by the arena's child order (= insertion order
-    /// at `add_widget` time). To re-stack a heavyweight widget,
-    /// remove and re-add it.
+    // -----------------------------------------------------------------
+    // Geometry — local
+    // -----------------------------------------------------------------
+
+    /// Read an item's `local_pos` (its anchor in parent coords).
+    pub fn local_pos(&self, id: ItemId) -> Option<Point> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries[pos].local_pos)
+    }
+
+    /// Move an item to a new `local_pos` in its parent's coordinate
+    /// frame. Re-buckets the item *and* every descendant in the
+    /// spatial index since the descendants' scene-AABBs shift along.
+    /// No-op if the id is unknown.
+    pub fn set_local_pos(&mut self, id: ItemId, local_pos: Point) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].local_pos = local_pos;
+            self.rebucket_subtree(id);
+        }
+    }
+
+    /// Read an item's `local_bounds` (its AABB in local coords).
+    pub fn local_bounds(&self, id: ItemId) -> Option<Rect> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries[pos].local_bounds)
+    }
+
+    /// Update an item's `local_bounds`. For lightweight items this
+    /// also calls [`SceneItem::set_local_bounds`] on the item so its
+    /// next `paint` reflects the new geometry. The spatial index is
+    /// re-bucketed; only this item moves (descendants' local frames
+    /// are unchanged). No-op if the id is unknown.
+    pub fn set_local_bounds(&mut self, id: ItemId, local_bounds: Rect) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].local_bounds = local_bounds;
+            if let SceneEntryKind::Item(item) = &mut self.entries[pos].kind {
+                item.set_local_bounds(local_bounds);
+            }
+            // Bounds are local — only this entry's scene-AABB shifts;
+            // descendants' local frames are unchanged.
+            let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
+            self.index.insert(id, aabb);
+        }
+    }
+
+    /// Read an item's local→parent transform (rotation/scale around
+    /// the local origin). Identity by default.
+    pub fn transform(&self, id: ItemId) -> Option<Transform2D> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries[pos].transform)
+    }
+
+    /// Set an item's local→parent transform. Re-buckets the item's
+    /// subtree in the spatial index. No-op if the id is unknown.
+    pub fn set_transform(&mut self, id: ItemId, transform: Transform2D) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].transform = transform;
+            self.rebucket_subtree(id);
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Geometry — scene (computed via parent chain)
+    // -----------------------------------------------------------------
+
+    /// The composed local→scene transform for this item, walking up
+    /// the parent chain. Identity for an item that doesn't exist.
+    pub fn scene_transform(&self, id: ItemId) -> Transform2D {
+        let mut acc = Transform2D::identity();
+        let mut cur = Some(id);
+        let cap = self.entries.len();
+        let mut hops = 0;
+        while let Some(cid) = cur {
+            let Some(&pos) = self.entry_index.get(&cid) else {
+                break;
+            };
+            let entry = &self.entries[pos];
+            let l2p = local_to_parent(entry.local_pos, &entry.transform);
+            acc = acc.then(&l2p);
+            cur = entry.parent;
+            hops += 1;
+            if hops > cap {
+                break;
+            }
+        }
+        acc
+    }
+
+    /// The item's anchor in scene coords (its local origin
+    /// transformed through the parent chain).
+    pub fn scene_pos(&self, id: ItemId) -> Option<Point> {
+        if !self.entry_index.contains_key(&id) {
+            return None;
+        }
+        Some(self.scene_transform(id).apply_point(Point::ZERO))
+    }
+
+    /// The AABB enclosing the item's `local_bounds` after composing
+    /// through the parent chain — i.e. the rectangle the spatial
+    /// index buckets on. `None` if the id is unknown.
+    pub fn scene_rect(&self, id: ItemId) -> Option<Rect> {
+        let local_bounds = self.local_bounds(id)?;
+        Some(self.scene_transform(id).apply_rect(local_bounds))
+    }
+
+    /// Map a point in the item's local frame to scene coords.
+    pub fn map_to_scene(&self, id: ItemId, local_pt: Point) -> Option<Point> {
+        if !self.entry_index.contains_key(&id) {
+            return None;
+        }
+        Some(self.scene_transform(id).apply_point(local_pt))
+    }
+
+    /// Map a point in scene coords to the item's local frame.
+    /// Returns `None` if the item is unknown or its scene transform
+    /// is degenerate (zero scale).
+    pub fn map_from_scene(&self, id: ItemId, scene_pt: Point) -> Option<Point> {
+        if !self.entry_index.contains_key(&id) {
+            return None;
+        }
+        self.scene_transform(id)
+            .inverse()
+            .map(|inv| inv.apply_point(scene_pt))
+    }
+
+    fn compute_scene_aabb(&self, id: ItemId) -> Option<Rect> {
+        let pos = *self.entry_index.get(&id)?;
+        let local_bounds = self.entries[pos].local_bounds;
+        Some(self.scene_transform(id).apply_rect(local_bounds))
+    }
+
+    fn rebucket_subtree(&mut self, root: ItemId) {
+        // Re-bucket `root` and every descendant whose scene-AABB
+        // depends on the root's frame.
+        let mut stack: Vec<ItemId> = vec![root];
+        while let Some(id) = stack.pop() {
+            if let Some(aabb) = self.compute_scene_aabb(id) {
+                self.index.insert(id, aabb);
+            }
+            for entry in &self.entries {
+                if entry.parent == Some(id) {
+                    stack.push(entry.id);
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Z-order and parenting
+    // -----------------------------------------------------------------
+
+    /// Set z-order for a lightweight entry. Higher z paints later
+    /// (on top); equal-z falls back to insertion order. Default 0.0.
     pub fn set_z(&mut self, id: ItemId, z: f32) {
         if let Some(&pos) = self.entry_index.get(&id) {
             self.entries[pos].z = z;
         }
     }
 
-    /// Read an entry's z-order. Returns `None` if unknown.
+    /// Read an entry's z-order.
     pub fn z(&self, id: ItemId) -> Option<f32> {
         let pos = *self.entry_index.get(&id)?;
-        Some(self.entries.get(pos)?.z)
+        Some(self.entries[pos].z)
     }
 
-    /// Declare a parent/child relationship between two scene items.
-    /// Modeled after `QGraphicsItem::setParentItem` — the `child`
-    /// becomes a logical descendant of `parent`. The visible
-    /// behaviour right now is **drag cascade**: dragging `parent`
-    /// (or any ancestor) translates `child` by the same delta, so
-    /// a labelled rectangle (Rect parent + TextItem child) moves
-    /// as one unit. Coordinates remain in absolute scene-space —
-    /// the link does NOT make the child's `scene_rect` relative
-    /// to the parent (a deliberate simplification; relative
-    /// coords + transform inheritance is a future addition if an
-    /// app needs it).
+    /// Declare a parent/child relationship. `child`'s `local_pos`
+    /// and `transform` are reinterpreted as relative to the new
+    /// parent's local frame — the visual position changes unless
+    /// the caller compensates. Re-buckets `child`'s subtree.
     ///
-    /// Pass `parent = None` to detach. No-op if `child` is unknown.
-    /// No cycle check — apps that wire parent loops get UB-free
-    /// infinite descendant traversal in `descendants_of`; the API
-    /// trusts callers not to do this (same contract as a tree
-    /// structure: the caller owns acyclicity).
+    /// Pass `parent = None` to detach (child's local frame becomes
+    /// scene-rooted again). No cycle check.
     pub fn set_item_parent(&mut self, child: ItemId, parent: Option<ItemId>) {
         if let Some(&pos) = self.entry_index.get(&child) {
             self.entries[pos].parent = parent;
+            self.rebucket_subtree(child);
         }
     }
 
     /// Parent of `id`, if any.
     pub fn parent_of(&self, id: ItemId) -> Option<ItemId> {
         let pos = *self.entry_index.get(&id)?;
-        self.entries.get(pos)?.parent
+        self.entries[pos].parent
     }
 
-    /// Whether `id`'s ancestor chain contains `ancestor`. Walks up
-    /// `parent` links; bounded by the entry count to avoid infinite
-    /// loops if the caller has wired a cycle.
+    /// Whether `id`'s ancestor chain contains `ancestor`.
     pub fn is_descendant_of(&self, id: ItemId, ancestor: ItemId) -> bool {
         let mut cur = self.parent_of(id);
         let cap = self.entries.len();
@@ -240,9 +371,8 @@ impl Scene {
     }
 
     /// Append every direct + transitive descendant of `id` into
-    /// `out`. The order is breadth-first across declaration order.
-    /// The dragged-item itself is NOT included — the caller adds
-    /// it to a moves-list explicitly.
+    /// `out`, breadth-first across declaration order. The id
+    /// itself is **not** included.
     pub fn collect_descendants(&self, id: ItemId, out: &mut Vec<ItemId>) {
         let mut frontier: Vec<ItemId> = vec![id];
         while let Some(parent) = frontier.pop() {
@@ -255,11 +385,22 @@ impl Scene {
         }
     }
 
-    /// Crate-private: helper for `SceneView::paint` to walk visible
-    /// items in z-order. Sorts the input ids by their `z` (ascending,
-    /// stable for equal values), so callers can iterate in paint
-    /// order. Heavyweight ids are still included so callers can
-    /// dispatch — they typically filter to lightweights downstream.
+    // -----------------------------------------------------------------
+    // Lookup
+    // -----------------------------------------------------------------
+
+    /// Borrow a lightweight [`SceneItem`] by id. `None` for unknown
+    /// ids and for heavyweight widget entries.
+    pub fn item(&self, id: ItemId) -> Option<&dyn SceneItem> {
+        let pos = *self.entry_index.get(&id)?;
+        match &self.entries[pos].kind {
+            SceneEntryKind::Item(item) => Some(item.as_ref()),
+            SceneEntryKind::Widget { .. } => None,
+        }
+    }
+
+    /// Sort `ids` by z-order ascending, stable for equal values.
+    /// Crate-private helper for `SceneView::paint`.
     pub(crate) fn sort_by_z(&self, ids: &mut Vec<ItemId>) {
         ids.sort_by(|a, b| {
             let za = self.z(*a).unwrap_or(0.0);
@@ -268,43 +409,17 @@ impl Scene {
         });
     }
 
-    /// Borrow a lightweight [`SceneItem`] by id. Returns `None` if the
-    /// id is unknown or refers to a heavyweight widget entry.
-    /// `SceneView::paint` uses this to walk the visible-item set.
-    pub fn item(&self, id: ItemId) -> Option<&dyn SceneItem> {
-        let pos = *self.entry_index.get(&id)?;
-        match &self.entries.get(pos)?.kind {
-            SceneEntryKind::Item(item) => Some(item.as_ref()),
-            SceneEntryKind::Widget { .. } => None,
-        }
-    }
+    // -----------------------------------------------------------------
+    // Removal
+    // -----------------------------------------------------------------
 
-
-    /// Update an item's scene rectangle. No-op if the id isn't in the
-    /// scene. The spatial index is re-bucketed in lockstep so future
-    /// `items_in_rect` queries see the new bounds.
-    pub fn move_item(&mut self, id: ItemId, new_bounds: Rect) {
-        if let Some(&pos) = self.entry_index.get(&id) {
-            self.entries[pos].scene_rect = new_bounds;
-            self.index.insert(id, new_bounds);
-            // Lightweight items store their own `bounds` field that
-            // `paint` reads from. Without this, drag-to-move would
-            // update `scene_rect` (so hit-test follows the move) but
-            // leave the item visually at the old position — the
-            // dragged item would become "invisible at its destination
-            // but still draggable from there".
-            if let SceneEntryKind::Item(item) = &mut self.entries[pos].kind {
-                item.set_bounds(new_bounds);
-            }
-        }
-    }
-
-    /// Remove an item by id. No-op if the id isn't in the scene.
+    /// Remove an item by id. No-op if unknown. Children of the
+    /// removed item are NOT auto-removed in R1 — orphaned ids carry
+    /// `parent: Some(removed_id)`. R6 makes this recursive.
     pub fn remove(&mut self, id: ItemId) {
-        let prev_len = self.entries.len();
+        let prev = self.entries.len();
         self.entries.retain(|e| e.id != id);
-        if self.entries.len() != prev_len {
-            // Rebuild the index since `retain` shifted positions.
+        if self.entries.len() != prev {
             self.entry_index.clear();
             for (pos, entry) in self.entries.iter().enumerate() {
                 self.entry_index.insert(entry.id, pos);
@@ -313,76 +428,109 @@ impl Scene {
         self.index.remove(id);
     }
 
-    /// All items whose `scene_rect` intersects the query rectangle.
-    /// Backed by the spatial index — `O(visible)` after a Phase 3
-    /// rebuild of the bucketing on insert/move/remove.
-    ///
-    /// The result is narrowed to exact-AABB intersections (the index
-    /// may return cell-fan-out false-positives that don't actually
-    /// intersect; Scene filters those out so callers get a clean
-    /// hit list).
+    // -----------------------------------------------------------------
+    // Queries
+    // -----------------------------------------------------------------
+
+    /// All items whose scene-AABB intersects `scene_rect`.
+    /// Backed by the spatial index plus a strict narrow phase.
     pub fn items_in_rect(&self, scene_rect: Rect) -> Vec<ItemId> {
         let candidates = self.index.query(scene_rect);
-        // Narrow phase — the spatial-index doc explicitly allows cell
-        // fan-out false-positives. We resolve to exact AABB here so
-        // the public API gives the strict mathematical answer.
         candidates
             .into_iter()
             .filter(|id| {
-                self.entries
-                    .iter()
-                    .find(|e| e.id == *id)
-                    .map(|e| rects_intersect(e.scene_rect, scene_rect))
+                self.entry_index
+                    .get(id)
+                    .and_then(|&pos| self.entries.get(pos))
+                    .and_then(|_| self.scene_rect(*id))
+                    .map(|r| rects_intersect(r, scene_rect))
                     .unwrap_or(false)
             })
             .collect()
     }
 
-    /// Read an item's current scene rectangle. Returns `None` if the
-    /// id isn't in the scene. O(1) via the entry index.
-    pub fn scene_rect(&self, id: ItemId) -> Option<Rect> {
-        self.entry_index
-            .get(&id)
-            .and_then(|&pos| self.entries.get(pos))
-            .map(|e| e.scene_rect)
+    /// Topmost lightweight item whose `shape_contains` fires for
+    /// `scene_pt`. Iterates `items_in_rect` for a tiny rect around
+    /// the point, sorts by z descending, and returns the first hit.
+    /// Heavyweight widget entries are skipped (their hit-testing is
+    /// handled by the arena event dispatch).
+    pub fn item_at(&self, scene_pt: Point) -> Option<ItemId> {
+        let probe = Rect::new(scene_pt.x, scene_pt.y, 0.0, 0.0);
+        let mut candidates = self.items_in_rect(probe);
+        candidates.sort_by(|a, b| {
+            let za = self.z(*a).unwrap_or(0.0);
+            let zb = self.z(*b).unwrap_or(0.0);
+            zb.partial_cmp(&za).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for id in candidates {
+            let Some(item) = self.item(id) else {
+                continue;
+            };
+            let Some(local_pt) = self.map_from_scene(id, scene_pt) else {
+                continue;
+            };
+            if item.shape_contains(local_pt) {
+                return Some(id);
+            }
+        }
+        None
     }
 
-    /// Number of items currently in the scene.
+    /// All lightweight items whose `shape_contains` fires for
+    /// `scene_pt`, sorted topmost-first by z.
+    pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId> {
+        let probe = Rect::new(scene_pt.x, scene_pt.y, 0.0, 0.0);
+        let mut candidates = self.items_in_rect(probe);
+        candidates.sort_by(|a, b| {
+            let za = self.z(*a).unwrap_or(0.0);
+            let zb = self.z(*b).unwrap_or(0.0);
+            zb.partial_cmp(&za).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates
+            .into_iter()
+            .filter(|id| {
+                let Some(item) = self.item(*id) else {
+                    return false;
+                };
+                let Some(local_pt) = self.map_from_scene(*id, scene_pt) else {
+                    return false;
+                };
+                item.shape_contains(local_pt)
+            })
+            .collect()
+    }
+
+    // -----------------------------------------------------------------
+    // Metadata
+    // -----------------------------------------------------------------
+
+    /// Number of entries in the scene.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Whether the scene contains any items.
+    /// Whether the scene is empty.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// All ids currently in the scene, in insertion order.
+    /// All ids in insertion order.
     pub fn ids(&self) -> Vec<ItemId> {
         self.entries.iter().map(|e| e.id).collect()
     }
 
-    /// Borrow the spatial index. Useful for diagnostics and tests
-    /// that want to verify an item was bucketed.
+    /// Borrow the spatial index (diagnostics / tests).
     pub fn index(&self) -> &dyn SpatialIndex {
         &*self.index
     }
 
-    // ===================================================================
-    // Phase 5b — logical AT structure (groups / parents / relations)
-    // ===================================================================
+    // -----------------------------------------------------------------
+    // Logical AT structure (kept verbatim from R0)
+    // -----------------------------------------------------------------
 
     /// Declare a virtual AT group. The group has no visual
-    /// counterpart — it exists purely so the AT walker can emit a
-    /// node in the AT tree under which any number of items / other
-    /// groups / widgets can be reparented via [`Scene::set_a11y_parent`].
-    ///
-    /// Use case: an `Act 1` group wrapping the Scene cards that
-    /// belong to the first act in a story corkboard; a `Subgraph A`
-    /// group wrapping a connected component in a node-graph editor;
-    /// a `Layer Foo` group wrapping geometry in a CAD canvas.
-    ///
-    /// Returns the [`A11yGroupId`] used to address the group later.
+    /// counterpart — it exists so the AT walker can emit an AT node
+    /// under which items / other groups / widgets can be reparented.
     pub fn add_a11y_group(&mut self, builder: A11yGroupBuilder) -> A11yGroupId {
         let id = A11yGroupId::next();
         let group = A11yGroup {
@@ -396,24 +544,19 @@ impl Scene {
         id
     }
 
-    /// Remove a previously-declared logical group. Any children that
-    /// declared this group as their parent fall back to the
-    /// SceneView root in the next AT-rebuild. No-op if the id isn't
-    /// known. Relations / live / landmarks / categories targeting
-    /// this group are removed as well.
+    /// Remove a logical group; orphaned references fall back to
+    /// SceneView root. Relations / live / landmarks / categories
+    /// targeting this group are cleaned up too.
     pub fn remove_a11y_group(&mut self, id: A11yGroupId) {
         let prev = self.a11y_groups.len();
         self.a11y_groups.retain(|g| g.id != id);
         if self.a11y_groups.len() != prev {
-            // Rebuild the index.
             self.a11y_group_index.clear();
             for (pos, group) in self.a11y_groups.iter().enumerate() {
                 self.a11y_group_index.insert(group.id, pos);
             }
         }
         let target = A11yNode::Group(id);
-        // Drop parent edges that point at this group, and parent
-        // edges originating from this group.
         self.a11y_parents
             .retain(|child, parent| *child != target && *parent != target);
         self.a11y_relations
@@ -429,20 +572,8 @@ impl Scene {
         self.a11y_groups.get(pos)
     }
 
-    /// Declare a logical-parent relationship for AT. **Independent
-    /// of visual placement** — the child can live anywhere in scene
-    /// coordinates and still appear under the declared parent in
-    /// the AT tree.
-    ///
-    /// `parent = None` clears the declared parent so the child
-    /// falls back to the SceneView root in the next AT-rebuild
-    /// (this is also the default for nodes that never had a parent
-    /// declared).
-    ///
-    /// Cycle detection is the caller's responsibility — declaring
-    /// `A → B` and `B → A` produces a cycle the AT walker handles
-    /// by truncating at the first repeated node, but the result is
-    /// not what the user intended.
+    /// Declare a logical-parent relationship for AT (independent of
+    /// visual placement).
     pub fn set_a11y_parent(&mut self, child: A11yNode, parent: Option<A11yNode>) {
         match parent {
             Some(p) => {
@@ -454,27 +585,22 @@ impl Scene {
         }
     }
 
-    /// The currently-declared logical parent of a node, if any.
+    /// The currently-declared logical parent of a node.
     pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode> {
         self.a11y_parents.get(&child).copied()
     }
 
-    /// Declare an AT relationship between two nodes. Multiple
-    /// relations between the same `from` and `to` are kept (apps
-    /// may declare both `LabelledBy` and `DescribedBy` between the
-    /// same pair). Used by the AT walker to populate AccessKit's
-    /// relationship arrays at TreeUpdate time.
+    /// Declare an AT relationship between two nodes.
     pub fn add_a11y_relation(&mut self, from: A11yNode, kind: A11yRelation, to: A11yNode) {
         self.a11y_relations.push((from, kind, to));
     }
 
-    /// Read access to all declared relations. The walker calls this.
+    /// All declared AT relations.
     pub fn a11y_relations(&self) -> &[(A11yNode, A11yRelation, A11yNode)] {
         &self.a11y_relations
     }
 
-    /// Mark a node as a live region — AT clients announce changes
-    /// without focus. Pass `accesskit::Live::Off` to clear.
+    /// Mark a node as a live region. Pass `Live::Off` to clear.
     pub fn set_a11y_live(&mut self, node: A11yNode, live: accesskit::Live) {
         if matches!(live, accesskit::Live::Off) {
             self.a11y_live.remove(&node);
@@ -483,9 +609,8 @@ impl Scene {
         }
     }
 
-    /// Mark a node as a landmark by overriding its role with one of
-    /// the `Role::Region`/`Main`/`Navigation`/`Search` etc. variants.
-    /// Pass `Role::Unknown` to clear.
+    /// Mark a node as a landmark by overriding its role. Pass
+    /// `Role::Unknown` to clear.
     pub fn set_a11y_landmark(&mut self, node: A11yNode, role: accesskit::Role) {
         if matches!(role, accesskit::Role::Unknown) {
             self.a11y_landmarks.remove(&node);
@@ -494,20 +619,16 @@ impl Scene {
         }
     }
 
-    /// Tag a node with one or more rotor categories. AT clients
-    /// that support categorized navigation surface them as quick-nav
-    /// targets (VoiceOver rotor, NVDA quick-nav). Pass an empty
-    /// slice to clear.
+    /// Tag a node with rotor / quick-nav categories.
     pub fn set_a11y_categories(&mut self, node: A11yNode, categories: &[A11yCategory]) {
         if categories.is_empty() {
             self.a11y_categories.remove(&node);
         } else {
-            self.a11y_categories
-                .insert(node, categories.to_vec());
+            self.a11y_categories.insert(node, categories.to_vec());
         }
     }
 
-    /// Read the categories declared for a node, if any.
+    /// Read declared categories for a node.
     pub fn a11y_categories_of(&self, node: A11yNode) -> Option<&[A11yCategory]> {
         self.a11y_categories.get(&node).map(|v| v.as_slice())
     }
@@ -528,9 +649,8 @@ impl std::fmt::Debug for Scene {
     }
 }
 
-/// Standard half-open AABB intersection: two rects intersect iff their
-/// projections overlap on both axes. Used by `Scene::items_in_rect`'s
-/// narrow phase and by `SceneView`'s viewport cull.
+/// Half-open AABB intersection: two rects intersect iff their
+/// projections overlap on both axes.
 pub(crate) fn rects_intersect(a: Rect, b: Rect) -> bool {
     a.x < b.x + b.width
         && b.x < a.x + a.width
@@ -541,13 +661,11 @@ pub(crate) fn rects_intersect(a: Rect, b: Rect) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::items::RectItem;
     use fern_canvas::{Size, SizeProposal};
     use fern_core::widget::{LayoutContext, LayoutResponse, Widget};
+    use fern_tokens::Color;
 
-    /// Minimal leaf widget used purely to populate `Scene` entries in
-    /// these unit tests. A no-op `layout_response` keeps the test
-    /// surface tiny; integration tests against real widget
-    /// interactions live in `crates/fern-scene/tests/integration.rs`.
     #[derive(Debug)]
     struct FillWidget;
 
@@ -573,39 +691,81 @@ mod tests {
         let r = Rect::new(10.0, 20.0, 100.0, 50.0);
         let id = scene.add_widget(FillWidget::new(), r);
         assert_eq!(scene.len(), 1);
+        // scene_rect is computed from local_pos + local_bounds.
         assert_eq!(scene.scene_rect(id), Some(r));
+        assert_eq!(scene.local_pos(id), Some(Point::new(10.0, 20.0)));
+        assert_eq!(scene.local_bounds(id), Some(Rect::new(0.0, 0.0, 100.0, 50.0)));
         assert_eq!(scene.ids(), vec![id]);
     }
 
     #[test]
-    fn add_widget_assigns_unique_ids() {
+    fn add_item_at_local_pos() {
         let mut scene = Scene::new();
-        let a = scene.add_widget(FillWidget::new(), Rect::ZERO);
-        let b = scene.add_widget(FillWidget::new(), Rect::ZERO);
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn move_item_updates_scene_rect() {
-        let mut scene = Scene::new();
-        let id = scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 50.0, 50.0));
-        let new = Rect::new(100.0, 100.0, 30.0, 30.0);
-        scene.move_item(id, new);
-        assert_eq!(scene.scene_rect(id), Some(new));
-    }
-
-    #[test]
-    fn move_item_unknown_id_is_noop() {
-        let mut scene = Scene::new();
-        let id = scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 50.0, 50.0));
-        // synthesise an id that's definitely not in the scene
-        let bogus = ItemId::next();
-        scene.move_item(bogus, Rect::new(99.0, 99.0, 1.0, 1.0));
-        assert_eq!(
-            scene.scene_rect(id),
-            Some(Rect::new(0.0, 0.0, 50.0, 50.0)),
-            "moving an unknown id must not affect existing items"
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 30.0, 40.0)).fill(Color::RED),
+            Point::new(10.0, 20.0),
         );
+        assert_eq!(scene.scene_rect(id), Some(Rect::new(10.0, 20.0, 30.0, 40.0)));
+        assert_eq!(scene.scene_pos(id), Some(Point::new(10.0, 20.0)));
+    }
+
+    #[test]
+    fn set_local_pos_updates_scene_rect_and_index() {
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(0.0, 0.0),
+        );
+        scene.set_local_pos(id, Point::new(500.0, 500.0));
+        assert_eq!(scene.scene_rect(id), Some(Rect::new(500.0, 500.0, 10.0, 10.0)));
+        let near_origin = scene.items_in_rect(Rect::new(0.0, 0.0, 50.0, 50.0));
+        assert!(!near_origin.contains(&id));
+        let near_far = scene.items_in_rect(Rect::new(490.0, 490.0, 30.0, 30.0));
+        assert!(near_far.contains(&id));
+    }
+
+    #[test]
+    fn parent_relative_position_composes_through_chain() {
+        let mut scene = Scene::new();
+        let parent = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)),
+            Point::new(50.0, 50.0),
+        );
+        let child = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            Point::new(10.0, 10.0),
+        );
+        scene.set_item_parent(child, Some(parent));
+
+        // Child's scene_pos = parent local_pos + child local_pos.
+        assert_eq!(scene.scene_pos(child), Some(Point::new(60.0, 60.0)));
+        // Move parent — child's scene_pos shifts in lockstep.
+        scene.set_local_pos(parent, Point::new(150.0, 150.0));
+        assert_eq!(scene.scene_pos(child), Some(Point::new(160.0, 160.0)));
+    }
+
+    #[test]
+    fn set_local_pos_propagates_to_descendants_scene_pos() {
+        // Three-deep chain: grandparent → parent → child.
+        let mut scene = Scene::new();
+        let gp = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(0.0, 0.0),
+        );
+        let p = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(20.0, 0.0),
+        );
+        let c = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(5.0, 0.0),
+        );
+        scene.set_item_parent(p, Some(gp));
+        scene.set_item_parent(c, Some(p));
+
+        assert_eq!(scene.scene_pos(c), Some(Point::new(25.0, 0.0)));
+        scene.set_local_pos(gp, Point::new(100.0, 100.0));
+        assert_eq!(scene.scene_pos(c), Some(Point::new(125.0, 100.0)));
     }
 
     #[test]
@@ -639,52 +799,54 @@ mod tests {
     }
 
     #[test]
-    fn add_item_round_trip_and_index_bucketed() {
-        use crate::items::RectItem;
-        use fern_tokens::Color;
-
+    fn item_at_picks_topmost() {
         let mut scene = Scene::new();
-        let r = Rect::new(10.0, 20.0, 30.0, 40.0);
-        let id = scene.add_item(RectItem::new(r).fill(Color::RED));
-        assert_eq!(scene.scene_rect(id), Some(r));
-        // Lightweight item participates in spatial-index queries the
-        // same way heavyweight widgets do.
-        let hits = scene.items_in_rect(Rect::new(0.0, 0.0, 100.0, 100.0));
-        assert!(hits.contains(&id));
+        let bottom = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)),
+            Point::new(0.0, 0.0),
+        );
+        let top = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)),
+            Point::new(25.0, 25.0),
+        );
+        scene.set_z(top, 1.0);
+        scene.set_z(bottom, 0.0);
+        // Click in the overlap region.
+        assert_eq!(scene.item_at(Point::new(50.0, 50.0)), Some(top));
+        // Click outside the top, inside the bottom.
+        assert_eq!(scene.item_at(Point::new(10.0, 10.0)), Some(bottom));
+        // Click outside everything.
+        assert_eq!(scene.item_at(Point::new(500.0, 500.0)), None);
     }
 
     #[test]
     fn item_accessor_returns_lightweight_only() {
-        use crate::items::RectItem;
-
         let mut scene = Scene::new();
         let widget_id = scene.add_widget(FillWidget::new(), Rect::ZERO);
-        let item_id = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
-        // Lightweight id resolves; heavyweight id returns None — the
-        // `item()` accessor is the lightweight-tier-only door.
+        let item_id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(0.0, 0.0),
+        );
         assert!(scene.item(item_id).is_some());
         assert!(scene.item(widget_id).is_none());
     }
 
     #[test]
-    fn move_item_updates_lightweight_bucket() {
-        use crate::items::RectItem;
-
+    fn map_to_scene_round_trips() {
         let mut scene = Scene::new();
-        let id = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
-        scene.move_item(id, Rect::new(500.0, 500.0, 10.0, 10.0));
-        let near_origin = scene.items_in_rect(Rect::new(0.0, 0.0, 50.0, 50.0));
-        assert!(!near_origin.contains(&id));
-        let near_far = scene.items_in_rect(Rect::new(490.0, 490.0, 30.0, 30.0));
-        assert!(near_far.contains(&id));
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(50.0, 50.0),
+        );
+        let local = Point::new(3.0, 4.0);
+        let scene_pt = scene.map_to_scene(id, local).unwrap();
+        let back = scene.map_from_scene(id, scene_pt).unwrap();
+        assert!((back.x - local.x).abs() < 1e-5);
+        assert!((back.y - local.y).abs() < 1e-5);
     }
 
     #[test]
     fn rects_intersect_edge_touching_excluded() {
-        // Two AABBs that share only an edge are NOT considered
-        // intersecting (half-open convention). Pins this so future
-        // refactors of the predicate don't silently flip semantics
-        // and break marquee selection / spatial-index queries.
         let a = Rect::new(0.0, 0.0, 10.0, 10.0);
         let b = Rect::new(10.0, 0.0, 10.0, 10.0);
         assert!(!rects_intersect(a, b));

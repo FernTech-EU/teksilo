@@ -447,27 +447,15 @@ impl SceneView {
         }
     }
 
-    /// Drain any pending drag-to-move commit, applying the new
-    /// bounds via `Scene::move_item` (which keeps the spatial
-    /// index in sync). Requires `&mut self` because the move
-    /// mutates the scene. Tests call this after driving on_drag;
-    /// real apps wire it in their post-event-dispatch path or
-    /// rely on the next layout cycle (which will eventually need
-    /// `&mut Scene` access via `scene_mut`).
+    /// Drain any pending drag-to-move commit by translating the
+    /// dragged item's `local_pos` by the queued delta. Descendants
+    /// follow automatically: their `local_pos` is unchanged but
+    /// their `scene_pos` derives from the parent's chain.
     pub fn flush_pending_item_move(&mut self) -> bool {
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            let mut to_move: Vec<ItemId> = vec![target_id];
-            self.scene.collect_descendants(target_id, &mut to_move);
-            for id in to_move {
-                if let Some(rect) = self.scene.scene_rect(id) {
-                    let new_bounds = Rect::new(
-                        rect.x + delta.x,
-                        rect.y + delta.y,
-                        rect.width,
-                        rect.height,
-                    );
-                    self.scene.move_item(id, new_bounds);
-                }
+            if let Some(local_pos) = self.scene.local_pos(target_id) {
+                let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
+                self.scene.set_local_pos(target_id, new_local_pos);
             }
             self.drag_target.set(None);
             true
@@ -888,7 +876,8 @@ impl SceneView {
     /// Compute the bounding rectangle (in scene coords) that encloses
     /// every item in the scene. Returns `None` for an empty scene.
     pub fn scene_content_bounds(&self) -> Option<Rect> {
-        union_rects(self.scene.entries.iter().map(|e| e.scene_rect))
+        let ids: Vec<ItemId> = self.scene.ids();
+        union_rects(ids.iter().filter_map(|id| self.scene.scene_rect(*id)))
     }
 
     /// Animate pan + zoom so the scene's content bounding box fits
@@ -949,34 +938,19 @@ impl SceneView {
 impl Widget for SceneView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Drain any pending drag-to-move commit. The drop closure
-        // queued `(target_id, delta)` and bumped `drag_dirty`,
-        // which flagged this widget for rebuild. Now we have
-        // `&mut self.scene` so `move_item` can re-bucket the
-        // spatial index. Clear `drag_target` here (not in the
-        // on_drag `Ended` branch) so paint keeps translating the
-        // item to its dragged position until the move actually
-        // lands — without this, between drag-end and the rebuild
-        // the item would visibly "snap back" to its pre-drag
-        // bounds for one or more frames.
-        //
-        // QGraphicsScene-style cascade: the dragged item's
-        // declared descendants (via `Scene::set_item_parent`)
-        // move by the same delta. So a Rect parent + TextItem
-        // child relationship lets the label follow the rect when
-        // the rect is dragged.
+        // queued `(target_id, delta)` and bumped `drag_dirty` which
+        // flagged this widget for rebuild. Translate the dragged
+        // item's `local_pos` by the queued delta — descendants
+        // follow automatically because their `local_pos` is
+        // unchanged but their `scene_pos` derives from the parent
+        // chain. Clear `drag_target` here (not on `Ended`) so paint
+        // keeps translating the item to its dragged position until
+        // the move actually lands; otherwise the item would visibly
+        // "snap back" between drag-end and the rebuild.
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            let mut to_move: Vec<ItemId> = vec![target_id];
-            self.scene.collect_descendants(target_id, &mut to_move);
-            for id in to_move {
-                if let Some(rect) = self.scene.scene_rect(id) {
-                    let new_bounds = Rect::new(
-                        rect.x + delta.x,
-                        rect.y + delta.y,
-                        rect.width,
-                        rect.height,
-                    );
-                    self.scene.move_item(id, new_bounds);
-                }
+            if let Some(local_pos) = self.scene.local_pos(target_id) {
+                let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
+                self.scene.set_local_pos(target_id, new_local_pos);
             }
             self.drag_target.set(None);
         }
@@ -1605,11 +1579,21 @@ impl Widget for SceneView {
             // feel unstable to the user.
             let mut snapshot = self.lightweight_bounds_snapshot.borrow_mut();
             snapshot.clear();
-            for entry in &self.scene.entries {
-                if let crate::scene::SceneEntryKind::Item(item) = &entry.kind {
-                    if item.is_draggable() {
-                        snapshot.push((entry.id, entry.scene_rect));
-                    }
+            // Iterate ids and compute the scene AABB for each draggable
+            // item (the parent chain may have shifted it). The snapshot
+            // is used by the on_drag handler's hit-test for drag-start
+            // — refreshed each layout pass so a parent move between
+            // drag events doesn't leave the snapshot stale.
+            let ids: Vec<crate::item::ItemId> = self.scene.ids();
+            for id in ids {
+                let Some(item) = self.scene.item(id) else {
+                    continue;
+                };
+                if !item.is_draggable() {
+                    continue;
+                }
+                if let Some(scene_rect) = self.scene.scene_rect(id) {
+                    snapshot.push((id, scene_rect));
                 }
             }
         }
@@ -1732,10 +1716,8 @@ impl Widget for SceneView {
         // decorations) — items render under the cards.
         let region = self.visible_scene_region(bounds);
         let view_transform = self.view_transform();
-        let item_ctx = crate::item::SceneItemPaintContext {
-            view_transform,
-            dirty_scene_rect: Some(region),
-        };
+        let item_ctx =
+            crate::item::SceneItemPaintContext::new(view_transform, Some(region));
         // `items_in_rect` returns both widget and item entries that
         // intersect the visible region. We filter to the lightweight
         // tier here — heavyweights are painted by the arena walker via
@@ -1757,28 +1739,39 @@ impl Widget for SceneView {
         // walker after SceneView's paint method).
         self.scene.sort_by_z(&mut visible_ids);
         for id in visible_ids {
-            if let Some(item) = self.scene.item(id) {
-                // An item paints with the drag offset when it is
-                // either the drag target itself OR a declared
-                // descendant of the drag target — so a TextItem
-                // parented to a draggable Rect follows the rect
-                // visually during the drag.
-                let dragging = drag_target
-                    .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
-                    .map(|t| {
-                        Vec2::new(
-                            t.current_scene.x - t.anchor_scene.x,
-                            t.current_scene.y - t.anchor_scene.y,
-                        )
-                    });
-                if let Some(delta) = dragging {
-                    canvas.translate(delta.x, delta.y);
-                    item.paint(canvas, &item_ctx);
-                    canvas.translate(-delta.x, -delta.y);
-                } else {
-                    item.paint(canvas, &item_ctx);
-                }
+            if self.scene.item(id).is_none() {
+                continue;
             }
+            // Items that are either the drag target itself OR a
+            // declared descendant of the drag target paint with a
+            // visual delta in scene coords — a child label follows
+            // its dragged rect parent visually until the rebuild
+            // commits the new local_pos.
+            let drag_delta = drag_target
+                .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
+                .map(|t| {
+                    fern_canvas::Transform2D::translate(
+                        t.current_scene.x - t.anchor_scene.x,
+                        t.current_scene.y - t.anchor_scene.y,
+                    )
+                });
+
+            // Compose `local→scene`, optionally with a scene-coord
+            // drag offset baked in (`scene_transform.then(translate)`
+            // = "scene-transform first, then translate in scene
+            // space"). Push it beneath the existing view transform so
+            // the item's `paint` works in local coords. `save` /
+            // `restore` keep neighbouring items' transforms isolated.
+            let mut local_to_scene = self.scene.scene_transform(id);
+            if let Some(t) = drag_delta {
+                local_to_scene = local_to_scene.then(&t);
+            }
+            canvas.save();
+            canvas.apply_transform(local_to_scene);
+            if let Some(item) = self.scene.item(id) {
+                item.paint(canvas, &item_ctx);
+            }
+            canvas.restore();
         }
 
         // Phase 6: marquee overlay — semi-transparent fill plus a
@@ -2119,16 +2112,18 @@ impl SceneView {
         let selection_color = fern_tokens::Color::new(1.00, 0.60, 0.20, 0.95);
 
         if cfg.item_bounds {
-            for entry in &self.scene.entries {
-                canvas.stroke_rect(
-                    entry.scene_rect,
-                    item_color,
-                    fern_canvas::StrokeStyle::solid(stroke_w),
-                );
+            for id in self.scene.ids() {
+                if let Some(scene_rect) = self.scene.scene_rect(id) {
+                    canvas.stroke_rect(
+                        scene_rect,
+                        item_color,
+                        fern_canvas::StrokeStyle::solid(stroke_w),
+                    );
+                }
             }
         }
         if cfg.content_bounds {
-            if let Some(content) = union_rects(self.scene.entries.iter().map(|e| e.scene_rect)) {
+            if let Some(content) = self.scene_content_bounds() {
                 canvas.stroke_rect(
                     content,
                     content_color,
@@ -2189,7 +2184,8 @@ impl SceneView {
                 // attach the framework-emitted widget node under
                 // the declared parent (auto-graft).
                 if let Some(item) = self.scene.item(item_id) {
-                    let scene_bounds = item.bounds_in_scene();
+                    let _ = item; // borrowed below for accessibility() call
+                    let scene_bounds = self.scene.scene_rect(item_id).unwrap_or(Rect::ZERO);
                     let screen_bounds = view_transform.apply_rect(scene_bounds);
                     // Choose which space to advertise to AT clients
                     // per `a11y_bounds_space`. The `SceneItemA11yContext`
@@ -3128,10 +3124,10 @@ mod tests {
 
         let mut scene = Scene::new();
         let _on_screen = scene.add_item(
-            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
         );
         let _off_screen = scene.add_item(
-            RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::BLUE),
+            RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -3158,10 +3154,10 @@ mod tests {
 
         let mut scene = Scene::new();
         scene.add_item(
-            RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::RED),
+            RectItem::new(Rect::new(5_000.0, 5_000.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
         );
         scene.add_item(
-            RectItem::new(Rect::new(-5_000.0, -5_000.0, 20.0, 20.0)).fill(Color::BLUE),
+            RectItem::new(Rect::new(-5_000.0, -5_000.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -3224,10 +3220,10 @@ mod tests {
         let on_screen = scene.add_item(
             RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
                 .fill(Color::RED)
-                .access_label("nearby"),
+                .access_label("nearby"), Point::ZERO
         );
         let _far_off = scene.add_item(
-            RectItem::new(Rect::new(50_000.0, 50_000.0, 20.0, 20.0)).fill(Color::BLUE),
+            RectItem::new(Rect::new(50_000.0, 50_000.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -3338,13 +3334,13 @@ mod tests {
         let mut scene = Scene::new();
         // In-viewport item: definitely AT-visible.
         scene.add_item(
-            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
         );
         // Item just past the right edge of the 400x300 viewport.
         // Default mode would include it (within 1× viewport
         // margin), but ViewportOnly should not.
         scene.add_item(
-            RectItem::new(Rect::new(450.0, 100.0, 20.0, 20.0)).fill(Color::BLUE),
+            RectItem::new(Rect::new(450.0, 100.0, 20.0, 20.0)).fill(Color::BLUE), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -3385,7 +3381,7 @@ mod tests {
         let mut scene = Scene::new();
         let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
         let card = scene.add_item(
-            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label("Scene A"),
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label("Scene A"), Point::ZERO
         );
         scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act1)));
 
@@ -3439,7 +3435,7 @@ mod tests {
         let mut scene = Scene::new();
         let outer = scene.add_a11y_group(A11yGroup::builder().label("Outer"));
         let inner = scene.add_a11y_group(A11yGroup::builder().label("Inner"));
-        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
         scene.set_a11y_parent(A11yNode::Group(inner), Some(A11yNode::Group(outer)));
         scene.set_a11y_parent(A11yNode::Item(item), Some(A11yNode::Group(inner)));
 
@@ -3480,8 +3476,8 @@ mod tests {
         use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
 
         let mut scene = Scene::new();
-        let a = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
-        let b = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)));
+        let a = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
+        let b = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)), Point::ZERO);
         scene.add_a11y_relation(A11yNode::Item(a), A11yRelation::FlowTo, A11yNode::Item(b));
 
         let mut tree = WidgetTree::new();
@@ -3511,7 +3507,7 @@ mod tests {
         use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
 
         let mut scene = Scene::new();
-        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
         scene.set_a11y_live(A11yNode::Item(item), accesskit::Live::Polite);
 
         let mut tree = WidgetTree::new();
@@ -3536,7 +3532,7 @@ mod tests {
         use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
 
         let mut scene = Scene::new();
-        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
         // RectItem default role is GraphicsObject. Landmark override
         // should re-set it to Region.
         scene.set_a11y_landmark(A11yNode::Item(item), accesskit::Role::Region);
@@ -3566,7 +3562,7 @@ mod tests {
 
         let mut scene = Scene::new();
         let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
-        let item = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        let item = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
         scene.set_a11y_parent(A11yNode::Item(item), Some(A11yNode::Group(g)));
         scene.set_a11y_live(A11yNode::Group(g), accesskit::Live::Assertive);
         scene.set_a11y_landmark(A11yNode::Group(g), accesskit::Role::Region);
@@ -3643,7 +3639,7 @@ mod tests {
         use fern_core::accessibility::{is_synthetic, widget_id_to_node_id};
 
         let mut scene = Scene::new();
-        scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
 
         let mut tree = WidgetTree::new();
         let view_id = tree.add(SceneView::new(scene));
@@ -3674,8 +3670,8 @@ mod tests {
 
         let mut scene = Scene::new();
         let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
-        let placed = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
-        let _orphan = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)));
+        let placed = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)), Point::ZERO);
+        let _orphan = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)), Point::ZERO);
         scene.set_a11y_parent(A11yNode::Item(placed), Some(A11yNode::Group(g)));
 
         let mut tree = WidgetTree::new();
@@ -4182,7 +4178,7 @@ mod tests {
         scene.add_item(TextItem::with_signal_text(
             label_text.clone(),
             Rect::new(0.0, 0.0, 50.0, 20.0),
-        ));
+        ), Point::ZERO);
 
         let mut tree = WidgetTree::new();
         let _view_id = tree.add(SceneView::new(scene));
@@ -4249,7 +4245,7 @@ mod tests {
         outer_scene.add_item(TextItem::with_signal_text(
             axis_label_text.clone(),
             Rect::new(0.0, 290.0, 80.0, 10.0),
-        ));
+        ), Point::ZERO);
         let outer = SceneView::new(outer_scene).interactive(false);
 
         let mut tree = WidgetTree::new();
@@ -4292,7 +4288,7 @@ mod tests {
         // Inner: one small RectItem at scene-coord (10, 10).
         let mut inner_scene = Scene::new();
         inner_scene
-            .add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED));
+            .add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO);
         let inner = SceneView::new(inner_scene).default_size(50.0, 40.0);
 
         // Outer holds the inner at scene-coord (200, 150, 50, 40).
@@ -4381,7 +4377,7 @@ mod tests {
         let mut scene = Scene::new();
         scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::RED),
+                .fill(fern_tokens::Color::RED), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -4433,7 +4429,7 @@ mod tests {
         let mut scene = Scene::new();
         scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::RED),
+                .fill(fern_tokens::Color::RED), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -4475,11 +4471,11 @@ mod tests {
         let mut scene = Scene::new();
         let inside = scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::RED),
+                .fill(fern_tokens::Color::RED), Point::ZERO
         );
         let outside = scene.add_item(
             RectItem::new(Rect::new(500.0, 500.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::BLUE),
+                .fill(fern_tokens::Color::BLUE), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -4537,7 +4533,7 @@ mod tests {
         let item_id = scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
                 .fill(fern_tokens::Color::RED)
-                .draggable(true),
+                .draggable(true), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -4629,7 +4625,7 @@ mod tests {
         let item_id = scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
                 .fill(fern_tokens::Color::RED)
-                .draggable(true),
+                .draggable(true), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -4743,12 +4739,12 @@ mod tests {
         let parent_rect = scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
                 .fill(fern_tokens::Color::RED)
-                .draggable(true),
+                .draggable(true), Point::ZERO
         );
         let label = scene.add_item(TextItem::new(
             "child",
             Rect::new(58.0, 70.0, 64.0, 20.0),
-        ));
+        ), Point::ZERO);
         scene.set_item_parent(label, Some(parent_rect));
 
         let mut tree = WidgetTree::new();
@@ -4801,43 +4797,6 @@ mod tests {
     }
 
     #[test]
-    fn move_item_updates_item_internal_bounds_so_paint_follows() {
-        // Regression: `Scene::move_item` must call
-        // `SceneItem::set_bounds` on the item itself, otherwise the
-        // item's stored bounds (which `paint` reads from) stay at the
-        // original position. Symptom in the showcase: drag works,
-        // hit-test follows the move, but the *visible* square stays
-        // at the original spot — the dragged item is "invisible at
-        // its destination but still draggable from there".
-        use crate::items::{PathItem, RectItem};
-        use fern_canvas::Path;
-
-        let mut scene = Scene::new();
-        let rect = scene.add_item(
-            RectItem::new(Rect::new(10.0, 10.0, 50.0, 50.0))
-                .fill(fern_tokens::Color::RED),
-        );
-        let mut p = Path::new();
-        p.move_to(Point::new(0.0, 0.0));
-        p.line_to(Point::new(20.0, 0.0));
-        let path_id = scene.add_item(PathItem::new(p, Rect::new(0.0, 0.0, 20.0, 1.0)));
-
-        scene.move_item(rect, Rect::new(110.0, 110.0, 50.0, 50.0));
-        scene.move_item(path_id, Rect::new(100.0, 100.0, 20.0, 1.0));
-
-        assert_eq!(
-            scene.item(rect).unwrap().bounds_in_scene(),
-            Rect::new(110.0, 110.0, 50.0, 50.0),
-            "RectItem.set_bounds must wire move_item to paint"
-        );
-        assert_eq!(
-            scene.item(path_id).unwrap().bounds_in_scene(),
-            Rect::new(100.0, 100.0, 20.0, 1.0),
-            "PathItem.set_bounds must wire move_item to paint"
-        );
-    }
-
-    #[test]
     fn parent_child_drag_persists_across_two_drags() {
         // Showcase regression: parent RectItem with declared TextItem
         // child, dragged twice in a row. After the cascade refactor
@@ -4853,12 +4812,12 @@ mod tests {
         let parent_rect = scene.add_item(
             RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
                 .fill(fern_tokens::Color::RED)
-                .draggable(true),
+                .draggable(true), Point::ZERO
         );
         let label = scene.add_item(TextItem::new(
             "child",
             Rect::new(58.0, 70.0, 64.0, 20.0),
-        ));
+        ), Point::ZERO);
         scene.set_item_parent(label, Some(parent_rect));
 
         let mut tree = WidgetTree::new();
@@ -4944,8 +4903,11 @@ mod tests {
             phase: Signal<f32>,
         }
         impl SceneItem for Looper {
-            fn bounds_in_scene(&self) -> Rect {
+            fn local_bounds(&self) -> Rect {
                 self.bounds
+            }
+            fn set_local_bounds(&mut self, b: Rect) {
+                self.bounds = b;
             }
             fn paint(&self, _c: &mut fern_canvas::Canvas, _x: &SceneItemPaintContext) {}
             fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {
@@ -4972,12 +4934,12 @@ mod tests {
             scene.add_item(Looper {
                 bounds: Rect::new(200.0 + i as f32 * 30.0, 50.0, 20.0, 20.0),
                 phase: p.clone(),
-            });
+            }, Point::ZERO);
         }
         let drag_rect = scene.add_item(
             RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0))
                 .fill(fern_tokens::Color::RED)
-                .draggable(true),
+                .draggable(true), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -5059,7 +5021,7 @@ mod tests {
         let mut scene = Scene::new();
         let item_id = scene.add_item(
             RectItem::new(Rect::new(100.0, 100.0, 30.0, 30.0))
-                .fill(fern_tokens::Color::RED),
+                .fill(fern_tokens::Color::RED), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -5109,11 +5071,11 @@ mod tests {
         let mut scene = Scene::new();
         let a = scene.add_item(
             RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::RED),
+                .fill(fern_tokens::Color::RED), Point::ZERO
         );
         let b = scene.add_item(
             RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::BLUE),
+                .fill(fern_tokens::Color::BLUE), Point::ZERO
         );
         // Reverse paint order via z: A on top by default (later
         // insertion = on top), but we set B's z higher so B paints
@@ -5151,11 +5113,13 @@ mod tests {
             red_first.unwrap() < blue_first.unwrap(),
             "z=10 (blue) should paint after z=0 (red)"
         );
-        // Pin both DrawCommands are decoration variants (not stale).
-        assert!(matches!(
-            frame.draw_order[0],
-            DrawCommand::Decoration(_)
-        ));
+        // Decoration commands are present (the per-item
+        // scene-transform push emits SetTransform commands too, so
+        // they're interleaved with decorations in `draw_order`).
+        assert!(
+            frame.draw_order.iter().any(|cmd| matches!(cmd, DrawCommand::Decoration(_))),
+            "expected at least one Decoration in draw_order"
+        );
     }
 
     #[test]
@@ -5166,11 +5130,11 @@ mod tests {
         let mut scene = Scene::new();
         scene.add_item(
             RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::RED),
+                .fill(fern_tokens::Color::RED), Point::ZERO
         );
         scene.add_item(
             RectItem::new(Rect::new(15.0, 15.0, 20.0, 20.0))
-                .fill(fern_tokens::Color::BLUE),
+                .fill(fern_tokens::Color::BLUE), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -5287,9 +5251,9 @@ mod tests {
     #[test]
     fn focus_order_default_walks_insertion_order_forward() {
         let mut scene = Scene::new();
-        let a = scene.add_item(rect_item_at(0.0, 0.0));
-        let b = scene.add_item(rect_item_at(20.0, 0.0));
-        let c = scene.add_item(rect_item_at(40.0, 0.0));
+        let a = scene.add_item(rect_item_at(0.0, 0.0), Point::ZERO);
+        let b = scene.add_item(rect_item_at(20.0, 0.0), Point::ZERO);
+        let c = scene.add_item(rect_item_at(40.0, 0.0), Point::ZERO);
 
         let view = SceneView::new(scene);
         // None → first
@@ -5303,9 +5267,9 @@ mod tests {
     #[test]
     fn focus_order_default_walks_insertion_order_backward() {
         let mut scene = Scene::new();
-        let a = scene.add_item(rect_item_at(0.0, 0.0));
-        let b = scene.add_item(rect_item_at(20.0, 0.0));
-        let c = scene.add_item(rect_item_at(40.0, 0.0));
+        let a = scene.add_item(rect_item_at(0.0, 0.0), Point::ZERO);
+        let b = scene.add_item(rect_item_at(20.0, 0.0), Point::ZERO);
+        let c = scene.add_item(rect_item_at(40.0, 0.0), Point::ZERO);
 
         let view = SceneView::new(scene);
         // None → last
@@ -5329,9 +5293,9 @@ mod tests {
         // order on Forward — proves the callback overrides the
         // built-in walk and isn't merely augmenting it.
         let mut scene = Scene::new();
-        let a = scene.add_item(rect_item_at(0.0, 0.0));
-        let b = scene.add_item(rect_item_at(20.0, 0.0));
-        let c = scene.add_item(rect_item_at(40.0, 0.0));
+        let a = scene.add_item(rect_item_at(0.0, 0.0), Point::ZERO);
+        let b = scene.add_item(rect_item_at(20.0, 0.0), Point::ZERO);
+        let c = scene.add_item(rect_item_at(40.0, 0.0), Point::ZERO);
 
         let view = SceneView::new(scene).focus_order(move |scene, dir, current| {
             let mut ids = scene.ids();
@@ -5373,7 +5337,7 @@ mod tests {
     #[test]
     fn fit_to_items_skips_stale_ids() {
         let mut scene = Scene::new();
-        let a = scene.add_item(rect_item_at(0.0, 0.0));
+        let a = scene.add_item(rect_item_at(0.0, 0.0), Point::ZERO);
         scene.remove(a);
 
         let mut tree = WidgetTree::new();
@@ -5391,8 +5355,8 @@ mod tests {
     #[test]
     fn fit_to_selection_uses_selected_ids() {
         let mut scene = Scene::new();
-        let a = scene.add_item(rect_item_at(100.0, 100.0));
-        let _b = scene.add_item(rect_item_at(900.0, 900.0));
+        let a = scene.add_item(rect_item_at(100.0, 100.0), Point::ZERO);
+        let _b = scene.add_item(rect_item_at(900.0, 900.0), Point::ZERO);
 
         let mut tree = WidgetTree::new();
         let view_id = tree.add(
@@ -5430,10 +5394,10 @@ mod tests {
         // (e.g. graph editor that only tabs through nodes, not
         // connectors).
         let mut scene = Scene::new();
-        let _skip0 = scene.add_item(rect_item_at(0.0, 0.0));
-        let keep1 = scene.add_item(rect_item_at(20.0, 0.0));
-        let _skip2 = scene.add_item(rect_item_at(40.0, 0.0));
-        let keep3 = scene.add_item(rect_item_at(60.0, 0.0));
+        let _skip0 = scene.add_item(rect_item_at(0.0, 0.0), Point::ZERO);
+        let keep1 = scene.add_item(rect_item_at(20.0, 0.0), Point::ZERO);
+        let _skip2 = scene.add_item(rect_item_at(40.0, 0.0), Point::ZERO);
+        let keep3 = scene.add_item(rect_item_at(60.0, 0.0), Point::ZERO);
 
         let allowed = vec![keep1, keep3];
         let view = SceneView::new(scene).focus_order(move |_scene, dir, current| {
@@ -5600,7 +5564,7 @@ mod tests {
 
         let mut scene = Scene::new();
         scene.add_item(
-            RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED),
+            RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -5633,7 +5597,7 @@ mod tests {
 
         let mut scene = Scene::new();
         scene.add_item(
-            RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED),
+            RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED), Point::ZERO
         );
 
         let mut tree = WidgetTree::new();
@@ -5705,8 +5669,8 @@ mod tests {
         // off, given identical scene contents.
         let make_scene = || {
             let mut s = Scene::new();
-            s.add_item(rect_item_at(20.0, 20.0));
-            s.add_item(rect_item_at(60.0, 20.0));
+            s.add_item(rect_item_at(20.0, 20.0), Point::ZERO);
+            s.add_item(rect_item_at(60.0, 20.0), Point::ZERO);
             s
         };
 
