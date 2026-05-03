@@ -42,7 +42,7 @@ use fern_ui::canvas::{Canvas, Path, Point, Rect, StrokeStyle};
 use fern_ui::core::binding::BindingLevel;
 use fern_ui::prelude::*;
 use fern_ui::tokens::Easing;
-use fern_ui::widgets::{Button, ComboBox, HStack, Panel, TextWidget, VStack};
+use fern_ui::widgets::{Button, ComboBox, HStack, Panel, ScrollArea, TextWidget, VStack};
 
 // ---------------------------------------------------------------------------
 // Scene layout: tight 4×2 grid that fits naturally in a 1500×950 window
@@ -415,8 +415,12 @@ fn build_zorder_section(scene: &mut Scene) {
 fn build_card_with_button() -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
-            .spacing(4.0)
+            .spacing(8.0)
             .child(TextWidget::new_literal("Card with Button").style(TextStyleRole::BodyBold))
+            .child(
+                TextWidget::new_literal("Real widget machinery: focus, keyboard, a11y.")
+                    .style(TextStyleRole::Body),
+            )
             .child(
                 Button::new_literal("Click me").on_activate_fn(|_ctx| {
                     eprintln!("[scene-showcase] button clicked");
@@ -429,8 +433,12 @@ fn build_card_with_combo() -> impl Widget + 'static {
     let selected: Signal<Option<String>> = Signal::new(Some("Apple".to_string()));
     Panel::new().child(
         VStack::new()
-            .spacing(4.0)
+            .spacing(8.0)
             .child(TextWidget::new_literal("Card with ComboBox").style(TextStyleRole::BodyBold))
+            .child(
+                TextWidget::new_literal("Pick a fruit from the list:")
+                    .style(TextStyleRole::Body),
+            )
             .child(ComboBox::new(
                 vec!["Apple", "Banana", "Cherry", "Date"],
                 selected,
@@ -441,41 +449,52 @@ fn build_card_with_combo() -> impl Widget + 'static {
 fn build_card_plain(title: &str, body: &str) -> impl Widget + 'static {
     Panel::new().child(
         VStack::new()
-            .spacing(2.0)
+            .spacing(8.0)
             .child(TextWidget::new_literal(title).style(TextStyleRole::BodyBold))
             .child(TextWidget::new_literal(body).style(TextStyleRole::Body)),
     )
 }
 
-fn build_heavyweight_section(scene: &mut Scene) -> Vec<ItemId> {
+/// Cards are wrapped in a `ScrollArea` so each one gets a comfortable
+/// height (Button / ComboBox stay easy to click) without being
+/// crammed into the section's vertical budget. The whole ScrollArea
+/// goes into the scene as ONE heavyweight widget; the cards inside
+/// it are children of the ScrollArea, not direct scene entries.
+///
+/// Returns the ScrollArea's `ItemId` so Section 6 can parent its
+/// AT-tree under the Acts.
+fn build_heavyweight_section(scene: &mut Scene) -> ItemId {
     add_section_frame(scene, 3, 0, "4. Heavyweight cards");
     add_section_caption(
         scene,
         3,
         0,
-        "Scene::add_widget puts a real Widget at a scene_rect. Each \
-         card here holds an interactive widget. Click to focus.",
+        "Scene::add_widget puts a real Widget at a scene_rect. Wrap \
+         several cards in a ScrollArea so each card stays a \
+         comfortable size — scroll inside this section.",
     );
 
     let r = section_rect(3, 0);
-    let card_w = r.width - 24.0;
-    let card_h = 50.0;
-    let card_x = r.x + 12.0;
-    let first_y = r.y + 130.0;
+    let area_x = r.x + 10.0;
+    let area_y = r.y + 130.0;
+    let area_w = r.width - 20.0;
+    let area_h = r.height - 140.0;
 
-    let id_a = scene.add_widget(
-        build_card_with_button(),
-        Rect::new(card_x, first_y, card_w, card_h),
+    // ScrollArea contains a tall VStack of cards. The total content
+    // height (~360 px) exceeds the area's height (~140 px), so the
+    // user scrolls inside this section to reveal each card.
+    let scroll_area = ScrollArea::new().child(
+        VStack::new()
+            .spacing(10.0)
+            .child(build_card_with_button())
+            .child(build_card_with_combo())
+            .child(build_card_plain(
+                "Plain card",
+                "Click to focus, Ctrl-click to toggle selection. Drag empty space outside this section for marquee.",
+            )),
     );
-    let id_b = scene.add_widget(
-        build_card_with_combo(),
-        Rect::new(card_x, first_y + (card_h + 8.0), card_w, card_h),
-    );
-    let id_c = scene.add_widget(
-        build_card_plain("Plain card", "Click to focus, Ctrl-click to toggle selection."),
-        Rect::new(card_x, first_y + 2.0 * (card_h + 8.0), card_w, card_h),
-    );
-    vec![id_a, id_b, id_c]
+
+    scene.add_widget(scroll_area, Rect::new(area_x, area_y, area_w, area_h))
 }
 
 // ---------------------------------------------------------------------------
@@ -525,28 +544,27 @@ fn build_drag_section(scene: &mut Scene) {
 // Section 6 — Logical a11y groups
 // ---------------------------------------------------------------------------
 
-fn build_a11y_groups_section(scene: &mut Scene, card_ids: &[ItemId]) {
+fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
     add_section_frame(scene, 1, 1, "6. Logical a11y groups");
     add_section_caption(
         scene,
         1,
         1,
-        "Three Acts as virtual A11yGroups parent the cards from §4. \
-         Screen readers announce 'Act I, contains: Card A' regardless \
-         of visual placement.",
+        "Three virtual A11yGroups (no on-screen counterpart). Section \
+         4's ScrollArea is parented under Act I so screen readers \
+         announce 'Act I, contains: ScrollArea' regardless of visual \
+         placement. Add more cards and parent each individually.",
     );
 
     let r = section_rect(1, 1);
 
     let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act I — Setup"));
     let act2 = scene.add_a11y_group(A11yGroup::builder().label("Act II — Confrontation"));
-    let act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
-    let acts = [act1, act2, act3];
+    let _act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
 
-    for (i, card_id) in card_ids.iter().enumerate() {
-        let act = acts[i.min(acts.len() - 1)];
-        scene.set_a11y_parent(A11yNode::Item(*card_id), Some(A11yNode::Group(act)));
-    }
+    // Parent the ScrollArea (and thereby its cards) under Act I.
+    scene.set_a11y_parent(A11yNode::Item(scroll_area_id), Some(A11yNode::Group(act1)));
+    let _ = act2;
 
     // Visual hint stripes (decoration only — not in the AT tree).
     let stripe_w = (r.width - 32.0) / 3.0;
@@ -729,9 +747,9 @@ fn build_showcase_view() -> SceneView {
     build_lightweight_items_section(&mut scene);
     build_groupitem_section(&mut scene);
     build_zorder_section(&mut scene);
-    let card_ids = build_heavyweight_section(&mut scene);
+    let scroll_area_id = build_heavyweight_section(&mut scene);
     build_drag_section(&mut scene);
-    build_a11y_groups_section(&mut scene, &card_ids);
+    build_a11y_groups_section(&mut scene, scroll_area_id);
     build_nested_scene_section(&mut scene);
     build_animation_section(&mut scene);
 
@@ -822,13 +840,14 @@ mod tests {
     }
 
     #[test]
-    fn outer_scene_has_one_inner_scene_widget() {
-        // 3 cards (§4) + 1 inner SceneView (§7) = 4 heavyweight children.
+    fn outer_scene_has_two_heavyweight_children() {
+        // 1 ScrollArea (§4, wraps 3 cards as ScrollArea descendants)
+        // + 1 inner SceneView (§7) = 2 direct heavyweight children.
         let mut tree = WidgetTree::new().with_theme(Theme::light_default());
         let view_id = tree.add(build_showcase_view());
         tree.layout(SizeProposal::exact(1500.0, 950.0));
         let kids = tree.children(view_id);
-        assert_eq!(kids.len(), 4);
+        assert_eq!(kids.len(), 2);
     }
 
     #[test]

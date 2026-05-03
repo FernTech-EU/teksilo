@@ -935,8 +935,18 @@ impl Widget for SceneView {
             self.drag_target.set(None);
         }
 
+        // Drain any pending marquee commit posted by the on_drag
+        // closure on its `Ended` branch, then clear the in-flight
+        // marquee Cell so paint stops overlaying the rect. Without
+        // this the lasso would linger on screen until something
+        // else triggered a layout pass (next user drag, etc.).
+        if let Some((rect, additive)) = self.pending_marquee_commit.take() {
+            self.selection.commit_marquee(&self.scene, rect, additive);
+            self.marquee.set(None);
+        }
+
         // Bind the drag-rebuild signal so the next drop triggers a
-        // rebuild and the drain above runs. `BindingLevel::Rebuild`
+        // rebuild and the drains above run. `BindingLevel::Rebuild`
         // is the level that re-runs `build()` on signal change.
         self.drag_dirty.bind_to(
             ctx.self_id(),
@@ -1399,7 +1409,12 @@ impl Widget for SceneView {
                             drag_dirty.set(drag_dirty.get().wrapping_add(1));
                             return;
                         }
-                        // Marquee commit path (unchanged).
+                        // Marquee commit path. Same drain-via-rebuild
+                        // pattern as drag-to-move: post the pending
+                        // commit, bump `drag_dirty` so `build()` runs
+                        // and drains it (which also clears the
+                        // marquee Cell so the visual lasso disappears
+                        // after release).
                         let Some(mut state) = marquee.get() else {
                             return;
                         };
@@ -1412,6 +1427,7 @@ impl Widget for SceneView {
                         };
                         pending_marquee_commit
                             .set(Some((scene_rect, state.additive)));
+                        drag_dirty.set(drag_dirty.get().wrapping_add(1));
                     }
                 }
             });
@@ -1544,6 +1560,24 @@ impl Widget for SceneView {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas, _ctx: &PaintContext) {
+        // Sync `bounds_origin_signal` with the bounds the framework
+        // assigned. `place_children` is the canonical site for this,
+        // but it only runs when the SceneView has heavyweight widget
+        // children — a SceneView with only lightweight items would
+        // never see a place_children call and its bounds_origin
+        // would stay at its default. That breaks nested-SceneView
+        // placement (the inner view draws at outer-scene origin
+        // instead of at its own scene_rect). Updating from `paint`
+        // costs a one-frame lag on first display (the Signal change
+        // dirties view_transform_signal which dirties paint for the
+        // next frame). For static nested SceneViews this is
+        // unnoticeable; for moving ones, every frame the bounds
+        // change, the signal updates, and the next frame catches up.
+        let new_origin = Vec2::new(bounds.x, bounds.y);
+        if self.bounds_origin_signal.get() != new_origin {
+            self.bounds_origin_signal.set(new_origin);
+        }
+
         // The SceneView's `set_transform` scope wraps both this paint
         // call and the children walk, so any `canvas.fill_*` /
         // `canvas.stroke_*` / `canvas.draw_*` call we make here lands
