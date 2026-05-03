@@ -287,6 +287,15 @@ impl Scene {
         if let Some(&pos) = self.entry_index.get(&id) {
             self.entries[pos].scene_rect = new_bounds;
             self.index.insert(id, new_bounds);
+            // Lightweight items store their own `bounds` field that
+            // `paint` reads from. Without this, drag-to-move would
+            // update `scene_rect` (so hit-test follows the move) but
+            // leave the item visually at the old position — the
+            // dragged item would become "invisible at its destination
+            // but still draggable from there".
+            if let SceneEntryKind::Item(item) = &mut self.entries[pos].kind {
+                item.set_bounds(new_bounds);
+            }
         }
     }
 

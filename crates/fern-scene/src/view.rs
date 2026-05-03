@@ -4801,6 +4801,43 @@ mod tests {
     }
 
     #[test]
+    fn move_item_updates_item_internal_bounds_so_paint_follows() {
+        // Regression: `Scene::move_item` must call
+        // `SceneItem::set_bounds` on the item itself, otherwise the
+        // item's stored bounds (which `paint` reads from) stay at the
+        // original position. Symptom in the showcase: drag works,
+        // hit-test follows the move, but the *visible* square stays
+        // at the original spot — the dragged item is "invisible at
+        // its destination but still draggable from there".
+        use crate::items::{PathItem, RectItem};
+        use fern_canvas::Path;
+
+        let mut scene = Scene::new();
+        let rect = scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 50.0, 50.0))
+                .fill(fern_tokens::Color::RED),
+        );
+        let mut p = Path::new();
+        p.move_to(Point::new(0.0, 0.0));
+        p.line_to(Point::new(20.0, 0.0));
+        let path_id = scene.add_item(PathItem::new(p, Rect::new(0.0, 0.0, 20.0, 1.0)));
+
+        scene.move_item(rect, Rect::new(110.0, 110.0, 50.0, 50.0));
+        scene.move_item(path_id, Rect::new(100.0, 100.0, 20.0, 1.0));
+
+        assert_eq!(
+            scene.item(rect).unwrap().bounds_in_scene(),
+            Rect::new(110.0, 110.0, 50.0, 50.0),
+            "RectItem.set_bounds must wire move_item to paint"
+        );
+        assert_eq!(
+            scene.item(path_id).unwrap().bounds_in_scene(),
+            Rect::new(100.0, 100.0, 20.0, 1.0),
+            "PathItem.set_bounds must wire move_item to paint"
+        );
+    }
+
+    #[test]
     fn parent_child_drag_persists_across_two_drags() {
         // Showcase regression: parent RectItem with declared TextItem
         // child, dragged twice in a row. After the cascade refactor

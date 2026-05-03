@@ -92,6 +92,17 @@ pub trait SceneItem: std::fmt::Debug + 'static {
     /// (Phase 6 territory).
     fn bounds_in_scene(&self) -> Rect;
 
+    /// Update the item's stored bounds. Called by [`Scene::move_item`]
+    /// (and therefore by drag-to-move's commit path) so that an item's
+    /// next `paint` reflects its new position. Built-in items override
+    /// this to write back to their internal `bounds` field; custom
+    /// items whose bounds are derived from external state (a signal,
+    /// an outer model) can leave the default no-op and rely on their
+    /// own update path — but in that case `bounds_in_scene` MUST track
+    /// the same source, otherwise drag visuals will desync from
+    /// hit-test.
+    fn set_bounds(&mut self, _bounds: Rect) {}
+
     /// Paint the item. The canvas's transform stack has the
     /// SceneView's view transform pushed, so painting at
     /// scene-coord positions lands correctly under pan/zoom.

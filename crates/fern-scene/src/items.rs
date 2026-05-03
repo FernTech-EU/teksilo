@@ -192,6 +192,10 @@ impl SceneItem for RectItem {
         self.bounds
     }
 
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
+    }
+
     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
         if let Some(fill) = self.fill {
             canvas.fill_rect(self.bounds, fill);
@@ -295,6 +299,21 @@ impl PathItem {
 impl SceneItem for PathItem {
     fn bounds_in_scene(&self) -> Rect {
         self.bounds
+    }
+
+    fn set_bounds(&mut self, bounds: Rect) {
+        // Translate the underlying path geometry by the same delta as
+        // the bounds so paint follows the move. Built from the origin
+        // delta only — width/height changes don't propagate to path
+        // geometry (callers shouldn't resize paths via `move_item`;
+        // they should rebuild the item).
+        let dx = bounds.x - self.bounds.x;
+        let dy = bounds.y - self.bounds.y;
+        if dx != 0.0 || dy != 0.0 {
+            let translate = fern_canvas::Transform2D::translate(dx, dy);
+            self.path = self.path.transformed(&translate);
+        }
+        self.bounds = bounds;
     }
 
     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
@@ -451,6 +470,10 @@ impl SceneItem for ImageItem {
         self.bounds
     }
 
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
+    }
+
     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
         canvas.draw_image(self.bounds, self.name.clone());
     }
@@ -558,6 +581,10 @@ impl TextItem {
 impl SceneItem for TextItem {
     fn bounds_in_scene(&self) -> Rect {
         self.bounds
+    }
+
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
     }
 
     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
@@ -729,6 +756,10 @@ impl GroupItem {
 impl SceneItem for GroupItem {
     fn bounds_in_scene(&self) -> Rect {
         self.bounds
+    }
+
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
     }
 
     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
