@@ -69,6 +69,10 @@ const DEFAULT_ZOOM_DURATION: Duration = Duration::from_millis(180);
 const DEFAULT_MIN_ZOOM: f32 = 0.1;
 const DEFAULT_MAX_ZOOM: f32 = 10.0;
 
+/// Maximum movement (scene-coord pixels) between PointerDown and
+/// PointerUp for the gesture to count as a tap rather than a drag.
+const TAP_MOVEMENT_THRESHOLD: f32 = 4.0;
+
 /// In-flight marquee box-select state. Tracked in scene
 /// coordinates so pan/zoom mid-drag (e.g. the user holds shift
 /// and scrolls while dragging) doesn't break the rectangle's
@@ -106,6 +110,30 @@ struct DragTarget {
     /// Ended). Allows paint to render the in-flight offset for
     /// live visual feedback.
     current_scene: Point,
+}
+
+/// Snapshot of one item's hit-test geometry + handler closures used
+/// by the SceneView's `on_pointer_event` dispatch path. Refreshed
+/// per layout pass alongside `lightweight_bounds_snapshot`.
+#[derive(Clone)]
+struct HandlerSnapshotEntry {
+    id: crate::item::ItemId,
+    /// Scene-coord AABB used for broad-phase hit-test.
+    scene_rect: Rect,
+    /// Local→scene transform — used to inverse-project the
+    /// scene-coord pointer into local coords for shape_contains
+    /// narrow-phase. Stored so the dispatch path doesn't have to
+    /// re-walk the parent chain (which would need `&Scene`).
+    scene_transform: fern_canvas::Transform2D,
+    /// Item-local hit-test predicate, cloned from the trait via a
+    /// small wrapper. Returns `true` when a local point is inside
+    /// the item's exact shape.
+    shape_contains: Rc<dyn Fn(Point) -> bool>,
+    /// z-order (used to pick topmost on overlap).
+    z: f32,
+    /// Item-level handler closures, cloned at snapshot time. `None`
+    /// when the item has no handler set installed.
+    handlers: Option<Box<crate::item_handlers::SceneItemHandlerSet>>,
 }
 
 /// Visual debug overlays painted on top of normal scene rendering.
@@ -195,6 +223,23 @@ pub struct SceneView {
     /// [`Scene::is_zoomable`]; the default policy is "no pan, no
     /// zoom" because the entire scene is already on-screen.
     adopt_scene_size: bool,
+    /// Drag-on-canvas behavior. Default `RubberBand` (item drag →
+    /// move; empty area → marquee). `ScrollHandDrag` makes the
+    /// canvas pan unconditionally on left-mouse drag; `NoDrag`
+    /// disables the on-drag handler entirely.
+    drag_mode: crate::item_handlers::DragMode,
+    /// Per-layout snapshot of (id, scene_rect, handlers) for items
+    /// that have a handler set installed. Used by the
+    /// `on_pointer_event` closure to dispatch hover / tap / context
+    /// menu without borrowing `&self.scene`. Refreshed in
+    /// `layout_response`.
+    handler_snapshot: Rc<RefCell<Vec<HandlerSnapshotEntry>>>,
+    /// Currently-hovered item id, used to dispatch `on_hover(false)`
+    /// when the pointer leaves it.
+    hovered_item: Rc<Cell<Option<crate::item::ItemId>>>,
+    /// Last press recorded for tap detection: (scene_pt, item_id).
+    /// Cleared on PointerUp / PointerLeave.
+    pending_tap: Rc<Cell<Option<(Point, crate::item::ItemId)>>>,
     /// Latest viewport size observed during layout. Cached so
     /// imperative methods like [`SceneView::fit_to_content`] can
     /// reason about the visible rectangle without re-running layout.
@@ -387,6 +432,10 @@ impl SceneView {
             widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
             adopt_scene_size: false,
+            drag_mode: crate::item_handlers::DragMode::RubberBand,
+            handler_snapshot: Rc::new(RefCell::new(Vec::new())),
+            hovered_item: Rc::new(Cell::new(None)),
+            pending_tap: Rc::new(Cell::new(None)),
             last_viewport: Rc::new(Cell::new(Size::new(800.0, 600.0))),
             pan_x,
             pan_y,
@@ -724,6 +773,17 @@ impl SceneView {
     /// fixed corkboards). Default `false`.
     pub fn adopt_scene_size(mut self, on: bool) -> Self {
         self.adopt_scene_size = on;
+        self
+    }
+
+    /// Configure how left-mouse drag-on-canvas behaves. Default
+    /// [`DragMode::RubberBand`](crate::DragMode) — drag-on-an-item
+    /// moves it (when `IS_DRAGGABLE`), drag-on-empty-space creates
+    /// a marquee. [`DragMode::ScrollHandDrag`] makes left-drag
+    /// pan the view unconditionally; [`DragMode::NoDrag`] disables
+    /// the on-drag handler entirely.
+    pub fn drag_mode(mut self, mode: crate::item_handlers::DragMode) -> Self {
+        self.drag_mode = mode;
         self
     }
 
@@ -1144,27 +1204,93 @@ impl Widget for SceneView {
         {
             let cursor_pos = self.cursor_pos.clone();
             let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
+            let handler_snapshot = self.handler_snapshot.clone();
             let view_xform_signal = self.view_transform_signal.clone();
             let drag_target_for_cursor = self.drag_target.clone();
+            let hovered_item = self.hovered_item.clone();
+            let pending_tap = self.pending_tap.clone();
             handlers = handlers.on_pointer_event(move |ev, ctx| {
+                use fern_core::event::PointerButton;
                 use fern_core::event::WidgetEvent as Ev;
                 use fern_core::widget::CursorIcon;
+
+                // Project a screen point to scene coords for
+                // hit-testing. Returns `Point::ZERO` when the view
+                // transform is degenerate.
+                let to_scene = |p: Point| {
+                    let xform = view_xform_signal.get();
+                    xform.inverse().map(|inv| inv.apply_point(p)).unwrap_or(Point::ZERO)
+                };
+
+                // Hit-test the handler-snapshot for the topmost
+                // item under `scene_pt`. Snapshot is z-sorted desc.
+                let hit_handler_item = |scene_pt: Point| -> Option<HandlerSnapshotEntry> {
+                    let snap = handler_snapshot.borrow();
+                    for entry in snap.iter() {
+                        if !entry.scene_rect.contains(scene_pt) {
+                            continue;
+                        }
+                        // Inverse-project to local for narrow-phase.
+                        let local_pt = entry
+                            .scene_transform
+                            .inverse()
+                            .map(|inv| inv.apply_point(scene_pt))
+                            .unwrap_or(Point::ZERO);
+                        if (entry.shape_contains)(local_pt) {
+                            return Some(entry.clone());
+                        }
+                    }
+                    None
+                };
+
                 match ev {
                     Ev::PointerMove { position, .. } => {
                         cursor_pos.set(Some(*position));
-                        // Project to scene coords and check the
-                        // draggable snapshot for hover.
-                        let xform = view_xform_signal.get();
-                        let scene_pt = match xform.inverse() {
-                            Some(inv) => inv.apply_point(*position),
-                            None => Point::ZERO,
-                        };
+                        let scene_pt = to_scene(*position);
+
+                        // Hover transitions: compare current hit
+                        // with previously-hovered item; fire
+                        // on_hover(false) on the old, on_hover(true)
+                        // on the new.
+                        let new_hit = hit_handler_item(scene_pt);
+                        let new_id = new_hit.as_ref().map(|e| e.id);
+                        let prev_id = hovered_item.get();
+                        if prev_id != new_id {
+                            if let Some(prev) = prev_id {
+                                if let Some(prev_entry) =
+                                    handler_snapshot.borrow().iter().find(|e| e.id == prev)
+                                {
+                                    if let Some(h) = prev_entry.handlers.as_deref() {
+                                        if let Some(cb) = h.on_hover.as_ref() {
+                                            cb(false, ctx);
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(new_entry) = new_hit.as_ref() {
+                                if let Some(h) = new_entry.handlers.as_deref() {
+                                    if let Some(cb) = h.on_hover.as_ref() {
+                                        cb(true, ctx);
+                                    }
+                                }
+                            }
+                            hovered_item.set(new_id);
+                        }
+
+                        // Cursor: per-item override → grab/grabbing
+                        // for draggable items → default.
+                        let item_cursor = new_hit
+                            .as_ref()
+                            .and_then(|e| e.handlers.as_deref())
+                            .and_then(|h| h.cursor);
                         let snap = bounds_snapshot.borrow();
                         let over_draggable = snap
                             .iter()
                             .any(|(_, rect)| rect.contains(scene_pt));
                         let cursor = if drag_target_for_cursor.get().is_some() {
                             CursorIcon::Grabbing
+                        } else if let Some(c) = item_cursor {
+                            c
                         } else if over_draggable {
                             CursorIcon::Grab
                         } else {
@@ -1172,11 +1298,73 @@ impl Widget for SceneView {
                         };
                         ctx.set_cursor(cursor);
                     }
-                    Ev::PointerDown { position, .. } => {
+                    Ev::PointerDown { position, button, .. } => {
                         cursor_pos.set(Some(*position));
+                        let scene_pt = to_scene(*position);
+                        let hit = hit_handler_item(scene_pt);
+                        match button {
+                            PointerButton::Secondary => {
+                                if let Some(entry) = hit.as_ref() {
+                                    if let Some(h) = entry.handlers.as_deref() {
+                                        if let Some(cb) = h.on_context_menu.as_ref() {
+                                            cb(scene_pt, ctx);
+                                            return EventResponse::Handled;
+                                        }
+                                    }
+                                }
+                            }
+                            PointerButton::Primary => {
+                                // Record the press for tap detection.
+                                if let Some(entry) = hit.as_ref() {
+                                    pending_tap.set(Some((scene_pt, entry.id)));
+                                } else {
+                                    pending_tap.set(None);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ev::PointerUp { position, button, .. } => {
+                        if matches!(button, PointerButton::Primary) {
+                            if let Some((press_scene, item_id)) = pending_tap.take() {
+                                let scene_pt = to_scene(*position);
+                                let dx = scene_pt.x - press_scene.x;
+                                let dy = scene_pt.y - press_scene.y;
+                                if (dx * dx + dy * dy).sqrt() <= TAP_MOVEMENT_THRESHOLD {
+                                    // Genuine tap — dispatch if the
+                                    // pressed item still has a tap
+                                    // handler installed.
+                                    if let Some(entry) = handler_snapshot
+                                        .borrow()
+                                        .iter()
+                                        .find(|e| e.id == item_id)
+                                    {
+                                        if let Some(h) = entry.handlers.as_deref() {
+                                            if let Some(cb) = h.on_tap.as_ref() {
+                                                cb(scene_pt, ctx);
+                                                return EventResponse::Handled;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     Ev::PointerLeave => {
                         cursor_pos.set(None);
+                        // Clear any pending hover.
+                        if let Some(prev) = hovered_item.take() {
+                            if let Some(prev_entry) =
+                                handler_snapshot.borrow().iter().find(|e| e.id == prev)
+                            {
+                                if let Some(h) = prev_entry.handlers.as_deref() {
+                                    if let Some(cb) = h.on_hover.as_ref() {
+                                        cb(false, ctx);
+                                    }
+                                }
+                            }
+                        }
+                        pending_tap.set(None);
                         ctx.set_cursor(CursorIcon::Default);
                     }
                     _ => {}
@@ -1514,10 +1702,13 @@ impl Widget for SceneView {
         // and can call `SceneSelection::commit_marquee` without
         // forcing `Scene` into an `Rc<RefCell>`. Tests can also
         // trigger the commit via `flush_marquee_commit()`.
-        if !matches!(
-            self.selection.mode(),
-            crate::selection::SceneSelectionMode::None
-        ) {
+        let drag_mode = self.drag_mode;
+        if drag_mode != crate::item_handlers::DragMode::NoDrag
+            && !matches!(
+                self.selection.mode(),
+                crate::selection::SceneSelectionMode::None
+            )
+        {
             let marquee = self.marquee.clone();
             let pending_marquee_commit = self.pending_marquee_commit.clone();
             let drag_target = self.drag_target.clone();
@@ -1525,7 +1716,27 @@ impl Widget for SceneView {
             let drag_dirty = self.drag_dirty.clone();
             let view_xform_signal = self.view_transform_signal.clone();
             let bounds_snapshot = self.lightweight_bounds_snapshot.clone();
+            let pan_x_for_drag = self.pan_x.clone();
+            let pan_y_for_drag = self.pan_y.clone();
+            let drag_mode_inner = drag_mode;
             handlers = handlers.on_drag(move |phase, _ctx| {
+                // ScrollHandDrag mode bypasses item / marquee logic
+                // entirely — drag pans the view by the cursor
+                // delta in scene coords. Marquee and drag-to-move
+                // are inactive in this mode.
+                if drag_mode_inner == crate::item_handlers::DragMode::ScrollHandDrag {
+                    use fern_core::gesture::DragPhase;
+                    if let DragPhase::Moved { delta, .. } = phase {
+                        // `delta` is in screen coords. Apply
+                        // verbatim to pan; sign matches scroll
+                        // direction (drag right → pan right).
+                        let target_x = pan_x_for_drag.get() + delta.x;
+                        let target_y = pan_y_for_drag.get() + delta.y;
+                        pan_x_for_drag.set(target_x);
+                        pan_y_for_drag.set(target_y);
+                    }
+                    return;
+                }
                 use fern_core::gesture::DragPhase;
                 match phase {
                     DragPhase::Started { position, button } => {
@@ -1709,6 +1920,50 @@ impl Widget for SceneView {
                     snapshot.push((id, scene_rect));
                 }
             }
+        }
+
+        // Refresh the handler-dispatch snapshot used by
+        // `on_pointer_event` to route hover / tap / context-menu
+        // events to the item under the pointer. Only items with a
+        // handler set installed need to be considered for routing,
+        // but we include every item so cursor-over-item-without-
+        // handler can still consult the per-item cursor field.
+        {
+            let mut snap = self.handler_snapshot.borrow_mut();
+            snap.clear();
+            for id in self.scene.ids() {
+                let Some(item) = self.scene.item(id) else {
+                    continue;
+                };
+                let Some(scene_rect) = self.scene.scene_rect(id) else {
+                    continue;
+                };
+                let scene_xform = self.scene.scene_transform(id);
+                let z = self.scene.z(id).unwrap_or(0.0);
+                let handlers = self.scene.handlers(id).cloned().map(Box::new);
+                let _ = item;
+                // We can't clone `&dyn SceneItem`; capture the
+                // local-bounds for an AABB predicate. Items with a
+                // non-AABB shape (PathItem stroke-only, GroupItem
+                // logical-only) fall back to AABB hit-test in the
+                // dispatch path — full `shape_contains` invocation
+                // lives in the eager `Scene::item_at` path.
+                let local_bounds = self.scene.local_bounds(id).unwrap_or(Rect::ZERO);
+                let shape_contains: Rc<dyn Fn(Point) -> bool> =
+                    Rc::new(move |p: Point| local_bounds.contains(p));
+                snap.push(HandlerSnapshotEntry {
+                    id,
+                    scene_rect,
+                    scene_transform: scene_xform,
+                    shape_contains,
+                    z,
+                    handlers,
+                });
+            }
+            // Sort by z descending so hit-test picks topmost first.
+            snap.sort_by(|a, b| {
+                b.z.partial_cmp(&a.z).unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         LayoutResponse::rigid(size)
@@ -5883,6 +6138,108 @@ mod tests {
         let z0 = view.zoom();
         view.set_zoom(2.5);
         assert!((view.zoom() - z0).abs() < 1e-6);
+    }
+
+    // -----------------------------------------------------------------
+    // R3: per-item events
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn on_tap_fires_when_item_clicked() {
+        use crate::items::RectItem;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0))
+                .fill(fern_tokens::Color::RED),
+            fern_canvas::Point::new(20.0, 20.0),
+        );
+        let count = Rc::new(Cell::new(0_u32));
+        let count_clone = count.clone();
+        scene.handlers_mut(id).unwrap().on_tap(move |_pt, _ctx| {
+            count_clone.set(count_clone.get() + 1);
+        });
+        let mut tree = WidgetTree::new();
+        tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // Tap squarely inside the item.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(40.0, 40.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(40.0, 40.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        assert_eq!(count.get(), 1, "on_tap must fire once");
+    }
+
+    #[test]
+    fn on_context_menu_fires_on_secondary_button() {
+        use crate::items::RectItem;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0))
+                .fill(fern_tokens::Color::RED),
+            fern_canvas::Point::new(20.0, 20.0),
+        );
+        let fired = Rc::new(Cell::new(false));
+        let fired_clone = fired.clone();
+        scene.handlers_mut(id).unwrap().on_context_menu(move |_pt, _ctx| {
+            fired_clone.set(true);
+        });
+        let mut tree = WidgetTree::new();
+        tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(40.0, 40.0),
+            button: fern_core::event::PointerButton::Secondary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        assert!(fired.get(), "on_context_menu must fire on right-click");
+    }
+
+    #[test]
+    fn drag_mode_no_drag_disables_marquee_and_drag_to_move() {
+        use crate::items::RectItem;
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 30.0, 30.0))
+                .fill(fern_tokens::Color::RED)
+                .draggable(true),
+            fern_canvas::Point::new(10.0, 10.0),
+        );
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::SceneSelectionMode::Multi)
+                .drag_mode(crate::DragMode::NoDrag),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // Attempt drag — should produce no change.
+        tree.pointer_move(fern_canvas::Point::new(20.0, 20.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: fern_canvas::Point::new(20.0, 20.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: fern_canvas::Point::new(60.0, 60.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: fern_canvas::Point::new(60.0, 60.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let view = view_handle(&tree, view_id);
+        // local_pos unchanged.
+        assert_eq!(view.scene().local_pos(id), Some(fern_canvas::Point::new(10.0, 10.0)));
     }
 
     #[test]

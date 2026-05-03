@@ -48,6 +48,7 @@ pub mod animation;
 pub mod flags;
 pub mod index;
 pub mod item;
+pub mod item_handlers;
 pub mod items;
 pub mod minimap;
 pub mod scene;
@@ -62,6 +63,8 @@ pub use a11y::{
 };
 pub use flags::ItemFlags;
 pub use index::{GridHashIndex, SpatialIndex};
+pub use item_handlers::{DragMode, SceneItemHandlerSet};
+pub use scene::PanAxes;
 pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
 pub use animation::{pulse_once, register_animated_item_signal};

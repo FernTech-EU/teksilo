@@ -14,6 +14,7 @@ use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNo
 use crate::flags::ItemFlags;
 use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::{ItemId, SceneItem};
+use crate::item_handlers::SceneItemHandlerSet;
 use crate::transform::local_to_parent;
 use fern_canvas::{Point, Rect, Transform2D};
 use fern_core::widget::Widget;
@@ -78,6 +79,10 @@ pub(crate) struct SceneEntry {
     /// parent chain: an item's `effective_opacity` is the product
     /// of every ancestor's opacity and its own.
     pub(crate) opacity: f32,
+    /// Per-item event handlers, cursor and tooltip overrides.
+    /// `None` until the app calls `Scene::set_item_handlers` /
+    /// `Scene::handlers_mut`.
+    pub(crate) handlers: Option<Box<SceneItemHandlerSet>>,
 }
 
 pub(crate) enum SceneEntryKind {
@@ -181,6 +186,7 @@ impl Scene {
             parent: None,
             flags: ItemFlags::default(),
             opacity: 1.0,
+            handlers: None,
         };
         self.push_entry(entry)
     }
@@ -203,6 +209,7 @@ impl Scene {
             parent: None,
             flags,
             opacity: 1.0,
+            handlers: None,
         };
         self.push_entry(entry)
     }
@@ -429,6 +436,31 @@ impl Scene {
         if let Some(&pos) = self.entry_index.get(&id) {
             self.entries[pos].opacity = opacity.clamp(0.0, 1.0);
         }
+    }
+
+    /// Replace an item's handler set. Pass `None` to clear.
+    pub fn set_item_handlers(&mut self, id: ItemId, handlers: Option<SceneItemHandlerSet>) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].handlers = handlers.map(Box::new);
+        }
+    }
+
+    /// Mutably borrow an item's handler set, lazily creating an
+    /// empty one if none exists. Returns `None` for unknown ids.
+    /// Allows fluent chains: `scene.handlers_mut(id).unwrap().on_tap(…).cursor(…);`.
+    pub fn handlers_mut(&mut self, id: ItemId) -> Option<&mut SceneItemHandlerSet> {
+        let pos = *self.entry_index.get(&id)?;
+        let entry = self.entries.get_mut(pos)?;
+        if entry.handlers.is_none() {
+            entry.handlers = Some(Box::new(SceneItemHandlerSet::new()));
+        }
+        entry.handlers.as_deref_mut()
+    }
+
+    /// Read-only access to an item's handler set, if one is set.
+    pub fn handlers(&self, id: ItemId) -> Option<&SceneItemHandlerSet> {
+        let pos = *self.entry_index.get(&id)?;
+        self.entries[pos].handlers.as_deref()
     }
 
     /// Effective opacity composed up the parent chain — the product
