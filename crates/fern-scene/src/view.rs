@@ -939,7 +939,12 @@ impl Widget for SceneView {
         // queued `(item_id, new_bounds)` and bumped `drag_dirty`,
         // which flagged this widget for rebuild. Now we have
         // `&mut self.scene` so `move_item` can re-bucket the
-        // spatial index.
+        // spatial index. Clear `drag_target` here (not in the
+        // on_drag `Ended` branch) so paint keeps translating the
+        // item to its dragged position until the move actually
+        // lands — without this, between drag-end and the rebuild
+        // the item would visibly "snap back" to its pre-drag
+        // bounds for one or more frames.
         if let Some((item_id, new_bounds)) = self.pending_item_move.take() {
             self.scene.move_item(item_id, new_bounds);
             self.drag_target.set(None);
@@ -1430,7 +1435,7 @@ impl Widget for SceneView {
                         }
                     }
                     DragPhase::Ended { position } => {
-                        if let Some(mut target) = drag_target.take() {
+                        if let Some(mut target) = drag_target.get() {
                             // Drag-to-move commit: compute new
                             // bounds = original + (current −
                             // anchor) in scene coords.
@@ -1446,6 +1451,21 @@ impl Widget for SceneView {
                                 target.original_bounds.width,
                                 target.original_bounds.height,
                             );
+                            // Keep `drag_target` set with the final
+                            // current_scene so `paint` continues to
+                            // translate the item to the dragged
+                            // position. The rebuild that drains
+                            // `pending_item_move` will clear
+                            // `drag_target` once the move has
+                            // actually been applied to the scene —
+                            // until then, clearing here would let
+                            // one or more frames paint at the
+                            // ORIGINAL (pre-drag) bounds and the
+                            // item appears to "snap back" before
+                            // the rebuild lands. Update the saved
+                            // current_scene so the visual delta
+                            // stays right.
+                            drag_target.set(Some(target));
                             pending_item_move.set(Some((target.item_id, new_bounds)));
                             // Bump the rebuild signal so SceneView's
                             // `build()` runs and drains the pending
@@ -4507,6 +4527,125 @@ mod tests {
         // Size unchanged.
         assert_eq!(new_rect.width, 30.0);
         assert_eq!(new_rect.height, 30.0);
+    }
+
+    #[test]
+    fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
+        // Regression: real apps don't call `flush_pending_item_move`
+        // — they rely on the `drag_dirty` rebuild signal to drain
+        // the pending commit on the next layout pass. Drive a drag
+        // end and then run a layout; the position must persist.
+        // Drive a SECOND drag from the new position; the position
+        // must reflect both drags (no snap-back).
+        use crate::items::RectItem;
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        // A heavyweight widget child so the SceneView's
+        // `has_built_children` flag flips to true — that's the
+        // gate guarding `collect_needs_rebuild` and the realistic
+        // shape of any showcase scene with cards.
+        scene.add_widget(FillWidget::new(), Rect::new(200.0, 200.0, 50.0, 50.0));
+        let item_id = scene.add_item(
+            RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
+                .fill(fern_tokens::Color::RED)
+                .draggable(true),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // -- First drag: (60, 60) → (100, 100) → release.
+        tree.pointer_move(Point::new(60.0, 60.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(60.0, 60.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 100.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 100.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+
+        // After Ended the on_drag closure must have posted a
+        // pending move and bumped drag_dirty.
+        {
+            let view = view_handle(&tree, view_id);
+            assert!(
+                view.pending_item_move.get().is_some(),
+                "drag end must post pending_item_move"
+            );
+            assert!(
+                view.drag_dirty.get() > 0,
+                "drag end must bump drag_dirty"
+            );
+        }
+
+        // Real apps' layout cycle runs after event dispatch, where
+        // drag_dirty (bumped on Ended) triggers the rebuild that
+        // drains the pending commit.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let view = view_handle(&tree, view_id);
+        let after_first = view
+            .scene()
+            .scene_rect(item_id)
+            .expect("item still exists");
+        assert!(
+            (after_first.x - 90.0).abs() < 1e-3,
+            "first drag must persist (expected x=90, got {})",
+            after_first.x
+        );
+        assert!(
+            (after_first.y - 90.0).abs() < 1e-3,
+            "first drag must persist (expected y=90, got {})",
+            after_first.y
+        );
+
+        // -- Second drag: (100, 100) → (140, 140) → release.
+        // After the first drag the item is at (90, 90, 30, 30), so
+        // the press at (100, 100) is inside it.
+        tree.pointer_move(Point::new(100.0, 100.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(100.0, 100.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(140.0, 140.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(140.0, 140.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let view = view_handle(&tree, view_id);
+        let after_second = view
+            .scene()
+            .scene_rect(item_id)
+            .expect("item still exists");
+        // Each drag delta is +40 on each axis. Two drags from
+        // (50, 50) → (90, 90) → (130, 130).
+        assert!(
+            (after_second.x - 130.0).abs() < 1e-3,
+            "second drag must compose with first (expected x=130, got {})",
+            after_second.x
+        );
+        assert!(
+            (after_second.y - 130.0).abs() < 1e-3,
+            "second drag must compose with first (expected y=130, got {})",
+            after_second.y
+        );
     }
 
     #[test]
