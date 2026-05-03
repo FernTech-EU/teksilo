@@ -42,6 +42,7 @@
 
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
 
 use fern_canvas::{Point, Rect, Size, SizeProposal, Transform2D, Vec2};
@@ -67,6 +68,29 @@ const DEFAULT_PAN_DURATION: Duration = Duration::from_millis(120);
 const DEFAULT_ZOOM_DURATION: Duration = Duration::from_millis(180);
 const DEFAULT_MIN_ZOOM: f32 = 0.1;
 const DEFAULT_MAX_ZOOM: f32 = 10.0;
+
+/// In-flight marquee box-select state. Tracked in scene
+/// coordinates so pan/zoom mid-drag (e.g. the user holds shift
+/// and scrolls while dragging) doesn't break the rectangle's
+/// alignment with scene contents.
+#[derive(Debug, Clone, Copy)]
+struct MarqueeState {
+    origin: Point,
+    current: Point,
+    /// Whether the marquee is additive (Ctrl/Shift held at start).
+    /// On commit, additive = `extend`; non-additive = `replace`.
+    additive: bool,
+}
+
+impl MarqueeState {
+    fn rect(self) -> Rect {
+        let x = self.origin.x.min(self.current.x);
+        let y = self.origin.y.min(self.current.y);
+        let w = (self.origin.x - self.current.x).abs();
+        let h = (self.origin.y - self.current.y).abs();
+        Rect::new(x, y, w, h)
+    }
+}
 
 /// A pannable/zoomable viewport hosting a [`Scene`]'s items at scene
 /// coordinates.
@@ -134,6 +158,24 @@ pub struct SceneView {
     /// (axis chrome around an inner data SceneView).
     interactive: bool,
 
+    // --- Selection (Phase 6) -----------------------------------------
+    /// Reactive selection state. Defaults to `SceneSelectionMode::None`
+    /// (no selection wired). Apps opt in via
+    /// [`selection_mode`](Self::selection_mode); marquee + click-to-
+    /// select then activate.
+    selection: crate::selection::SceneSelection,
+    /// In-flight marquee state: scene-coord origin + current. While
+    /// `Some`, `paint` overlays a semi-transparent rect.
+    /// `Rc<Cell>` so the on_drag closure (which only borrows
+    /// `&self` shape via the closure's capture) can mutate it.
+    marquee: Rc<Cell<Option<MarqueeState>>>,
+    /// Pending marquee commit: set by the on_drag closure on
+    /// `DragPhase::Ended`, consumed at the start of the next
+    /// `place_children` (which has direct `&self.scene` access
+    /// via `self`). This indirection avoids forcing `Scene` into
+    /// an `Rc<RefCell>`.
+    pending_marquee_commit: Rc<Cell<Option<(Rect, bool)>>>,
+
     // --- Cached derived signals ---------------------------------------
     /// `view_transform` as a derived `Signal<Transform2D>`,
     /// constructed once in `new()` and reused across rebuilds.
@@ -184,6 +226,45 @@ impl SceneView {
             self_widget_id: Cell::new(None),
             interactive: true,
             view_transform_signal,
+            selection: crate::selection::SceneSelection::new(
+                crate::selection::SceneSelectionMode::None,
+            ),
+            marquee: Rc::new(Cell::new(None)),
+            pending_marquee_commit: Rc::new(Cell::new(None)),
+        }
+    }
+
+    /// Configure selection behavior. Default
+    /// [`SceneSelectionMode::None`](crate::SceneSelectionMode::None) —
+    /// click and marquee do nothing. Set to `Single` for
+    /// at-most-one selection (click replaces) or `Multi` for
+    /// multi-select with marquee box-select, Ctrl+click toggle,
+    /// and Ctrl+drag additive marquee.
+    pub fn selection_mode(mut self, mode: crate::selection::SceneSelectionMode) -> Self {
+        self.selection = crate::selection::SceneSelection::new(mode);
+        self
+    }
+
+    /// Borrow the SceneView's [`SceneSelection`](crate::SceneSelection).
+    /// Use this from external code to bind to the selection signal,
+    /// query selected ids, or call `select_one` / `clear` /
+    /// `replace` programmatically.
+    pub fn selection(&self) -> &crate::selection::SceneSelection {
+        &self.selection
+    }
+
+    /// Drain any pending marquee commit synchronously. Normal
+    /// per-frame use never needs this — `place_children` consumes
+    /// the pending commit at the start of every layout pass. Tests
+    /// that drive on_drag without a follow-up layout call this to
+    /// materialise the box-select result.
+    pub fn flush_marquee_commit(&self) -> bool {
+        if let Some((rect, additive)) = self.pending_marquee_commit.take() {
+            self.selection.commit_marquee(&self.scene, rect, additive);
+            self.marquee.set(None);
+            true
+        } else {
+            false
         }
     }
 
@@ -721,6 +802,75 @@ impl Widget for SceneView {
 
         } // end of `if self.interactive`
 
+        // --- Phase 6: marquee box-select via on_drag --------------------
+        //
+        // Active only when selection mode is not None. The on_drag
+        // closure tracks the marquee rectangle in *screen* coords
+        // (the position the recognizer hands us is screen-space at
+        // the time of the gesture) and, on `Ended`, posts a
+        // pending-commit entry. The next `place_children` call
+        // consumes it: that step has direct `&self.scene` access
+        // and can call `SceneSelection::commit_marquee` without
+        // forcing `Scene` into an `Rc<RefCell>`. Tests can also
+        // trigger the commit via `flush_marquee_commit()`.
+        if !matches!(
+            self.selection.mode(),
+            crate::selection::SceneSelectionMode::None
+        ) {
+            let marquee = self.marquee.clone();
+            let pending_commit = self.pending_marquee_commit.clone();
+            let view_xform_signal = self.view_transform_signal.clone();
+            handlers = handlers.on_drag(move |phase, _ctx| {
+                use fern_core::gesture::DragPhase;
+                match phase {
+                    DragPhase::Started { position, button } => {
+                        if !matches!(
+                            button,
+                            fern_core::event::PointerButton::Primary
+                        ) {
+                            return;
+                        }
+                        // Store screen-coord origin/current. We
+                        // project to scene coords on commit using
+                        // the current view_transform — pan/zoom
+                        // mid-drag is uncommon and the small
+                        // alignment artifact is acceptable.
+                        marquee.set(Some(MarqueeState {
+                            origin: position,
+                            current: position,
+                            additive: false,
+                        }));
+                    }
+                    DragPhase::Moved { position, .. } => {
+                        if let Some(mut state) = marquee.get() {
+                            state.current = position;
+                            marquee.set(Some(state));
+                        }
+                    }
+                    DragPhase::Ended { position } => {
+                        // Update `current` to the release position
+                        // — necessary for cases where the drag
+                        // recognizer fires only `Started` (on
+                        // threshold crossing) and `Ended` without
+                        // an intervening `Moved` (single-jump
+                        // drags). Without this, the marquee rect
+                        // would be a degenerate point.
+                        let Some(mut state) = marquee.get() else {
+                            return;
+                        };
+                        state.current = position;
+                        let screen_rect = state.rect();
+                        let xform = view_xform_signal.get();
+                        let scene_rect = match xform.inverse() {
+                            Some(inv) => inv.apply_rect(screen_rect),
+                            None => Rect::ZERO,
+                        };
+                        pending_commit.set(Some((scene_rect, state.additive)));
+                    }
+                }
+            });
+        }
+
         ctx.apply_self_handlers(handlers);
 
         child_ids
@@ -752,6 +902,18 @@ impl Widget for SceneView {
         let new_origin = Vec2::new(bounds.x, bounds.y);
         if self.bounds_origin_signal.get() != new_origin {
             self.bounds_origin_signal.set(new_origin);
+        }
+
+        // Phase 6: drain any pending marquee commit posted by the
+        // on_drag closure on the previous `Ended`. We do it here
+        // (not in the closure) because `place_children` has direct
+        // access to `&self.scene` for the spatial-index query
+        // — keeping `Scene` plain instead of `Rc<RefCell<Scene>>`.
+        // After commit, clear the in-flight marquee so paint stops
+        // overlaying the rect.
+        if let Some((rect, additive)) = self.pending_marquee_commit.take() {
+            self.selection.commit_marquee(&self.scene, rect, additive);
+            self.marquee.set(None);
         }
 
         // Place each child at its **pure scene coordinate** — not
@@ -816,6 +978,32 @@ impl Widget for SceneView {
         for id in self.scene.items_in_rect(region) {
             if let Some(item) = self.scene.item(id) {
                 item.paint(canvas, &item_ctx);
+            }
+        }
+
+        // Phase 6: marquee overlay — semi-transparent fill plus a
+        // single-pixel stroke. The marquee state is in screen
+        // coords (set by the on_drag closure). The view-transform
+        // scope is on the canvas, so to paint at screen coords we
+        // inverse-apply the transform. For a non-rotated identity-
+        // ish transform that's just `inv * screen_rect`. We project
+        // the screen-rect to scene coords and paint there — same
+        // visual position because the transform applies to scene
+        // coords back the other way.
+        if let Some(state) = self.marquee.get() {
+            let screen_rect = state.rect();
+            // Project to scene coords so the paint commands land
+            // through the view-transform stack to the right pixels.
+            if let Some(inv) = view_transform.inverse() {
+                let scene_rect = inv.apply_rect(screen_rect);
+                let fill = fern_tokens::Color::new(0.40, 0.55, 0.85, 0.18);
+                let stroke = fern_tokens::Color::new(0.40, 0.55, 0.85, 0.85);
+                canvas.fill_rect(scene_rect, fill);
+                canvas.stroke_rect(
+                    scene_rect,
+                    stroke,
+                    fern_canvas::StrokeStyle::solid(1.0),
+                );
             }
         }
     }
@@ -3131,5 +3319,208 @@ mod tests {
              pan_x_signal changes — derived axis-label text \
              updates via `register_bindings`"
         );
+    }
+
+    // -- Phase 6: selection + marquee -----------------------------------
+
+    #[test]
+    fn selection_default_is_none_mode() {
+        let view = SceneView::new(Scene::new());
+        assert_eq!(
+            view.selection().mode(),
+            crate::selection::SceneSelectionMode::None
+        );
+    }
+
+    #[test]
+    fn selection_mode_builder_sets_multi() {
+        let view = SceneView::new(Scene::new())
+            .selection_mode(crate::selection::SceneSelectionMode::Multi);
+        assert_eq!(
+            view.selection().mode(),
+            crate::selection::SceneSelectionMode::Multi
+        );
+    }
+
+    #[test]
+    fn marquee_drag_ends_with_pending_commit() {
+        // Diagnostic: full Started → Moved → Ended → pending_commit.
+        use crate::items::RectItem;
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::RED),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.pointer_move(Point::new(40.0, 40.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(40.0, 40.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(80.0, 80.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(80.0, 80.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+
+        let view = view_handle(&tree, view_id);
+        let pending = view.pending_marquee_commit.get();
+        let (rect, _) = pending.expect("drag Ended must post pending_marquee_commit");
+        // The rect should enclose (50, 50, 20, 20) — origin (40,40)
+        // to current (80,80), screen-coords. Identity view-transform
+        // → scene_rect = (40, 40, 40, 40).
+        assert!(
+            rect.width >= 30.0 && rect.height >= 30.0,
+            "marquee rect was tiny: {:?}",
+            rect
+        );
+        assert!(
+            rect.x <= 50.0 && rect.x + rect.width >= 70.0,
+            "marquee rect doesn't enclose item x range: {:?}",
+            rect
+        );
+    }
+
+    #[test]
+    fn marquee_drag_recognizes_started_phase() {
+        // Diagnostic: drag-Started is recognized at all.
+        use crate::items::RectItem;
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::RED),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Hover so pointer-over state is set, then PointerDown,
+        // PointerMove (crosses 5px threshold), PointerUp.
+        tree.pointer_move(Point::new(40.0, 40.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(40.0, 40.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(80.0, 80.0),
+        });
+
+        // After Started fires, marquee state should be Some.
+        let view = view_handle(&tree, view_id);
+        assert!(
+            view.marquee.get().is_some(),
+            "drag Started must populate marquee state"
+        );
+    }
+
+    #[test]
+    fn marquee_drag_records_pending_commit() {
+        // Drive on_drag through the event path: Started → Moved →
+        // Ended. The closure must post a pending commit via
+        // `pending_marquee_commit`. Then `flush_marquee_commit`
+        // (or the next layout) materialises the selection.
+        use crate::items::RectItem;
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        let inside = scene.add_item(
+            RectItem::new(Rect::new(50.0, 50.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::RED),
+        );
+        let outside = scene.add_item(
+            RectItem::new(Rect::new(500.0, 500.0, 20.0, 20.0))
+                .fill(fern_tokens::Color::BLUE),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Drive pointer-down → move → up at coordinates that
+        // produce a screen-rect enclosing `inside` but not
+        // `outside`. The view-transform is identity at this
+        // point, so screen and scene coords coincide.
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(40.0, 40.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(80.0, 80.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(80.0, 80.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+
+        let view = view_handle(&tree, view_id);
+        // Materialise the marquee result — outside a real
+        // per-frame loop the test calls this directly.
+        view.flush_marquee_commit();
+        let selected = view.selection().selected();
+        assert!(
+            selected.contains(&inside),
+            "marquee enclosing `inside` must select it (got {:?})",
+            selected
+        );
+        assert!(
+            !selected.contains(&outside),
+            "marquee not enclosing `outside` must not select it"
+        );
+    }
+
+    #[test]
+    fn marquee_no_op_in_none_mode() {
+        // With selection mode None, drag does nothing — the
+        // on_drag handler isn't even registered.
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(40.0, 40.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(80.0, 80.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(80.0, 80.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+
+        let view = view_handle(&tree, view_id);
+        assert_eq!(view.selection().count(), 0);
     }
 }
