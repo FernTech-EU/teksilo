@@ -276,6 +276,15 @@ pub struct SceneView {
     /// to their original positions on drag release.
     drag_dirty: Signal<u64>,
 
+    /// Latest pointer position seen on the SceneView (screen-space).
+    /// Updated via an on_pointer_event handler in `build`. Used by
+    /// Ctrl+wheel zoom to zoom-about-pointer instead of zoom-about-
+    /// viewport-center, which is the natural feel users expect (the
+    /// scene point under the cursor stays put).
+    /// `None` until the first pointer event arrives — Ctrl+wheel
+    /// before any pointer event falls back to viewport center.
+    cursor_pos: Rc<Cell<Option<Point>>>,
+
     /// App-supplied focus-order callback. When set, the public
     /// [`next_focus`](Self::next_focus) /
     /// [`previous_focus`](Self::previous_focus) accessors route
@@ -394,6 +403,7 @@ impl SceneView {
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
             drag_dirty: Signal::new(0),
+            cursor_pos: Rc::new(Cell::new(None)),
             focus_order_callback: None,
             a11y_nested: false,
             a11y_label: None,
@@ -1047,6 +1057,31 @@ impl Widget for SceneView {
 
         let mut handlers = HandlerSet::new();
 
+        // Track the latest pointer position so Ctrl+wheel can
+        // zoom-about-pointer (the scene point under the cursor
+        // stays put). Updated even when not interactive — the
+        // outer SceneView in a nested chart still benefits from
+        // knowing where the mouse is.
+        {
+            let cursor_pos = self.cursor_pos.clone();
+            handlers = handlers.on_pointer_event(move |ev, _ctx| {
+                use fern_core::event::WidgetEvent as Ev;
+                match ev {
+                    Ev::PointerMove { position, .. } => {
+                        cursor_pos.set(Some(*position));
+                    }
+                    Ev::PointerDown { position, .. } => {
+                        cursor_pos.set(Some(*position));
+                    }
+                    Ev::PointerLeave => {
+                        cursor_pos.set(None);
+                    }
+                    _ => {}
+                }
+                EventResponse::Ignored
+            });
+        }
+
         // User-driven navigation (scroll, pinch, keyboard) is gated
         // by `interactive`. When false (typically the outer scene
         // in a nested chart-style layout), skip handler registration
@@ -1062,6 +1097,7 @@ impl Widget for SceneView {
             let rotation = self.rotation.clone();
             let bounds_origin_for_scroll = self.bounds_origin_signal.clone();
             let last_viewport_for_scroll = self.last_viewport.clone();
+            let cursor_pos_for_scroll = self.cursor_pos.clone();
             let zoom_dur = self.zoom_anim_duration;
             handlers = handlers.on_scroll(move |event, _ctx| {
                 let WidgetEvent::Scroll { delta, modifiers } = event else {
@@ -1100,13 +1136,20 @@ impl Widget for SceneView {
                     }
                     let viewport_size = last_viewport_for_scroll.get();
                     let bo = bounds_origin_for_scroll.get();
-                    let center_screen = fern_canvas::Point::new(
-                        bo.x + viewport_size.width * 0.5,
-                        bo.y + viewport_size.height * 0.5,
-                    );
+                    // Anchor the zoom at the cursor when known
+                    // (zoom-about-pointer — the scene point under
+                    // the mouse stays put). Fall back to viewport
+                    // center if no cursor position has been seen.
+                    let anchor_screen = match cursor_pos_for_scroll.get() {
+                        Some(p) => p,
+                        None => fern_canvas::Point::new(
+                            bo.x + viewport_size.width * 0.5,
+                            bo.y + viewport_size.height * 0.5,
+                        ),
+                    };
                     let pan_old = Vec2::new(pan_x.get(), pan_y.get());
                     let new_pan = anchor_pan_for_pinch(
-                        center_screen,
+                        anchor_screen,
                         pan_old,
                         z_old,
                         r_now,
@@ -1115,15 +1158,18 @@ impl Widget for SceneView {
                         bo,
                     )
                     .unwrap_or(pan_old);
-                    if prefers_reduced {
-                        zoom.set(z_new);
-                        pan_x.set(new_pan.x);
-                        pan_y.set(new_pan.y);
-                    } else {
-                        zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
-                        pan_x.animate_to(new_pan.x, zoom_dur, Easing::EaseOut);
-                        pan_y.animate_to(new_pan.y, zoom_dur, Easing::EaseOut);
-                    }
+                    // Snap zoom + pan together. Animating the two
+                    // signals independently with EaseOut would drift
+                    // mid-tween (the anchor math is exact only at
+                    // start and end states). Snap is also the
+                    // standard wheel-zoom feel — each notch produces
+                    // an immediate, predictable step. The `zoom_dur`
+                    // capture stays for symmetry with `set_zoom` /
+                    // `zoom_to` callers.
+                    let _ = zoom_dur;
+                    zoom.set(z_new);
+                    pan_x.set(new_pan.x);
+                    pan_y.set(new_pan.y);
                     return EventResponse::Handled;
                 }
                 // Convention: positive scroll delta on the y-axis
@@ -2536,6 +2582,61 @@ mod tests {
 
         let view = view_handle(&tree, view_id);
         assert_eq!(view.pan_y.animation_target(), Some(32.0));
+    }
+
+    #[test]
+    fn ctrl_wheel_zooms_about_cursor_keeping_scene_anchor_fixed() {
+        // Ctrl+wheel zoom must keep the scene point under the cursor
+        // fixed across the zoom step. Without zoom-about-pointer the
+        // user perceives the scene "drifting away" — the right side
+        // of the scene shifts further right when zooming in about
+        // viewport center.
+        use fern_core::event::{Modifiers, WidgetEvent as Ev};
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // Park the cursor at (700, 400) — far from viewport center
+        // (400, 300) — so any anchor mistake shows up clearly.
+        let cursor = Point::new(700.0, 400.0);
+        tree.dispatch_event(Ev::PointerMove { position: cursor });
+
+        // Capture scene point under the cursor BEFORE zooming.
+        let view = view_handle(&tree, view_id);
+        let xform_before = view.view_transform();
+        let scene_under_cursor = xform_before
+            .inverse()
+            .expect("identity xform invertible")
+            .apply_point(cursor);
+
+        // Ctrl+wheel scroll up by 1 line → zoom in.
+        tree.dispatch_event(Ev::Scroll {
+            delta: ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            modifiers: Modifiers::CTRL,
+        });
+
+        // Verify zoom changed and the scene point originally under
+        // the cursor still projects to the cursor position.
+        let view = view_handle(&tree, view_id);
+        assert!(
+            (view.zoom() - 1.0).abs() > 1e-3,
+            "zoom should have changed (got {})",
+            view.zoom()
+        );
+        let projected = view.view_transform().apply_point(scene_under_cursor);
+        assert!(
+            (projected.x - cursor.x).abs() < 0.5,
+            "x: scene anchor must stay under cursor (cursor {} → projected {})",
+            cursor.x,
+            projected.x
+        );
+        assert!(
+            (projected.y - cursor.y).abs() < 0.5,
+            "y: scene anchor must stay under cursor (cursor {} → projected {})",
+            cursor.y,
+            projected.y
+        );
     }
 
     #[test]
