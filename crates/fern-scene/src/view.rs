@@ -232,6 +232,19 @@ pub struct SceneView {
     /// keeping the closure shared.
     focus_order_callback: Option<Rc<dyn Fn(&Scene, FocusDirection, Option<ItemId>) -> Option<ItemId>>>,
 
+    /// Whether this SceneView is logically nested inside another
+    /// (chart-style outer chrome + inner data scene, or a preview
+    /// pane inside a parent scene). Default `false` — every
+    /// SceneView reports itself as a top-level [`Role::Pane`]. When
+    /// `true`, the AT walker reports [`Role::Region`] instead so
+    /// screen readers don't announce redundant landmarks.
+    a11y_nested: bool,
+    /// Optional label announced as the SceneView's own AT name.
+    /// When set, becomes the logical region name (e.g. "Chart
+    /// data area" for an inner chart SceneView). Default `None`
+    /// — the SceneView has no explicit name.
+    a11y_label: Option<String>,
+
     // --- Cached derived signals ---------------------------------------
     /// `view_transform` as a derived `Signal<Transform2D>`,
     /// constructed once in `new()` and reused across rebuilds.
@@ -256,6 +269,8 @@ impl std::fmt::Debug for SceneView {
             .field("a11y_off_screen_mode", &self.a11y_off_screen_mode)
             .field("selection_mode", &self.selection.mode())
             .field("focus_order_callback", &self.focus_order_callback.is_some())
+            .field("a11y_nested", &self.a11y_nested)
+            .field("a11y_label", &self.a11y_label)
             .finish_non_exhaustive()
     }
 }
@@ -310,6 +325,8 @@ impl SceneView {
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
             focus_order_callback: None,
+            a11y_nested: false,
+            a11y_label: None,
         }
     }
 
@@ -379,6 +396,46 @@ impl SceneView {
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
         self
+    }
+
+    /// Mark this SceneView as logically nested inside another
+    /// SceneView. Affects only the AT walker — the inner
+    /// SceneView reports [`Role::Region`] instead of the default
+    /// [`Role::Pane`], so screen readers don't announce a
+    /// redundant top-level landmark for what's logically a sub-
+    /// region. Pair with [`a11y_label`](Self::a11y_label) to give
+    /// the inner region a useful announce name.
+    ///
+    /// Use case: chart-style nested scenes (outer SceneView holds
+    /// axis chrome, inner SceneView holds data) — the inner one
+    /// should announce as "Data area" or similar, not as another
+    /// "Pane" sibling to the outer.
+    ///
+    /// Default `false`. Apps explicitly set this when they know
+    /// they're nesting; the framework doesn't introspect the
+    /// widget tree to detect nesting automatically (deliberately
+    /// kept declarative — the visual layout doesn't always match
+    /// logical nesting).
+    pub fn nested_a11y(mut self, nested: bool) -> Self {
+        self.a11y_nested = nested;
+        self
+    }
+
+    /// Set the AT label announced as this SceneView's own name.
+    /// Particularly useful for nested SceneViews via
+    /// [`nested_a11y`](Self::nested_a11y), where the inner
+    /// region should have a domain-specific name (e.g. "Chart
+    /// data area"). Default `None` — the SceneView has no
+    /// explicit AT name.
+    pub fn a11y_label(mut self, label: impl Into<String>) -> Self {
+        self.a11y_label = Some(label.into());
+        self
+    }
+
+    /// Whether the SceneView is currently marked as logically
+    /// nested. Read-only accessor for tests / diagnostics.
+    pub fn is_nested(&self) -> bool {
+        self.a11y_nested
     }
 
     /// Install a custom focus-order callback. When set,
@@ -1396,12 +1453,20 @@ impl Widget for SceneView {
         use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
         use std::collections::{HashMap, HashSet};
 
-        // SceneView itself is `Role::Pane` — a generic container
-        // surfacing the scene as one navigable region. Heavyweight
-        // children (real widgets in the arena) are emitted by the
-        // tree walker as natural descendants; we only need to add
-        // the lightweight tier here.
-        builder.set_role(accesskit::Role::Pane);
+        // SceneView itself is `Role::Pane` for a top-level scene
+        // and `Role::Region` for a logically nested scene (set via
+        // `nested_a11y(true)`). Heavyweight children (real widgets
+        // in the arena) are emitted by the tree walker as natural
+        // descendants; we only need to add the lightweight tier
+        // here.
+        if self.a11y_nested {
+            builder.set_role(accesskit::Role::Region);
+        } else {
+            builder.set_role(accesskit::Role::Pane);
+        }
+        if let Some(label) = &self.a11y_label {
+            builder.set_name(label.clone());
+        }
 
         // Compute screen-space viewport for the at-visible-region
         // query. `last_viewport` was set by `layout_response`;
@@ -4251,5 +4316,72 @@ mod tests {
         assert_eq!(view.next_focus(Some(keep3)), None);
         assert_eq!(view.previous_focus(None), Some(keep3));
         assert_eq!(view.previous_focus(Some(keep3)), Some(keep1));
+    }
+
+    // -- Nested-SceneView a11y -----------------------------------------
+
+    #[test]
+    fn default_scene_view_has_pane_role() {
+        use fern_core::accessibility::widget_id_to_node_id;
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+        let view_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == widget_id_to_node_id(view_id))
+            .map(|(_, n)| n)
+            .expect("scene view node");
+        assert_eq!(view_node.role(), accesskit::Role::Pane);
+    }
+
+    #[test]
+    fn nested_scene_view_uses_region_role() {
+        use fern_core::accessibility::widget_id_to_node_id;
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()).nested_a11y(true));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+        let view_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == widget_id_to_node_id(view_id))
+            .map(|(_, n)| n)
+            .expect("scene view node");
+        // Nested SceneViews announce as Region instead of Pane to
+        // avoid landmark redundancy in nested layouts.
+        assert_eq!(view_node.role(), accesskit::Role::Region);
+    }
+
+    #[test]
+    fn a11y_label_is_announced() {
+        use fern_core::accessibility::widget_id_to_node_id;
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(Scene::new())
+                .nested_a11y(true)
+                .a11y_label("Chart data area"),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+        let view_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == widget_id_to_node_id(view_id))
+            .map(|(_, n)| n)
+            .expect("scene view node");
+        assert_eq!(view_node.label(), Some("Chart data area"));
+    }
+
+    #[test]
+    fn is_nested_accessor_reflects_builder_setting() {
+        let view = SceneView::new(Scene::new());
+        assert!(!view.is_nested());
+        let view = view.nested_a11y(true);
+        assert!(view.is_nested());
     }
 }
