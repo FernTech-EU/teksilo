@@ -146,6 +146,11 @@ pub struct TextInputField {
     /// by the field. Read by the focus handler to repaint a
     /// parent's focus ring / border on gain/loss.
     interaction: Signal<InteractionState>,
+    /// Mirror of the inner state's `cursor_position` for external
+    /// readers. Wired in `build()` via a `ctx.effect`. Composing
+    /// widgets that need the caret (e.g. `DateEdit` for segment
+    /// stepping) read this via [`TextInputField::caret_position`].
+    caret_position: Signal<usize>,
 }
 
 impl std::fmt::Debug for TextInputField {
@@ -179,6 +184,7 @@ impl TextInputField {
             feedback: Signal::new(ValidationFeedback::Pristine),
             state: None,
             interaction: Signal::new(InteractionState::Idle),
+            caret_position: Signal::new(0),
         }
     }
 
@@ -353,6 +359,15 @@ impl TextInputField {
     pub fn interaction(&self) -> Signal<InteractionState> {
         self.interaction.clone()
     }
+
+    /// Reactive caret position in the field's text (in `usize` char
+    /// offsets). Updates after every keyboard or pointer action that
+    /// moves the cursor. Used by composing widgets that need to know
+    /// where the caret is — e.g. `DateEdit` reads this to figure out
+    /// which date segment Up/Down should step.
+    pub fn caret_position(&self) -> Signal<usize> {
+        self.caret_position.clone()
+    }
 }
 
 impl Widget for TextInputField {
@@ -470,6 +485,22 @@ impl Widget for TextInputField {
             ctx.effect(&self.text, move |_| {
                 if !matches!(feedback.get(), ValidationFeedback::Pristine) {
                     feedback.set(ValidationFeedback::Pristine);
+                }
+            });
+        }
+
+        // Mirror the inner state's `cursor_position` onto the field's
+        // public `caret_position` so callers of `caret_position()` see
+        // live caret updates. The state's signal is keyed by the
+        // shared state's identity (created in `TextInputState::new`),
+        // not by the field's; this effect bridges the two.
+        {
+            let inner = shared_state.borrow().cursor_position.clone();
+            let outer = self.caret_position.clone();
+            outer.set(inner.get());
+            ctx.effect(&inner, move |pos| {
+                if outer.get() != *pos {
+                    outer.set(*pos);
                 }
             });
         }

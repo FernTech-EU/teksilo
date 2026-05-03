@@ -358,9 +358,7 @@ impl Widget for Calendar {
         // Resolve first day of week: explicit override → locale default → Monday.
         let first_dow = self.first_day_of_week_override.unwrap_or_else(|| {
             let tag = ctx.locale_signal().get().unwrap_or_default();
-            let fdow = crate::common::datetime::first_day_of_week_for_locale(&tag);
-            eprintln!("[Calendar] locale_signal = {:?}, first_day_of_week = {:?}", tag, fdow);
-            fdow
+            crate::common::datetime::first_day_of_week_for_locale(&tag)
         });
 
         // ── Header (prev / month-label / next) ──────────────────

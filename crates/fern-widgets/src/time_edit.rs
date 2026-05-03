@@ -43,7 +43,8 @@ use fern_i18n::resolve_message_widget;
 use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::common::datetime::pattern::{
-    format_value, mask_for_pattern, parse_value, ParseTarget, ParsedPattern, ParsedValue,
+    format_value, mask_for_pattern, parse_value, segment_at_position, step_time_field,
+    ParseTarget, ParsedPattern, ParsedValue,
 };
 use crate::common::datetime::Time;
 use crate::date_edit::ValidationBehavior;
@@ -79,7 +80,10 @@ pub struct TimeEdit {
     /// Set by `::required(Signal<Time>)` — wired into `ctx.effect()`
     /// in `build()` so observer handles outlive construction.
     required_source: Option<Signal<Time>>,
-    format: TimeFormat,
+    /// Explicit 12h/24h override. `None` (default) means "derive from
+    /// the current locale" via [`prefers_12_hour_clock`]. Set via
+    /// [`Self::format`] to lock a specific clock for the field.
+    format: Option<TimeFormat>,
     seconds: SecondsMode,
     pattern_override: Option<String>,
     min_time: Option<Time>,
@@ -112,7 +116,7 @@ impl TimeEdit {
         Self {
             value,
             required_source: None,
-            format: TimeFormat::Hour24,
+            format: None,
             seconds: SecondsMode::Hidden,
             pattern_override: None,
             min_time: None,
@@ -139,8 +143,12 @@ impl TimeEdit {
         s
     }
 
+    /// Lock the field to a specific clock (12h or 24h). When this
+    /// builder is *not* called, the field defaults to the user's
+    /// current locale via [`prefers_12_hour_clock`] (12h for en-US /
+    /// en-CA / en-AU / en-NZ / en-PH / en-IN / en-PK; 24h elsewhere).
     pub fn format(mut self, f: TimeFormat) -> Self {
-        self.format = f;
+        self.format = Some(f);
         self
     }
 
@@ -213,11 +221,11 @@ impl TimeEdit {
         self.value.clone()
     }
 
-    fn resolved_pattern(&self) -> String {
+    fn resolved_pattern(&self, format: TimeFormat) -> String {
         if let Some(p) = self.pattern_override.clone() {
             return p;
         }
-        match (self.format, self.seconds) {
+        match (format, self.seconds) {
             (TimeFormat::Hour24, SecondsMode::Hidden) => "%H:%M".into(),
             (TimeFormat::Hour24, SecondsMode::Editable) => "%H:%M:%S".into(),
             (TimeFormat::Hour12, SecondsMode::Hidden) => "%I:%M %p".into(),
@@ -258,7 +266,16 @@ impl Widget for TimeEdit {
         let enabled = self.enabled;
         let read_only = self.read_only;
 
-        let pattern_string = self.resolved_pattern();
+        // Resolve clock format: explicit override → locale default.
+        let format = self.format.unwrap_or_else(|| {
+            let tag = ctx.locale_signal().get().unwrap_or_default();
+            if crate::common::datetime::prefers_12_hour_clock(&tag) {
+                TimeFormat::Hour12
+            } else {
+                TimeFormat::Hour24
+            }
+        });
+        let pattern_string = self.resolved_pattern(format);
         let parsed_pattern = ParsedPattern::parse(&pattern_string)
             .unwrap_or_else(|_| ParsedPattern::parse("%H:%M").unwrap());
         let pattern_rc = Rc::new(parsed_pattern);
@@ -455,6 +472,11 @@ impl Widget for TimeEdit {
             field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
         }
 
+        // Capture caret signal BEFORE moving the field into the tree
+        // — used by the segment-stepping handler attached on the
+        // wrapping container below.
+        let caret_for_step = field.caret_position();
+
         // A11y override: focused field announces as TimeInput, not
         // TextInput. The field's caret/selection/character AT stays.
         let mut field_with_a11y = field.access_role(Role::TimeInput);
@@ -464,6 +486,29 @@ impl Widget for TimeEdit {
         let field_id = ctx.add(field_with_a11y);
         self.field_id = Some(field_id);
 
+        // ── Segment-stepping (Qt-style ↑/↓ on focused segment) ────
+        let pattern_for_step = pattern_rc.clone();
+        let value_for_step = self.value.clone();
+        let text_for_step = self.text_signal.clone();
+        let on_changed_for_step = self.on_value_changed.clone();
+        let min_for_step = self.min_time;
+        let max_for_step = self.max_time;
+        let segment_step = move |delta: i32, ctx_evt: &mut EventContext| {
+            let caret = caret_for_step.get();
+            let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret) else {
+                return;
+            };
+            let current = value_for_step.get().unwrap_or_else(Time::midnight);
+            let stepped = step_time_field(current, kind, delta);
+            let clamped = clamp_time(stepped, min_for_step, max_for_step);
+            value_for_step.set(Some(clamped));
+            text_for_step.set(format_value(&pattern_for_step, None, Some(clamped)));
+            if let Some(cb) = on_changed_for_step.as_ref() {
+                cb(Some(clamped), ctx_evt);
+            }
+            ctx_evt.request_frame();
+        };
+
         let padded_field_id = ctx.add(
             Padding::new(
                 field_style.padding_vertical,
@@ -471,7 +516,24 @@ impl Widget for TimeEdit {
                 field_style.padding_vertical,
                 field_style.padding_horizontal,
             )
-            .child_id(field_id),
+            .child_id(field_id)
+            .on_key_preview(move |event, ctx_evt| {
+                if !enabled || read_only {
+                    return EventResponse::Ignored;
+                }
+                let WidgetEvent::KeyDown { key, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                let delta = match key {
+                    Key::ArrowUp => 1,
+                    Key::ArrowDown => -1,
+                    Key::PageUp => 10,
+                    Key::PageDown => -10,
+                    _ => return EventResponse::Ignored,
+                };
+                segment_step(delta, ctx_evt);
+                EventResponse::Handled
+            }),
         );
 
         // Frame.

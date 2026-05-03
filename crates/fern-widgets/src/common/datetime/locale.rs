@@ -28,6 +28,25 @@ pub fn first_day_of_week_for_locale(tag: &str) -> Weekday {
     Weekday::Monday
 }
 
+/// Whether the given locale prefers a 12-hour clock (with AM/PM) for
+/// digital-UI time display. Returns `false` (24-hour) for any locale
+/// not explicitly listed — matching CLDR's behaviour for the vast
+/// majority of locales worldwide. The few `true` cases are the
+/// English-speaking regions where digital-UI 12-hour display is the
+/// near-universal convention: US, Canada, Australia, New Zealand,
+/// Philippines, plus the `en-IN`/`en-PK` digital convention. Lookup
+/// is longest-prefix match, identical to [`format_pattern_for_locale`]
+/// and [`first_day_of_week_for_locale`].
+pub fn prefers_12_hour_clock(tag: &str) -> bool {
+    let normalized = tag.to_ascii_lowercase();
+    for &prefix in REGION_12H {
+        if normalized == prefix || normalized.starts_with(&format!("{prefix}-")) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Default date format pattern for the given locale tag. Uses the
 /// strftime subset described in `pattern.rs`.
 pub fn format_pattern_for_locale(tag: &str) -> &'static str {
@@ -100,6 +119,12 @@ const LANG_FIRST_DAY: &[(&str, Weekday)] = &[
     ("sl", Weekday::Monday),
     ("el", Weekday::Monday),
     ("tr", Weekday::Monday),
+];
+
+/// Region prefixes that prefer a 12-hour clock for digital UI.
+/// Anything not listed defaults to 24-hour.
+const REGION_12H: &[&str] = &[
+    "en-us", "en-ca", "en-au", "en-nz", "en-ph", "en-in", "en-pk",
 ];
 
 /// Per-region default pattern. Ordered most-specific first.
@@ -187,5 +212,28 @@ mod tests {
         // `en` defaults to ISO; `en-US` overrides to MDY.
         assert_eq!(format_pattern_for_locale("en"), "%Y-%m-%d");
         assert_eq!(format_pattern_for_locale("en-US"), "%m/%d/%Y");
+    }
+
+    #[test]
+    fn time_format_us_australia_are_12h() {
+        assert!(prefers_12_hour_clock("en-US"));
+        assert!(prefers_12_hour_clock("en-AU"));
+        assert!(prefers_12_hour_clock("en-CA"));
+        assert!(prefers_12_hour_clock("en-PH"));
+    }
+
+    #[test]
+    fn time_format_eu_asia_are_24h() {
+        assert!(!prefers_12_hour_clock("fr-FR"));
+        assert!(!prefers_12_hour_clock("de-DE"));
+        assert!(!prefers_12_hour_clock("ja-JP"));
+        assert!(!prefers_12_hour_clock("en-GB"));
+        assert!(!prefers_12_hour_clock("zh-CN"));
+    }
+
+    #[test]
+    fn time_format_unknown_locale_defaults_to_24h() {
+        assert!(!prefers_12_hour_clock("xx-XX"));
+        assert!(!prefers_12_hour_clock(""));
     }
 }

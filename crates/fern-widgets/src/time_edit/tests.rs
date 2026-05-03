@@ -59,7 +59,7 @@ fn time_edit_resolved_pattern_24h_no_seconds() {
     let editor = TimeEdit::new(value)
         .format(TimeFormat::Hour24)
         .seconds(SecondsMode::Hidden);
-    assert_eq!(editor.resolved_pattern(), "%H:%M");
+    assert_eq!(editor.resolved_pattern(TimeFormat::Hour24), "%H:%M");
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn time_edit_resolved_pattern_12h_with_seconds() {
     let editor = TimeEdit::new(value)
         .format(TimeFormat::Hour12)
         .seconds(SecondsMode::Editable);
-    assert_eq!(editor.resolved_pattern(), "%I:%M:%S %p");
+    assert_eq!(editor.resolved_pattern(TimeFormat::Hour12), "%I:%M:%S %p");
 }
 
 #[test]

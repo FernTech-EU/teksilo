@@ -527,6 +527,131 @@ pub fn mask_for_pattern(pattern: &ParsedPattern) -> String {
     out
 }
 
+/// One editable segment's span in formatted-text display coordinates.
+/// `(start_char_offset, end_char_offset_exclusive, kind)`. Computed by
+/// walking [`ParsedPattern::tokens`] and accumulating the rendered
+/// width of each segment (4 for `Year`, 2 for `Period` (`AM`/`PM`),
+/// 2 for every digit segment) and each literal. Drives caret-in-
+/// segment lookups for segment-stepping and per-segment selection.
+pub fn segments_layout(pattern: &ParsedPattern) -> Vec<(usize, usize, SegmentKind)> {
+    let mut out = Vec::new();
+    let mut pos = 0usize;
+    for token in &pattern.tokens {
+        match token {
+            PatternToken::Literal(s) => pos += s.chars().count(),
+            PatternToken::Segment(kind) => {
+                let width = match kind {
+                    SegmentKind::Year => 4,
+                    // "AM" / "PM" — see `render_segment` for the
+                    // canonical width of every segment kind.
+                    SegmentKind::Period => 2,
+                    _ => 2,
+                };
+                out.push((pos, pos + width, *kind));
+                pos += width;
+            }
+        }
+    }
+    out
+}
+
+/// Find the segment under `caret_pos` (in formatted-text display
+/// coordinates). A caret resting on a segment boundary belongs to the
+/// segment to its right (typing-into semantics). A caret on a separator
+/// snaps to the *preceding* segment so Up/Down keep working when the
+/// caret is between two segments. Returns `None` only when the pattern
+/// has no editable segments at all.
+pub fn segment_at_position(
+    pattern: &ParsedPattern,
+    caret_pos: usize,
+) -> Option<(usize, usize, SegmentKind)> {
+    let layout = segments_layout(pattern);
+    // First pass: caret strictly inside a segment.
+    for &(start, end, kind) in &layout {
+        if caret_pos >= start && caret_pos < end {
+            return Some((start, end, kind));
+        }
+    }
+    // Caret on a separator or past the end: snap to the nearest
+    // segment that ENDS at-or-before the caret (preceding segment).
+    layout
+        .iter()
+        .rev()
+        .find(|(_, end, _)| *end <= caret_pos)
+        .copied()
+        .or_else(|| layout.first().copied())
+}
+
+/// Step a single field of a `Date` by `delta`. Year saturates at the
+/// jiff range and clamps the day if the new year+month no longer holds
+/// the current day (e.g. Feb 29 → Feb 28 in non-leap years). Month
+/// wraps within `[1, 12]` and clamps the day to the new month's last
+/// day. Day wraps within the current month — does not advance to the
+/// next month, matching Qt `QDateEdit` and macOS Calendar behaviour.
+/// Returns the input `date` unchanged when `kind` is not a date field.
+pub fn step_date_field(date: Date, kind: SegmentKind, delta: i32) -> Date {
+    match kind {
+        SegmentKind::Year => {
+            let new_year = (date.year() as i32 + delta).clamp(-9999, 9999) as i16;
+            let last_day = Date::new(new_year, date.month(), 1)
+                .map(|d| d.last_of_month().day())
+                .unwrap_or(date.day());
+            let day = date.day().min(last_day);
+            Date::new(new_year, date.month(), day).unwrap_or(date)
+        }
+        SegmentKind::Month | SegmentKind::MonthShort => {
+            let new_month = ((date.month() as i32 - 1).rem_euclid(12) + delta).rem_euclid(12) + 1;
+            let new_month = new_month as i8;
+            let last_day = Date::new(date.year(), new_month, 1)
+                .map(|d| d.last_of_month().day())
+                .unwrap_or(date.day());
+            let day = date.day().min(last_day);
+            Date::new(date.year(), new_month, day).unwrap_or(date)
+        }
+        SegmentKind::Day | SegmentKind::DayShort => {
+            let last_day = Date::new(date.year(), date.month(), 1)
+                .map(|d| d.last_of_month().day())
+                .unwrap_or(28) as i32;
+            let new_day = (date.day() as i32 - 1 + delta).rem_euclid(last_day) + 1;
+            Date::new(date.year(), date.month(), new_day as i8).unwrap_or(date)
+        }
+        _ => date,
+    }
+}
+
+/// Step a single field of a `Time` by `delta`. Hour wraps in `[0, 24)`
+/// (whether 12h or 24h segment kind — internal storage is 24h).
+/// Minute and second wrap in `[0, 60)`. AM/PM toggles on any non-zero
+/// `delta` (sign-agnostic). Returns the input `time` unchanged when
+/// `kind` is not a time field.
+pub fn step_time_field(time: Time, kind: SegmentKind, delta: i32) -> Time {
+    match kind {
+        SegmentKind::Hour24
+        | SegmentKind::Hour24Short
+        | SegmentKind::Hour12
+        | SegmentKind::Hour12Short => {
+            let h = (time.hour() as i32 + delta).rem_euclid(24) as i8;
+            Time::new(h, time.minute(), time.second(), 0).unwrap_or(time)
+        }
+        SegmentKind::Minute | SegmentKind::MinuteShort => {
+            let m = (time.minute() as i32 + delta).rem_euclid(60) as i8;
+            Time::new(time.hour(), m, time.second(), 0).unwrap_or(time)
+        }
+        SegmentKind::Second | SegmentKind::SecondShort => {
+            let s = (time.second() as i32 + delta).rem_euclid(60) as i8;
+            Time::new(time.hour(), time.minute(), s, 0).unwrap_or(time)
+        }
+        SegmentKind::Period => {
+            if delta == 0 {
+                return time;
+            }
+            let h = (time.hour() as i32 + 12).rem_euclid(24) as i8;
+            Time::new(h, time.minute(), time.second(), 0).unwrap_or(time)
+        }
+        _ => time,
+    }
+}
+
 /// Consume up to 2 ASCII letters at the front of `cursor` (so "AM",
 /// "Am", "PM", or a bare "A"/"P" mid-typing all advance the cursor
 /// correctly). Returns the trimmed slice.
@@ -791,5 +916,127 @@ mod tests {
         assert_eq!(SegmentKind::Month.max_digits(), 2);
         assert_eq!(SegmentKind::Day.max_digits(), 2);
         assert_eq!(SegmentKind::Period.max_digits(), 0);
+    }
+
+    // ── Segment layout / position lookup ────────────────────────────
+
+    #[test]
+    fn segments_layout_iso_pattern() {
+        let pat = ParsedPattern::parse("%Y-%m-%d").unwrap();
+        assert_eq!(
+            segments_layout(&pat),
+            vec![
+                (0, 4, SegmentKind::Year),
+                (5, 7, SegmentKind::Month),
+                (8, 10, SegmentKind::Day),
+            ]
+        );
+    }
+
+    #[test]
+    fn segments_layout_with_period() {
+        let pat = ParsedPattern::parse("%I:%M %p").unwrap();
+        assert_eq!(
+            segments_layout(&pat),
+            vec![
+                (0, 2, SegmentKind::Hour12),
+                (3, 5, SegmentKind::Minute),
+                (6, 8, SegmentKind::Period),
+            ]
+        );
+    }
+
+    #[test]
+    fn segment_at_position_inside_segments() {
+        let pat = ParsedPattern::parse("%Y-%m-%d").unwrap();
+        // caret 0..4 → Year
+        assert_eq!(segment_at_position(&pat, 0).map(|s| s.2), Some(SegmentKind::Year));
+        assert_eq!(segment_at_position(&pat, 3).map(|s| s.2), Some(SegmentKind::Year));
+        // caret 5..7 → Month
+        assert_eq!(segment_at_position(&pat, 5).map(|s| s.2), Some(SegmentKind::Month));
+        assert_eq!(segment_at_position(&pat, 6).map(|s| s.2), Some(SegmentKind::Month));
+        // caret 8..10 → Day
+        assert_eq!(segment_at_position(&pat, 9).map(|s| s.2), Some(SegmentKind::Day));
+    }
+
+    #[test]
+    fn segment_at_position_on_separator_snaps_left() {
+        let pat = ParsedPattern::parse("%Y-%m-%d").unwrap();
+        // caret 4 sits on the boundary at end of Year / start of `-`.
+        // Snaps to Year (preceding segment).
+        assert_eq!(segment_at_position(&pat, 4).map(|s| s.2), Some(SegmentKind::Year));
+        // caret 7 = end of Month, sits on boundary with `-`.
+        assert_eq!(segment_at_position(&pat, 7).map(|s| s.2), Some(SegmentKind::Month));
+        // caret 10 = end of Day (text end). Snaps to Day.
+        assert_eq!(segment_at_position(&pat, 10).map(|s| s.2), Some(SegmentKind::Day));
+    }
+
+    // ── step_date_field ─────────────────────────────────────────────
+
+    #[test]
+    fn step_year_basic_increment() {
+        let d = Date::new(2026, 5, 15).unwrap();
+        assert_eq!(step_date_field(d, SegmentKind::Year, 1), Date::new(2027, 5, 15).unwrap());
+        assert_eq!(step_date_field(d, SegmentKind::Year, -10), Date::new(2016, 5, 15).unwrap());
+    }
+
+    #[test]
+    fn step_year_clamps_feb_29() {
+        let leap = Date::new(2024, 2, 29).unwrap();
+        // Stepping to 2025 (non-leap) clamps day to 28.
+        assert_eq!(step_date_field(leap, SegmentKind::Year, 1), Date::new(2025, 2, 28).unwrap());
+    }
+
+    #[test]
+    fn step_month_wraps_within_year() {
+        // Dec → Jan stays in same year (display-segment wrap).
+        let d = Date::new(2026, 12, 5).unwrap();
+        assert_eq!(step_date_field(d, SegmentKind::Month, 1), Date::new(2026, 1, 5).unwrap());
+        // Jan → Dec
+        let d = Date::new(2026, 1, 5).unwrap();
+        assert_eq!(step_date_field(d, SegmentKind::Month, -1), Date::new(2026, 12, 5).unwrap());
+    }
+
+    #[test]
+    fn step_month_clamps_day() {
+        // Mar 31 → Feb (28 in 2026)
+        let d = Date::new(2026, 3, 31).unwrap();
+        assert_eq!(step_date_field(d, SegmentKind::Month, -1), Date::new(2026, 2, 28).unwrap());
+    }
+
+    #[test]
+    fn step_day_wraps_within_month() {
+        // 31 + 1 in March → 1 (same month, not April).
+        let d = Date::new(2026, 3, 31).unwrap();
+        assert_eq!(step_date_field(d, SegmentKind::Day, 1), Date::new(2026, 3, 1).unwrap());
+        // 1 - 1 in March → 31
+        let d = Date::new(2026, 3, 1).unwrap();
+        assert_eq!(step_date_field(d, SegmentKind::Day, -1), Date::new(2026, 3, 31).unwrap());
+    }
+
+    // ── step_time_field ─────────────────────────────────────────────
+
+    #[test]
+    fn step_hour_wraps_24h() {
+        let t = Time::new(23, 30, 0, 0).unwrap();
+        assert_eq!(step_time_field(t, SegmentKind::Hour24, 1), Time::new(0, 30, 0, 0).unwrap());
+        let t = Time::new(0, 30, 0, 0).unwrap();
+        assert_eq!(step_time_field(t, SegmentKind::Hour24, -1), Time::new(23, 30, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn step_minute_wraps_60() {
+        let t = Time::new(10, 59, 0, 0).unwrap();
+        assert_eq!(step_time_field(t, SegmentKind::Minute, 1), Time::new(10, 0, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn step_period_toggles_am_pm() {
+        let am = Time::new(9, 0, 0, 0).unwrap();
+        assert_eq!(step_time_field(am, SegmentKind::Period, 1), Time::new(21, 0, 0, 0).unwrap());
+        let pm = Time::new(15, 30, 0, 0).unwrap();
+        assert_eq!(step_time_field(pm, SegmentKind::Period, -1), Time::new(3, 30, 0, 0).unwrap());
+        // Zero delta is a no-op
+        assert_eq!(step_time_field(am, SegmentKind::Period, 0), am);
     }
 }

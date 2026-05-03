@@ -71,10 +71,10 @@ use jiff::civil::Weekday;
 
 use crate::calendar::Calendar;
 use crate::common::datetime::pattern::{
-    format_value, mask_for_pattern, parse_value, ParseTarget, ParsedPattern, ParsedValue,
-    PatternToken, SegmentKind,
+    format_value, mask_for_pattern, parse_value, segment_at_position, step_date_field,
+    ParseTarget, ParsedPattern, ParsedValue, PatternToken, SegmentKind,
 };
-use crate::common::datetime::types::YearMonth;
+use crate::common::datetime::types::{today_local, YearMonth};
 use crate::common::datetime::Date;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
 use crate::primitives::{
@@ -541,6 +541,11 @@ impl Widget for DateEdit {
             field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
         }
 
+        // Capture caret signal BEFORE moving the field into the tree
+        // so the segment-stepping handler below can read live caret
+        // position. Bridged to the inner state inside `build()`.
+        let caret_for_step = field.caret_position();
+
         // A11y override on the field: AT users who tab into the
         // editable surface hear "Date input" rather than "Edit text".
         // The field's existing TextInput-flavored AT (text content,
@@ -553,6 +558,36 @@ impl Widget for DateEdit {
         let field_id = ctx.add(field_with_a11y);
         self.field_id = Some(field_id);
 
+        // ── Segment-stepping (Qt-style ↑/↓ on focused segment) ────
+        //
+        // `on_key_preview` on a strict ancestor of the field claims
+        // ArrowUp/ArrowDown/PageUp/PageDown BEFORE the field's own
+        // `on_key` runs. The field never binds these keys today, but
+        // attaching at preview makes the contract explicit so future
+        // field changes (multi-line caret motion, etc.) cannot
+        // silently break stepping. Mirrors the SpinBox pattern.
+        let pattern_for_step = pattern_rc.clone();
+        let value_for_step = self.value.clone();
+        let text_for_step = self.text_signal.clone();
+        let on_changed_for_step = on_value_changed.clone();
+        let min_for_step = self.min_date;
+        let max_for_step = self.max_date;
+        let segment_step = move |delta: i32, ctx_evt: &mut EventContext| {
+            let caret = caret_for_step.get();
+            let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret) else {
+                return;
+            };
+            let current = value_for_step.get().unwrap_or_else(today_local);
+            let stepped = step_date_field(current, kind, delta);
+            let clamped = clamp_date(stepped, min_for_step, max_for_step);
+            value_for_step.set(Some(clamped));
+            text_for_step.set(format_value(&pattern_for_step, Some(clamped), None));
+            if let Some(cb) = on_changed_for_step.as_ref() {
+                cb(Some(clamped), ctx_evt);
+            }
+            ctx_evt.request_frame();
+        };
+
         let padded_field_id = ctx.add(
             Padding::new(
                 field_style.padding_vertical,
@@ -560,7 +595,24 @@ impl Widget for DateEdit {
                 field_style.padding_vertical,
                 0.0,
             )
-            .child_id(field_id),
+            .child_id(field_id)
+            .on_key_preview(move |event, ctx_evt| {
+                if !enabled || read_only {
+                    return EventResponse::Ignored;
+                }
+                let WidgetEvent::KeyDown { key, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                let delta = match key {
+                    Key::ArrowUp => 1,
+                    Key::ArrowDown => -1,
+                    Key::PageUp => 10,
+                    Key::PageDown => -10,
+                    _ => return EventResponse::Ignored,
+                };
+                segment_step(delta, ctx_evt);
+                EventResponse::Handled
+            }),
         );
         let expanded_field_id = ctx.add(
             crate::primitives::Expand::horizontal().child_id(padded_field_id),

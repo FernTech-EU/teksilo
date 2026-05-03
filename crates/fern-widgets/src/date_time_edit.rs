@@ -56,7 +56,9 @@ pub struct DateTimeEdit {
     /// in `build()` so observer handles outlive construction.
     required_source: Option<Signal<DateTime>>,
     date_format_pattern: Option<String>,
-    time_format: TimeFormat,
+    /// Explicit 12h/24h override for the time half. `None` (default)
+    /// derives from the current locale via [`prefers_12_hour_clock`].
+    time_format: Option<TimeFormat>,
     seconds: SecondsMode,
     min: Option<DateTime>,
     max: Option<DateTime>,
@@ -95,7 +97,7 @@ impl DateTimeEdit {
             time_part,
             required_source: None,
             date_format_pattern: None,
-            time_format: TimeFormat::Hour24,
+            time_format: None,
             seconds: SecondsMode::Hidden,
             min: None,
             max: None,
@@ -126,8 +128,12 @@ impl DateTimeEdit {
         self
     }
 
+    /// Lock the time half to a specific clock (12h or 24h). When this
+    /// builder is *not* called, the time half defaults to the user's
+    /// current locale via [`prefers_12_hour_clock`] — same rule as
+    /// standalone `TimeEdit`.
     pub fn time_format(mut self, f: TimeFormat) -> Self {
-        self.time_format = f;
+        self.time_format = Some(f);
         self
     }
 
@@ -308,12 +314,14 @@ impl Widget for DateTimeEdit {
         let date_id = ctx.add(date_editor);
 
         let mut time_editor = TimeEdit::new(self.time_part.clone())
-            .format(self.time_format)
             .seconds(self.seconds)
             .step_minutes(self.step_minutes)
             .enabled(self.enabled)
             .read_only(self.read_only)
             .validation_behavior(self.validation_behavior);
+        if let Some(fmt) = self.time_format {
+            time_editor = time_editor.format(fmt);
+        }
         let time_feedback = time_editor.validation_feedback_signal();
         {
             let outer = self.value.clone();
