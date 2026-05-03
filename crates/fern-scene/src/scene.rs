@@ -848,11 +848,16 @@ impl Scene {
     /// dropping its children — call `orphan(id)` then `remove(id)`.
     /// No-op when `id` is unknown or has no children.
     ///
-    /// Fires one [`ItemChange::ParentChanged`] per detached child.
-    /// Scene transforms shift: the children no longer compose `id`'s
-    /// transform up the chain. Apps wanting visual stability across
-    /// the orphan call should bake `id`'s `scene_transform` into
-    /// each child's `local_pos` + `transform` first.
+    /// Fires one [`ItemChange::ParentChanged`] per detached child and
+    /// re-buckets every detached subtree in the spatial index — the
+    /// children's `scene_transform` shifts (no longer composes
+    /// `id`'s) so their scene-space AABBs change. Without re-bucketing
+    /// the index, [`items_in_rect`](Self::items_in_rect) and
+    /// [`item_at`](Self::item_at) would return stale results.
+    ///
+    /// Apps wanting *visual* stability across the orphan call should
+    /// first bake `id`'s `scene_transform` into each child's
+    /// `local_pos` + `transform`; otherwise children visibly jump.
     pub fn orphan(&mut self, id: ItemId) {
         if !self.entry_index.contains_key(&id) {
             return;
@@ -866,6 +871,11 @@ impl Scene {
         for child in children {
             if let Some(&pos) = self.entry_index.get(&child) {
                 self.entries[pos].parent = None;
+                // Re-bucket the entire detached subtree: each child's
+                // scene_transform changed (no longer composes `id`'s),
+                // so spatial-index AABBs are stale. Subtree-walk
+                // because grandchildren depend on the chain too.
+                self.rebucket_subtree(child);
                 self.item_change_signal.set(ItemChange::ParentChanged {
                     id: child,
                     old: Some(id),
@@ -1632,6 +1642,39 @@ mod tests {
         // Both still present.
         scene.remove(parent);
         assert!(scene.scene_rect(child).is_some());
+    }
+
+    #[test]
+    fn scene_orphan_rebuckets_detached_children() {
+        // After orphaning, the spatial index must reflect children's
+        // new scene-AABBs. Move a parent off-origin, attach a child,
+        // then orphan — items_in_rect at the child's *child-local*
+        // origin must now return it (because its scene_transform no
+        // longer composes the parent's offset).
+        let mut scene = Scene::new();
+        let parent = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(500.0, 500.0),
+        );
+        let child = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(0.0, 0.0),
+        );
+        scene.set_item_parent(child, Some(parent));
+        // Pre-orphan: child sits at scene (500, 500).
+        assert!(scene
+            .items_in_rect(Rect::new(495.0, 495.0, 20.0, 20.0))
+            .contains(&child));
+        scene.orphan(parent);
+        // Post-orphan: child sits at scene (0, 0); the index must
+        // reflect that — query at the new origin must hit, query at
+        // the old origin must miss.
+        assert!(scene
+            .items_in_rect(Rect::new(-5.0, -5.0, 20.0, 20.0))
+            .contains(&child));
+        assert!(!scene
+            .items_in_rect(Rect::new(495.0, 495.0, 20.0, 20.0))
+            .contains(&child));
     }
 
     #[test]
