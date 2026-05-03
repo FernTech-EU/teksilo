@@ -759,3 +759,17 @@ backends).
   revisit if a real app needs cheap animated decorations off-screen.
 - **Mini-map widget** (Phase 7 stretch). Possibly its own crate.
 - **Snap-to-other-items** beyond grid (alignment guides). Phase 7+.
+- **GPU instancing for lightweight items.** A profiled-but-deferred
+  optimization for rendering tens of thousands of homogeneous
+  `RectItem`s / `PathItem`s. The framework's existing 3-pipeline
+  renderer already issues per-shape-kind batches via
+  `RenderFrame::shapes` and `RenderFrame::draw_order`, so a single
+  visible viewport at 5k items renders in well under a frame budget.
+  Real wins from instancing would only show on stress demos beyond
+  the spatial-index cull (10k+ visible items), where the bottleneck
+  is typically memory bandwidth at the upload step rather than draw
+  count. This is a **renderer-level concern**, not a fern-scene
+  concern: the right fix is `fern-render` adopting an
+  `InstanceBuffer` for `RectItem`-like quads, after which
+  fern-scene benefits transparently. Revisit when a real app stress-
+  tests beyond the current cull-bounded budget.
