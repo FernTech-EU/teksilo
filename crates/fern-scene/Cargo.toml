@@ -12,6 +12,7 @@ fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-core = { workspace = true }
 fern-data = { workspace = true }
+accesskit = { workspace = true }
 
 [dev-dependencies]
 # Used by tests for end-to-end checks against real widgets. Not part of

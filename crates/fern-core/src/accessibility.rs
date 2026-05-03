@@ -53,6 +53,16 @@ pub enum SyntheticKind {
     /// hosting widget's own node, with `Role::Link` and the link label
     /// as its name.
     Link = 4,
+    /// A lightweight `SceneItem` rendered by `fern_scene::SceneView`.
+    /// Items live outside the arena — `SceneView::accessibility`
+    /// emits one synthetic child per visible item using
+    /// [`push_scene_item_child`](AccessNodeBuilder::push_scene_item_child).
+    SceneItem = 5,
+    /// A logical grouping declared via `Scene::add_a11y_group` (Phase
+    /// 5b). Pure AT structure — no visual counterpart. The parent's
+    /// children list orders mixed `SceneItem` and `SceneGroup`
+    /// synthetic NodeIds however the app declared the logical tree.
+    SceneGroup = 6,
 }
 
 /// Top bit of the u64 NodeId encoding. Set for synthetic (widget-
@@ -528,6 +538,85 @@ impl AccessNodeBuilder {
         self.children_collected.push((node_id, node));
         self.inner.push_child(node_id);
         node_id
+    }
+
+    /// Push a synthetic child node representing a lightweight
+    /// `SceneItem` (or `SceneGroup`) emitted by `fern_scene::SceneView`.
+    /// The caller customizes a sub-`AccessNodeBuilder` (mirroring the
+    /// `Widget::accessibility` shape) and gets back the
+    /// deterministic synthetic `NodeId` allocated for the
+    /// `(owner, element_id, kind)` tuple.
+    ///
+    /// `kind` must be [`SyntheticKind::SceneItem`] or
+    /// [`SyntheticKind::SceneGroup`]; passing any other variant
+    /// panics in debug.
+    ///
+    /// Any further synthetic children the closure pushes (a future
+    /// `SceneGroup` containing `SceneItem`s, for the Phase 5b
+    /// logical-tree walker) are forwarded into the parent's
+    /// `children_collected` and re-parented under the
+    /// just-pushed node via the closure's own `inner.push_child`
+    /// calls — same convention as `push_paragraph_child` →
+    /// `push_text_run_child`.
+    pub fn push_scene_child(
+        &mut self,
+        element_id: u64,
+        kind: SyntheticKind,
+        customize: impl FnOnce(&mut AccessNodeBuilder),
+    ) -> NodeId {
+        debug_assert!(
+            matches!(kind, SyntheticKind::SceneItem | SyntheticKind::SceneGroup),
+            "push_scene_child requires SyntheticKind::SceneItem or ::SceneGroup"
+        );
+        let Some(owner) = self.owner else {
+            debug_assert!(
+                false,
+                "push_scene_child called on a builder with no owner — \
+                 widgets must only call this from Widget::accessibility"
+            );
+            return NodeId(0);
+        };
+        let node_id = synthetic_node_id(owner, element_id, kind);
+        // Build the child against a fresh sub-builder so the item
+        // sees the same `&mut AccessNodeBuilder` shape as widgets.
+        // Owner-id is the SceneView's so further `push_scene_child`
+        // calls inside the customize closure (a `SceneGroup`
+        // emitting nested items) hash off the same owner.
+        let mut child_builder = AccessNodeBuilder::for_widget(owner);
+        customize(&mut child_builder);
+        // `build(owner)` re-derives a widget-keyed NodeId we throw
+        // away — we use our synthetic `node_id` instead. The
+        // returned `Node` carries the role / label / bounds / etc
+        // the customize closure populated; any *grand*children the
+        // closure pushed via further `push_scene_child` calls come
+        // back in the third tuple field and we forward them so the
+        // main TreeUpdate sees the full subtree.
+        let (_unused, node, grand_children) = child_builder.build(owner);
+        self.children_collected.push((node_id, node));
+        for (gid, gnode) in grand_children {
+            self.children_collected.push((gid, gnode));
+        }
+        self.inner.push_child(node_id);
+        node_id
+    }
+
+    /// Append an existing synthetic node id as a child of a
+    /// previously-pushed `SceneGroup` (or `SceneItem`) child. Used by
+    /// the Phase 5b logical-tree walker to re-parent items under
+    /// their declared logical group rather than as direct children
+    /// of the SceneView.
+    ///
+    /// Returns `true` if the parent was found (and the child was
+    /// attached), `false` if the parent isn't in
+    /// `children_collected` — the caller mis-ordered the pushes.
+    pub fn attach_scene_child_under(&mut self, parent: NodeId, child: NodeId) -> bool {
+        for (id, node) in self.children_collected.iter_mut() {
+            if *id == parent {
+                node.push_child(child);
+                return true;
+            }
+        }
+        false
     }
 
     /// Override a previously-pushed paragraph child's role to

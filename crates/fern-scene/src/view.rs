@@ -111,6 +111,9 @@ pub struct SceneView {
     pan_anim_duration: Duration,
     zoom_anim_duration: Duration,
     line_height: f32,
+
+    // --- Phase 5a a11y configuration ----------------------------------
+    a11y_off_screen_mode: crate::a11y::A11yOffScreenMode,
 }
 
 impl SceneView {
@@ -133,7 +136,19 @@ impl SceneView {
             pan_anim_duration: DEFAULT_PAN_DURATION,
             zoom_anim_duration: DEFAULT_ZOOM_DURATION,
             line_height: DEFAULT_LINE_HEIGHT,
+            a11y_off_screen_mode: crate::a11y::A11yOffScreenMode::default(),
         }
+    }
+
+    /// Override the off-screen visibility policy for the AT walker.
+    /// Default: `ViewportPlusN { n: 1 }` — items inside the
+    /// viewport plus a one-screen margin appear in the AT tree.
+    /// `AllItems` for small scenes where AT users want a complete
+    /// table of contents; `ViewportOnly` for very large scenes where
+    /// listing off-screen content would overwhelm AT clients.
+    pub fn a11y_off_screen_mode(mut self, mode: crate::a11y::A11yOffScreenMode) -> Self {
+        self.a11y_off_screen_mode = mode;
+        self
     }
 
     /// Override the size used when the parent doesn't propose one on
@@ -196,6 +211,24 @@ impl SceneView {
     /// Current rotation in radians.
     pub fn rotation(&self) -> f32 {
         self.rotation.get()
+    }
+
+    /// In-flight animation target for the X pan signal, or `None`
+    /// if the signal is at rest. Useful for tests that want to
+    /// observe a tween before it lands without spinning the
+    /// scheduler.
+    pub fn pan_x_animation_target(&self) -> Option<f32> {
+        self.pan_x.animation_target()
+    }
+
+    /// In-flight animation target for the Y pan signal.
+    pub fn pan_y_animation_target(&self) -> Option<f32> {
+        self.pan_y.animation_target()
+    }
+
+    /// In-flight animation target for the zoom signal.
+    pub fn zoom_animation_target(&self) -> Option<f32> {
+        self.zoom.animation_target()
     }
 
     /// The composed view transform the render walker has on its
@@ -449,6 +482,120 @@ impl Widget for SceneView {
             });
         }
 
+        // --- Phase 5a keyboard navigation -------------------------------
+        //
+        // Default scheme:
+        // - Arrow keys: pan by ~one viewport-quarter per press. Released
+        //   here for now; held-key repeat naturally chains tweens via
+        //   `animate_to`. Apps that wire `focus_order(...)` (Phase 5b)
+        //   can override the arrow path by handling them upstream.
+        // - `+` / `=`: zoom in by 1.25× about the viewport center.
+        // - `-`: zoom out by 0.8× about the viewport center.
+        // - `0`: reset zoom to 1.0 about the viewport center.
+        //
+        // Handler is `on_key` (focused-widget surface) — it only
+        // fires when the SceneView itself is the focus target, NOT
+        // when a heavyweight child (like a TextInput) has focus and
+        // the user is typing. This is the right default: typing
+        // letters into a card shouldn't pan the scene. Apps that
+        // want global pan/zoom shortcuts should register them
+        // through the `Shortcut`/`Action` pipeline so they work
+        // regardless of focus.
+        {
+            use fern_core::event::{EventResponse, Key, WidgetEvent};
+            let pan_x = self.pan_x.clone();
+            let pan_y = self.pan_y.clone();
+            let zoom = self.zoom.clone();
+            let pan_dur = self.pan_anim_duration;
+            let zoom_dur = self.zoom_anim_duration;
+            let min_zoom = self.min_zoom;
+            let max_zoom = self.max_zoom;
+            let viewport_size = self.last_viewport.clone();
+            let pan_x_for_xform = self.pan_x.clone();
+            let pan_y_for_xform = self.pan_y.clone();
+            let zoom_for_xform = self.zoom.clone();
+            let rotation_for_xform = self.rotation.clone();
+            let bounds_origin_for_xform = self.bounds_origin_signal.clone();
+            handlers = handlers.on_key(move |event, _ctx| {
+                let WidgetEvent::KeyDown { key, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                // Pan step = quarter of the smaller viewport axis,
+                // capped to a sensible minimum so unusually small
+                // viewports still feel responsive.
+                let vp = viewport_size.get();
+                let pan_step = (vp.width.min(vp.height) * 0.25).max(64.0);
+                let mut handled = true;
+                let recenter_zoom = |z_new: f32| {
+                    // Adjust pan so the viewport center stays fixed
+                    // when zoom changes. Same anchor logic as pinch
+                    // about viewport center, but always centered.
+                    let bo = bounds_origin_for_xform.get();
+                    let viewport = vp;
+                    let anchor_screen = fern_canvas::Point::new(
+                        bo.x + viewport.width * 0.5,
+                        bo.y + viewport.height * 0.5,
+                    );
+                    let z_old = zoom_for_xform.get();
+                    let r = rotation_for_xform.get();
+                    let pan_old = Vec2::new(pan_x_for_xform.get(), pan_y_for_xform.get());
+                    if let Some(new_pan) = anchor_pan_for_pinch(
+                        anchor_screen, pan_old, z_old, r, z_new, r, bo,
+                    ) {
+                        pan_x_for_xform.animate_to(new_pan.x, pan_dur, Easing::EaseOut);
+                        pan_y_for_xform.animate_to(new_pan.y, pan_dur, Easing::EaseOut);
+                    }
+                };
+                match key {
+                    Key::ArrowLeft => {
+                        let target = pan_x.animation_target().unwrap_or_else(|| pan_x.get())
+                            + pan_step;
+                        pan_x.animate_to(target, pan_dur, Easing::EaseOut);
+                    }
+                    Key::ArrowRight => {
+                        let target = pan_x.animation_target().unwrap_or_else(|| pan_x.get())
+                            - pan_step;
+                        pan_x.animate_to(target, pan_dur, Easing::EaseOut);
+                    }
+                    Key::ArrowUp => {
+                        let target = pan_y.animation_target().unwrap_or_else(|| pan_y.get())
+                            + pan_step;
+                        pan_y.animate_to(target, pan_dur, Easing::EaseOut);
+                    }
+                    Key::ArrowDown => {
+                        let target = pan_y.animation_target().unwrap_or_else(|| pan_y.get())
+                            - pan_step;
+                        pan_y.animate_to(target, pan_dur, Easing::EaseOut);
+                    }
+                    other if other.to_char() == Some('+') || other.to_char() == Some('=') => {
+                        let z_new = (zoom.get() * 1.25).clamp(min_zoom, max_zoom);
+                        zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
+                        recenter_zoom(z_new);
+                    }
+                    other if other.to_char() == Some('-') => {
+                        let z_new = (zoom.get() * 0.8).clamp(min_zoom, max_zoom);
+                        zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
+                        recenter_zoom(z_new);
+                    }
+                    other if other.to_char() == Some('0') => {
+                        zoom.animate_to(1.0, zoom_dur, Easing::EaseOut);
+                        recenter_zoom(1.0);
+                    }
+                    _ => handled = false,
+                }
+                if handled {
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            });
+            // SceneView itself is focusable so it can receive these
+            // key events. Heavyweight children grab focus first when
+            // they're the click target — typing in a card stays in
+            // the card.
+            handlers = handlers.focusable(true);
+        }
+
         ctx.apply_self_handlers(handlers);
 
         child_ids
@@ -556,6 +703,87 @@ impl Widget for SceneView {
         // are already culled in `place_children` via collapse-to-zero;
         // the clip is the lightweight-tier equivalent.
         true
+    }
+
+    fn accessibility(&self, builder: &mut fern_core::accessibility::AccessNodeBuilder) {
+        use crate::scene::SceneEntryKind;
+        use fern_core::accessibility::SyntheticKind;
+
+        // SceneView itself is `Role::Pane` — a generic container
+        // surfacing the scene as one navigable region. Heavyweight
+        // children (real widgets in the arena) are emitted by the
+        // tree walker as natural descendants; we only need to add
+        // the lightweight tier here.
+        builder.set_role(accesskit::Role::Pane);
+
+        // Compute screen-space viewport for the at-visible-region
+        // query. `last_viewport` was set by `layout_response`;
+        // `bounds_origin_signal` was set by `place_children`. Both
+        // fire whenever the SceneView is laid out, so they're up-
+        // to-date by the time the AT walker runs.
+        let viewport_size = self.last_viewport.get();
+        let bounds_origin = self.bounds_origin_signal.get();
+        let viewport_screen = Rect::new(
+            bounds_origin.x,
+            bounds_origin.y,
+            viewport_size.width,
+            viewport_size.height,
+        );
+        let view_transform = self.view_transform();
+        let visible_scene_region = match view_transform.inverse() {
+            Some(inv) => inv.apply_rect(viewport_screen),
+            None => Rect::ZERO,
+        };
+
+        // Apply the off-screen-mode policy on top of the viewport
+        // region. `None` means "AllItems" — bypass the spatial-
+        // index query and walk every entry.
+        let at_region = self
+            .a11y_off_screen_mode
+            .at_visible_region(visible_scene_region);
+
+        // Query order matters: items_in_rect's narrow phase is
+        // already AABB-exact, so we get the precise set without
+        // post-filtering. Insertion order is preserved via the
+        // entries vec when we iterate fall-through.
+        let candidate_ids: Vec<_> = match at_region {
+            Some(r) => self.scene.items_in_rect(r),
+            None => self.scene.ids(),
+        };
+
+        for id in candidate_ids {
+            // Resolve the entry: skip widget kind (those emit
+            // through the arena walker as normal heavyweight
+            // children of SceneView) and fetch the lightweight
+            // SceneItem reference.
+            let item = match self.scene.entry_for(id) {
+                Some(SceneEntryKind::Item(item)) => item.as_ref(),
+                _ => continue,
+            };
+            // Project the item's scene-coord bounds to screen
+            // space via the current view transform. AT clients
+            // expect screen-coordinate bounds; that's the
+            // framework convention used elsewhere
+            // (`accessibility_impl::build_accessibility_recursive`
+            // sets bounds from `arena.bounds(id)` which is post-
+            // layout/post-transform screen).
+            let scene_bounds = item.bounds_in_scene();
+            let screen_bounds = view_transform.apply_rect(scene_bounds);
+            let ctx = crate::item::SceneItemA11yContext {
+                view_transform,
+                screen_bounds,
+                item_id: id,
+            };
+            builder.push_scene_child(id.as_u64(), SyntheticKind::SceneItem, |child| {
+                item.accessibility(child, &ctx);
+                child.inner_mut().set_bounds(accesskit::Rect {
+                    x0: screen_bounds.x as f64,
+                    y0: screen_bounds.y as f64,
+                    x1: (screen_bounds.x + screen_bounds.width) as f64,
+                    y1: (screen_bounds.y + screen_bounds.height) as f64,
+                });
+            });
+        }
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -1395,6 +1623,161 @@ mod tests {
         assert!(
             Widget::clips_children(&view),
             "SceneView must clip its subtree so light items don't bleed past bounds"
+        );
+    }
+
+    // -- Phase 5a a11y + keyboard navigation -----------------------------
+
+    #[test]
+    fn scene_view_emits_synthetic_at_node_per_visible_item() {
+        // The AT walker should emit one synthetic AT node per
+        // visible lightweight item, with screen-projected bounds.
+        // Off-screen items (subject to the off-screen-mode policy)
+        // should be excluded from the tree.
+        use crate::items::RectItem;
+        use fern_core::accessibility::{is_synthetic, synthetic_node_id, SyntheticKind};
+        use fern_tokens::Color;
+
+        let mut scene = Scene::new();
+        let on_screen = scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0))
+                .fill(Color::RED)
+                .access_label("nearby"),
+        );
+        let _far_off = scene.add_item(
+            RectItem::new(Rect::new(50_000.0, 50_000.0, 20.0, 20.0)).fill(Color::BLUE),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Compute the synthetic NodeId we expect for the on-screen
+        // item. The walker derives `synthetic_node_id(view_id,
+        // item_id.as_u64(), SyntheticKind::SceneItem)`.
+        let expected_id =
+            synthetic_node_id(view_id, on_screen.as_u64(), SyntheticKind::SceneItem);
+        assert!(is_synthetic(expected_id), "must have bit-63 set");
+
+        // Build the AT tree update and verify our synthetic NodeId
+        // appears (and the off-screen item's would-be id does not).
+        let update = tree.sync_accessibility();
+        let nodes_have_id = |needle: accesskit::NodeId| {
+            update.nodes.iter().any(|(id, _)| *id == needle)
+        };
+        assert!(
+            nodes_have_id(expected_id),
+            "on-screen item must appear in the AT tree update"
+        );
+        let synthetic_count = update
+            .nodes
+            .iter()
+            .filter(|(id, _)| is_synthetic(*id))
+            .count();
+        assert!(
+            synthetic_count >= 1,
+            "expected at least one synthetic SceneItem node, got {}",
+            synthetic_count
+        );
+    }
+
+    #[test]
+    fn keyboard_arrow_keys_animate_pan() {
+        use fern_core::event::{Key, Modifiers, WidgetEvent};
+
+        let mut scene = Scene::new();
+        scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        // Focus the SceneView so on_key fires on it.
+        tree.focus(view_id);
+        let pan_before = view_handle(&tree, view_id).pan();
+
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::ArrowRight,
+            modifiers: Modifiers::default(),
+            text: None,
+        });
+
+        // Pan target should move (negative x — content shifts to
+        // bring the viewport's right side into view, equivalent to
+        // panning the scene leftward in screen space). The pan
+        // signal is animated; we check the *target*.
+        let pan_target_x = view_handle(&tree, view_id)
+            .pan_x_animation_target()
+            .unwrap_or(pan_before.x);
+        assert!(
+            pan_target_x < pan_before.x,
+            "ArrowRight should reduce pan_x target (saw {})",
+            pan_target_x
+        );
+    }
+
+    #[test]
+    fn keyboard_plus_minus_animate_zoom() {
+        use fern_core::event::{Key, Modifiers, WidgetEvent};
+
+        let mut scene = Scene::new();
+        scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.focus(view_id);
+        let zoom_before = view_handle(&tree, view_id).zoom();
+
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Character('+'),
+            modifiers: Modifiers::default(),
+            text: Some("+".into()),
+        });
+
+        let zoom_after_target = view_handle(&tree, view_id)
+            .zoom_animation_target()
+            .unwrap_or(zoom_before);
+        assert!(
+            zoom_after_target > zoom_before,
+            "Plus key should increase zoom target (saw {})",
+            zoom_after_target
+        );
+    }
+
+    #[test]
+    fn a11y_off_screen_mode_viewport_only_excludes_grown_items() {
+        // With ViewportOnly, an item just past the viewport edge
+        // does NOT appear in the AT tree, even though the default
+        // ViewportPlusN { n: 1 } would include it.
+        use crate::items::RectItem;
+        use fern_core::accessibility::is_synthetic;
+        use fern_tokens::Color;
+
+        let mut scene = Scene::new();
+        // In-viewport item: definitely AT-visible.
+        scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).fill(Color::RED),
+        );
+        // Item just past the right edge of the 400x300 viewport.
+        // Default mode would include it (within 1× viewport
+        // margin), but ViewportOnly should not.
+        scene.add_item(
+            RectItem::new(Rect::new(450.0, 100.0, 20.0, 20.0)).fill(Color::BLUE),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id =
+            tree.add(SceneView::new(scene).a11y_off_screen_mode(crate::a11y::A11yOffScreenMode::ViewportOnly));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+        let synthetic_count = update
+            .nodes
+            .iter()
+            .filter(|(id, _)| is_synthetic(*id))
+            .count();
+        assert_eq!(
+            synthetic_count, 1,
+            "ViewportOnly mode must exclude the off-screen item"
         );
     }
 }

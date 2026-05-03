@@ -138,6 +138,14 @@ impl Scene {
         }
     }
 
+    /// Crate-private: borrow an entry's kind by id. Used by
+    /// `SceneView::accessibility` to discriminate heavyweight vs
+    /// lightweight without forcing a public `SceneEntryKind` API.
+    pub(crate) fn entry_for(&self, id: ItemId) -> Option<&SceneEntryKind> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(&self.entries.get(pos)?.kind)
+    }
+
     /// Update an item's scene rectangle. No-op if the id isn't in the
     /// scene. The spatial index is re-bucketed in lockstep so future
     /// `items_in_rect` queries see the new bounds.

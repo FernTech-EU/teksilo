@@ -19,9 +19,86 @@
 //! `hit_test` + optional `label`).
 
 use fern_canvas::{Canvas, Path, Point, Rect, StrokeStyle};
+use fern_core::accessibility::AccessNodeBuilder;
 use fern_tokens::Color;
 
-use crate::item::{SceneItem, SceneItemPaintContext};
+use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
+
+/// Builder-level accessibility overrides shared by every built-in
+/// `SceneItem`. Mirrors the widget-level `.access_*` chain in CLAUDE.md
+/// (`access_label` / `access_role` / `access_description` /
+/// `access_hidden`) — the names match so muscle memory carries from
+/// widgets to scene items.
+///
+/// `AccessNodeBuilder::set_*` semantics are "scalars replace if set"
+/// — so a per-item `.access_label("X")` wins over the default
+/// derived from `SceneItem::label()`. `apply` runs *after* the
+/// default `accessibility` impl populates role + label, so the
+/// per-item layer always lands on top.
+#[derive(Debug, Default, Clone)]
+struct ItemA11yOverrides {
+    label: Option<String>,
+    description: Option<String>,
+    role: Option<accesskit::Role>,
+    hidden: bool,
+}
+
+impl ItemA11yOverrides {
+    fn apply(&self, builder: &mut AccessNodeBuilder) {
+        if let Some(role) = self.role {
+            builder.set_role(role);
+        }
+        if let Some(ref label) = self.label {
+            builder.set_name(label.clone());
+        }
+        if let Some(ref desc) = self.description {
+            builder.set_description(desc.clone());
+        }
+        if self.hidden {
+            builder.set_hidden();
+        }
+    }
+}
+
+/// Macro: emit the per-item `.access_*` builder chain on a struct
+/// that holds an `a11y: ItemA11yOverrides` field. Keeps the four
+/// methods consistent across `RectItem` / `PathItem` / `ImageItem` /
+/// `TextItem` / `GroupItem` without re-typing the bodies.
+macro_rules! item_a11y_builders {
+    () => {
+        /// Override the AT name announced for this item. Default:
+        /// `label()` (which falls back to `text` for `TextItem`,
+        /// `None` otherwise).
+        pub fn access_label(mut self, label: impl Into<String>) -> Self {
+            self.a11y.label = Some(label.into());
+            self
+        }
+
+        /// Long-form context appended to the item's announcement.
+        pub fn access_description(mut self, description: impl Into<String>) -> Self {
+            self.a11y.description = Some(description.into());
+            self
+        }
+
+        /// Override the AccessKit role for this item. Default:
+        /// item-shape-derived (`GraphicsObject` for `RectItem` /
+        /// `PathItem`, `Image` for `ImageItem`, `StaticText` for
+        /// `TextItem`, `Group` for `GroupItem`).
+        pub fn access_role(mut self, role: accesskit::Role) -> Self {
+            self.a11y.role = Some(role);
+            self
+        }
+
+        /// Hide this item from the AT tree entirely. Equivalent to
+        /// `accesskit::Node::set_hidden`. Use sparingly — most
+        /// "decorative-only" items should rely on the default
+        /// `GraphicsObject` role being interpretable by AT clients.
+        pub fn access_hidden(mut self, hidden: bool) -> Self {
+            self.a11y.hidden = hidden;
+            self
+        }
+    };
+}
 
 // ---------------------------------------------------------------------------
 // RectItem
@@ -35,6 +112,7 @@ pub struct RectItem {
     fill: Option<Color>,
     stroke: Option<(Color, f32)>,
     label: Option<String>,
+    a11y: ItemA11yOverrides,
 }
 
 impl RectItem {
@@ -46,6 +124,7 @@ impl RectItem {
             fill: None,
             stroke: None,
             label: None,
+            a11y: ItemA11yOverrides::default(),
         }
     }
 
@@ -63,11 +142,13 @@ impl RectItem {
     }
 
     /// Human-readable label used for debug introspection and the
-    /// Phase 5 a11y walker default name.
+    /// default a11y walker name.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
+
+    item_a11y_builders!();
 }
 
 impl SceneItem for RectItem {
@@ -86,6 +167,18 @@ impl SceneItem for RectItem {
 
     fn label(&self) -> Option<&str> {
         self.label.as_deref()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
+        // Rect items default to GraphicsObject — they're decorations.
+        // Apps that want a more specific role (e.g. Role::Image for a
+        // colored square that represents a logo) override via
+        // `.access_role(...)`.
+        builder.set_role(accesskit::Role::GraphicsObject);
+        if let Some(label) = self.label() {
+            builder.set_name(label);
+        }
+        self.a11y.apply(builder);
     }
 }
 
@@ -106,6 +199,7 @@ pub struct PathItem {
     fill: Option<Color>,
     stroke: Option<(Color, f32)>,
     label: Option<String>,
+    a11y: ItemA11yOverrides,
 }
 
 impl PathItem {
@@ -122,6 +216,7 @@ impl PathItem {
             fill: None,
             stroke: None,
             label: None,
+            a11y: ItemA11yOverrides::default(),
         }
     }
 
@@ -142,6 +237,8 @@ impl PathItem {
         self.label = Some(label.into());
         self
     }
+
+    item_a11y_builders!();
 }
 
 impl SceneItem for PathItem {
@@ -161,6 +258,14 @@ impl SceneItem for PathItem {
     fn label(&self) -> Option<&str> {
         self.label.as_deref()
     }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
+        builder.set_role(accesskit::Role::GraphicsObject);
+        if let Some(label) = self.label() {
+            builder.set_name(label);
+        }
+        self.a11y.apply(builder);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +281,7 @@ pub struct ImageItem {
     bounds: Rect,
     name: String,
     label: Option<String>,
+    a11y: ItemA11yOverrides,
 }
 
 impl ImageItem {
@@ -186,6 +292,7 @@ impl ImageItem {
             bounds,
             name: name.into(),
             label: None,
+            a11y: ItemA11yOverrides::default(),
         }
     }
 
@@ -194,6 +301,8 @@ impl ImageItem {
         self.label = Some(label.into());
         self
     }
+
+    item_a11y_builders!();
 }
 
 impl SceneItem for ImageItem {
@@ -207,6 +316,16 @@ impl SceneItem for ImageItem {
 
     fn label(&self) -> Option<&str> {
         self.label.as_deref()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
+        // Default: Role::Image. Apps that want decorative-only
+        // semantics should `.access_hidden(true)`.
+        builder.set_role(accesskit::Role::Image);
+        if let Some(label) = self.label() {
+            builder.set_name(label);
+        }
+        self.a11y.apply(builder);
     }
 }
 
@@ -225,6 +344,7 @@ pub struct TextItem {
     bounds: Rect,
     color: Color,
     label: Option<String>,
+    a11y: ItemA11yOverrides,
 }
 
 impl TextItem {
@@ -237,6 +357,7 @@ impl TextItem {
             bounds,
             color: Color::BLACK,
             label: None,
+            a11y: ItemA11yOverrides::default(),
         }
     }
 
@@ -251,6 +372,8 @@ impl TextItem {
         self.label = Some(label.into());
         self
     }
+
+    item_a11y_builders!();
 }
 
 impl SceneItem for TextItem {
@@ -272,6 +395,14 @@ impl SceneItem for TextItem {
         // sensible default.
         self.label.as_deref().or(Some(self.text.as_str()))
     }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
+        builder.set_role(accesskit::Role::Label);
+        if let Some(label) = self.label() {
+            builder.set_name(label);
+        }
+        self.a11y.apply(builder);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +421,7 @@ impl SceneItem for TextItem {
 pub struct GroupItem {
     bounds: Rect,
     label: Option<String>,
+    a11y: ItemA11yOverrides,
 }
 
 impl GroupItem {
@@ -298,15 +430,18 @@ impl GroupItem {
         Self {
             bounds,
             label: None,
+            a11y: ItemA11yOverrides::default(),
         }
     }
 
-    /// Human-readable label. Used by the Phase 5 a11y walker as the
-    /// default group name.
+    /// Human-readable label. Used by the a11y walker as the default
+    /// group name.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
     }
+
+    item_a11y_builders!();
 }
 
 impl SceneItem for GroupItem {
@@ -328,6 +463,16 @@ impl SceneItem for GroupItem {
 
     fn label(&self) -> Option<&str> {
         self.label.as_deref()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
+        // Group items get Role::Group regardless of visual: they
+        // exist to organize AT structure for items beneath them.
+        builder.set_role(accesskit::Role::Group);
+        if let Some(label) = self.label() {
+            builder.set_name(label);
+        }
+        self.a11y.apply(builder);
     }
 }
 

@@ -43,6 +43,7 @@
 //! tree.add(view);
 //! ```
 
+pub mod a11y;
 pub mod index;
 pub mod item;
 pub mod items;
@@ -50,8 +51,9 @@ pub mod scene;
 pub mod transform;
 pub mod view;
 
+pub use a11y::A11yOffScreenMode;
 pub use index::{GridHashIndex, SpatialIndex};
-pub use item::{ItemId, SceneItem, SceneItemPaintContext};
+pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
 pub use scene::Scene;
 pub use view::SceneView;

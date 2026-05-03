@@ -38,8 +38,9 @@ not yet implemented.
 | 1 | `Scene` + `SceneView` + free positioning | ✅ landed |
 | 2 | View transform, pan/zoom/rotate, gestures, inertial fling | ✅ landed |
 | 3 | `SpatialIndex` trait + `GridHashIndex` + viewport culling | ✅ landed |
-| 4 | `SceneItem` trait + lightweight built-ins | ✅ this doc |
-| 5a / 5b | Visual-default a11y / a11y-shaping tools | not yet |
+| 4 | `SceneItem` trait + lightweight built-ins | ✅ landed |
+| 5a | Visual-default a11y + keyboard navigation | ✅ landed (see `fern-scene-a11y.md`) |
+| 5b | A11y-shaping tools | not yet |
 | 6 | Selection, marquee, drag-to-move | not yet |
 | 7 | Polish + R-tree alternative + mini-map | not yet |
 

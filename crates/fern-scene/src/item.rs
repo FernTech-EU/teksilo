@@ -20,6 +20,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fern_canvas::{Canvas, Point, Rect, Transform2D};
+use fern_core::accessibility::AccessNodeBuilder;
 
 /// Opaque identifier for an item in a [`Scene`](crate::Scene).
 /// Generated monotonically by `Scene::add_widget` / `add_item`.
@@ -72,8 +73,12 @@ pub struct SceneItemPaintContext {
 /// same [`Scene`](crate::Scene) and share the same spatial index for
 /// queries / culling.
 ///
-/// Phase 4 is paint-and-hit-test only; the `accessibility` hook
-/// lands in Phase 5 once the synthetic-NodeId surface is in place.
+/// `accessibility(builder, ctx)` defaults to an `accesskit::Role`
+/// derived from the item shape (overridable per-built-in) plus the
+/// item's `label` if any. Apps customise the default via the per-
+/// item `.access_*` chain (`access_label`, `access_role`,
+/// `access_description`, `access_hidden`) — same naming convention
+/// as the widget-level overrides.
 pub trait SceneItem: std::fmt::Debug + Send + 'static {
     /// Axis-aligned bounding box in scene coordinates. Used by the
     /// spatial index for bucketing / queries / culling. The trait
@@ -100,12 +105,42 @@ pub trait SceneItem: std::fmt::Debug + Send + 'static {
     }
 
     /// Optional human-readable label, shown by debug introspection
-    /// and used by the Phase 5 a11y walker as the default
-    /// `accessibility` name when an item author hasn't overridden
-    /// it.
+    /// and used by the default `accessibility` impl as the AT name
+    /// when an item author hasn't overridden it via
+    /// `.access_label(...)`.
     fn label(&self) -> Option<&str> {
         None
     }
+
+    /// Populate the AccessKit `AccessNodeBuilder` for this item.
+    /// Default: `Role::GraphicsObject` plus the item's `label()` as
+    /// the AT name if set. Override this for items that want a
+    /// different default role (`Role::Image` for `ImageItem`,
+    /// `Role::StaticText` for `TextItem`, `Role::Group` for
+    /// `GroupItem`).
+    ///
+    /// The bounds (screen-projected) and any per-item `.access_*`
+    /// overrides are layered on by `SceneView::accessibility` after
+    /// this method runs — so widget-style "set role/label,
+    /// framework adds the rest" composition holds.
+    fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
+        builder.set_role(accesskit::Role::GraphicsObject);
+        if let Some(label) = self.label() {
+            builder.set_name(label);
+        }
+    }
+}
+
+/// Context passed to [`SceneItem::accessibility`]. Carries the
+/// SceneView's current `view_transform` (so an item that wants to
+/// emit scene-coord bounds in screen space can project itself), the
+/// item's screen-projected AABB, and the item's [`ItemId`] for
+/// callbacks that route AT actions back to the owning item.
+#[derive(Debug, Clone, Copy)]
+pub struct SceneItemA11yContext {
+    pub view_transform: Transform2D,
+    pub screen_bounds: Rect,
+    pub item_id: ItemId,
 }
 
 #[cfg(test)]
