@@ -221,6 +221,9 @@ time-edit-placeholder = Sélectionner une heure
 
 date-time-edit-name = Date et heure
 date-time-edit-placeholder = Sélectionner la date et l'heure
+date-time-edit-date-name = Date
+date-time-edit-time-name = Heure
+date-time-edit-trigger-tooltip = Ouvrir le calendrier
 date-range-edit-name = Plage de dates
 date-range-edit-placeholder = Sélectionner une plage de dates
 date-range-edit-start-name = Date de début

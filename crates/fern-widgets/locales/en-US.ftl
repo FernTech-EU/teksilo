@@ -239,6 +239,9 @@ time-edit-placeholder = Select a time
 
 date-time-edit-name = Date and time
 date-time-edit-placeholder = Select date and time
+date-time-edit-date-name = Date
+date-time-edit-time-name = Time
+date-time-edit-trigger-tooltip = Open calendar
 date-range-edit-name = Date range
 date-range-edit-placeholder = Select date range
 date-range-edit-start-name = Start date

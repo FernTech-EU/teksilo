@@ -222,12 +222,19 @@ impl TimeEdit {
         if let Some(p) = self.pattern_override.clone() {
             return p;
         }
-        match (format, self.seconds) {
-            (TimeFormat::Hour24, SecondsMode::Hidden) => "%H:%M".into(),
-            (TimeFormat::Hour24, SecondsMode::Editable) => "%H:%M:%S".into(),
-            (TimeFormat::Hour12, SecondsMode::Hidden) => "%I:%M %p".into(),
-            (TimeFormat::Hour12, SecondsMode::Editable) => "%I:%M:%S %p".into(),
-        }
+        time_pattern_for(format, self.seconds)
+    }
+}
+
+/// Resolve the strftime-subset pattern for the given clock + seconds
+/// mode. `pub(crate)` so `DateTimeEdit` can share TimeEdit's pattern
+/// derivation rules without duplicating the matcher.
+pub(crate) fn time_pattern_for(format: TimeFormat, seconds: SecondsMode) -> String {
+    match (format, seconds) {
+        (TimeFormat::Hour24, SecondsMode::Hidden) => "%H:%M".into(),
+        (TimeFormat::Hour24, SecondsMode::Editable) => "%H:%M:%S".into(),
+        (TimeFormat::Hour12, SecondsMode::Hidden) => "%I:%M %p".into(),
+        (TimeFormat::Hour12, SecondsMode::Editable) => "%I:%M:%S %p".into(),
     }
 }
 
@@ -595,7 +602,7 @@ impl Widget for TimeEdit {
     }
 }
 
-fn clamp_time(t: Time, min: Option<Time>, max: Option<Time>) -> Time {
+pub(crate) fn clamp_time(t: Time, min: Option<Time>, max: Option<Time>) -> Time {
     let t = match min {
         Some(min) if t < min => min,
         _ => t,
@@ -606,11 +613,58 @@ fn clamp_time(t: Time, min: Option<Time>, max: Option<Time>) -> Time {
     }
 }
 
+/// Build a time-validator closure suitable for plugging into
+/// `TextInputField::validator(...)`. Mirrors
+/// [`crate::date_edit::build_date_validator`] in shape: lenient
+/// strict-parse → clamp-recovery → reject. Used by `TimeEdit` itself
+/// AND by `DateTimeEdit`'s time half so both share the same parsing
+/// semantics without duplicating the closure body.
+pub(crate) fn build_time_validator(
+    pattern: Rc<ParsedPattern>,
+    min: Option<Time>,
+    max: Option<Time>,
+    behavior: ValidationBehavior,
+) -> crate::primitives::text_input_field::ValidatorFn {
+    Rc::new(move |raw: &str| -> ValidationOutcome {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return ValidationOutcome::Valid;
+        }
+        if let Some(ParsedValue::Time(t)) =
+            parse_value(&pattern, trimmed, ParseTarget::TimeOnly)
+        {
+            let clamped = clamp_time(t, min, max);
+            let formatted = format_value(&pattern, None, Some(clamped));
+            if formatted == trimmed && clamped == t {
+                return ValidationOutcome::Valid;
+            }
+            return ValidationOutcome::Corrected {
+                corrected: formatted.clone(),
+                message: resolve_message_widget(
+                    "validation-corrected-to",
+                    &[("value", formatted.clone().into())],
+                ),
+            };
+        }
+        if behavior == ValidationBehavior::AutoCorrect
+            && let Some((corrected, msg)) = try_clamp_time_recovery(&pattern, trimmed, min, max)
+        {
+            return ValidationOutcome::Corrected {
+                corrected,
+                message: msg,
+            };
+        }
+        ValidationOutcome::Invalid {
+            message: resolve_message_widget("time-edit-validation-not-a-time", &[]),
+        }
+    })
+}
+
 /// AutoCorrect recovery for time inputs. Walks the pattern, extracts
 /// per-segment digit runs, clamps each value to its valid range
 /// (hour → 0..=23 in 24h or 1..=12 in 12h, minute/second → 0..=59),
 /// and re-constructs. The AM/PM segment is parsed permissively.
-fn try_clamp_time_recovery(
+pub(crate) fn try_clamp_time_recovery(
     pattern: &ParsedPattern,
     raw: &str,
     min: Option<Time>,
