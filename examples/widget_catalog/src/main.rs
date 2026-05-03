@@ -3377,6 +3377,7 @@ impl WidgetCatalog {
 
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .register_tooltips(vec![
             TooltipContent::new(

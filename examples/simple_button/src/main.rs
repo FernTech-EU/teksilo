@@ -2,7 +2,6 @@
 //!
 //! Run with: `cargo run -p simple-button`
 
-use fern_inspector::FernAppBuilderInspectorExt;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{Button, ButtonVariant};
 

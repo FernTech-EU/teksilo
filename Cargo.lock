@@ -1520,6 +1520,7 @@ dependencies = [
  "fern-core",
  "fern-data",
  "fern-i18n",
+ "fern-inspector",
  "fern-platform",
  "fern-render",
  "fern-resources",
@@ -4329,7 +4330,6 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 name = "simple-button"
 version = "0.1.0"
 dependencies = [
- "fern-inspector",
  "fern-ui",
 ]
 

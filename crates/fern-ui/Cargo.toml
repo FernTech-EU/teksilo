@@ -18,6 +18,7 @@ default = [
     "widgets",
     "text",
     "i18n",
+    "inspector",
     "fonts-arabic",
     "fonts-hebrew",
 ]
@@ -26,6 +27,13 @@ widgets = ["dep:fern-widgets"]
 text = ["dep:fern-text", "fern-app/text"]
 i18n = ["dep:fern-i18n"]
 rich-text = ["widgets", "fern-widgets/rich-text"]
+# Debug-only in-app inspector (`F12`, picker, AllBounds overlay,
+# theme/locale switchers, models tab, …). Pulls in `rich-text`
+# transitively because the Tree tab's filter input requires it. The
+# crate itself is `cfg(debug_assertions)` — release builds compile to
+# a no-op — but the Cargo dep is unconditional; turn this feature off
+# if you want to drop the transitive `rich-text` cost too.
+inspector = ["dep:fern-inspector", "rich-text"]
 # Forwards clipboard support through fern-app so `RichTextEditor::editor`
 # can copy/cut/paste via the system clipboard. Without this feature the
 # editor silently no-ops clipboard commands (they are filtered at the
@@ -84,6 +92,7 @@ fern-widgets = { workspace = true, optional = true }
 # Noto fonts bundled.
 fern-text = { path = "../fern-text", version = "0.1.0", optional = true, default-features = false }
 fern-i18n = { workspace = true, optional = true }
+fern-inspector = { workspace = true, optional = true }
 fern-resources = { workspace = true }
 
 [dev-dependencies]

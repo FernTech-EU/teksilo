@@ -39,6 +39,23 @@ pub use fern_text::text_document;
 #[cfg(feature = "i18n")]
 pub use fern_i18n as i18n;
 
+/// Debug-only in-app inspector. Apps wire it in with one line:
+///
+/// ```ignore
+/// use fern_ui::prelude::*;
+///
+/// FernAppBuilder::new()
+///     .install_inspector_in_debug()   // no-op in release
+///     .initial_window(WindowConfig::new()...)
+///     .run();
+/// ```
+///
+/// `FernAppBuilderInspectorExt` is also re-exported from
+/// [`prelude`] so the umbrella import (`use fern_ui::prelude::*;`)
+/// makes `install_inspector_in_debug()` callable directly.
+#[cfg(feature = "inspector")]
+pub use fern_inspector as inspector;
+
 pub mod prelude {
     // DSL entry point
     pub use fern_ui_macros::fern;
@@ -87,4 +104,12 @@ pub mod prelude {
     pub use fern_i18n::{
         I18nConfig, LanguageIdentifier, LocalizedString, localized, tr, tr_widget,
     };
+
+    // Debug inspector — the extension trait that adds
+    // `install_inspector_in_debug()` to `FernAppBuilder`. The trait is
+    // always present (release builds get a no-op shim); only the
+    // re-export is gated so apps that disable the `inspector` feature
+    // don't pull in the dep.
+    #[cfg(feature = "inspector")]
+    pub use fern_inspector::FernAppBuilderInspectorExt;
 }

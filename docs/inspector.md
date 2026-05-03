@@ -22,10 +22,13 @@ End-to-end smoke example: `cargo run -p simple-button` then press F12.
 
 ## Enabling the inspector
 
-One line at the builder, regardless of release/debug:
+One line at the builder, regardless of release/debug. The
+`FernAppBuilderInspectorExt` extension trait is re-exported from the
+umbrella prelude (`fern_ui::prelude::*`) so `install_inspector_in_debug()`
+is callable without an extra import or dependency:
 
 ```rust
-use fern_inspector::FernAppBuilderInspectorExt;
+use fern_ui::prelude::*;
 
 FernAppBuilder::new()
     .theme(Theme::light_default())
@@ -33,6 +36,14 @@ FernAppBuilder::new()
     .initial_window(WindowConfig::new()…)
     .run();
 ```
+
+The inspector ships behind the umbrella's `inspector` feature
+(default-on). To drop it (and the transitive `rich-text` chain it
+pulls in for the Tree-tab filter), depend on `fern-ui` with
+`default-features = false` and re-add only the features you need.
+Apps that drop the feature can still call
+`install_inspector_in_debug` only if they take a direct dependency
+on `fern-inspector` themselves.
 
 `install_inspector_in_debug` is a no-op stub when
 `!cfg(debug_assertions)`, so the call site stays clean of `#[cfg]`
