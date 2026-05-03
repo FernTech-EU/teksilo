@@ -37,10 +37,9 @@ use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
 use fern_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
-use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::common::datetime::pattern::{
     format_value, mask_for_pattern, parse_value, segment_at_position, step_time_field,
@@ -48,8 +47,9 @@ use crate::common::datetime::pattern::{
 };
 use crate::common::datetime::Time;
 use crate::date_edit::ValidationBehavior;
-use crate::primitives::text_input_field::{TextInputField, ValidationFeedback, ValidationOutcome};
-use crate::primitives::{Padding, RectWidget, ZStack};
+use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
+use crate::primitives::MinSize;
+use crate::text_input::TextInput;
 
 const DEFAULT_WIDTH: f32 = 96.0;
 
@@ -99,7 +99,6 @@ pub struct TimeEdit {
     focused: Signal<bool>,
     feedback: Signal<ValidationFeedback>,
     root_child_id: Option<WidgetId>,
-    field_id: Option<WidgetId>,
 }
 
 impl std::fmt::Debug for TimeEdit {
@@ -132,7 +131,6 @@ impl TimeEdit {
             focused: Signal::new(false),
             feedback: Signal::new(ValidationFeedback::Pristine),
             root_child_id: None,
-            field_id: None,
         }
     }
 
@@ -260,9 +258,6 @@ impl Widget for TimeEdit {
             }
         }
 
-        let theme = ctx.theme_signal().get();
-        let field_style = theme.components.text_field;
-        let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
         let read_only = self.read_only;
 
@@ -399,18 +394,20 @@ impl Widget for TimeEdit {
         // page keys).
         let _ = step_minutes;
 
-        // ── Inner editing field ───────────────────────────────
-        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
-
+        // ── TextInput composite ───────────────────────────────
+        // Same trick as DateEdit: the framing, padding, validation
+        // strip, and focus-driven border all live in TextInput. We
+        // just pass the time-shaped configuration (pattern-derived
+        // input mask, validator, char filter, commit handlers) and
+        // wrap with a min-width floor so the field sits at the
+        // editor's design width.
         let pattern_for_filter = pattern_rc.clone();
         let mask_string = mask_for_pattern(&pattern_rc);
-        let mut field = TextInputField::new(self.text_signal.clone())
+        let mut text_input = TextInput::new(self.text_signal.clone())
+            .placeholder(self.placeholder.clone())
             .enabled(enabled)
             .read_only(read_only)
-            .placeholder(self.placeholder.clone())
-            .text_height(text_area_height)
-            .input_mask(&mask_string)
+            .input_mask(mask_string)
             .validator({
                 let v = validator.clone();
                 move |s| (v)(s)
@@ -419,7 +416,6 @@ impl Widget for TimeEdit {
                 if c.is_ascii_digit() || c == ' ' || c == ':' {
                     return true;
                 }
-                // Accept AM/PM letters in 12h mode.
                 if matches!(c, 'a' | 'A' | 'p' | 'P' | 'm' | 'M') {
                     return true;
                 }
@@ -431,10 +427,24 @@ impl Widget for TimeEdit {
                     }
                 }
                 false
+            })
+            .on_submit_fn({
+                let commit = commit.clone();
+                move |ctx_evt| commit(ctx_evt)
+            })
+            .on_blur_fn({
+                let commit = commit.clone();
+                move |ctx_evt| commit(ctx_evt)
             });
-        // Mirror feedback signal.
+        if let Some(label) = self.label.clone() {
+            text_input = text_input.label(label);
+        }
+
+        let caret_for_step = text_input.caret_position();
+        let caret_setter_for_step = text_input.caret_setter();
+
         {
-            let inner_feedback = field.validation_feedback_signal();
+            let inner_feedback = text_input.validation_feedback_signal();
             let outer_feedback = self.feedback.clone();
             ctx.effect(&inner_feedback, move |fb| {
                 if outer_feedback.get() != *fb {
@@ -442,37 +452,12 @@ impl Widget for TimeEdit {
                 }
             });
         }
-        {
-            let commit = commit.clone();
-            field = field.on_submit_fn(move |ctx_evt| commit(ctx_evt));
-        }
-        {
-            let commit = commit.clone();
-            field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
-        }
 
-        // Capture caret signal AND a caret setter BEFORE moving the
-        // field into the tree. The setter restores the caret after a
-        // programmatic text rewrite (otherwise `cursor.insert_text`
-        // parks the caret at document end and the user loses their
-        // segment between every Up/Down step).
-        let caret_for_step = field.caret_position();
-        let caret_setter_for_step = field.caret_setter();
+        let text_input_id = ctx.add(text_input);
+        let root_id = ctx.add(MinSize::new(DEFAULT_WIDTH, 0.0).child_id(text_input_id));
+        self.root_child_id = Some(root_id);
 
-        // A11y override: focused field announces as TimeInput, not
-        // TextInput. The field's caret/selection/character AT stays.
-        let mut field_with_a11y = field.access_role(Role::TimeInput);
-        if let Some(label) = self.label.clone() {
-            field_with_a11y = field_with_a11y.access_label(label);
-        }
-        let field_id = ctx.add(field_with_a11y);
-        self.field_id = Some(field_id);
-
-        // ── Segment-stepping helper — installed into the on_key_preview
-        // self handler below. Reads live caret position, looks up the
-        // segment under the caret (hour/minute/second/period), and
-        // applies a single field step. Wrapped in `Rc` so the closure
-        // is reusable from the self-attached HandlerSet.
+        // ── Segment-stepping helper ───────────────────────────
         let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {
             let pattern_for_step = pattern_rc.clone();
             let value_for_step = self.value.clone();
@@ -502,55 +487,6 @@ impl Widget for TimeEdit {
                 ctx_evt.request_frame();
             })
         };
-
-        let padded_field_id = ctx.add(
-            Padding::new(
-                field_style.padding_vertical,
-                field_style.padding_horizontal,
-                field_style.padding_vertical,
-                field_style.padding_horizontal,
-            )
-            .child_id(field_id),
-        );
-
-        // Frame.
-        let border_role = self.focused.map(|f| {
-            if *f {
-                BorderRole::Focused
-            } else {
-                BorderRole::Default
-            }
-        });
-        let border_width_signal = self.focused.map(move |f| {
-            if *f {
-                focus_ring_width
-            } else {
-                field_style.border_width
-            }
-        });
-        let bg = RectWidget::new()
-            .background(SurfaceRole::Content)
-            .border_color(border_role)
-            .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
-        let bg_id = ctx.add(bg);
-        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padded_field_id));
-
-        let sized_id = ctx.add(
-            crate::primitives::MinSize::new(DEFAULT_WIDTH, field_style.height).child_id(zstack_id),
-        );
-
-        // ── Inline validation strip ───────────────────────────
-        // VStack(field, strip) wrap; strip collapses to zero size when
-        // feedback is Pristine/Valid (see ValidationStrip::layout_response).
-        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(self.feedback.clone()));
-        let root_with_strip = ctx.add(
-            crate::primitives::VStack::new()
-                .spacing(field_style.validation_strip_gap)
-                .add_child(sized_id)
-                .add_child(strip_id),
-        );
-        self.root_child_id = Some(root_with_strip);
 
         // ── Self handlers: focus_within + segment-step keys ────
         // Self-attached `on_key_preview` claims arrow / page keys
@@ -589,7 +525,7 @@ impl Widget for TimeEdit {
             fern_core::binding::BindingLevel::AccessibilityOnly,
         );
 
-        vec![root_with_strip]
+        vec![root_id]
     }
 
     fn layout_response(

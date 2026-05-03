@@ -78,7 +78,7 @@ use crate::date_edit::{
 };
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::{
-    Center, Divider, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, VStack, ZStack,
+    Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, VStack, ZStack,
 };
 
 type OnRangeChanged = Rc<dyn Fn(Option<DateRange>, &mut EventContext)>;
@@ -383,18 +383,17 @@ impl Widget for DateRangeEdit {
             }
         });
         let trigger_id = ctx.add(trigger_btn);
-        let divider_id = ctx.add(
-            Padding::new(4.0, 0.0, 4.0, 0.0)
-                .child(Divider::vertical().thickness(1.0).color(BorderRole::Default)),
-        );
 
         // ── Row layout ─────────────────────────────────────────
+        // No divider before the trailing trigger — Int UI's
+        // BuiltInButton sits flush inside the field's trailing slot
+        // (the same convention TextInput uses) and the button's own
+        // hover/pressed background gives it enough visual separation.
         let row = HStack::new()
             .spacing(0.0)
             .add_child(start_field_id)
             .add_child(separator_id)
             .add_child(end_field_id)
-            .add_child(divider_id)
             .add_child(trigger_id);
         let inline_row_id = ctx.add(row);
         let row_id = ctx.add(

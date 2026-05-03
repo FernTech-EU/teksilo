@@ -63,10 +63,10 @@ use fern_core::overlay::{
 };
 use fern_core::signal::Signal;
 use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
-use fern_core::widget_builder::{HandlerSet, WidgetBuilder};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::resolve_message_widget;
-use fern_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use fern_tokens::{CornerRadius, SurfaceRole};
 use jiff::civil::Weekday;
 
 use crate::calendar::Calendar;
@@ -77,10 +77,8 @@ use crate::common::datetime::pattern::{
 use crate::common::datetime::types::{today_local, YearMonth};
 use crate::common::datetime::Date;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
-use crate::primitives::{
-    Center, Divider, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, ZStack,
-};
-use crate::primitives::text_input_field::TextInputField;
+use crate::primitives::{Center, FixedSize, IconWidget, MinSize, RectWidget, ZStack};
+use crate::text_input::TextInput;
 
 const DEFAULT_WIDTH: f32 = 144.0;
 
@@ -138,9 +136,7 @@ pub struct DateEdit {
     popover_open: Signal<bool>,
     // Build state
     root_child_id: Option<WidgetId>,
-    field_id: Option<WidgetId>,
     calendar_id: Option<WidgetId>,
-    trigger_id: Option<WidgetId>,
 }
 
 impl std::fmt::Debug for DateEdit {
@@ -176,9 +172,7 @@ impl DateEdit {
             focused: Signal::new(false),
             popover_open: Signal::new(false),
             root_child_id: None,
-            field_id: None,
             calendar_id: None,
-            trigger_id: None,
         }
     }
 
@@ -309,9 +303,7 @@ impl Widget for DateEdit {
         }
 
         let theme = ctx.theme_signal().get();
-        let field_style = theme.components.text_field;
         let date_style = theme.components.date_edit;
-        let focus_ring_width = theme.shape.focus_ring_width;
         let enabled = self.enabled;
         let read_only = self.read_only;
 
@@ -461,135 +453,9 @@ impl Widget for DateEdit {
         // (replaces the pre-segment ±day stepping that used to live
         // here).
 
-        // ── Inner editing field ───────────────────────────────
-        let inner_height = (field_style.height - 2.0 * field_style.border_width).max(0.0);
-        let text_area_height = (inner_height - 2.0 * field_style.padding_vertical).max(0.0);
-
-        let pattern_for_filter = pattern_rc.clone();
-        let access_label_for_field = self.label.clone();
-        // Auto-derive an input mask from the pattern: gives the empty
-        // field a `__/__/____` template + per-position char filtering.
-        let mask_string = mask_for_pattern(&pattern_rc);
-        let mut field = TextInputField::new(self.text_signal.clone())
-            .enabled(enabled)
-            .read_only(read_only)
-            .placeholder(placeholder.clone())
-            .text_height(text_area_height)
-            .input_mask(&mask_string)
-            .validator({
-                let v = validator.clone();
-                move |s| (v)(s)
-            })
-            .char_filter(move |c: char| {
-                // Accept digits + any literal char that appears in the pattern
-                // tokens (separators) + leading minus for negative years.
-                if c.is_ascii_digit() || c == '-' || c == ' ' {
-                    return true;
-                }
-                for tok in &pattern_for_filter.tokens {
-                    if let PatternToken::Literal(s) = tok {
-                        if s.chars().any(|x| x == c) {
-                            return true;
-                        }
-                    }
-                }
-                false
-            });
-        // Mirror the field's published feedback into our own signal
-        // so the wrapper's accessibility() and the ValidationStrip
-        // both bind to the same source.
-        {
-            let inner_feedback = field.validation_feedback_signal();
-            let outer_feedback = self.feedback.clone();
-            ctx.effect(&inner_feedback, move |fb| {
-                if outer_feedback.get() != *fb {
-                    outer_feedback.set(fb.clone());
-                }
-            });
-        }
-        // Submit on Enter — commit + keep focus.
-        {
-            let commit = commit.clone();
-            field = field.on_submit_fn(move |ctx_evt| commit(ctx_evt));
-        }
-        // Commit on blur.
-        {
-            let commit = commit.clone();
-            field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
-        }
-
-        // Capture caret signal AND a caret setter BEFORE moving the
-        // field into the tree. The setter is a no-op until `build()`
-        // populates the field's state slot; segment_step uses it to
-        // restore the caret AFTER rewriting text (otherwise
-        // `cursor.insert_text` parks the caret at the document end).
-        let caret_for_step = field.caret_position();
-        let caret_setter_for_step = field.caret_setter();
-
-        // A11y override on the field: AT users who tab into the
-        // editable surface hear "Date input" rather than "Edit text".
-        // The field's existing TextInput-flavored AT (text content,
-        // selection, character lengths, word starts) all stays — only
-        // the role + label slot are overridden by the access_* layer.
-        let mut field_with_a11y = field.access_role(Role::DateInput);
-        if let Some(label) = access_label_for_field {
-            field_with_a11y = field_with_a11y.access_label(label);
-        }
-        let field_id = ctx.add(field_with_a11y);
-        self.field_id = Some(field_id);
-
-        // ── Segment-stepping helper — captured by the on_key_preview
-        // self handler below. Reads live caret position, looks up the
-        // segment under the caret, and applies a single field step
-        // (year / month / day / hour / minute / second / period).
-        // Wrapped in `Rc` so the closure is reusable from the self-
-        // attached HandlerSet without capturing-and-moving once.
-        let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {
-            let pattern_for_step = pattern_rc.clone();
-            let value_for_step = self.value.clone();
-            let text_for_step = self.text_signal.clone();
-            let on_changed_for_step = on_value_changed.clone();
-            let min_for_step = self.min_date;
-            let max_for_step = self.max_date;
-            let caret_for_step = caret_for_step.clone();
-            let caret_setter = caret_setter_for_step.clone();
-            Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
-                let caret = caret_for_step.get();
-                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
-                else {
-                    return;
-                };
-                let current = value_for_step.get().unwrap_or_else(today_local);
-                let stepped = step_date_field(current, kind, delta);
-                let clamped = clamp_date(stepped, min_for_step, max_for_step);
-                value_for_step.set(Some(clamped));
-                text_for_step.set(format_value(&pattern_for_step, Some(clamped), None));
-                // Restore the caret to where it was — `text_signal.set`
-                // → field text effect → `cursor.insert_text` parked the
-                // caret at the document end. Without this restore the
-                // user has to re-click the segment between every Up/Down.
-                caret_setter(caret);
-                if let Some(cb) = on_changed_for_step.as_ref() {
-                    cb(Some(clamped), ctx_evt);
-                }
-                ctx_evt.request_frame();
-            })
-        };
-
-        let padded_field_id = ctx.add(
-            Padding::new(
-                field_style.padding_vertical,
-                0.0,
-                field_style.padding_vertical,
-                0.0,
-            )
-            .child_id(field_id),
-        );
-        let expanded_field_id = ctx.add(
-            crate::primitives::Expand::horizontal().child_id(padded_field_id),
-        );
-
         // ── Calendar popover (pre-built dormant) ──────────────
+        // Built before the TextInput composite so the trailing-slot
+        // trigger button can capture the calendar's id.
         let calendar_id_opt = if self.show_calendar_button {
             // Bridge signal: the calendar binds to a parallel
             // `Signal<Option<Date>>` so its internal cell-render +
@@ -651,8 +517,9 @@ impl Widget for DateEdit {
         };
         self.calendar_id = calendar_id_opt;
 
-        // ── Calendar trigger button ────────────────────────────
-        let trigger_id_opt = if self.show_calendar_button {
+        // ── Calendar trigger button (built as a value, dropped into
+        //    the TextInput's trailing slot) ──────────────────────
+        let trigger_widget_opt: Option<CalendarTriggerButton> = if self.show_calendar_button {
             let popover_open = self.popover_open.clone();
             let calendar_id = calendar_id_opt.expect("calendar built when button enabled");
             let placement = self.calendar_popover_placement.clone();
@@ -663,7 +530,7 @@ impl Widget for DateEdit {
                     popover_open.set(false);
                 })
             };
-            let trigger_widget = CalendarTriggerButton::new(
+            Some(CalendarTriggerButton::new(
                 date_style.calendar_button_width,
                 date_style.calendar_icon_size,
                 enabled && !read_only,
@@ -692,74 +559,121 @@ impl Widget for DateEdit {
                         ctx_evt.request_focus(calendar_id);
                     }
                 }),
-            );
-            Some(ctx.add(trigger_widget))
+            ))
         } else {
             None
         };
-        self.trigger_id = trigger_id_opt;
 
-        // ── Row: field | divider | trigger ────────────────────
-        let row_id = {
-            let mut row = HStack::new().spacing(0.0);
-            row = row.add_child(expanded_field_id);
-            if let Some(trigger_id) = trigger_id_opt {
-                let divider = Divider::vertical()
-                    .thickness(1.0)
-                    .color(BorderRole::Default);
-                let divider_id = ctx.add(Padding::new(2.0, 0.0, 2.0, 0.0).child(divider));
-                row = row.add_child(divider_id).add_child(trigger_id);
-            }
-            ctx.add(row)
+        // ── TextInput composite ───────────────────────────────
+        // Drops the date-shaped editing surface into the same frame
+        // every TextInput uses (border, padding, validation strip,
+        // focus border) and parks the calendar trigger in its
+        // trailing slot — flush against the field's right edge with
+        // no manual divider, matching Int UI's BuiltInButton convention.
+        let pattern_for_filter = pattern_rc.clone();
+        let mask_string = mask_for_pattern(&pattern_rc);
+        let mut text_input = TextInput::new(self.text_signal.clone())
+            .placeholder(placeholder.clone())
+            .enabled(enabled)
+            .read_only(read_only)
+            .input_mask(mask_string)
+            .validator({
+                let v = validator.clone();
+                move |s| (v)(s)
+            })
+            .char_filter(move |c: char| {
+                if c.is_ascii_digit() || c == '-' || c == ' ' {
+                    return true;
+                }
+                for tok in &pattern_for_filter.tokens {
+                    if let PatternToken::Literal(s) = tok {
+                        if s.chars().any(|x| x == c) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            })
+            .on_submit_fn({
+                let commit = commit.clone();
+                move |ctx_evt| commit(ctx_evt)
+            })
+            .on_blur_fn({
+                let commit = commit.clone();
+                move |ctx_evt| commit(ctx_evt)
+            });
+        if let Some(label) = self.label.clone() {
+            text_input = text_input.label(label);
+        }
+        if let Some(trigger) = trigger_widget_opt {
+            text_input = text_input.trailing_slot(trigger);
+        }
+
+        // Capture caret signal AND a caret setter BEFORE moving the
+        // composite into the tree. The setter is a no-op until
+        // `build()` populates the slot; segment_step uses it to
+        // restore the caret AFTER rewriting text.
+        let caret_for_step = text_input.caret_position();
+        let caret_setter_for_step = text_input.caret_setter();
+
+        // Mirror the inner field's published feedback into our own
+        // signal so the commit closure (which short-circuits on
+        // Invalid) reads the live state. The TextInput composite also
+        // wires this internally to its ValidationStrip.
+        {
+            let inner_feedback = text_input.validation_feedback_signal();
+            let outer_feedback = self.feedback.clone();
+            ctx.effect(&inner_feedback, move |fb| {
+                if outer_feedback.get() != *fb {
+                    outer_feedback.set(fb.clone());
+                }
+            });
+        }
+
+        let text_input_id = ctx.add(text_input);
+
+        // Wrap with a min-width floor so the field sits at the date
+        // editor's design width even when its parent (e.g. an HStack
+        // with surplus slack) would otherwise let it collapse to
+        // TextInput's intrinsic 65 dp floor.
+        let root_id = ctx.add(MinSize::new(DEFAULT_WIDTH, 0.0).child_id(text_input_id));
+        self.root_child_id = Some(root_id);
+
+        // ── Segment-stepping helper — captured by the on_key_preview
+        // self handler below. Reads live caret position, looks up the
+        // segment under the caret, and applies a single field step
+        // (year / month / day / hour / minute / second / period).
+        let segment_step: Rc<dyn Fn(i32, &mut EventContext)> = {
+            let pattern_for_step = pattern_rc.clone();
+            let value_for_step = self.value.clone();
+            let text_for_step = self.text_signal.clone();
+            let on_changed_for_step = on_value_changed.clone();
+            let min_for_step = self.min_date;
+            let max_for_step = self.max_date;
+            let caret_for_step = caret_for_step.clone();
+            let caret_setter = caret_setter_for_step.clone();
+            Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
+                let caret = caret_for_step.get();
+                let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
+                else {
+                    return;
+                };
+                let current = value_for_step.get().unwrap_or_else(today_local);
+                let stepped = step_date_field(current, kind, delta);
+                let clamped = clamp_date(stepped, min_for_step, max_for_step);
+                value_for_step.set(Some(clamped));
+                text_for_step.set(format_value(&pattern_for_step, Some(clamped), None));
+                // Restore the caret to where it was — `text_signal.set`
+                // → field text effect → `cursor.insert_text` parked the
+                // caret at the document end. Without this restore the
+                // user has to re-click the segment between every Up/Down.
+                caret_setter(caret);
+                if let Some(cb) = on_changed_for_step.as_ref() {
+                    cb(Some(clamped), ctx_evt);
+                }
+                ctx_evt.request_frame();
+            })
         };
-        let padded_row_id = ctx.add(
-            Padding::new(
-                0.0,
-                field_style.padding_horizontal,
-                0.0,
-                field_style.padding_horizontal,
-            )
-            .child_id(row_id),
-        );
-
-        // ── Frame: focus-driven border ────────────────────────
-        let border_role = self.focused.map(|f| {
-            if *f {
-                BorderRole::Focused
-            } else {
-                BorderRole::Default
-            }
-        });
-        let border_width_signal = self.focused.map(move |f| {
-            if *f {
-                focus_ring_width
-            } else {
-                field_style.border_width
-            }
-        });
-        let bg = RectWidget::new()
-            .background(SurfaceRole::Content)
-            .border_color(border_role)
-            .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_style.corner_radius));
-        let bg_id = ctx.add(bg);
-        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padded_row_id));
-
-        let sized_id = ctx.add(MinSize::new(DEFAULT_WIDTH, field_style.height).child_id(zstack_id));
-
-        // ── Inline validation strip ───────────────────────────
-        // Wraps the field + strip in a VStack so the strip sits
-        // directly below the frame. The strip reports zero size when
-        // feedback is Pristine/Valid, so the wrapper collapses cleanly
-        // when there's no message to show.
-        let strip_id = ctx.add(crate::primitives::ValidationStrip::new(self.feedback.clone()));
-        let root_with_strip = ctx.add(
-            crate::primitives::VStack::new()
-                .spacing(field_style.validation_strip_gap)
-                .add_child(sized_id)
-                .add_child(strip_id),
-        );
-        self.root_child_id = Some(root_with_strip);
 
         // ── Self handlers: focus_within + segment-step keys ────
         // `on_key_preview` on SELF (DateEdit, an actual ancestor of
@@ -810,7 +724,7 @@ impl Widget for DateEdit {
             fern_core::binding::BindingLevel::AccessibilityOnly,
         );
 
-        vec![root_with_strip]
+        vec![root_id]
     }
 
     fn layout_response(

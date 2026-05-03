@@ -72,6 +72,29 @@ pub struct TextInput {
     on_blur: Option<Box<dyn Fn(&mut EventContext)>>,
     char_filter: Option<std::rc::Rc<dyn Fn(char) -> bool>>,
     suffix: String,
+    /// Optional input-mask grammar string (Qt syntax). Forwarded
+    /// 1:1 to `TextInputField::input_mask`. Used by composing
+    /// widgets like `DateEdit` that need a position-aware filter
+    /// + auto-derived placeholder template (`__/__/____`).
+    input_mask: Option<String>,
+    /// Optional validator closure. Forwarded 1:1 to
+    /// `TextInputField::validator`. Runs on commit (Enter, Tab-out,
+    /// blur). Set this AND `bind_validation_feedback` together for
+    /// the standard validator → feedback display pattern.
+    validator: Option<crate::primitives::text_input_field::ValidatorFn>,
+    /// Captured pre-build so composing widgets can read live caret
+    /// position (DateEdit-style segment-stepping). Populated by
+    /// `caret_position()` on first call; the inner field's own
+    /// signal is mirrored into it during `build`.
+    caret_position_slot: std::rc::Rc<std::cell::RefCell<Option<Signal<usize>>>>,
+    /// Same idea as `caret_position_slot` but for the setter
+    /// closure. Captured pre-build by `caret_setter()`.
+    caret_setter_slot: std::rc::Rc<std::cell::RefCell<Option<std::rc::Rc<dyn Fn(usize)>>>>,
+    /// Mirrored from the inner field's `validation_feedback_signal`
+    /// during `build`. Composing widgets that install a `validator`
+    /// read this to compose feedback across multiple fields (range
+    /// editor's worse-of-two ladder, etc.).
+    feedback_signal: Signal<ValidationFeedback>,
 
     // ── Configuration owned by this composite only ──────────────────
     label: Option<String>,
@@ -112,6 +135,11 @@ impl TextInput {
             on_blur: None,
             char_filter: None,
             suffix: String::new(),
+            input_mask: None,
+            validator: None,
+            caret_position_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            caret_setter_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            feedback_signal: Signal::new(ValidationFeedback::Pristine),
             label: None,
             show_clear_button: false,
             leading_slot: None,
@@ -202,6 +230,64 @@ impl TextInput {
     pub fn suffix(mut self, text: impl Into<String>) -> Self {
         self.suffix = text.into();
         self
+    }
+
+    /// Install an input mask (Qt grammar). Forwarded 1:1 to
+    /// [`TextInputField::input_mask`]. Composing widgets like
+    /// `DateEdit` use this to project the date format pattern
+    /// onto the editing surface.
+    pub fn input_mask(mut self, mask: impl Into<String>) -> Self {
+        self.input_mask = Some(mask.into());
+        self
+    }
+
+    /// Install a commit-time validator. Forwarded 1:1 to
+    /// [`TextInputField::validator`]. Pair with
+    /// [`Self::validation_feedback_signal`] (or
+    /// [`Self::bind_validation_feedback`]) to surface the outcome
+    /// in the inline strip.
+    pub fn validator(
+        mut self,
+        f: impl Fn(&str) -> crate::primitives::text_input_field::ValidationOutcome + 'static,
+    ) -> Self {
+        self.validator = Some(std::rc::Rc::new(f));
+        self
+    }
+
+    /// Reactive caret position. Mirrors the inner field's
+    /// [`TextInputField::caret_position`] after `build`. Capture
+    /// before `ctx.add(text_input)` — used by composing widgets
+    /// (`DateEdit` segment-stepping) that need to know which
+    /// segment Up/Down should step.
+    pub fn caret_position(&self) -> Signal<usize> {
+        let mut slot = self.caret_position_slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(Signal::new(0));
+        }
+        slot.as_ref().unwrap().clone()
+    }
+
+    /// Programmatic caret setter. Mirrors the inner field's
+    /// [`TextInputField::caret_setter`]. Returns a closure that
+    /// is a no-op until `build` runs; afterwards it walks the
+    /// inner field's state and moves the document cursor. Capture
+    /// before `ctx.add(text_input)`.
+    pub fn caret_setter(&self) -> std::rc::Rc<dyn Fn(usize)> {
+        let slot = self.caret_setter_slot.clone();
+        std::rc::Rc::new(move |position: usize| {
+            if let Some(setter) = slot.borrow().as_ref() {
+                (setter)(position);
+            }
+        })
+    }
+
+    /// Reactive published validation feedback. Mirrors the inner
+    /// field's [`TextInputField::validation_feedback_signal`]
+    /// after `build`. Composing widgets observe this to compose
+    /// feedback across multiple fields (range editor's
+    /// worse-of-two ladder, etc.).
+    pub fn validation_feedback_signal(&self) -> Signal<ValidationFeedback> {
+        self.feedback_signal.clone()
     }
 
     pub fn validation(mut self, validation: Signal<ValidationState>) -> Self {
@@ -302,11 +388,31 @@ impl Widget for TextInput {
         if !self.suffix.is_empty() {
             field = field.suffix(std::mem::take(&mut self.suffix));
         }
+        if let Some(mask) = self.input_mask.take() {
+            field = field.input_mask(mask);
+        }
+        let validator_installed = self.validator.is_some();
+        if let Some(validator) = self.validator.take() {
+            // ValidatorFn is `Rc<dyn Fn(&str) -> ValidationOutcome>`.
+            // The primitive's builder takes a fresh closure; wrap the
+            // Rc in one so the caller can keep their own clones if
+            // they captured it before.
+            field = field.validator(move |s| (validator)(s));
+        }
 
         // Expose the field's text signal for downstream reactivity
         // (placeholder visibility, clear-button visibility) before
         // the field is consumed by `ctx.add`.
         let text_signal_for_vis = field.text();
+
+        // Capture the inner field's reactive accessors BEFORE
+        // `ctx.add` consumes it, so composing widgets that called
+        // `caret_position()` / `caret_setter()` /
+        // `validation_feedback_signal()` on us pre-build see live
+        // updates through the slots we mirror into.
+        let inner_caret = field.caret_position();
+        let inner_setter = field.caret_setter();
+        let inner_feedback = field.validation_feedback_signal();
 
         // Text editing area, wrapped in vertical padding so slots
         // (BuiltInButton etc.) sit flush against top/bottom of the
@@ -492,7 +598,44 @@ impl Widget for TextInput {
             ctx.effect(&src, move |fb| {
                 target.set(feedback_to_state(fb));
             });
+        } else if validator_installed {
+            // Auto-bridge: a validator was installed but no explicit
+            // `bind_validation_feedback` source was provided. Mirror
+            // the inner field's published outcome into our display
+            // state so calling `.validator(...)` on TextInput "just
+            // works" — the strip and border respond without a
+            // separate `.bind_validation_feedback(...)` call.
+            let target = self.validation.clone();
+            let src = inner_feedback.clone();
+            ctx.effect(&src, move |fb| {
+                target.set(feedback_to_state(fb));
+            });
         }
+
+        // Mirror inner field accessors into the slots that were
+        // captured before build by composing widgets.
+        //
+        // - caret_position: only mirror if the slot was lazy-initialized
+        //   (i.e. someone called `caret_position()` on us pre-build).
+        //   Seed with the current value, then forward changes.
+        // - caret_setter: store the inner field's setter Rc; the closure
+        //   we returned to callers forwards through this slot at call time.
+        // - validation_feedback_signal: always mirror (the slot's signal
+        //   is created in `new()` and may already have observers).
+        if let Some(target) = self.caret_position_slot.borrow().clone() {
+            target.set(inner_caret.get());
+            ctx.effect(&inner_caret, move |pos| {
+                if target.get() != *pos {
+                    target.set(*pos);
+                }
+            });
+        }
+        *self.caret_setter_slot.borrow_mut() = Some(inner_setter);
+        let outer_feedback = self.feedback_signal.clone();
+        outer_feedback.set(inner_feedback.get());
+        ctx.effect(&inner_feedback, move |fb| {
+            outer_feedback.set(fb.clone());
+        });
 
         self.root_child_id = Some(root_id);
         vec![root_id]
