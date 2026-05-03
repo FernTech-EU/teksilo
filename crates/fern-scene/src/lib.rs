@@ -44,6 +44,7 @@
 //! ```
 
 pub mod a11y;
+pub mod animation;
 pub mod index;
 pub mod item;
 pub mod items;
@@ -61,6 +62,7 @@ pub use a11y::{
 pub use index::{GridHashIndex, SpatialIndex};
 pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};
+pub use animation::{pulse_once, register_animated_item_signal};
 pub use minimap::SceneMinimap;
 pub use state::SceneViewState;
 pub use scene::Scene;
