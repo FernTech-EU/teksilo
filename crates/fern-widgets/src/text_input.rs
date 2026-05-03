@@ -98,6 +98,14 @@ pub struct TextInput {
 
     // ── Configuration owned by this composite only ──────────────────
     label: Option<String>,
+    /// Optional override for the frame's intrinsic minimum width
+    /// (default 65 dp). Composing widgets like `DateEdit` /
+    /// `TimeEdit` raise this so the frame stays at the design
+    /// width even when typed content shrinks. Wired into the inner
+    /// `MinSize` wrapper around the ZStack frame — NOT the outer
+    /// VStack — so the floor doesn't fight the VStack's
+    /// `proposal.width.unwrap_or(max_width)` rule.
+    min_width: Option<f32>,
     show_clear_button: bool,
     leading_slot: Option<Box<dyn Widget>>,
     trailing_slot: Option<Box<dyn Widget>>,
@@ -141,6 +149,7 @@ impl TextInput {
             caret_setter_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             feedback_signal: Signal::new(ValidationFeedback::Pristine),
             label: None,
+            min_width: None,
             show_clear_button: false,
             leading_slot: None,
             trailing_slot: None,
@@ -189,6 +198,15 @@ impl TextInput {
 
     pub fn show_clear_button(mut self, show: bool) -> Self {
         self.show_clear_button = show;
+        self
+    }
+
+    /// Override the frame's intrinsic minimum width (default 65 dp).
+    /// Use to express a design width for date / time / phone-number
+    /// fields whose content is well-known and whose collapse to the
+    /// generic 65 dp floor would look out of place.
+    pub fn min_width(mut self, w: f32) -> Self {
+        self.min_width = Some(w.max(0.0));
         self
     }
 
@@ -539,8 +557,9 @@ impl Widget for TextInput {
         let zstack = ZStack::new().add_child(bg_id).add_child(padded_id);
         let zstack_id = ctx.add(zstack);
 
+        let min_w = self.min_width.unwrap_or(65.0);
         let frame_id = ctx.add(
-            MinSize::new(65.0, field_style.height).child_id(zstack_id),
+            MinSize::new(min_w, field_style.height).child_id(zstack_id),
         );
 
         // ── Inline validation strip ────────────────────────────────

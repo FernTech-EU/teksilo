@@ -77,7 +77,7 @@ use crate::common::datetime::pattern::{
 use crate::common::datetime::types::{today_local, YearMonth};
 use crate::common::datetime::Date;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
-use crate::primitives::{Center, FixedSize, IconWidget, MinSize, RectWidget, ZStack};
+use crate::primitives::{Center, FixedSize, IconWidget, RectWidget, ZStack};
 use crate::text_input::TextInput;
 
 const DEFAULT_WIDTH: f32 = 144.0;
@@ -576,6 +576,7 @@ impl Widget for DateEdit {
             .placeholder(placeholder.clone())
             .enabled(enabled)
             .read_only(read_only)
+            .min_width(DEFAULT_WIDTH)
             .input_mask(mask_string)
             .validator({
                 let v = validator.clone();
@@ -630,13 +631,7 @@ impl Widget for DateEdit {
             });
         }
 
-        let text_input_id = ctx.add(text_input);
-
-        // Wrap with a min-width floor so the field sits at the date
-        // editor's design width even when its parent (e.g. an HStack
-        // with surplus slack) would otherwise let it collapse to
-        // TextInput's intrinsic 65 dp floor.
-        let root_id = ctx.add(MinSize::new(DEFAULT_WIDTH, 0.0).child_id(text_input_id));
+        let root_id = ctx.add(text_input);
         self.root_child_id = Some(root_id);
 
         // ── Segment-stepping helper — captured by the on_key_preview

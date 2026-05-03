@@ -48,7 +48,6 @@ use crate::common::datetime::pattern::{
 use crate::common::datetime::Time;
 use crate::date_edit::ValidationBehavior;
 use crate::primitives::text_input_field::{ValidationFeedback, ValidationOutcome};
-use crate::primitives::MinSize;
 use crate::text_input::TextInput;
 
 const DEFAULT_WIDTH: f32 = 96.0;
@@ -407,6 +406,7 @@ impl Widget for TimeEdit {
             .placeholder(self.placeholder.clone())
             .enabled(enabled)
             .read_only(read_only)
+            .min_width(DEFAULT_WIDTH)
             .input_mask(mask_string)
             .validator({
                 let v = validator.clone();
@@ -453,8 +453,7 @@ impl Widget for TimeEdit {
             });
         }
 
-        let text_input_id = ctx.add(text_input);
-        let root_id = ctx.add(MinSize::new(DEFAULT_WIDTH, 0.0).child_id(text_input_id));
+        let root_id = ctx.add(text_input);
         self.root_child_id = Some(root_id);
 
         // ── Segment-stepping helper ───────────────────────────
