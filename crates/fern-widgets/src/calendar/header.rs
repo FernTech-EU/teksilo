@@ -140,29 +140,24 @@ impl Widget for CalendarHeader {
             move |ctx_evt| step_dbl_next(1, ctx_evt),
         ));
 
-        // Center label — a Flat Button that demotes the mode on
-        // click (Days → Months → Years; Years stays). The label is
-        // computed eagerly from the current mode + visible_month and
-        // captured by the Button (Button doesn't take a reactive
-        // label). The Calendar rebuilds whenever `mode` changes
-        // (mode signal bound at Relayout in `Calendar::build`), so
-        // a freshly-built Button picks up the right label after
-        // each demotion.
-        let cur_mode = self.mode.get();
-        let cur_ym = self.visible_month.get();
-        let label_text = match cur_mode {
+        // Center label — a Flat Button bound to a derived label
+        // signal (mode + visible_month → "May 2026" / "2026" /
+        // "2020 — 2029"). Reactive via `Button::bind_label`, so
+        // the calendar doesn't have to rebuild on mode flips.
+        let label_signal = self.visible_month.zip(&self.mode).map(|(ym, m)| match m {
             CalendarMode::Days => {
-                let month_name = resolve_message_widget(month_long_key(cur_ym.month()), &[]);
-                format!("{} {}", month_name, cur_ym.year())
+                let month_name = resolve_message_widget(month_long_key(ym.month()), &[]);
+                format!("{} {}", month_name, ym.year())
             }
-            CalendarMode::Months => format!("{}", cur_ym.year()),
+            CalendarMode::Months => format!("{}", ym.year()),
             CalendarMode::Years => {
-                let start = (cur_ym.year() / 10) * 10;
+                let start = (ym.year() / 10) * 10;
                 format!("{} — {}", start, start + 9)
             }
-        };
+        });
         let mode_for_action = self.mode.clone();
-        let title_btn = crate::button::Button::new_literal(label_text)
+        let title_btn = crate::button::Button::new_literal("")
+            .bind_label(label_signal)
             .style(crate::button::ButtonVariant::Flat)
             .on_activate_fn(move |ctx_evt| {
                 let cur = mode_for_action.get();

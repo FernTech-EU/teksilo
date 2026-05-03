@@ -92,7 +92,13 @@ pub enum IconLocation {
 type CommandFactory = Box<dyn Fn(&mut EventContext)>;
 
 pub struct Button {
-    label: String,
+    /// Button label as a `Prop<String>`. `new(...)` / `new_literal(...)`
+    /// store `Prop::Static(resolved)`; `bind_label(signal)` upgrades
+    /// it to `Prop::Bound`, so the inner `TextWidget` re-renders
+    /// reactively without rebuilding the Button. The accessibility
+    /// node's `set_name` reads the current value via `Prop::get()`,
+    /// keeping AT in sync with bound updates.
+    label: fern_core::signal::Prop<String>,
     style: ButtonVariant,
     action: Option<CommandFactory>,
     enabled: bool,
@@ -128,7 +134,7 @@ impl Button {
     pub fn new(label: impl Into<fern_i18n::LocalizedString>) -> Self {
         let ls: fern_i18n::LocalizedString = label.into();
         Self {
-            label: ls.resolve_now(),
+            label: fern_core::signal::Prop::Static(ls.resolve_now()),
             // Int UI default is a Regular (non-primary) button; the caller
             // opts into `ButtonVariant::Default` for the one primary action.
             style: ButtonVariant::Regular,
@@ -157,6 +163,24 @@ impl Button {
 
     pub fn style(mut self, style: ButtonVariant) -> Self {
         self.style = style;
+        self
+    }
+
+    /// Bind the button's label to a reactive source — replaces the
+    /// static label captured at `new(...)`. Accepts any
+    /// `impl Into<Prop<String>>`: a `Signal<String>` for live
+    /// updates, or a plain `String` (which is the same as constructing
+    /// the button with that string). Mirrors
+    /// [`TextWidget::bind_text`](crate::primitives::TextWidget::bind_text).
+    /// The inner label `TextWidget` is built with the bound prop, so
+    /// the visible text refreshes without rebuilding the Button. The
+    /// AT node's `set_name` reads the current value via `Prop::get`.
+    ///
+    /// Translation note: derive the signal with
+    /// `state.map(|s| tr!("key", s).resolve_now())` for translated
+    /// reactive labels — Button only sees the resolved `String`.
+    pub fn bind_label(mut self, label: impl Into<fern_core::signal::Prop<String>>) -> Self {
+        self.label = label.into();
         self
     }
 
@@ -238,12 +262,29 @@ impl Button {
         self.expanded_signal = Some(signal);
         self
     }
+
+    /// Construct the label `TextWidget` used inside the button's
+    /// content layout. Always routes through `bind_text(prop)` —
+    /// `Prop::Static` and `Prop::Bound` are both handled uniformly
+    /// by the TextWidget. `new_literal("")` seeds the placeholder
+    /// initial text; `bind_text` immediately overwrites it with the
+    /// prop's current value (and tracks updates for `Prop::Bound`).
+    fn make_label_text(
+        &self,
+        color: impl Into<fern_core::color_prop::ColorProp>,
+    ) -> TextWidget {
+        TextWidget::new_literal("")
+            .bind_text(self.label.clone())
+            .bind_color(color)
+            .single_line()
+            .a11y_hidden()
+    }
 }
 
 impl std::fmt::Debug for Button {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Button")
-            .field("label", &self.label)
+            .field("label", &self.label.get())
             .field("style", &self.style)
             .field("enabled", &self.enabled)
             .finish()
@@ -347,6 +388,19 @@ impl fern_core::widget::Widget for Button {
             );
         }
 
+        // If `bind_label(signal)` was used, register the prop on the
+        // Button itself at AccessibilityOnly so `set_name` re-runs
+        // when the signal changes. The inner `TextWidget` already
+        // re-renders via its own `bind_text` plumbing — this binding
+        // is purely for the AT name.
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.label.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::AccessibilityOnly,
+        );
+
         // Derived reactive roles — map interaction state to semantic roles,
         // resolved against the current theme at paint time. Signal<Role>
         // replaces the older `interaction.zip(&theme_signal).map(...)` zip
@@ -363,10 +417,7 @@ impl fern_core::widget::Widget for Button {
         // Build the content (icon + label) based on icon_location
         let content_id = match self.icon_location {
             IconLocation::None => {
-                let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_role)
-                    .single_line()
-                    .a11y_hidden();
+                let text = self.make_label_text(text_role);
                 ctx.add(text)
             }
             IconLocation::IconOnly => {
@@ -377,10 +428,7 @@ impl fern_core::widget::Widget for Button {
             IconLocation::Leading => {
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
                 let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role.clone()));
-                let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_role)
-                    .single_line()
-                    .a11y_hidden();
+                let text = self.make_label_text(text_role);
                 let text_id = ctx.add(text);
                 ctx.add(
                     HStack::new()
@@ -390,10 +438,7 @@ impl fern_core::widget::Widget for Button {
                 )
             }
             IconLocation::Trailing => {
-                let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_role.clone())
-                    .single_line()
-                    .a11y_hidden();
+                let text = self.make_label_text(text_role.clone());
                 let text_id = ctx.add(text);
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
                 let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
@@ -407,10 +452,7 @@ impl fern_core::widget::Widget for Button {
             IconLocation::Top => {
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
                 let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role.clone()));
-                let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_role)
-                    .single_line()
-                    .a11y_hidden();
+                let text = self.make_label_text(text_role);
                 let text_id = ctx.add(text);
                 ctx.add(
                     VStack::new()
@@ -420,10 +462,7 @@ impl fern_core::widget::Widget for Button {
                 )
             }
             IconLocation::Bottom => {
-                let text = TextWidget::new_literal(&self.label)
-                    .bind_color(text_role.clone())
-                    .single_line()
-                    .a11y_hidden();
+                let text = self.make_label_text(text_role.clone());
                 let text_id = ctx.add(text);
                 let icon = self.icon.take().unwrap_or_else(|| IconWidget::from_path(fern_canvas::Path::new(), button_style.icon_size));
                 let icon_id = ctx.add(icon.icon_size(button_style.icon_size).bind_color(text_role));
@@ -616,7 +655,10 @@ impl fern_core::widget::Widget for Button {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(fern_core::accesskit::Role::Button);
-        builder.set_name(&self.label);
+        // Read the current label value uniformly through `Prop::get`
+        // — Static returns the captured `String`; Bound returns the
+        // signal's current value. Keeps AT in sync with `bind_label`.
+        builder.set_name(self.label.get());
         if !self.enabled {
             builder.set_disabled();
         }
@@ -692,6 +734,44 @@ mod tests {
             1,
             "a matched KeyDown + KeyUp pair must activate exactly once",
         );
+    }
+
+    #[test]
+    fn bind_label_updates_at_name_when_signal_changes() {
+        // Regression for the calendar header use case: a Button bound
+        // to a `Signal<String>` must (1) display the signal's current
+        // value and (2) refresh its accessibility name when the
+        // signal changes — without rebuilding the parent.
+        use fern_core::accessibility::widget_id_to_node_id;
+        let label = Signal::new("May 2026".to_string());
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let id = tree.add(
+            Button::new_literal("")
+                .bind_label(label.clone())
+                .on_activate_fn(|_| {}),
+        );
+        tree.layout(SizeProposal::exact(300.0, 80.0));
+        let target = widget_id_to_node_id(id);
+        let update = tree.sync_accessibility();
+        let (_, node) = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == target)
+            .expect("button node");
+        assert_eq!(node.label().unwrap_or_default(), "May 2026");
+
+        // Flip the signal — AT name should refresh after the next
+        // layout pass (the bind_label registration triggers a
+        // re-evaluation of `accessibility()`).
+        label.set("2026".to_string());
+        tree.layout(SizeProposal::exact(300.0, 80.0));
+        let update = tree.sync_accessibility();
+        let (_, node) = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == target)
+            .expect("button node after relabel");
+        assert_eq!(node.label().unwrap_or_default(), "2026");
     }
 }
 
