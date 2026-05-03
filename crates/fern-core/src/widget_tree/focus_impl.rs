@@ -37,7 +37,7 @@ impl WidgetTree {
                 self.dispatch_to_widget(old, &WidgetEvent::FocusLost, &mut *ops);
             }
         }
-        self.focused = Some(id);
+        self.set_focused(Some(id));
         self.focus_origin = Some(origin);
         self.a11y_dirty = true;
         self.update_focus_within_signals(previously_focused, Some(id));
@@ -333,6 +333,19 @@ impl WidgetTree {
         self.hovered = value;
         if self.hovered_signal.get() != value {
             self.hovered_signal.set(value);
+        }
+    }
+
+    /// Single point of mutation for `self.focused`. Mirror of
+    /// [`set_hovered`] for the focused chain. Drives the inspector's
+    /// Focus tab without requiring the tab to poll. Does not touch
+    /// `focus_origin` or focus-within signals — call sites remain
+    /// responsible for those (the bookkeeping varies by mutation
+    /// path, e.g. focus loss vs. arena destruction).
+    pub(crate) fn set_focused(&mut self, value: Option<WidgetId>) {
+        self.focused = value;
+        if self.focused_signal.get() != value {
+            self.focused_signal.set(value);
         }
     }
 

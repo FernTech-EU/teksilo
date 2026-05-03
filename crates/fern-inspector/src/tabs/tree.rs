@@ -1,17 +1,24 @@
-//! Tree tab — live widget hierarchy, click to select.
+//! Tree tab — live widget hierarchy with substring filter, click to
+//! select.
+//!
+//! Composed of a top filter `TextInput` (bound to
+//! `state.tree_filter`) above a `TreeRows` leaf that paints rows
+//! filtered by case-insensitive substring match against the
+//! `last_segment` of each widget's type name.
 
 use std::cell::RefCell;
 
 use fern_canvas::{Canvas, Rect, SizeProposal};
-use fern_tokens::Color;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::arena::WidgetArena;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
-use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
+use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::TextRole;
+use fern_tokens::{Color, TextRole};
+use fern_widgets::TextInput;
+use fern_widgets::primitives::{Padding, VStack};
 
 use crate::state::InspectorState;
 use crate::tabs::{ROW_HEIGHT, ROW_INDENT_PX, ROW_PADDING_X, last_segment};
@@ -23,20 +30,18 @@ struct TreeRow {
     label: String,
 }
 
-/// Snapshot-driven tree view. Walks the arena from roots in
-/// `layout_response`, paints each row in `paint`, dispatches clicks
-/// via `on_pointer_event`. Excludes the inspector shell's own subtree
-/// from the displayed list.
+/// Composing widget for the Tree tab. Builds the filter input plus
+/// the rows leaf as siblings in a `VStack`.
 pub(crate) struct TreeTab {
     state: InspectorState,
-    rows: RefCell<Vec<TreeRow>>,
+    root_child_id: Option<WidgetId>,
 }
 
 impl TreeTab {
     pub fn new(state: InspectorState) -> Self {
         Self {
             state,
-            rows: RefCell::new(Vec::new()),
+            root_child_id: None,
         }
     }
 }
@@ -49,25 +54,82 @@ impl std::fmt::Debug for TreeTab {
 
 impl Widget for TreeTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Re-paint when selection changes (selected row gets a different
-        // background). Re-layout when the inspector's own root id is
-        // resolved (initial mount) or panel state flips.
+        let filter_input = Padding::symmetric(4.0, 4.0)
+            .child(TextInput::new(self.state.tree_filter.clone()).placeholder("filter type names…"));
+        let rows = TreeRows::new(self.state.clone());
+        let root = ctx.add(VStack::new().spacing(2.0).child(filter_input).child(rows));
+        self.root_child_id = Some(root);
+        vec![root]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .map(LayoutResponse::from)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for c in children.iter_mut() {
+            c.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            c.size = fern_canvas::Size::new(bounds.width, bounds.height);
+        }
+    }
+
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+}
+
+/// Snapshot-driven rows leaf. Walks the arena from roots in
+/// `layout_response`, paints each row in `paint`, dispatches clicks
+/// via `on_pointer_event`. Excludes every InspectorShell subtree from
+/// the displayed list.
+struct TreeRows {
+    state: InspectorState,
+    rows: RefCell<Vec<TreeRow>>,
+}
+
+impl TreeRows {
+    fn new(state: InspectorState) -> Self {
+        Self {
+            state,
+            rows: RefCell::new(Vec::new()),
+        }
+    }
+}
+
+impl std::fmt::Debug for TreeRows {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TreeRows").finish()
+    }
+}
+
+impl Widget for TreeRows {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
-        self.state
-            .selected_id
-            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        // Repaint on selection change; relayout on filter / open flips
+        // (initial mount + filter typing).
+        self.state.selected_id.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
         self.state
             .open
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
+        self.state
+            .tree_filter
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
 
         let state_for_handler = self.state.clone();
         let handlers = HandlerSet::new()
             .focusable(true)
             .on_tap(move |position, _ctx| {
-                // `on_tap` gives widget-local coordinates — perfect
-                // for translating y → row index. Defer the actual
-                // selection update to the next layout pass via a
-                // signal so we don't need handler-side row data.
                 state_for_handler.pending_tree_click_y.set(Some(position.y));
             });
         ctx.apply_self_handlers(handlers);
@@ -78,13 +140,19 @@ impl Widget for TreeTab {
         // Snapshot tree once per layout pass (cheap — a flat traversal).
         let mut rows: Vec<TreeRow> = Vec::new();
         if let Some(arena) = ctx.arena() {
-            let exclude = self.state.shell_root_id.get();
+            let excludes = self.state.shell_root_ids.get();
             for &root in arena.roots().iter() {
-                if Some(root) == exclude {
+                if excludes.contains(&root) {
                     continue;
                 }
-                push_subtree(arena, root, 0, exclude, &mut rows);
+                push_subtree(arena, root, 0, &excludes, &mut rows);
             }
+        }
+        // Apply filter — case-insensitive substring match against the
+        // type's last segment. Empty filter passes everything.
+        let filter = self.state.tree_filter.get().to_lowercase();
+        if !filter.trim().is_empty() {
+            rows.retain(|r| r.label.to_lowercase().contains(filter.trim()));
         }
         let height = rows.len() as f32 * ROW_HEIGHT;
         *self.rows.borrow_mut() = rows;
@@ -139,10 +207,10 @@ fn push_subtree(
     arena: &WidgetArena,
     id: WidgetId,
     depth: u32,
-    exclude: Option<WidgetId>,
+    excludes: &[WidgetId],
     out: &mut Vec<TreeRow>,
 ) {
-    if Some(id) == exclude {
+    if excludes.contains(&id) {
         return;
     }
     if !arena.is_active(id) {
@@ -155,6 +223,6 @@ fn push_subtree(
     out.push(TreeRow { id, depth, label });
     let children: Vec<WidgetId> = arena.children(id).to_vec();
     for child in children {
-        push_subtree(arena, child, depth + 1, exclude, out);
+        push_subtree(arena, child, depth + 1, excludes, out);
     }
 }

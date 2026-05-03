@@ -819,7 +819,7 @@ impl WidgetTree {
                     .is_some_and(|current| self.is_descendant_of(current, id))
                 {
                     let old = self.focused;
-                    self.focused = None;
+                    self.set_focused(None);
                     self.focus_origin = None;
                     self.update_focus_within_signals(old, None);
                 }

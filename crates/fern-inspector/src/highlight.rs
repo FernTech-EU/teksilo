@@ -64,6 +64,9 @@ impl Widget for HighlightLayer {
         self.state
             .hover_info
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.state
+            .band_snapshot
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
         Vec::new()
     }
 
@@ -79,10 +82,10 @@ impl Widget for HighlightLayer {
         let opacity = self.state.overlay_opacity.get().clamp(0.0, 1.0);
 
         if mode == OverlayMode::AllBounds {
+            // Bands paint first so the strokes drawn over them stay
+            // crisp and the tooltip sits on the very top.
+            paint_bands(canvas, &self.state, opacity);
             paint_all_bounds(canvas, ctx, &self.state, opacity);
-            // Cursor-following tooltip — only in AllBounds mode where
-            // the user is actively inspecting layout. Painted after
-            // the bounds strokes so it sits on top.
             if let Some(info) = self.state.hover_info.get() {
                 paint_hover_tooltip(canvas, ctx, &info, bounds, opacity);
             }
@@ -175,6 +178,27 @@ fn format_hover_label(info: &HoverInfo) -> String {
     format!("{} · {}×{}", info.type_label, w, h)
 }
 
+fn paint_bands(canvas: &mut Canvas, state: &InspectorState, opacity: f32) {
+    let bands = state.band_snapshot.get_ref();
+    if bands.is_empty() {
+        return;
+    }
+    // PaddingInset = warm yellow, StackGap = soft green. Translucent
+    // so the underlying widget colors still show through.
+    let inset_fill = Color::from_rgba(0.95, 0.85, 0.20, 0.20 * opacity);
+    let gap_fill = Color::from_rgba(0.20, 0.85, 0.55, 0.20 * opacity);
+    for band in bands.iter() {
+        if band.bounds.width <= 0.0 || band.bounds.height <= 0.0 {
+            continue;
+        }
+        let color = match band.kind {
+            BandKind::PaddingInset => inset_fill,
+            BandKind::StackGap => gap_fill,
+        };
+        canvas.fill_rounded_rect(band.bounds, fern_tokens::CornerRadius::ZERO, color);
+    }
+}
+
 fn paint_all_bounds(
     canvas: &mut Canvas,
     _ctx: &PaintContext,
@@ -215,6 +239,26 @@ pub(crate) struct HoverInfo {
     pub bounds: Rect,
     pub type_label: String,
     pub is_layout: bool,
+}
+
+/// Per-band snapshot entry kept in `InspectorState::band_snapshot`.
+/// Painted as a filled translucent rect by `HighlightLayer` to make
+/// per-axis spacing visible inside Padding widgets and between
+/// consecutive HStack/VStack siblings.
+#[derive(Clone, Debug)]
+pub(crate) struct BandEntry {
+    pub bounds: Rect,
+    pub kind: BandKind,
+}
+
+/// Two flavors of spacing band — different colors so the user can tell
+/// inset from gap at a glance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BandKind {
+    /// Space inside a `Padding` widget that lies outside its child.
+    PaddingInset,
+    /// Space between consecutive `HStack`/`VStack` siblings.
+    StackGap,
 }
 
 /// Invisible leaf widget. On every layout pass:
@@ -267,27 +311,30 @@ impl Widget for BoundsTracker {
             self.state.selected_bounds.set(new_bounds);
         }
 
-        // Update bounds snapshot + hover_info when AllBounds is active.
+        // Update bounds snapshot + bands + hover_info when AllBounds
+        // is active.
         let mode = self.state.overlay_mode.get();
         if mode == OverlayMode::AllBounds {
-            let exclude = self.state.shell_root_id.get();
+            let excludes = self.state.shell_root_ids.get();
             if let Some(arena) = ctx.arena() {
                 let mut snap: Vec<BoundsEntry> = Vec::new();
+                let mut bands: Vec<BandEntry> = Vec::new();
                 for &root in arena.roots().iter() {
-                    if Some(root) == exclude {
+                    if excludes.contains(&root) {
                         continue;
                     }
-                    collect_bounds(arena, root, exclude, &mut snap);
+                    collect_bounds_and_bands(arena, root, &excludes, &mut snap, &mut bands);
                 }
                 self.state.bounds_snapshot.set(snap);
+                self.state.band_snapshot.set(bands);
 
                 // Resolve the hovered widget into a HoverInfo if it
-                // exists and is not within the inspector's own subtree.
+                // exists and is not within any inspector subtree.
                 let new_hover = self
                     .state
                     .hover_id
                     .get()
-                    .filter(|id| !is_in_subtree(arena, *id, exclude))
+                    .filter(|id| !is_in_any_subtree(arena, *id, &excludes))
                     .and_then(|id| {
                         let node = arena.get(id)?;
                         let bounds = arena.bounds(id);
@@ -308,10 +355,13 @@ impl Widget for BoundsTracker {
                 }
             }
         } else {
-            // Clear snapshot + hover_info when we leave AllBounds so
+            // Clear snapshots + hover_info when we leave AllBounds so
             // a stale overlay or tooltip doesn't ghost.
             if !self.state.bounds_snapshot.get_ref().is_empty() {
                 self.state.bounds_snapshot.set(Vec::new());
+            }
+            if !self.state.band_snapshot.get_ref().is_empty() {
+                self.state.band_snapshot.set(Vec::new());
             }
             if self.state.hover_info.get().is_some() {
                 self.state.hover_info.set(None);
@@ -324,15 +374,16 @@ impl Widget for BoundsTracker {
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 }
 
-/// Walks ancestors of `id` looking for `exclude`. Used to skip the
-/// inspector's own subtree when resolving the hovered widget.
-fn is_in_subtree(arena: &WidgetArena, id: WidgetId, exclude: Option<WidgetId>) -> bool {
-    let Some(target) = exclude else {
+/// Walks ancestors of `id` looking for any id in `excludes`. Used to
+/// skip every InspectorShell subtree (one per window) when resolving
+/// the hovered widget.
+fn is_in_any_subtree(arena: &WidgetArena, id: WidgetId, excludes: &[WidgetId]) -> bool {
+    if excludes.is_empty() {
         return false;
-    };
+    }
     let mut cur = Some(id);
     while let Some(c) = cur {
-        if c == target {
+        if excludes.contains(&c) {
             return true;
         }
         cur = arena.parent(c);
@@ -349,21 +400,126 @@ fn last_segment(s: &str) -> &str {
     bare.rsplit_once("::").map(|(_, t)| t).unwrap_or(bare)
 }
 
-fn collect_bounds(
+fn collect_bounds_and_bands(
     arena: &WidgetArena,
     id: WidgetId,
-    exclude: Option<WidgetId>,
+    excludes: &[WidgetId],
     out: &mut Vec<BoundsEntry>,
+    bands: &mut Vec<BandEntry>,
 ) {
-    if Some(id) == exclude || !arena.is_active(id) {
+    if excludes.contains(&id) || !arena.is_active(id) {
         return;
     }
     let Some(node) = arena.get(id) else { return };
     let bounds = arena.bounds(id);
     let is_layout = is_layout_primitive(node.widget.type_name());
     out.push(BoundsEntry { bounds, is_layout });
+
+    // Spacing bands derived from this widget's relationship to its
+    // children — Padding insets and HStack/VStack gaps are the two
+    // patterns that produce "visible empty space" the user wants to
+    // see.
+    let label = last_segment(node.widget.type_name());
     let children: Vec<WidgetId> = arena.children(id).to_vec();
+    if label == "Padding" && children.len() == 1 {
+        let child = children[0];
+        if !excludes.contains(&child) && arena.is_active(child) {
+            let inner = arena.bounds(child);
+            push_padding_bands(bounds, inner, bands);
+        }
+    } else if (label == "HStack" || label == "VStack") && children.len() >= 2 {
+        let active_children: Vec<Rect> = children
+            .iter()
+            .filter(|c| !excludes.contains(c) && arena.is_active(**c))
+            .map(|c| arena.bounds(*c))
+            .filter(|r| r.width > 0.0 && r.height > 0.0)
+            .collect();
+        if active_children.len() >= 2 {
+            push_stack_gap_bands(bounds, &active_children, label == "HStack", bands);
+        }
+    }
+
     for child in children {
-        collect_bounds(arena, child, exclude, out);
+        collect_bounds_and_bands(arena, child, excludes, out, bands);
+    }
+}
+
+/// Emit up to four PaddingInset bands — top / bottom / leading /
+/// trailing space between a `Padding`'s outer rect and its child's
+/// inner rect. Skips zero-width sides.
+fn push_padding_bands(outer: Rect, inner: Rect, bands: &mut Vec<BandEntry>) {
+    let push = |bands: &mut Vec<BandEntry>, x, y, w, h| {
+        if w > 0.0 && h > 0.0 {
+            bands.push(BandEntry {
+                bounds: Rect::new(x, y, w, h),
+                kind: BandKind::PaddingInset,
+            });
+        }
+    };
+    let top_h = (inner.y - outer.y).max(0.0);
+    let bottom_h = (outer.y + outer.height - (inner.y + inner.height)).max(0.0);
+    let leading_w = (inner.x - outer.x).max(0.0);
+    let trailing_w = (outer.x + outer.width - (inner.x + inner.width)).max(0.0);
+    // Top band spans full outer width.
+    push(bands, outer.x, outer.y, outer.width, top_h);
+    // Bottom band spans full outer width.
+    push(
+        bands,
+        outer.x,
+        inner.y + inner.height,
+        outer.width,
+        bottom_h,
+    );
+    // Side bands cover only the inner-row slice (avoid double-tinting
+    // the corners that the top/bottom bands already cover).
+    push(bands, outer.x, inner.y, leading_w, inner.height);
+    push(
+        bands,
+        inner.x + inner.width,
+        inner.y,
+        trailing_w,
+        inner.height,
+    );
+}
+
+/// Emit StackGap bands for the empty space between consecutive
+/// children of an HStack (`horizontal == true`) or VStack. The gap
+/// rect spans the parent's cross-axis extent and the inter-child
+/// gap on the main axis.
+fn push_stack_gap_bands(
+    parent: Rect,
+    child_bounds: &[Rect],
+    horizontal: bool,
+    bands: &mut Vec<BandEntry>,
+) {
+    // Sort by main-axis position so consecutive comparison is correct
+    // even if the children were inserted out of visual order.
+    let mut sorted: Vec<Rect> = child_bounds.to_vec();
+    if horizontal {
+        sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    } else {
+        sorted.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    for pair in sorted.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if horizontal {
+            let gap_x = a.x + a.width;
+            let gap_w = b.x - gap_x;
+            if gap_w > 0.0 {
+                bands.push(BandEntry {
+                    bounds: Rect::new(gap_x, parent.y, gap_w, parent.height),
+                    kind: BandKind::StackGap,
+                });
+            }
+        } else {
+            let gap_y = a.y + a.height;
+            let gap_h = b.y - gap_y;
+            if gap_h > 0.0 {
+                bands.push(BandEntry {
+                    bounds: Rect::new(parent.x, gap_y, parent.width, gap_h),
+                    kind: BandKind::StackGap,
+                });
+            }
+        }
     }
 }

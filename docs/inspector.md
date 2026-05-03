@@ -85,10 +85,10 @@ It is also shown dimmed in the inspector's Shortcuts tab.
 
 | Tab | What it shows |
 |---|---|
-| **Tree** | Live widget hierarchy, indented by depth. Click a row to select. Excludes the inspector's own subtree. |
-| **Properties** | For the selected widget: type, bounds, dirty flags, parent, children count, activation, `clips_children`, `event_pass_through`. |
+| **Tree** | Live widget hierarchy, indented by depth. Click a row to select. Top text input filters by case-insensitive substring match against each type's last segment. Excludes every InspectorShell subtree (multi-window safe). |
+| **Properties** | For the selected widget: type, bounds, dirty flags, parent, children count, activation, `clips_children`, `event_pass_through`, plus a single-line `debug_repr` row. **Copy** button at the top dumps every row plus the full multi-line Debug repr to the clipboard via `ClipboardHandle`. |
 | **Accessibility** | Role / name / value / advertised actions / toggled / expanded / selected / hidden, from the widget's `accessibility(builder)` output. |
-| **Theme** | Two preset buttons (Light / Dark) — clicking calls `EventContext::set_theme(...)`. Below: a curated read-only swatch list (accent, surfaces, text roles, borders, status colors). |
+| **Theme** | Preset buttons (**Light** / **Dark**) — clicking calls `EventContext::set_theme(...)`. **Export** dumps the current `Theme` as pretty JSON to the clipboard; **Import** parses the clipboard JSON back into a `Theme` and applies it (silently ignores parse errors). Below: a curated read-only swatch list (accent, surfaces, text roles, borders, status colors). |
 | **Locale** | Every locale declared in `I18nConfig::supported_locales`. Click a row to call `EventContext::set_locale(...)`. The active locale is highlighted. |
 | **Focus** | Current focused widget plus its ancestor chain (root → leaf). Leaf shown in primary color, ancestors dimmed. |
 | **Shortcuts** | Every shortcut in the tree's `ShortcutRegistry` with its effective primary keystroke. Framework-reserved ids (`__`-prefixed) are dimmed. |
@@ -136,7 +136,7 @@ its natural lifetime.
 ## Persistence
 
 When `FernAppBuilder::settings(SettingsBundle::new())` has been wired,
-the inspector bridges four signals to keys under the framework-reserved
+the inspector bridges five signals to keys under the framework-reserved
 `__fern_inspector.*` namespace:
 
 - `__fern_inspector.open` (bool) — last toggle state. Read at startup
@@ -146,14 +146,20 @@ the inspector bridges four signals to keys under the framework-reserved
 - `__fern_inspector.active_tab` (i64) — index of the last-used panel
   tab. Stored as `i64` because TOML lacks unsigned integers and
   `usize` width varies by target. Out-of-range values seed at 0.
+- `__fern_inspector.panel_height` (f32) — last user-set panel height.
+  Clamped to `[120, 720]` on load and on every observer fire so a
+  hand-edited or stale value can't shrink the panel below the toolbar
+  or grow it past the user-root.
 
 Bridging is one-way (state → store), with the persisted value used as
 the initial seed. Bridge wiring runs once per process, on the first
 window's creation. Apps without `SettingsStore` configured see no
 behavior change.
 
-Panel height persistence waits on a drag-resize handle (no UI for it
-yet — the panel is currently a fixed 280 px).
+The panel grows / shrinks via a **6 px top-edge resize handle**.
+Drag captures the pointer, anchors at the click point in widget-local
+coords, and updates `state.panel_height` on every move so the handle's
+top edge tracks the cursor exactly under live layout.
 
 ## Bounds overlay color legend
 
@@ -176,8 +182,16 @@ when the cursor is over the inspector's own panel. Driven off the
 framework's `WidgetTree::hovered_signal()` (added in slice 6) — no
 polling.
 
-Padding/gap visualization (tinted bands inside `Padding` and between
-stack siblings) is queued for a later slice.
+`All` mode also paints **spacing bands** behind the strokes:
+
+- **Yellow** fill — the four `Padding`-inset bands between a
+  `Padding` widget's outer rect and its child's inner rect
+  (top, bottom, leading, trailing).
+- **Green** fill — the gap between consecutive `HStack` / `VStack`
+  siblings, spanning the parent's cross-axis extent.
+
+The bands are translucent so the underlying widget colors still show
+through. Use the opacity slider to dim them for dense UIs.
 
 ## Limitations
 
@@ -190,10 +204,10 @@ stack siblings) is queued for a later slice.
 - **Theme tab does not yet support per-color editing.** Slice 4 ships
   the preset switcher only; per-color RGB / hex editing waits for
   the real `ColorPicker` widget (Phase B in `widgets-plan.md`).
-- **Multi-window picker exclusion uses a single `shell_root_id`
-  signal.** When more than one window is open, the picker excludes
-  the most recently opened window's shell — fine for the common
-  single-window case, but may shadow widgets in older windows.
+- **Multi-window picker exclusion** now tracks every InspectorShell
+  id in `state.shell_root_ids: Signal<Vec<WidgetId>>`. The picker
+  walks every shell id when hit-testing, so opening a second window
+  no longer shadows widgets in older windows.
 
 ## Where the code lives
 
@@ -203,6 +217,7 @@ stack siblings) is queued for a later slice.
 - Wrapping shell: [crates/fern-inspector/src/shell.rs](../crates/fern-inspector/src/shell.rs)
 - Highlight overlay: [crates/fern-inspector/src/highlight.rs](../crates/fern-inspector/src/highlight.rs)
 - Picker tool: [crates/fern-inspector/src/picker.rs](../crates/fern-inspector/src/picker.rs)
+- Resize handle: [crates/fern-inspector/src/resize_handle.rs](../crates/fern-inspector/src/resize_handle.rs)
 - Persistence: [crates/fern-inspector/src/persistence.rs](../crates/fern-inspector/src/persistence.rs)
 - Tabs: [crates/fern-inspector/src/tabs/](../crates/fern-inspector/src/tabs/)
 - Debug-registry hook: [crates/fern-data/src/debug_registry.rs](../crates/fern-data/src/debug_registry.rs)
@@ -217,6 +232,12 @@ wants to introspect a running tree:
 - `WidgetTree::hovered_signal() -> Signal<Option<WidgetId>>` — reactive
   mirror updated at every hover change (added in slice 6 to drive the
   AllBounds tooltip without polling)
+- `WidgetTree::focused_signal() -> Signal<Option<WidgetId>>` — reactive
+  mirror of focused id, drives the inspector's Focus tab without
+  polling (added in slice 7)
+- `OverlayManager::version() -> &Signal<u64>` — bumped on every
+  show/dismiss, drives the inspector's Overlays tab without polling
+  (added in slice 7)
 - `WidgetTree::hit_test(point)` (delegates to `WidgetArena::hit_test_at`)
 - `WidgetArena::hit_test_at(point, exclude)`
 - `WidgetBuilder::event_pass_through(bool)` and the corresponding

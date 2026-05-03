@@ -83,6 +83,13 @@ impl WidgetTree {
         self.hovered_signal.clone()
     }
 
+    /// Reactive handle to the focused widget id. Mirror of
+    /// [`hovered_signal`](Self::hovered_signal) for the focus chain;
+    /// drives the inspector's Focus tab without polling.
+    pub fn focused_signal(&self) -> crate::signal::Signal<Option<WidgetId>> {
+        self.focused_signal.clone()
+    }
+
     /// Drain and run all pending idle callbacks with the given time budget.
     /// Called by the event loop during idle periods between frames.
     pub fn run_idle_callbacks(&mut self, budget: std::time::Duration) {

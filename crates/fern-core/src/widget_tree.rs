@@ -62,6 +62,10 @@ pub struct WidgetTree {
     theme_signal: crate::signal::Signal<Theme>,
     text_backend: Option<Rc<RefCell<dyn fern_canvas::TextBackend>>>,
     focused: Option<WidgetId>,
+    /// Reactive mirror of `focused`. Same pattern as `hovered_signal`
+    /// — kept in sync via `set_focused`. Drives the inspector's Focus
+    /// tab without polling.
+    focused_signal: crate::signal::Signal<Option<WidgetId>>,
     hovered: Option<WidgetId>,
     /// Reactive mirror of `hovered`. Set whenever `hovered` changes
     /// during dispatch / hit-test recovery so external observers
@@ -287,6 +291,7 @@ impl WidgetTree {
             theme_signal: crate::signal::Signal::new(initial_theme),
             text_backend: None,
             focused: None,
+            focused_signal: crate::signal::Signal::new(None),
             hovered: None,
             hovered_signal: crate::signal::Signal::new(None),
             last_pointer_position: None,
@@ -1035,7 +1040,7 @@ impl WidgetTree {
             && !self.arena.is_active(id)
         {
             let old = self.focused;
-            self.focused = None;
+            self.set_focused(None);
             self.focus_origin = None;
             self.update_focus_within_signals(old, None);
         }
@@ -1224,7 +1229,7 @@ impl WidgetTree {
         // (which would silently swallow the intent).
         if self.focused == Some(widget_id) {
             let old = self.focused;
-            self.focused = None;
+            self.set_focused(None);
             self.focus_origin = None;
             self.update_focus_within_signals(old, None);
         }

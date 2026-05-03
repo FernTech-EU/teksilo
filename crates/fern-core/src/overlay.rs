@@ -238,6 +238,12 @@ pub struct OverlayManager {
     /// constructions outside a tree (tests of OverlayManager in
     /// isolation) still produce sensible values.
     sim_clock: Instant,
+    /// Monotonic counter bumped on every stack mutation (show /
+    /// dismiss). External observers — notably the inspector's Overlays
+    /// tab — bind to this signal to know when the visible overlay set
+    /// has changed without polling. Mirrors the
+    /// `ShortcutRegistry::version` pattern.
+    version: Signal<u64>,
 }
 
 impl OverlayManager {
@@ -246,7 +252,20 @@ impl OverlayManager {
             stack: Vec::new(),
             next_id: 1,
             sim_clock: Instant::now(),
+            version: Signal::new(0),
         }
+    }
+
+    /// Reactive handle bumped on every overlay mutation (show /
+    /// dismiss / cascade). Cheap clone. Same shape as
+    /// [`crate::shortcut::ShortcutRegistry::version`].
+    pub fn version(&self) -> &Signal<u64> {
+        &self.version
+    }
+
+    /// Bump the version signal. Called from every stack-mutating path.
+    fn bump_version(&self) {
+        self.version.set(self.version.get().wrapping_add(1));
     }
 
     /// Mirror the tree's sim_clock onto the manager so the fade
@@ -295,6 +314,7 @@ impl OverlayManager {
             fade: None,
         };
         self.stack.push(overlay);
+        self.bump_version();
         id
     }
 
@@ -537,6 +557,9 @@ impl OverlayManager {
             .filter_map(|o| o.on_dismiss.clone())
             .collect();
         self.stack.retain(|o| !to_dismiss.contains(&o.id));
+        if !to_dismiss.is_empty() {
+            self.bump_version();
+        }
         for cb in callbacks {
             cb();
         }
@@ -657,7 +680,10 @@ impl OverlayManager {
     /// Returns the content widget IDs of all dismissed overlays.
     pub fn dismiss_all(&mut self) -> Vec<WidgetId> {
         let content_ids: Vec<WidgetId> = self.stack.iter().map(|o| o.content_id).collect();
-        self.stack.clear();
+        if !content_ids.is_empty() {
+            self.stack.clear();
+            self.bump_version();
+        }
         content_ids
     }
 

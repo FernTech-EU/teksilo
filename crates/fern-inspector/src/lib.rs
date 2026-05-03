@@ -13,6 +13,8 @@ mod persistence;
 #[cfg(debug_assertions)]
 mod picker;
 #[cfg(debug_assertions)]
+mod resize_handle;
+#[cfg(debug_assertions)]
 mod shell;
 #[cfg(debug_assertions)]
 mod state;

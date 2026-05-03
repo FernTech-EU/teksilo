@@ -67,11 +67,12 @@ pub struct InspectorState {
     /// pending hit-test resolution by `PickResolver` in the next
     /// layout pass. `None` between picks.
     pub pending_pick_point: Signal<Option<Point>>,
-    /// The post-root id (the inspector shell's wrapped root) — set by
-    /// `InspectorShell::build` once it knows its own id, and used by
-    /// the picker resolver as the `exclude` argument to hit-test so
-    /// the picker doesn't pick its own overlay.
-    pub shell_root_id: Signal<Option<WidgetId>>,
+    /// Post-root ids of every InspectorShell currently mounted (one
+    /// per window). Pushed by `state::install`'s post_root closure
+    /// when each window's shell is created. Used as the multi-window
+    /// `exclude` set so the picker / hover tooltip never resolve to
+    /// the inspector's own UI in any window.
+    pub shell_root_ids: Signal<Vec<WidgetId>>,
     /// Set by the tree tab's tap handler with the widget-local y
     /// coordinate of the click; the tab's own `layout_response`
     /// reads this on the next pass, divides by row height, and updates
@@ -116,7 +117,57 @@ pub struct InspectorState {
     /// this on the next pass, divides by row height, and updates
     /// `selected_model_index`. Mirrors `pending_tree_click_y`.
     pub pending_models_click_y: Signal<Option<f32>>,
+    /// Mirror of `WidgetTree::focused()`. Bridged in `state::install`
+    /// post_root closure so the Focus tab can bind to it for reactive
+    /// repaint instead of polling.
+    pub focus_id: Signal<Option<WidgetId>>,
+    /// Mirror of `ShortcutRegistry::version()`. Bridged once per
+    /// process; the Shortcuts tab binds to it for reactive repaint
+    /// when shortcuts are registered or rebound.
+    pub shortcut_version: Signal<u64>,
+    /// Mirror of `OverlayManager::version()`. Bridged once per
+    /// process; the Overlays tab binds to it for reactive repaint
+    /// whenever an overlay is shown or dismissed.
+    pub overlay_version: Signal<u64>,
+    /// Padding insets and stack gaps captured by `BoundsTracker` in
+    /// AllBounds mode. Painted as filled tinted bands by
+    /// `HighlightLayer` to make per-axis spacing visible. Empty
+    /// outside AllBounds.
+    pub(crate) band_snapshot: Signal<Vec<crate::highlight::BandEntry>>,
+    /// Current panel height in logical pixels. Drives the panel slot's
+    /// `FixedSize::bind_height`. Mutated by the panel resize handle
+    /// (top-edge drag) and persisted via `__fern_inspector.panel_height`.
+    /// Clamped to a sensible range — see `MIN_PANEL_HEIGHT` /
+    /// `MAX_PANEL_HEIGHT`.
+    pub panel_height: Signal<f32>,
+    /// Substring filter for the Tree tab. Empty string disables the
+    /// filter. The tab compares each widget's last-segment type name
+    /// case-insensitively against this string.
+    pub tree_filter: Signal<String>,
+    /// Panel-resize drag anchor: the widget-local y-coordinate inside
+    /// the resize handle where the user originally pressed. The handle
+    /// uses this as a fixed reference so its top-edge tracks the
+    /// cursor exactly under live layout — `delta = anchor - position.y`
+    /// applied to `panel_height` each `PointerMove`. `None` when no
+    /// drag is in flight.
+    pub(crate) panel_drag_anchor_y: Signal<Option<f32>>,
+    /// Pre-formatted dump of the Properties tab's current rows
+    /// (including the full multi-line Debug repr). Refreshed by the
+    /// Properties leaf in `layout_response`; consumed by the Copy
+    /// button to write to the clipboard. Empty when no widget is
+    /// selected.
+    pub(crate) properties_dump: Signal<String>,
 }
+
+/// Default panel height in logical pixels. Used as the initial value
+/// of `panel_height` and as the persistence default.
+pub(crate) const DEFAULT_PANEL_HEIGHT: f32 = 280.0;
+/// Lower clamp for `panel_height`. Anything smaller doesn't fit the
+/// toolbar + one row of tab content.
+pub(crate) const MIN_PANEL_HEIGHT: f32 = 120.0;
+/// Upper clamp for `panel_height`. Past this the panel starts hiding
+/// the user-root area entirely on small windows.
+pub(crate) const MAX_PANEL_HEIGHT: f32 = 720.0;
 
 impl InspectorState {
     pub(crate) fn new(initial_open: bool) -> Self {
@@ -126,7 +177,7 @@ impl InspectorState {
             selected_bounds: Signal::new(None),
             picker_mode: Signal::new(false),
             pending_pick_point: Signal::new(None),
-            shell_root_id: Signal::new(None),
+            shell_root_ids: Signal::new(Vec::new()),
             pending_tree_click_y: Signal::new(None),
             overlay_mode: Signal::new(OverlayMode::SelectionOnly),
             overlay_opacity: Signal::new(0.7),
@@ -136,6 +187,14 @@ impl InspectorState {
             pending_models_click_y: Signal::new(None),
             hover_id: Signal::new(None),
             hover_info: Signal::new(None),
+            focus_id: Signal::new(None),
+            shortcut_version: Signal::new(0),
+            overlay_version: Signal::new(0),
+            band_snapshot: Signal::new(Vec::new()),
+            panel_height: Signal::new(DEFAULT_PANEL_HEIGHT),
+            tree_filter: Signal::new(String::new()),
+            panel_drag_anchor_y: Signal::new(None),
+            properties_dump: Signal::new(String::new()),
         }
     }
 }
@@ -197,12 +256,11 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
             }
         }
 
-        // First time only: bridge `tree.hovered_signal()` →
-        // `state.hover_id` so the AllBounds tooltip (and any future
-        // hover-driven inspector UI) can react to hover changes via a
-        // signal binding rather than polling. Same idempotent guard
-        // pattern as persistence; the keepalive lives on the tree's
-        // own signal so it dies with the tree.
+        // First time only: bridge a handful of `tree.*_signal()`
+        // sources → InspectorState mirrors so the panel tabs can react
+        // via signal bindings rather than polling. Same idempotent
+        // guard pattern as persistence; the keepalive lives on the
+        // tree's own signal so it dies with the tree.
         if !hover_bridge_wired.replace(true) {
             let hover_target = state_for_post_root.hover_id.clone();
             let tree_hover = tree.hovered_signal();
@@ -212,13 +270,47 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
                 }
             });
             tree_hover.attach_keepalive(h);
+
+            let focus_target = state_for_post_root.focus_id.clone();
+            let tree_focus = tree.focused_signal();
+            let h = tree_focus.observe(move |id| {
+                if focus_target.get() != *id {
+                    focus_target.set(*id);
+                }
+            });
+            tree_focus.attach_keepalive(h);
+
+            let sc_target = state_for_post_root.shortcut_version.clone();
+            let sc_version = tree.shortcut_registry().version().clone();
+            let h = sc_version.observe(move |v| {
+                if sc_target.get() != *v {
+                    sc_target.set(*v);
+                }
+            });
+            sc_version.attach_keepalive(h);
+
+            let ov_target = state_for_post_root.overlay_version.clone();
+            let ov_version = tree.overlay_manager().version().clone();
+            let h = ov_version.observe(move |v| {
+                if ov_target.get() != *v {
+                    ov_target.set(*v);
+                }
+            });
+            ov_version.attach_keepalive(h);
         }
 
         // Wrap the user root in an InspectorShell. The shell owns the
         // panel, the toolbar, the highlight overlay, the picker
         // overlay, and the bounds-tracker / pick-resolver helpers.
         let shell_id = tree.add(InspectorShell::new(root_id, state_for_post_root.clone()));
-        state_for_post_root.shell_root_id.set(Some(shell_id));
+        // Multi-window: every window's shell adds its id to the
+        // exclusion vec so neither the picker nor the hover tooltip
+        // ever resolves to inspector UI in any window.
+        let mut ids = state_for_post_root.shell_root_ids.get();
+        if !ids.contains(&shell_id) {
+            ids.push(shell_id);
+            state_for_post_root.shell_root_ids.set(ids);
+        }
         shell_id
     });
 

@@ -1,22 +1,22 @@
-//! Theme tab — preset switcher (Light / Dark) + read-only color list.
+//! Theme tab — preset switcher (Light / Dark) + JSON Export/Import +
+//! read-only color list.
 //!
-//! Slice 4 ships preset switching. Per-color editing is queued for a
-//! later slice once a real `ColorPicker` widget lands (currently
-//! Phase B in `widgets-plan.md`).
+//! Per-color editing waits on a real `ColorPicker` widget (Phase B in
+//! `widgets-plan.md`).
 
 use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
-use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
-use fern_core::widget_builder::HandlerSet;
+use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_id::WidgetId;
+use fern_platform::ClipboardHandle;
 use fern_tokens::{Color, ColorTokens, CornerRadius, TextRole, Theme};
+use fern_widgets::Button;
+use fern_widgets::primitives::{HStack, Padding, VStack};
 
 use crate::state::InspectorState;
 use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X};
 
-const PRESET_BUTTON_WIDTH: f32 = 70.0;
-const PRESET_ROW_HEIGHT: f32 = 28.0;
 const SWATCH_WIDTH: f32 = 28.0;
 const NAME_COLUMN_WIDTH: f32 = 180.0;
 
@@ -44,13 +44,16 @@ const SHOWN_COLORS: &[(&str, fn(&ColorTokens) -> Color)] = &[
 ];
 
 pub(crate) struct ThemeTab {
-    #[allow(dead_code)]
     state: InspectorState,
+    root_child_id: Option<WidgetId>,
 }
 
 impl ThemeTab {
     pub fn new(state: InspectorState) -> Self {
-        Self { state }
+        Self {
+            state,
+            root_child_id: None,
+        }
     }
 }
 
@@ -62,30 +65,98 @@ impl std::fmt::Debug for ThemeTab {
 
 impl Widget for ThemeTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Click handlers: top-row layout reserves a Light/Dark button
-        // pair; we translate widget-local clicks to a preset choice
-        // and call `set_theme` from the handler closure.
-        let handlers = HandlerSet::new()
-            .focusable(true)
-            .on_tap(move |position, event_ctx| {
-                if position.y > PRESET_ROW_HEIGHT {
-                    return;
-                }
-                // Two preset buttons starting at x=ROW_PADDING_X with
-                // PRESET_BUTTON_WIDTH each.
-                let bx = position.x - ROW_PADDING_X;
-                if (0.0..PRESET_BUTTON_WIDTH).contains(&bx) {
-                    event_ctx.set_theme(Theme::light_default());
-                } else if (PRESET_BUTTON_WIDTH..PRESET_BUTTON_WIDTH * 2.0).contains(&bx) {
-                    event_ctx.set_theme(Theme::dark_default());
+        let _ = &self.state;
+        let theme_sig = ctx.theme_signal();
+
+        // Preset buttons.
+        let light_btn = Button::new_literal("Light")
+            .on_activate_fn(|c| c.set_theme(Theme::light_default()));
+        let dark_btn =
+            Button::new_literal("Dark").on_activate_fn(|c| c.set_theme(Theme::dark_default()));
+
+        // Export → JSON dump → clipboard.
+        let theme_for_export = theme_sig.clone();
+        let export_btn = Button::new_literal("Export")
+            .on_activate_fn(move |c| {
+                if let Some(cb) = c.app_state::<ClipboardHandle>() {
+                    let theme = theme_for_export.get();
+                    if let Ok(json) = serde_json::to_string_pretty(&theme) {
+                        let _ = cb.set_text(&json);
+                    }
                 }
             });
-        ctx.apply_self_handlers(handlers);
-        Vec::new()
+
+        // Import ← clipboard JSON → set_theme. Silently ignores parse
+        // errors (a debug tool — the developer can check the clipboard
+        // and try again).
+        let import_btn = Button::new_literal("Import").on_activate_fn(|c| {
+            let Some(cb) = c.app_state::<ClipboardHandle>() else {
+                return;
+            };
+            let Ok(text) = cb.get_text() else {
+                return;
+            };
+            if let Ok(theme) = serde_json::from_str::<Theme>(&text) {
+                c.set_theme(theme);
+            }
+        });
+
+        let toolbar = Padding::symmetric(2.0, 4.0).child(
+            HStack::new()
+                .spacing(6.0)
+                .child(light_btn)
+                .child(dark_btn)
+                .child(export_btn)
+                .child(import_btn),
+        );
+
+        let color_list = ColorList::new();
+        let root = ctx.add(VStack::new().spacing(2.0).child(toolbar).child(color_list));
+        self.root_child_id = Some(root);
+        vec![root]
     }
 
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        self.root_child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .map(LayoutResponse::from)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for c in children.iter_mut() {
+            c.origin = fern_canvas::Point::new(bounds.x, bounds.y);
+            c.size = fern_canvas::Size::new(bounds.width, bounds.height);
+        }
+    }
+
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+}
+
+#[derive(Default)]
+struct ColorList;
+
+impl ColorList {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl std::fmt::Debug for ColorList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColorList").finish()
+    }
+}
+
+impl Widget for ColorList {
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        let height = PRESET_ROW_HEIGHT + (SHOWN_COLORS.len() as f32) * ROW_HEIGHT;
+        let height = (SHOWN_COLORS.len() as f32) * ROW_HEIGHT;
         proposal.resolve(0.0, height).into()
     }
 
@@ -96,29 +167,8 @@ impl Widget for ThemeTab {
         let secondary = TextRole::Secondary.resolve(&theme.colors);
         let border = theme.colors.border;
 
-        // Preset row: [Light] [Dark]
-        let preset_y = bounds.y + 2.0;
-        let light_rect = Rect::new(
-            bounds.x + ROW_PADDING_X,
-            preset_y,
-            PRESET_BUTTON_WIDTH,
-            PRESET_ROW_HEIGHT - 4.0,
-        );
-        let dark_rect = Rect::new(
-            bounds.x + ROW_PADDING_X + PRESET_BUTTON_WIDTH,
-            preset_y,
-            PRESET_BUTTON_WIDTH,
-            PRESET_ROW_HEIGHT - 4.0,
-        );
-        canvas.stroke_rounded_rect(light_rect, CornerRadius::uniform(4.0), border, 1.0);
-        canvas.stroke_rounded_rect(dark_rect, CornerRadius::uniform(4.0), border, 1.0);
-        canvas.draw_text("Light", inset(light_rect, 6.0, 4.0), style, primary);
-        canvas.draw_text("Dark", inset(dark_rect, 6.0, 4.0), style, primary);
-
-        // Color rows.
-        let list_top = bounds.y + PRESET_ROW_HEIGHT;
         for (i, (name, getter)) in SHOWN_COLORS.iter().enumerate() {
-            let y = list_top + (i as f32) * ROW_HEIGHT;
+            let y = bounds.y + (i as f32) * ROW_HEIGHT;
             let swatch = Rect::new(
                 bounds.x + ROW_PADDING_X,
                 y + 2.0,
@@ -146,15 +196,6 @@ impl Widget for ThemeTab {
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
-}
-
-fn inset(r: Rect, dx: f32, dy: f32) -> Rect {
-    Rect::new(
-        r.x + dx,
-        r.y + dy,
-        (r.width - dx * 2.0).max(0.0),
-        (r.height - dy * 2.0).max(0.0),
-    )
 }
 
 fn format_hex(c: Color) -> String {

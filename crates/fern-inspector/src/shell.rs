@@ -33,6 +33,7 @@ use fern_widgets::{Button, Panel, SegmentedControl, Slider, TabWidget};
 
 use crate::highlight::{BoundsTracker, HighlightLayer};
 use crate::picker::{PickResolver, PickerOverlay};
+use crate::resize_handle::ResizeHandle;
 use crate::state::{InspectorState, OverlayMode};
 use crate::tabs::accessibility::A11yTab;
 use crate::tabs::data_models::DataModelsTab;
@@ -44,7 +45,6 @@ use crate::tabs::shortcuts::ShortcutsTab;
 use crate::tabs::theme::ThemeTab;
 use crate::tabs::tree::TreeTab;
 
-const PANEL_HEIGHT: f32 = 280.0;
 
 /// Composing widget that takes ownership of wrapping a user-root id
 /// with the inspector UI. Created by the post-root hook in
@@ -94,18 +94,46 @@ impl Widget for InspectorShell {
             .child(highlight)
             .child(picker_switcher);
 
-        // Slot for the inspector panel. Visibility is driven by
-        // `state.open` via a Switcher: index 0 hides, index 1 shows.
+        // Slot for the inspector panel + its top-edge resize handle.
+        // The Switcher gates the whole block on `state.open`: closed
+        // collapses both handle and panel to zero so the user-root
+        // takes the full window. Open shows the handle on top of the
+        // panel (handle drags drive `state.panel_height`).
+        let panel_block = VStack::new()
+            .child(ResizeHandle::new(state.clone()))
+            .child(
+                FixedSize::new()
+                    .bind_height(state.panel_height.clone())
+                    .child(build_panel(state.clone())),
+            );
         let panel_index = state.open.map(|open| if *open { 1usize } else { 0 });
         let panel_switcher = fern_widgets::primitives::Switcher::new(panel_index)
             .child(empty_filler())
-            .child(build_panel(state.clone()));
+            .child(panel_block);
+
+        // Derived height signal — depends on BOTH `open` and
+        // `panel_height` so dragging the handle OR toggling the panel
+        // re-runs layout. `Signal::zip` dirties on either source.
+        let height_signal = state
+            .open
+            .zip(&state.panel_height)
+            .map(|(open, h)| {
+                if *open {
+                    *h + crate::resize_handle::HANDLE_HEIGHT
+                } else {
+                    0.0
+                }
+            });
 
         let stack = VStack::new()
             .child(Expand::new().flex(1.0).child(z))
             .child(bounds_tracker)
             .child(pick_resolver)
-            .child(FixedSize::new().bind_height(panel_height_signal(&state)).child(panel_switcher));
+            .child(
+                FixedSize::new()
+                    .bind_height(height_signal)
+                    .child(panel_switcher),
+            );
 
         let root = ctx.add(stack);
         self.root_child_id = Some(root);
@@ -133,15 +161,6 @@ impl Widget for InspectorShell {
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
-}
-
-/// Derives a height signal: 0 when closed, `PANEL_HEIGHT` when open.
-/// Used to drive `FixedSize::bind_height`. (No animation in slice 2 —
-/// hard show/hide.)
-fn panel_height_signal(state: &InspectorState) -> Signal<f32> {
-    state
-        .open
-        .map(|open| if *open { PANEL_HEIGHT } else { 0.0 })
 }
 
 /// Zero-size placeholder used in Switchers when we want "nothing here".

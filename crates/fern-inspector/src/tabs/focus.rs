@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::arena::WidgetArena;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use fern_core::widget_id::WidgetId;
@@ -23,7 +24,6 @@ struct FocusRow {
 /// Snapshot-driven view of the focus chain. Walks from the focused
 /// widget back to the root via parent links.
 pub(crate) struct FocusTab {
-    #[allow(dead_code)]
     state: InspectorState,
     rows: RefCell<Vec<FocusRow>>,
 }
@@ -44,7 +44,14 @@ impl std::fmt::Debug for FocusTab {
 }
 
 impl Widget for FocusTab {
-    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Reactive: relayout whenever the framework's focused widget
+        // changes. The bridge in `state::install` mirrors
+        // `tree.focused_signal()` into `state.focus_id`.
+        let self_id = ctx.self_id();
+        self.state
+            .focus_id
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
         Vec::new()
     }
 

@@ -115,8 +115,18 @@ impl Widget for PickResolver {
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         if let Some(point) = self.state.pending_pick_point.get() {
-            let exclude = self.state.shell_root_id.get();
-            let hit = ctx.widget_at_point(point, exclude);
+            // Multi-window: try every shell exclusion in turn. The
+            // hit-test API takes a single exclude id, so we walk all
+            // shells looking for a non-shell hit. With one window this
+            // collapses to the previous behavior.
+            let excludes = self.state.shell_root_ids.get();
+            let hit = if excludes.is_empty() {
+                ctx.widget_at_point(point, None)
+            } else {
+                excludes
+                    .iter()
+                    .find_map(|&shell| ctx.widget_at_point(point, Some(shell)))
+            };
             if let Some(id) = hit {
                 self.state.selected_id.set(Some(id));
             }

@@ -12,12 +12,15 @@
 use fern_core::signal::Signal;
 use fern_settings::SettingsStore;
 
-use crate::state::{InspectorState, NUM_TABS, OverlayMode};
+use crate::state::{
+    InspectorState, MAX_PANEL_HEIGHT, MIN_PANEL_HEIGHT, NUM_TABS, OverlayMode,
+};
 
 const KEY_OPEN: &str = "__fern_inspector.open";
 const KEY_BOUNDS_MODE: &str = "__fern_inspector.bounds_mode";
 const KEY_OVERLAY_OPACITY: &str = "__fern_inspector.overlay_opacity";
 const KEY_ACTIVE_TAB: &str = "__fern_inspector.active_tab";
+const KEY_PANEL_HEIGHT: &str = "__fern_inspector.panel_height";
 
 /// Bridge `InspectorState` signals to their persistent counterparts
 /// in `SettingsStore`. Idempotent — calling more than once on the
@@ -27,6 +30,7 @@ pub(crate) fn wire(state: &InspectorState, store: &SettingsStore) {
     bridge_overlay_mode(&state.overlay_mode, store);
     bridge_f32(&state.overlay_opacity, store, KEY_OVERLAY_OPACITY);
     bridge_active_tab(&state.active_tab, store);
+    bridge_panel_height(&state.panel_height, store);
 }
 
 fn bridge_bool(state_sig: &Signal<bool>, store: &SettingsStore, key: &str) {
@@ -98,6 +102,26 @@ fn bridge_active_tab(state_sig: &Signal<usize>, store: &SettingsStore) {
         let v = *idx as i64;
         if pers_clone.get() != v {
             pers_clone.set(v);
+        }
+    });
+    state_sig.attach_keepalive(h);
+}
+
+fn bridge_panel_height(state_sig: &Signal<f32>, store: &SettingsStore) {
+    // Same shape as `bridge_f32` but with an extra clamp so a stale
+    // or hand-edited value can't shrink the panel below the toolbar
+    // or grow it past the user-root.
+    let initial = state_sig.get().clamp(MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT);
+    let persisted = store.signal::<f32>(KEY_PANEL_HEIGHT, initial);
+    let parsed = persisted.get().clamp(MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT);
+    if (parsed - state_sig.get()).abs() > f32::EPSILON {
+        state_sig.set(parsed);
+    }
+    let pers_clone = persisted.clone();
+    let h = state_sig.observe(move |v| {
+        let clamped = v.clamp(MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT);
+        if (pers_clone.get() - clamped).abs() > f32::EPSILON {
+            pers_clone.set(clamped);
         }
     });
     state_sig.attach_keepalive(h);

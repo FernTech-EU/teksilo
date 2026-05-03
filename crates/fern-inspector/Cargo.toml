@@ -29,8 +29,14 @@ fern-core = { workspace = true }
 fern-app = { workspace = true }
 fern-data = { workspace = true }
 fern-i18n = { workspace = true }
+fern-platform = { workspace = true }
 fern-settings = { workspace = true }
 fern-tokens = { workspace = true }
-fern-widgets = { workspace = true }
+# `rich-text` is needed for the Tree tab's filter `TextInput`. It pulls
+# in `fern-text` (text-typeset) which is the only realistic way to get
+# a polished editable input. Inspector is debug-only so the cost is
+# acceptable; release builds compile out everything in this crate.
+fern-widgets = { workspace = true, features = ["rich-text"] }
+serde_json = { workspace = true }
 
 [dev-dependencies]

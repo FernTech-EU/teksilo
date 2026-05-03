@@ -4,6 +4,7 @@ use std::cell::RefCell;
 
 use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use fern_core::widget_id::WidgetId;
@@ -22,7 +23,6 @@ struct ShortcutRow {
 }
 
 pub(crate) struct ShortcutsTab {
-    #[allow(dead_code)]
     state: InspectorState,
     rows: RefCell<Vec<ShortcutRow>>,
 }
@@ -43,7 +43,14 @@ impl std::fmt::Debug for ShortcutsTab {
 }
 
 impl Widget for ShortcutsTab {
-    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Reactive: relayout on every shortcut-registry version bump
+        // (registration, removal, rebind). Bridged from
+        // `tree.shortcut_registry().version()`.
+        let self_id = ctx.self_id();
+        self.state
+            .shortcut_version
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
         Vec::new()
     }
 

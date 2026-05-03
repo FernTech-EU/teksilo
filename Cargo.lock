@@ -1373,9 +1373,11 @@ dependencies = [
  "fern-core",
  "fern-data",
  "fern-i18n",
+ "fern-platform",
  "fern-settings",
  "fern-tokens",
  "fern-widgets",
+ "serde_json",
 ]
 
 [[package]]
