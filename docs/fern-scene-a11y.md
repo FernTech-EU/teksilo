@@ -22,19 +22,16 @@ The framework therefore ships two cooperating layers:
    *whatever* AT shape makes sense for their domain — independent
    of visual layout.
 
-Two pieces remain deferred to a later sub-phase:
+One piece remains deferred to a later sub-phase:
 
-- **Auto-graft of interactive widget descendants** into their
-  containing logical item. Today, declaring
-  `set_a11y_parent(A11yNode::Widget(combo_id), Some(Group(tools)))`
-  has no effect — heavyweight widgets are emitted by the arena
-  walker as natural descendants of `SceneView`, and the
-  scene-walker can't decorate widget-derived NodeIds from a
-  sibling's `accessibility()` impl.
 - **Custom focus-order / directional-navigation callbacks** on
-  `SceneView`. Default reading-order Tab cycle is the only mode in
-  Phase 5b. Apps that need data-flow-order Tab in a graph editor
+  `SceneView`. Default reading-order Tab cycle is the only mode
+  today. Apps that need data-flow-order Tab in a graph editor
   must wait for the dedicated callback API.
+
+Auto-graft of interactive widget descendants into their declared
+logical parent **is supported** — see *A11yMode + auto-graft*
+below.
 
 ## Status
 
@@ -42,7 +39,8 @@ Two pieces remain deferred to a later sub-phase:
 |-------|------|--------|
 | 5a | Visual-default a11y + keyboard navigation | ✅ landed |
 | 5b core | Logical tree (groups, parents, relations, live, landmarks, categories) | ✅ landed |
-| 5b auto-graft | Widget descendants routed through declared logical parents | not yet |
+| 5b auto-graft | Widget descendants routed through declared logical parents | ✅ landed |
+| 5b modes | `A11yMode::Cooperative` / `StrictlyParallel` | ✅ landed |
 | 5b callbacks | `focus_order(...)` / `directional_navigation(...)` | not yet |
 
 ---
@@ -134,6 +132,75 @@ App-wide shortcuts (`Ctrl+Plus` etc.) route through the standard
 
 ---
 
+## A11yMode + auto-graft
+
+Two design decisions shape how scene contents land in the AT tree:
+
+### `A11yMode`
+
+```rust
+SceneView::new(scene)                                     // default: Cooperative
+SceneView::new(scene).a11y_mode(A11yMode::StrictlyParallel)
+```
+
+- **`Cooperative`** *(default)*. Visual is the AT structure
+  unless overridden. Lightweight items inside the off-screen-mode
+  policy emit as direct AT children of `SceneView`; heavyweight
+  widgets emit through the arena walker as natural descendants.
+  Apps selectively override with `set_a11y_parent` for parts of
+  the scene where AT diverges. Right for charts, dashboards,
+  simple maps — apps where the visual layout *is* a sensible AT
+  structure for most nodes.
+
+- **`StrictlyParallel`**. AT structure is purely declared.
+  Lightweight items are emitted **only** if the app placed them
+  in the logical tree via `set_a11y_parent`; items without a
+  declared parent are suppressed. Heavyweight widgets still
+  emit (they own focus / interaction state the AT layer can't
+  suppress) but their AT-tree parent is the declared logical
+  parent if any, else `SceneView` root. Right for corkboards,
+  graph editors, CAD canvases — apps where AT shape is
+  fundamentally different from visual layout, and apps would
+  override the default for every node anyway.
+
+### Auto-graft
+
+Heavyweight widgets are added via `Scene::add_widget(widget,
+scene_rect)` and get an `ItemId` back. Apps declare their AT
+parent the same way they declare it for lightweight items:
+
+```rust
+let card = scene.add_widget(my_card_widget(), card_rect);
+scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act_one)));
+```
+
+Behind the scenes, the framework AT walker calls a hook
+(`Widget::a11y_redirect_descendant`) on `SceneView` for every
+arena-child it's about to emit. SceneView's hook impl checks for
+a declared parent on the descendant's `ItemId`; if found, it
+returns the synthetic NodeId of the declared parent, telling the
+walker to skip its default push. SceneView's own `accessibility()`
+emission has already attached the widget's NodeId to the parent's
+children list — so the widget appears exactly once, under its
+logical parent, with all its real focus / keyboard / action
+machinery intact.
+
+`A11yNode::Widget(widget_id)` is reserved for relocating an
+*arbitrary* widget. For widgets you added via `Scene::add_widget`,
+prefer `A11yNode::Item(item_id)` — same ergonomics, and
+auto-graft handles them.
+
+> **Limitation.** The `Widget::a11y_redirect_descendant` hook is
+> consulted only on the **direct** arena parent of a child during
+> AT walk. So `A11yNode::Widget(widget_id)` only takes effect
+> when `widget_id` is a direct child of `SceneView`. Relocating
+> a *deeply nested* widget (a `ComboBox` two arena-levels inside
+> a Card) would require ancestor-chain queries from the walker,
+> which is a planned extension. Apps that need this today should
+> structure the widget so the relocation target is a direct
+> SceneView child, or expose the inner widget's id and add it to
+> the Scene as its own `add_widget` entry.
+
 ## Parallel structural layer (Phase 5b)
 
 The visual-default layer is correct out of the box but rigid:
@@ -157,13 +224,12 @@ pub enum A11yNode {
 Every Phase 5b API targets `A11yNode`. Apps mix item / group /
 widget handles uniformly when declaring parents and relations.
 
-> **Note (deferred).** `A11yNode::Widget` is accepted by every
-> setter but the walker doesn't yet route widget-derived NodeIds
-> through the logical tree (the auto-graft work). `set_a11y_parent
-> (A11yNode::Widget(...), ...)` is recorded but has no effect on
-> the emitted TreeUpdate. Use `A11yNode::Item` and `A11yNode::Group`
-> for the parts of your app that need full Phase 5b semantics
-> today.
+> **Note.** For widgets you added via `Scene::add_widget`, prefer
+> `A11yNode::Item(item_id)` (the address you got back from
+> `add_widget`). The walker auto-grafts it. Reserve
+> `A11yNode::Widget(widget_id)` for relocating *non-add_widget*
+> widgets — typically a descendant of a heavyweight scene item
+> that should logically belong elsewhere.
 
 ### Logical groups
 
@@ -288,8 +354,11 @@ let act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resoluti
 
 for (i, (title, body)) in cards.iter().enumerate() {
     let card_rect = grid_rect(i);
-    scene.add_widget(card_widget(title, body), card_rect);
-    // (Heavyweight grouping deferred — see auto-graft.)
+    let card = scene.add_widget(card_widget(title, body), card_rect);
+    let act = match i / 3 { 0 => act1, 1 => act2, _ => act3 };
+    // Auto-graft: card's WidgetId lands under its act in the AT
+    // tree, with full focus / keyboard machinery intact.
+    scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act)));
 }
 
 // Connectors AT-grouped under their source act.

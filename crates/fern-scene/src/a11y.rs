@@ -44,20 +44,31 @@ impl A11yGroupId {
 }
 
 /// Address of a node in the parallel logical AT tree. Lets apps
-/// uniformly target lightweight items, virtual groups, and real
-/// interactive widgets when declaring relationships, parents, or
-/// rotor categories.
+/// uniformly target scene entries, virtual groups, and ad-hoc
+/// widgets when declaring relationships, parents, or rotor
+/// categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum A11yNode {
-    /// A lightweight `SceneItem` in the scene.
+    /// Any entry in the scene — lightweight `SceneItem` or
+    /// heavyweight `Widget` added via `Scene::add_widget`. The
+    /// walker discriminates by entry kind: lightweight items get
+    /// a synthetic `SyntheticKind::SceneItem` AT node; heavyweight
+    /// items get auto-grafted via the framework redirect hook,
+    /// landing the real widget's `NodeId` under the declared
+    /// parent.
     Item(ItemId),
     /// A virtual `A11yGroup` declared via
     /// [`Scene::add_a11y_group`](crate::Scene::add_a11y_group).
     Group(A11yGroupId),
-    /// A real interactive widget in the arena. Use this to relocate
-    /// a heavyweight `WidgetItem`'s descendant — say, a `ComboBox`
-    /// nested visually in a Scene card — to a logical parent
-    /// elsewhere in the AT tree.
+    /// A real interactive widget addressed by its arena
+    /// [`WidgetId`]. Use this to relocate widgets that aren't
+    /// `Scene::add_widget`-managed — typically a *descendant* of
+    /// a heavyweight scene item that should logically belong
+    /// elsewhere (a global `ComboBox` nested visually inside a
+    /// Scene card but logically under a top-level "Tools" group).
+    /// For widgets you added via `Scene::add_widget`, prefer
+    /// `A11yNode::Item(item_id)` — the walker handles the
+    /// heavyweight-item auto-graft for you.
     Widget(WidgetId),
 }
 
@@ -159,6 +170,49 @@ impl A11yGroup {
     /// The role set on the builder. Default `Role::Group`.
     pub fn role(&self) -> accesskit::Role {
         self.role
+    }
+}
+
+/// AT-emission strategy for `SceneView`. Decides whether items /
+/// widgets that have *not* been placed in the app-declared logical
+/// tree appear in the AT tree by default, or are suppressed.
+///
+/// Pick `Cooperative` when the visual scene layout *is* a sensible
+/// AT structure for your app (charts, dashboards, simple maps).
+/// Pick `StrictlyParallel` when AT shape diverges meaningfully
+/// from visual layout — story corkboards (Acts → Scene cards),
+/// node-graph editors (Subgraphs → Nodes → Ports), CAD canvases
+/// (Layers → Components). Apps in this category typically declare
+/// every AT edge anyway, so the default visual-emission becomes
+/// noise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum A11yMode {
+    /// **Default.** Visual is the AT structure unless overridden.
+    /// Items inside the off-screen-mode policy emit as direct AT
+    /// children of `SceneView` (or their declared logical parent
+    /// if `set_a11y_parent` placed them). Heavyweight widgets
+    /// emit through the arena walker as natural descendants of
+    /// `SceneView`. Phase 5b's logical-tree machinery layers on
+    /// top.
+    Cooperative,
+
+    /// AT structure is purely declared. Items are emitted **only**
+    /// if the app placed them in the logical tree via
+    /// `Scene::set_a11y_parent`. Heavyweight widgets still emit
+    /// (they own focus / interaction state the AT layer can't
+    /// suppress) but their parent in the AT tree is the declared
+    /// logical parent if any, else `SceneView` itself.
+    ///
+    /// Use this when your app's AT shape is fundamentally
+    /// different from its visual layout — declaring every node
+    /// once is cheaper than overriding the visual default for
+    /// every node.
+    StrictlyParallel,
+}
+
+impl Default for A11yMode {
+    fn default() -> Self {
+        A11yMode::Cooperative
     }
 }
 

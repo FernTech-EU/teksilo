@@ -114,6 +114,16 @@ pub struct SceneView {
 
     // --- Phase 5a a11y configuration ----------------------------------
     a11y_off_screen_mode: crate::a11y::A11yOffScreenMode,
+
+    // --- Phase 5b a11y configuration ----------------------------------
+    /// Cooperative (default) vs StrictlyParallel.
+    a11y_mode: crate::a11y::A11yMode,
+    /// SceneView's own arena `WidgetId`, captured during the first
+    /// `build()`. Needed by `a11y_redirect_descendant` to compute
+    /// the synthetic `NodeId` of a declared logical parent group
+    /// (the hash key is `(self_id, group_id, SyntheticKind::SceneGroup)`).
+    /// `Cell` because the trait method is `&self`.
+    self_widget_id: Cell<Option<WidgetId>>,
 }
 
 impl SceneView {
@@ -137,7 +147,23 @@ impl SceneView {
             zoom_anim_duration: DEFAULT_ZOOM_DURATION,
             line_height: DEFAULT_LINE_HEIGHT,
             a11y_off_screen_mode: crate::a11y::A11yOffScreenMode::default(),
+            a11y_mode: crate::a11y::A11yMode::default(),
+            self_widget_id: Cell::new(None),
         }
+    }
+
+    /// Override the [`A11yMode`](crate::a11y::A11yMode) for this
+    /// SceneView. Default is `Cooperative` — the visual scene
+    /// layout drives AT emission unless explicitly overridden via
+    /// [`Scene::set_a11y_parent`](crate::Scene::set_a11y_parent).
+    /// Switch to `StrictlyParallel` when your app's AT shape is
+    /// fundamentally different from its visual layout: items
+    /// without a declared logical parent are then suppressed from
+    /// the AT tree, and the app declares every node it wants AT
+    /// users to reach.
+    pub fn a11y_mode(mut self, mode: crate::a11y::A11yMode) -> Self {
+        self.a11y_mode = mode;
+        self
     }
 
     /// Override the off-screen visibility policy for the AT walker.
@@ -400,6 +426,10 @@ impl Widget for SceneView {
             });
         let self_id = ctx.self_id();
         ctx.set_transform(self_id, view_transform);
+        // Capture for the AT-redirect hook (Phase 5b auto-graft).
+        // The hook is `&self`; without a stash here it has no way
+        // to derive its own `WidgetId` to compute synthetic NodeIds.
+        self.self_widget_id.set(Some(self_id));
 
         // Wire scroll + pinch handlers. Captures are by clone so they
         // outlive the build call.
@@ -705,6 +735,52 @@ impl Widget for SceneView {
         true
     }
 
+    fn a11y_redirect_descendant(
+        &self,
+        _self_id: WidgetId,
+        descendant: WidgetId,
+    ) -> Option<accesskit::NodeId> {
+        // Phase 5b auto-graft: tell the framework walker to skip
+        // its default push for any heavyweight scene entry whose
+        // declared logical parent is in our own logical tree.
+        // Two paths:
+        //   1. The widget was added via `Scene::add_widget` (most
+        //      common). Its `ItemId` lives in `widget_to_item`.
+        //      Look up the declaration via
+        //      `a11y_parent_of(A11yNode::Item(item_id))`.
+        //   2. The widget was relocated ad-hoc via
+        //      `set_a11y_parent(A11yNode::Widget(widget_id), ...)`.
+        //      Look it up directly. Used for descendants of
+        //      heavyweight items.
+        use crate::a11y::A11yNode;
+        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+        let owner = self.self_widget_id.get()?;
+        let parent = self
+            .widget_to_item
+            .get(&descendant)
+            .and_then(|item_id| self.scene.a11y_parent_of(A11yNode::Item(*item_id)))
+            .or_else(|| self.scene.a11y_parent_of(A11yNode::Widget(descendant)))?;
+        match parent {
+            A11yNode::Item(item_id) => Some(synthetic_node_id(
+                owner,
+                item_id.as_u64(),
+                SyntheticKind::SceneItem,
+            )),
+            A11yNode::Group(group_id) => Some(synthetic_node_id(
+                owner,
+                group_id.as_u64(),
+                SyntheticKind::SceneGroup,
+            )),
+            A11yNode::Widget(_) => {
+                // Widget→Widget reparenting: the declared parent
+                // widget's NodeId isn't ours to attach to (it's
+                // owned by another arena widget's accessibility()
+                // emission). Fall through.
+                None
+            }
+        }
+    }
+
     fn accessibility(&self, builder: &mut fern_core::accessibility::AccessNodeBuilder) {
         use crate::a11y::A11yNode;
         use crate::scene::SceneEntryKind;
@@ -752,27 +828,70 @@ impl Widget for SceneView {
         // `add_item` order. The `None` bucket keeps groups before
         // items so screen readers announce structure first.
         let mut logical_children: HashMap<Option<A11yNode>, Vec<A11yNode>> = HashMap::new();
-        // Phase 1: place groups under their declared parents.
+
+        // Phase 1: place groups. Groups always emit — they have no
+        // visual default to fall back to. A group with no declared
+        // parent goes to SceneView root, regardless of mode.
         for group in &self.scene.a11y_groups {
             let node = A11yNode::Group(group.id);
             let parent = self.scene.a11y_parent_of(node);
             logical_children.entry(parent).or_default().push(node);
         }
-        // Phase 2: place visible lightweight items.
+
+        // Phase 2: place all visible scene entries — lightweight
+        // items and heavyweight widgets alike. Both kinds use
+        // `A11yNode::Item(item_id)` as their logical-tree address.
+        // Discrimination by entry kind happens at emit time.
+        //
+        // Mode dispatch (applies to lightweight items only —
+        // heavyweight widgets always emit via the framework walker
+        // since they own focus / interaction state; the only
+        // question is whether they emit at SceneView root or under
+        // a declared logical parent):
+        //   - Cooperative: item without a declared parent emits
+        //     as a SceneView-root child (visual default).
+        //   - StrictlyParallel: lightweight item without a parent
+        //     is suppressed; heavyweight without a parent stays
+        //     at SceneView root via the framework walker.
         for entry in &self.scene.entries {
             if !visible_item_ids.contains(&entry.id) {
                 continue;
             }
-            let SceneEntryKind::Item(_) = &entry.kind else { continue };
             let node = A11yNode::Item(entry.id);
             let parent = self.scene.a11y_parent_of(node);
-            logical_children.entry(parent).or_default().push(node);
+            let is_widget = matches!(&entry.kind, SceneEntryKind::Widget { .. });
+            match (parent, is_widget, self.a11y_mode) {
+                (Some(p), _, _) => {
+                    logical_children.entry(Some(p)).or_default().push(node);
+                }
+                (None, false, crate::a11y::A11yMode::Cooperative) => {
+                    // Lightweight item, root, cooperative → emit at root.
+                    logical_children.entry(None).or_default().push(node);
+                }
+                (None, false, crate::a11y::A11yMode::StrictlyParallel) => {
+                    // Lightweight item, root, strict → suppressed.
+                }
+                (None, true, _) => {
+                    // Heavyweight at root — let the framework walker
+                    // handle it via natural descendant emission. No
+                    // entry in our logical tree.
+                }
+            }
         }
-        // Note: heavyweight `Widget` items declared via `add_widget`
-        // emit through the arena walker as normal direct children of
-        // SceneView. The Phase 5b auto-graft path that would re-
-        // parent them under a logical group is not yet implemented —
-        // see `docs/fern-scene-a11y.md` for the deferred work.
+
+        // Phase 3: ad-hoc widget relocations addressed by `WidgetId`
+        // (rare — typically a descendant of a heavyweight scene
+        // item that should belong elsewhere logically). Widgets
+        // referenced via `A11yNode::Item(item_id)` are already
+        // handled in Phase 2.
+        for (child_node, parent_node) in &self.scene.a11y_parents {
+            if matches!(child_node, A11yNode::Widget(_)) {
+                logical_children
+                    .entry(Some(*parent_node))
+                    .or_default()
+                    .push(*child_node);
+            }
+        }
 
         // Walk the logical tree DFS, depth-first, emitting synthetic
         // NodeIds. Cycle guard: a node visited twice (the result of
@@ -805,7 +924,9 @@ impl Widget for SceneView {
                 A11yNode::Group(id) => owner.map(|o| {
                     synthetic_node_id(o, id.as_u64(), SyntheticKind::SceneGroup)
                 }),
-                A11yNode::Widget(_) => None,
+                A11yNode::Widget(id) => {
+                    Some(fern_core::accessibility::widget_id_to_node_id(id))
+                }
             }
         };
         for (from, kind, to) in self.scene.a11y_relations() {
@@ -884,30 +1005,51 @@ impl SceneView {
         let view_transform = self.view_transform();
         let synthetic_id = match node {
             A11yNode::Item(item_id) => {
-                let Some(item) = self.scene.item(item_id) else {
+                // Discriminate by entry kind: lightweight items
+                // emit a synthetic AT node; heavyweight items
+                // attach the framework-emitted widget node under
+                // the declared parent (auto-graft).
+                if let Some(item) = self.scene.item(item_id) {
+                    let scene_bounds = item.bounds_in_scene();
+                    let screen_bounds = view_transform.apply_rect(scene_bounds);
+                    let ctx = crate::item::SceneItemA11yContext {
+                        view_transform,
+                        screen_bounds,
+                        item_id,
+                    };
+                    builder.push_scene_child_under(
+                        parent_id,
+                        item_id.as_u64(),
+                        SyntheticKind::SceneItem,
+                        |child| {
+                            item.accessibility(child, &ctx);
+                            child.inner_mut().set_bounds(accesskit::Rect {
+                                x0: screen_bounds.x as f64,
+                                y0: screen_bounds.y as f64,
+                                x1: (screen_bounds.x + screen_bounds.width) as f64,
+                                y1: (screen_bounds.y + screen_bounds.height) as f64,
+                            });
+                        },
+                    )
+                } else if let Some(&widget_id) = self.materialized.get(&item_id) {
+                    // Heavyweight scene entry — auto-graft.
+                    let Some(parent) = parent_id else {
+                        debug_assert!(
+                            false,
+                            "auto-graft requires a declared parent — root \
+                             heavyweight items emit through the framework walker"
+                        );
+                        return;
+                    };
+                    let widget_node_id =
+                        fern_core::accessibility::widget_id_to_node_id(widget_id);
+                    builder.attach_scene_child_under(parent, widget_node_id);
+                    widget_node_id
+                } else {
+                    // Item id not found — Scene was mutated between
+                    // logical-tree population and emit. Skip.
                     return;
-                };
-                let scene_bounds = item.bounds_in_scene();
-                let screen_bounds = view_transform.apply_rect(scene_bounds);
-                let ctx = crate::item::SceneItemA11yContext {
-                    view_transform,
-                    screen_bounds,
-                    item_id,
-                };
-                builder.push_scene_child_under(
-                    parent_id,
-                    item_id.as_u64(),
-                    SyntheticKind::SceneItem,
-                    |child| {
-                        item.accessibility(child, &ctx);
-                        child.inner_mut().set_bounds(accesskit::Rect {
-                            x0: screen_bounds.x as f64,
-                            y0: screen_bounds.y as f64,
-                            x1: (screen_bounds.x + screen_bounds.width) as f64,
-                            y1: (screen_bounds.y + screen_bounds.height) as f64,
-                        });
-                    },
-                )
+                }
             }
             A11yNode::Group(group_id) => {
                 let Some(group) = self.scene.a11y_group(group_id) else {
@@ -927,13 +1069,33 @@ impl SceneView {
                     },
                 )
             }
-            A11yNode::Widget(_) => {
-                // Heavyweight widgets are emitted by the arena
-                // walker as natural descendants of SceneView. The
-                // Phase 5b auto-graft path that would route them
-                // through the logical tree is deferred — see
-                // `docs/fern-scene-a11y.md`. Skip silently.
-                return;
+            A11yNode::Widget(widget_id) => {
+                // Auto-graft: the widget's full AT node is emitted
+                // by the framework walker as part of the recursive
+                // descent. Here we only need to add its NodeId to
+                // the declared parent's children list. The
+                // redirect hook (`a11y_redirect_descendant`) tells
+                // the walker to skip its own push, so the widget
+                // appears exactly once — under its declared
+                // logical parent.
+                //
+                // Widgets at the logical-tree root (parent_id =
+                // None) should never get here: the population
+                // pass only adds widgets when their parent is
+                // declared. Bail on that path so we don't
+                // double-attach.
+                let Some(parent) = parent_id else {
+                    debug_assert!(
+                        false,
+                        "auto-graft requires a declared parent — root widgets emit \
+                         through the framework walker as natural descendants"
+                    );
+                    return;
+                };
+                let widget_node_id =
+                    fern_core::accessibility::widget_id_to_node_id(widget_id);
+                builder.attach_scene_child_under(parent, widget_node_id);
+                widget_node_id
             }
         };
 
@@ -2199,5 +2361,193 @@ mod tests {
         // Just running sync_accessibility without panic / hang is
         // the assertion: cycle guard works.
         let _ = tree.sync_accessibility();
+    }
+
+    // -- Phase 5b: A11yMode + auto-graft of widget descendants -------------
+
+    /// Helper: a widget with a deterministic accessibility role we
+    /// can detect in the AT update.
+    #[derive(Debug)]
+    struct LabelledFill {
+        label: &'static str,
+    }
+    impl Widget for LabelledFill {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            Size::new(20.0, 20.0).into()
+        }
+        fn accessibility(
+            &self,
+            builder: &mut fern_core::accessibility::AccessNodeBuilder,
+        ) {
+            builder.set_role(accesskit::Role::Button);
+            builder.set_name(self.label);
+        }
+    }
+
+    #[test]
+    fn cooperative_default_emits_items_at_root_when_unparented() {
+        // Cooperative is the default mode. Items without a declared
+        // parent emit as direct children of SceneView — Phase 5a
+        // visual-default behaviour, preserved.
+        use crate::items::RectItem;
+        use fern_core::accessibility::{is_synthetic, widget_id_to_node_id};
+
+        let mut scene = Scene::new();
+        scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+        let view_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == widget_id_to_node_id(view_id))
+            .map(|(_, n)| n)
+            .expect("scene view node");
+        let synth_kids = view_node
+            .children()
+            .iter()
+            .filter(|id| is_synthetic(**id))
+            .count();
+        assert_eq!(synth_kids, 1, "Cooperative emits unparented item at root");
+    }
+
+    #[test]
+    fn strictly_parallel_suppresses_unparented_items() {
+        // In StrictlyParallel mode an item without a declared
+        // parent does NOT emit. Apps must place every node they
+        // want AT-visible.
+        use crate::a11y::{A11yGroup, A11yMode, A11yNode};
+        use crate::items::RectItem;
+        use fern_core::accessibility::{is_synthetic, widget_id_to_node_id};
+
+        let mut scene = Scene::new();
+        let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
+        let placed = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        let _orphan = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)));
+        scene.set_a11y_parent(A11yNode::Item(placed), Some(A11yNode::Group(g)));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene).a11y_mode(A11yMode::StrictlyParallel),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        // Total synthetic node count: just the group + the placed
+        // item. The orphan item is suppressed.
+        let synth_total = update
+            .nodes
+            .iter()
+            .filter(|(id, _)| is_synthetic(*id))
+            .count();
+        assert_eq!(
+            synth_total, 2,
+            "StrictlyParallel: only group + placed item, orphan suppressed"
+        );
+
+        // SceneView's children list contains the group only —
+        // not the orphan item.
+        let view_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == widget_id_to_node_id(view_id))
+            .map(|(_, n)| n)
+            .unwrap();
+        let synth_kids: Vec<_> = view_node
+            .children()
+            .iter()
+            .filter(|id| is_synthetic(**id))
+            .collect();
+        assert_eq!(synth_kids.len(), 1, "only the group reaches root");
+    }
+
+    #[test]
+    fn auto_graft_widget_appears_under_declared_logical_group() {
+        // The headline Phase 5b auto-graft test: a heavyweight
+        // widget added via `Scene::add_widget` is declared (via
+        // its `ItemId`) under a logical group. The widget's
+        // `NodeId` must appear in the group's children list AND
+        // must NOT appear in SceneView's own children list.
+        use crate::a11y::{A11yGroup, A11yNode};
+        use fern_core::accessibility::{
+            synthetic_node_id, widget_id_to_node_id, SyntheticKind,
+        };
+
+        let mut scene = Scene::new();
+        let act_one = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
+        let card_item_id = scene.add_widget(
+            LabelledFill { label: "card" },
+            Rect::new(10.0, 10.0, 20.0, 20.0),
+        );
+        // Declare the parent up-front via ItemId — works for both
+        // lightweight and heavyweight scene entries.
+        scene.set_a11y_parent(
+            A11yNode::Item(card_item_id),
+            Some(A11yNode::Group(act_one)),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let view = view_handle(&tree, view_id);
+        let card_widget_id = view
+            .widget_id_for(card_item_id)
+            .expect("card was materialised");
+
+        let update = tree.sync_accessibility();
+        let view_node_id = widget_id_to_node_id(view_id);
+        let group_node_id =
+            synthetic_node_id(view_id, act_one.as_u64(), SyntheticKind::SceneGroup);
+        let widget_node_id = widget_id_to_node_id(card_widget_id);
+
+        let find = |id: accesskit::NodeId| {
+            update
+                .nodes
+                .iter()
+                .find(|(n, _)| *n == id)
+                .map(|(_, n)| n)
+        };
+        let scene_view = find(view_node_id).expect("scene view node");
+        let group = find(group_node_id).expect("group node");
+        let _widget_node = find(widget_node_id).expect("widget node still emitted");
+
+        assert!(
+            group.children().contains(&widget_node_id),
+            "widget must be a child of its declared logical group"
+        );
+        assert!(
+            !scene_view.children().contains(&widget_node_id),
+            "widget must NOT also appear as a direct child of SceneView"
+        );
+    }
+
+    #[test]
+    fn auto_graft_redirect_hook_default_is_none() {
+        // Sanity: a SceneView with no widget-parent declarations
+        // returns None from the redirect hook, so default
+        // behaviour is unchanged.
+        let mut scene = Scene::new();
+        scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let view = view_handle(&tree, view_id);
+        // Pick any descendant — without a declaration the hook
+        // returns None.
+        let view_widget_id = view_id;
+        // Use any non-existent widget id; the hook must still
+        // return None.
+        assert!(
+            Widget::a11y_redirect_descendant(view, view_widget_id, view_widget_id)
+                .is_none(),
+            "redirect hook returns None when no declaration is in place"
+        );
     }
 }

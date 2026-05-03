@@ -142,11 +142,22 @@ fn build_corkboard() -> SceneView {
     // the deferred auto-graft work — see docs/fern-scene-a11y.md);
     // we still bookkeep their ids so the demo source documents the
     // intent.
+    // Heavyweight cards. Auto-graft places each card under its
+    // declared Act group: the screen reader announces "Act I —
+    // Setup, contains: Card, Card, Card, connector 1 → 2,
+    // connector 2 → 3" before reaching Act II. The framework
+    // handles redirecting each card's WidgetId to the right
+    // logical parent via `Widget::a11y_redirect_descendant`.
     let mut card_rects = Vec::with_capacity(CARDS.len());
-    for (_i, (title, body)) in CARDS.iter().enumerate() {
-        let r = card_rect(_i);
-        let _id = scene.add_widget(build_card(title, body), r);
+    for (i, (title, body)) in CARDS.iter().enumerate() {
+        let r = card_rect(i);
+        let card_item = scene.add_widget(build_card(title, body), r);
         card_rects.push(r);
+        let act_index = i / 3;
+        scene.set_a11y_parent(
+            A11yNode::Item(card_item),
+            Some(A11yNode::Group(acts[act_index])),
+        );
     }
 
     // Connector lines wiring each card to the next in reading order
@@ -203,7 +214,7 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Scene Corkboard (Phase 5b: light items + cards + Act groups)")
+                .title("FernUI — Scene Corkboard (Phase 5b: cards auto-grafted into Act groups)")
                 .size(900, 600)
                 .root(|tree, _state| tree.add(build_corkboard())),
         )

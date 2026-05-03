@@ -186,6 +186,20 @@ impl WidgetTree {
                 for &child_id in children {
                     if self.arena.is_active(child_id) {
                         let child_nid = widget_id_to_node_id(child_id);
+                        // AT-redirect hook: the parent widget can claim
+                        // it has already placed this descendant under a
+                        // different parent in its own `accessibility()`
+                        // emission (typically `fern_scene::SceneView`
+                        // grafting a heavyweight item into a declared
+                        // logical group). When that happens, skip the
+                        // push so the descendant doesn't appear as a
+                        // duplicate child of this widget. Still record
+                        // in `seen_children` so a sibling can't
+                        // independently claim the same NodeId.
+                        if node.widget.a11y_redirect_descendant(id, child_id).is_some() {
+                            seen_children.insert(child_nid, id);
+                            continue;
+                        }
                         if let Some(&prior_parent) = seen_children.get(&child_nid) {
                             eprintln!(
                                 "FernUI bug: duplicate accessibility child {:?}: \

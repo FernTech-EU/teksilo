@@ -228,6 +228,39 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Declare this widget's accessibility identity.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 
+    /// Optional redirection hook for AT-tree placement of a child.
+    ///
+    /// The accessibility walker calls this for each arena child of
+    /// `self_id` while building the parent's AT children list. The
+    /// default returns `None` — the walker emits the child as a
+    /// normal direct AT child of this widget. Returning `Some(_)`
+    /// tells the walker that this widget has *already* placed
+    /// `descendant`'s `NodeId` somewhere else (typically under a
+    /// synthetic node it emitted in its own `accessibility()`
+    /// call), and the walker should NOT add it to this widget's
+    /// own children list.
+    ///
+    /// The returned `NodeId` is informational — it identifies the
+    /// new logical parent in case the walker wants to bookkeep
+    /// (e.g., dedupe). The walker does not validate that
+    /// `descendant`'s NodeId is actually in that target's children
+    /// list; it is the implementing widget's responsibility to
+    /// have placed it there during its `accessibility()` emission
+    /// (e.g. via `AccessNodeBuilder::attach_scene_child_under`).
+    ///
+    /// Used by `fern_scene::SceneView` to graft heavyweight
+    /// `Widget` items into an app-declared logical AT tree (Phase
+    /// 5b). Other layered containers can adopt the same pattern.
+    ///
+    /// Default: `None` — no redirection.
+    fn a11y_redirect_descendant(
+        &self,
+        _self_id: WidgetId,
+        _descendant: WidgetId,
+    ) -> Option<accesskit::NodeId> {
+        None
+    }
+
     /// Suggest an accessible title to an enclosing container that
     /// wraps this widget as content — typically a modal / dialog
     /// shell that wants to propagate the inner content's visible
