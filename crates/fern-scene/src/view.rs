@@ -4921,6 +4921,134 @@ mod tests {
     }
 
     #[test]
+    fn looping_item_animation_survives_drag_end_rebuild() {
+        // Showcase regression: dropping a draggable square in section 5
+        // froze the PulsingDot animations in section 8. Cause: the
+        // `drag_dirty` rebuild cancels animations owned by SceneView,
+        // and the items' `register_bindings` must re-register and
+        // re-arm `animate_looping` so the loop resumes on the next
+        // pending-pickup pass.
+        use crate::animation::register_animated_item_signal;
+        use crate::item::SceneItemPaintContext;
+        use crate::items::RectItem;
+        use crate::SceneItem;
+        use fern_canvas::Point;
+        use fern_core::binding::BindingLevel;
+        use fern_core::build_context::BuildContext;
+        use fern_core::widget_id::WidgetId;
+        use fern_tokens::Easing;
+
+        #[derive(Debug)]
+        struct Looper {
+            bounds: Rect,
+            phase: Signal<f32>,
+        }
+        impl SceneItem for Looper {
+            fn bounds_in_scene(&self) -> Rect {
+                self.bounds
+            }
+            fn paint(&self, _c: &mut fern_canvas::Canvas, _x: &SceneItemPaintContext) {}
+            fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {
+                register_animated_item_signal(ctx, &self.phase);
+                self.phase
+                    .bind_to(view_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+                self.phase.animate_looping(
+                    1.0,
+                    Duration::from_millis(200),
+                    Easing::Linear,
+                    None,
+                );
+            }
+        }
+
+        let mut scene = Scene::new();
+        // Heavyweight child to flip `has_built_children` so the
+        // drag-end rebuild path actually runs (matches realistic
+        // showcase scenes with at least one widget tier).
+        scene.add_widget(FillWidget::new(), Rect::new(280.0, 200.0, 30.0, 30.0));
+        // Five loopers — same shape as the showcase's PulsingDot row.
+        let phases: Vec<Signal<f32>> = (0..5).map(|_| Signal::new_animated(0.0)).collect();
+        for (i, p) in phases.iter().enumerate() {
+            scene.add_item(Looper {
+                bounds: Rect::new(200.0 + i as f32 * 30.0, 50.0, 20.0, 20.0),
+                phase: p.clone(),
+            });
+        }
+        let drag_rect = scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0))
+                .fill(fern_tokens::Color::RED)
+                .draggable(true),
+        );
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Animation should be ticking before any drag.
+        tree.tick_animations(Duration::from_millis(50));
+        for (i, p) in phases.iter().enumerate() {
+            let v = p.get();
+            assert!(
+                v > 0.0 && v < 1.0,
+                "phase[{}] must tween mid-loop pre-drag (got {})",
+                i,
+                v
+            );
+        }
+
+        // Drag the rect — Down/Move/Up. This bumps drag_dirty, which
+        // triggers a SceneView rebuild on the next layout pass, which
+        // is where the regression bites.
+        tree.pointer_move(Point::new(20.0, 20.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(20.0, 20.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(60.0, 60.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(60.0, 60.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        // First layout: drains the pending move; rebuild's
+        // `register_bindings` re-arms the loop's pending request.
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // tick_animations picks up the pending and re-inserts the
+        // looping animation into the scheduler, then advances time.
+        tree.tick_animations(Duration::from_millis(80));
+        let post_a: Vec<f32> = phases.iter().map(|p| p.get()).collect();
+        // Confirm motion resumed for every looper: advance another
+        // small slice and require each value to have moved.
+        tree.tick_animations(Duration::from_millis(40));
+        for (i, p) in phases.iter().enumerate() {
+            let post_b = p.get();
+            assert!(
+                (post_b - post_a[i]).abs() > 1e-4,
+                "looper[{}] must keep ticking after drag-end rebuild \
+                 (post_a = {}, post_b = {})",
+                i,
+                post_a[i],
+                post_b
+            );
+        }
+        // And the rect actually moved — sanity check that the drag
+        // commit ran.
+        let view = view_handle(&tree, _view_id);
+        let r = view.scene().scene_rect(drag_rect).unwrap();
+        assert!(
+            (r.x - 50.0).abs() < 1e-3 && (r.y - 50.0).abs() < 1e-3,
+            "drag commit must have run (got {:?})",
+            r
+        );
+    }
+
+    #[test]
     fn drag_in_empty_area_starts_marquee_not_move() {
         // Press in empty scene area (no item underneath) → marquee
         // mode wins; dragging across an item selects it instead of
