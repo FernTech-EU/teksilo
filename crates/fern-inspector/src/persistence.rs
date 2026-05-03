@@ -17,6 +17,7 @@ use crate::state::{InspectorState, OverlayMode};
 const KEY_OPEN: &str = "__fern_inspector.open";
 const KEY_BOUNDS_MODE: &str = "__fern_inspector.bounds_mode";
 const KEY_OVERLAY_OPACITY: &str = "__fern_inspector.overlay_opacity";
+const KEY_ACTIVE_TAB: &str = "__fern_inspector.active_tab";
 
 /// Bridge `InspectorState` signals to their persistent counterparts
 /// in `SettingsStore`. Idempotent — calling more than once on the
@@ -25,6 +26,7 @@ pub(crate) fn wire(state: &InspectorState, store: &SettingsStore) {
     bridge_bool(&state.open, store, KEY_OPEN);
     bridge_overlay_mode(&state.overlay_mode, store);
     bridge_f32(&state.overlay_opacity, store, KEY_OVERLAY_OPACITY);
+    bridge_active_tab(&state.active_tab, store);
 }
 
 fn bridge_bool(state_sig: &Signal<bool>, store: &SettingsStore, key: &str) {
@@ -71,6 +73,25 @@ fn bridge_overlay_mode(state_sig: &Signal<OverlayMode>, store: &SettingsStore) {
         let s = mode_to_str(*mode).to_string();
         if pers_clone.get() != s {
             pers_clone.set(s);
+        }
+    });
+    state_sig.attach_keepalive(h);
+}
+
+fn bridge_active_tab(state_sig: &Signal<usize>, store: &SettingsStore) {
+    // Stored as i64 because TOML lacks unsigned integers and `usize`'s
+    // width varies by target. Out-of-range / negative values seed at 0.
+    let initial = state_sig.get() as i64;
+    let persisted = store.signal::<i64>(KEY_ACTIVE_TAB, initial);
+    let parsed = usize::try_from(persisted.get()).unwrap_or(0);
+    if parsed != state_sig.get() {
+        state_sig.set(parsed);
+    }
+    let pers_clone = persisted.clone();
+    let h = state_sig.observe(move |idx| {
+        let v = *idx as i64;
+        if pers_clone.get() != v {
+            pers_clone.set(v);
         }
     });
     state_sig.attach_keepalive(h);

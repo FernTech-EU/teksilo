@@ -27,6 +27,13 @@ struct TreeModelInner<T> {
     roots: Vec<NodeId>,
     observers: Vec<TreeObserverEntry>,
     next_observer_id: u64,
+    /// Strong handle to the debug-registry adapter for this tree.
+    /// Owned here so the registration drops automatically when the
+    /// inner is freed (the adapter holds only a `Weak` to inner,
+    /// breaking the cycle). `None` until `.debug_named()` is called.
+    /// Compiled out in release.
+    #[cfg(debug_assertions)]
+    debug_adapter: Option<Rc<dyn crate::debug_registry::ModelDebug>>,
 }
 
 /// A concrete reactive tree that stores a hierarchy of items.
@@ -49,6 +56,8 @@ impl<T: 'static> TreeModel<T> {
                 roots: Vec::new(),
                 observers: Vec::new(),
                 next_observer_id: 1,
+                #[cfg(debug_assertions)]
+                debug_adapter: None,
             })),
         }
     }
@@ -353,6 +362,74 @@ impl<T: 'static> TreeModel<T> {
             current = arena.get(nid.key()).and_then(|n| n.parent);
         }
         false
+    }
+}
+
+impl<T: std::fmt::Debug + 'static> TreeModel<T> {
+    /// Register this tree with the debug inspector under `name`. In
+    /// release builds (`!cfg(debug_assertions)`) this is a no-op
+    /// pass-through so call sites stay free of `#[cfg]` lines.
+    ///
+    /// Idempotent on repeated calls — the latest registration wins.
+    /// The registration drops automatically when the last `TreeModel`
+    /// handle is freed (the adapter the registry holds is `Weak`).
+    pub fn debug_named(self, _name: impl Into<String>) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            let weak = Rc::downgrade(&self.inner);
+            let adapter: Rc<dyn crate::debug_registry::ModelDebug> =
+                Rc::new(TreeModelDebug::<T> { weak });
+            let name = _name.into();
+            crate::debug_registry::register(name, Rc::downgrade(&adapter));
+            self.inner.borrow_mut().debug_adapter = Some(adapter);
+        }
+        self
+    }
+}
+
+#[cfg(debug_assertions)]
+struct TreeModelDebug<T> {
+    weak: std::rc::Weak<RefCell<TreeModelInner<T>>>,
+}
+
+#[cfg(debug_assertions)]
+impl<T: std::fmt::Debug + 'static> crate::debug_registry::ModelDebug for TreeModelDebug<T> {
+    fn kind(&self) -> &'static str {
+        "TreeModel"
+    }
+    fn len(&self) -> usize {
+        self.weak
+            .upgrade()
+            .map(|inner| inner.borrow().arena.len())
+            .unwrap_or(0)
+    }
+    fn debug_dump(&self, out: &mut dyn std::fmt::Write) {
+        let Some(inner) = self.weak.upgrade() else {
+            return;
+        };
+        let guard = inner.borrow();
+        // Depth-first walk from each root, indenting by depth.
+        let roots: Vec<NodeId> = guard.roots.clone();
+        for root in roots {
+            dump_subtree(&guard, root, 0, out);
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn dump_subtree<T: std::fmt::Debug>(
+    guard: &TreeModelInner<T>,
+    node: NodeId,
+    depth: usize,
+    out: &mut dyn std::fmt::Write,
+) {
+    let Some(n) = guard.arena.get(node.key()) else {
+        return;
+    };
+    let _ = writeln!(out, "{:indent$}{:?}", "", n.data, indent = depth * 2);
+    let children = n.children.clone();
+    for child in children {
+        dump_subtree(guard, child, depth + 1, out);
     }
 }
 

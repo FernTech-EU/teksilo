@@ -152,8 +152,7 @@ fn empty_filler() -> impl Widget + 'static {
 /// Build the inspector panel's content. Toolbar above a `TabWidget`
 /// with nine tabs, all inside a `Panel`.
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
-    let active_tab = Signal::new(0_usize);
-    let tabs = TabWidget::new(active_tab)
+    let tabs = TabWidget::new(state.active_tab.clone())
         .tab_literal("Tree", scrollable_tab(TreeTab::new(state.clone())))
         .tab_literal("Properties", scrollable_tab(PropertiesTab::new(state.clone())))
         .tab_literal("Accessibility", scrollable_tab(A11yTab::new(state.clone())))

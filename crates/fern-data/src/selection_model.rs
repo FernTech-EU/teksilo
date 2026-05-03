@@ -5,6 +5,8 @@
 //! and range-select (Shift+click extension).
 
 use std::cell::Cell;
+#[cfg(debug_assertions)]
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -31,6 +33,13 @@ pub struct SelectionModel {
     /// Anchor index for Shift+click range extension.
     /// Shared via Rc so clones see the same anchor state.
     anchor: Rc<Cell<Option<usize>>>,
+    /// Strong holder for the debug-registry adapter. Shared across
+    /// clones; once all `SelectionModel` handles drop, the holder Rc
+    /// reaches zero and the adapter is freed, marking the registry
+    /// entry dead. `None` until `.debug_named()` is called.
+    /// Compiled out in release.
+    #[cfg(debug_assertions)]
+    debug_adapter_holder: Rc<RefCell<Option<Rc<dyn crate::debug_registry::ModelDebug>>>>,
 }
 
 impl SelectionModel {
@@ -40,6 +49,8 @@ impl SelectionModel {
             mode,
             selection: Signal::new(BTreeSet::new()),
             anchor: Rc::new(Cell::new(None)),
+            #[cfg(debug_assertions)]
+            debug_adapter_holder: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -190,6 +201,59 @@ impl Clone for SelectionModel {
             mode: self.mode,
             selection: self.selection.clone(),
             anchor: self.anchor.clone(),
+            #[cfg(debug_assertions)]
+            debug_adapter_holder: self.debug_adapter_holder.clone(),
+        }
+    }
+}
+
+impl SelectionModel {
+    /// Register this selection model with the debug inspector under
+    /// `name`. In release builds (`!cfg(debug_assertions)`) this is a
+    /// no-op pass-through so call sites stay free of `#[cfg]` lines.
+    ///
+    /// Idempotent on repeated calls — the latest registration wins.
+    /// The registration drops automatically when the last
+    /// `SelectionModel` handle is freed (the strong adapter `Rc` lives
+    /// inside a shared holder; the registry holds only a `Weak`).
+    pub fn debug_named(self, _name: impl Into<String>) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            let adapter: Rc<dyn crate::debug_registry::ModelDebug> =
+                Rc::new(SelectionModelDebug {
+                    selection: self.selection.clone(),
+                    mode: self.mode,
+                });
+            crate::debug_registry::register(_name.into(), Rc::downgrade(&adapter));
+            *self.debug_adapter_holder.borrow_mut() = Some(adapter);
+        }
+        self
+    }
+}
+
+#[cfg(debug_assertions)]
+struct SelectionModelDebug {
+    selection: Signal<BTreeSet<usize>>,
+    mode: SelectionMode,
+}
+
+#[cfg(debug_assertions)]
+impl crate::debug_registry::ModelDebug for SelectionModelDebug {
+    fn kind(&self) -> &'static str {
+        "SelectionModel"
+    }
+    fn len(&self) -> usize {
+        self.selection.get().len()
+    }
+    fn debug_dump(&self, out: &mut dyn std::fmt::Write) {
+        let _ = writeln!(out, "mode = {:?}", self.mode);
+        let sel = self.selection.get();
+        if sel.is_empty() {
+            let _ = writeln!(out, "(empty)");
+            return;
+        }
+        for i in sel.iter() {
+            let _ = writeln!(out, "[{}]", i);
         }
     }
 }

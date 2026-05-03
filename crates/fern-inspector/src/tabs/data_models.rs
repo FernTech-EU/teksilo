@@ -1,17 +1,20 @@
 //! Data Models tab — registered models from `fern_data::debug_registry`.
 //!
-//! For Slice 4, lists every registered model's name + kind + len.
-//! Per-model `debug_dump` output is shown for the most recent
-//! registration; future slices add row selection.
+//! Lists every registered model's name + kind + len. Click a row to
+//! select that model; the dump area below shows the selected model's
+//! `debug_dump` output. With nothing selected, falls back to the most
+//! recently registered model.
 
 use std::cell::RefCell;
 
 use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::TextRole;
+use fern_tokens::{Color, CornerRadius, TextRole};
 
 use crate::state::InspectorState;
 use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X};
@@ -30,10 +33,9 @@ struct ModelRow {
 }
 
 pub(crate) struct DataModelsTab {
-    #[allow(dead_code)]
     state: InspectorState,
     rows: RefCell<Vec<ModelRow>>,
-    /// Snapshot of the most-recent registration's `debug_dump` output.
+    /// Snapshot of the selected (or fallback last) model's dump output.
     dump: RefCell<String>,
 }
 
@@ -54,14 +56,32 @@ impl std::fmt::Debug for DataModelsTab {
 }
 
 impl Widget for DataModelsTab {
-    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Repaint on selection change; relayout when the panel opens
+        // (initial mount).
+        let self_id = ctx.self_id();
+        self.state
+            .selected_model_index
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        self.state
+            .open
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Relayout);
+
+        let state_for_handler = self.state.clone();
+        let handlers = HandlerSet::new()
+            .focusable(true)
+            .on_tap(move |position, _ctx| {
+                state_for_handler
+                    .pending_models_click_y
+                    .set(Some(position.y));
+            });
+        ctx.apply_self_handlers(handlers);
         Vec::new()
     }
 
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
         let snapshot = fern_data::debug_registry::snapshot();
         let mut rows: Vec<ModelRow> = Vec::with_capacity(snapshot.len());
-        let mut dump = String::new();
         for (name, model) in &snapshot {
             rows.push(ModelRow {
                 name: name.clone(),
@@ -69,11 +89,40 @@ impl Widget for DataModelsTab {
                 len: model.len(),
             });
         }
-        // Dump the last registered model into the preview area —
-        // typically the most recently created one. Future slice 5
-        // adds click-to-select per row.
-        if let Some((_, last)) = snapshot.last() {
-            last.debug_dump(&mut dump);
+
+        // Resolve any deferred row click. Click coordinate space:
+        // y=0..HEADER_HEIGHT is the header (no selection); below is
+        // rows[0..rows.len()].
+        if let Some(y) = self.state.pending_models_click_y.get() {
+            self.state.pending_models_click_y.set(None);
+            if y >= HEADER_HEIGHT {
+                let idx = ((y - HEADER_HEIGHT) / ROW_HEIGHT).floor() as usize;
+                if idx < snapshot.len() {
+                    let current = self.state.selected_model_index.get();
+                    if current == Some(idx) {
+                        // Toggle off — fall back to "last registered".
+                        self.state.selected_model_index.set(None);
+                    } else {
+                        self.state.selected_model_index.set(Some(idx));
+                    }
+                }
+            }
+        }
+
+        // Decide which model's contents to dump. Explicit selection
+        // wins; otherwise the most recent registration (matches the
+        // behavior shipped in slice 4).
+        let mut dump = String::new();
+        let chosen = self
+            .state
+            .selected_model_index
+            .get()
+            .filter(|i| *i < snapshot.len())
+            .or_else(|| snapshot.len().checked_sub(1));
+        if let Some(idx) = chosen {
+            if let Some((_, model)) = snapshot.get(idx) {
+                model.debug_dump(&mut dump);
+            }
         }
 
         let row_count = rows.len().max(1);
@@ -138,7 +187,20 @@ impl Widget for DataModelsTab {
             return;
         }
 
-        for row in rows.iter() {
+        let selected_idx = self.state.selected_model_index.get();
+        // Effective "shown in dump" highlight — covers the implicit
+        // last-registered fallback when no explicit selection exists.
+        let effective_idx = selected_idx.or_else(|| rows.len().checked_sub(1));
+        let selection_bg = Color::from_rgba(0.13, 0.55, 1.0, 0.18);
+        let fallback_bg = Color::from_rgba(0.13, 0.55, 1.0, 0.08);
+
+        for (i, row) in rows.iter().enumerate() {
+            let row_rect = Rect::new(bounds.x, y, bounds.width, ROW_HEIGHT);
+            if Some(i) == selected_idx {
+                canvas.fill_rounded_rect(row_rect, CornerRadius::ZERO, selection_bg);
+            } else if Some(i) == effective_idx {
+                canvas.fill_rounded_rect(row_rect, CornerRadius::ZERO, fallback_bg);
+            }
             canvas.draw_text(
                 &row.name,
                 Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, NAME_COL_WIDTH, ROW_HEIGHT),
@@ -170,10 +232,18 @@ impl Widget for DataModelsTab {
             y += ROW_HEIGHT;
         }
 
-        // Separator + "dump" label
+        // Separator + "dump" label. Distinguish explicit vs fallback
+        // selection in the label so the dim row tint isn't a mystery.
         y += ROW_HEIGHT * 0.25;
+        let dump_label = match selected_idx {
+            Some(i) => match rows.get(i) {
+                Some(row) => format!("dump ({}):", row.name),
+                None => "dump:".to_string(),
+            },
+            None => "dump (most recent registration):".to_string(),
+        };
         canvas.draw_text(
-            "dump (most recent registration):",
+            &dump_label,
             Rect::new(bounds.x + ROW_PADDING_X, y, bounds.width, ROW_HEIGHT),
             style,
             secondary,

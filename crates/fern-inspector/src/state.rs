@@ -83,6 +83,21 @@ pub struct InspectorState {
     /// pass when `overlay_mode == AllBounds`; consumed by
     /// `HighlightLayer::paint`.
     pub(crate) bounds_snapshot: Signal<Vec<crate::highlight::BoundsEntry>>,
+    /// Index of the active panel tab. Hoisted out of `build_panel`'s
+    /// local state so the tab survives panel rebuilds and persists via
+    /// `__fern_inspector.active_tab`. Indexes the same tab list the
+    /// panel registers (Tree / Properties / Accessibility / Theme /
+    /// Locale / Focus / Shortcuts / Overlays / Models — slots 0..9).
+    pub active_tab: Signal<usize>,
+    /// Currently selected row in the Data Models tab. Drives which
+    /// registered model's contents are shown in the dump area. `None`
+    /// falls back to the most recently registered model.
+    pub selected_model_index: Signal<Option<usize>>,
+    /// Set by the Models tab's tap handler with the widget-local y
+    /// coordinate of the click; the tab's own `layout_response` reads
+    /// this on the next pass, divides by row height, and updates
+    /// `selected_model_index`. Mirrors `pending_tree_click_y`.
+    pub pending_models_click_y: Signal<Option<f32>>,
 }
 
 impl InspectorState {
@@ -98,6 +113,9 @@ impl InspectorState {
             overlay_mode: Signal::new(OverlayMode::SelectionOnly),
             overlay_opacity: Signal::new(0.7),
             bounds_snapshot: Signal::new(Vec::new()),
+            active_tab: Signal::new(0),
+            selected_model_index: Signal::new(None),
+            pending_models_click_y: Signal::new(None),
         }
     }
 }

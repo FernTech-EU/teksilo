@@ -92,51 +92,67 @@ It is also shown dimmed in the inspector's Shortcuts tab.
 | **Focus** | Current focused widget plus its ancestor chain (root → leaf). Leaf shown in primary color, ancestors dimmed. |
 | **Shortcuts** | Every shortcut in the tree's `ShortcutRegistry` with its effective primary keystroke. Framework-reserved ids (`__`-prefixed) are dimmed. |
 | **Overlays** | Active overlays from `OverlayManager`, with their content + anchor labels. |
-| **Models** | Data models registered via `.debug_named(...)` (see *Data models*). For each: name, kind (`ListModel`, `TreeModel`, …), and len. The most recently registered model's contents are dumped below. |
+| **Models** | Data models registered via `.debug_named(...)` (see *Data models*). For each: name, kind (`ListModel`, `TreeModel`, `SelectionModel`), and len. Click a row to select it — its `debug_dump` output is shown below. With nothing selected, the most recently registered model is dumped (dimmed row highlight). Click the same row again to clear the selection. |
 
 ## Data models
 
-To make a `ListModel` show up in the **Models** tab, call
-`.debug_named("…")` after construction:
+To make a model show up in the **Models** tab, call `.debug_named("…")`
+after construction. Available on `ListModel<T>`, `TreeModel<T>`, and
+`SelectionModel`:
 
 ```rust
-use fern_data::ListModel;
+use fern_data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 
 let recents: ListModel<RecentProject> =
     ListModel::from_vec(load_recents()).debug_named("recents");
+
+let outline: TreeModel<OutlineNode> =
+    TreeModel::new().debug_named("outline");
+
+let row_selection: SelectionModel =
+    SelectionModel::new(SelectionMode::Multi).debug_named("rows");
 ```
 
-The method requires `T: Debug + 'static` (used by the dump).
-`debug_named` is always available — in release builds it is a no-op
-pass-through, so call sites do not need `#[cfg]` lines.
+`ListModel` and `TreeModel` require `T: Debug + 'static` (used by the
+dump). `debug_named` is always available — in release builds it is a
+no-op pass-through, so call sites do not need `#[cfg]` lines.
 
-Internally, the model registers a `Weak<dyn ModelDebug>` adapter in
-the thread-local `fern_data::debug_registry`. The adapter holds a
-`Weak` to the model's inner data, so it never extends the model's
-lifetime: when the last `ListModel` handle drops, the registration
-becomes dead and is pruned on the next `snapshot()`.
+Internally, each model registers a `Weak<dyn ModelDebug>` adapter in
+the thread-local `fern_data::debug_registry`:
 
-`TreeModel` and `SelectionModel` will follow the same pattern in a
-later slice.
+- `ListModel` / `TreeModel` — the adapter holds a `Weak` to the
+  model's inner `Rc<RefCell<…>>`, so it never extends the model's
+  lifetime. When the last model handle drops, the registration
+  becomes dead and is pruned on the next `snapshot()`.
+- `SelectionModel` — has no shared inner; the strong adapter `Rc`
+  lives inside an `Rc<RefCell<Option<…>>>` cloned across handles.
+  When the last `SelectionModel` clone drops, the holder reaches
+  zero, the adapter is freed, and the registry's `Weak` goes dead.
+
+In all three cases, the inspector never keeps a model alive past
+its natural lifetime.
 
 ## Persistence
 
 When `FernAppBuilder::settings(SettingsBundle::new())` has been wired,
-the inspector bridges three signals to keys under the framework-reserved
+the inspector bridges four signals to keys under the framework-reserved
 `__fern_inspector.*` namespace:
 
 - `__fern_inspector.open` (bool) — last toggle state. Read at startup
   if neither `--fern-inspector` nor `FERN_INSPECTOR` was given.
 - `__fern_inspector.bounds_mode` (`"off"` / `"selection"` / `"all"`)
 - `__fern_inspector.overlay_opacity` (f32)
+- `__fern_inspector.active_tab` (i64) — index of the last-used panel
+  tab. Stored as `i64` because TOML lacks unsigned integers and
+  `usize` width varies by target. Out-of-range values seed at 0.
 
 Bridging is one-way (state → store), with the persisted value used as
 the initial seed. Bridge wiring runs once per process, on the first
 window's creation. Apps without `SettingsStore` configured see no
 behavior change.
 
-Future slices may persist `last_tab` and panel height once the
-underlying signals are split out from local panel state.
+Panel height persistence waits on a drag-resize handle (no UI for it
+yet — the panel is currently a fixed 280 px).
 
 ## Bounds overlay color legend
 
