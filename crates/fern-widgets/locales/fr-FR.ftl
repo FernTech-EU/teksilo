@@ -221,6 +221,8 @@ time-edit-placeholder = Sélectionner une heure
 
 date-time-edit-name = Date et heure
 date-time-edit-placeholder = Sélectionner la date et l'heure
+date-range-edit-name = Plage de dates
+date-range-edit-placeholder = Sélectionner une plage de dates
 
 # Validation feedback (TextInputField + DateEdit/TimeEdit)
 validation-corrected-to = Corrigé en { $value }

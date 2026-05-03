@@ -12,7 +12,7 @@
 use fern_ui::core::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Calendar, DateEdit, DateRange, DateTimeEdit, GroupHeader, HStack, Panel, Padding,
+    Calendar, DateEdit, DateRange, DateRangeEdit, DateTimeEdit, GroupHeader, HStack, Panel, Padding,
     SecondsMode, TextWidget, TimeEdit, TimeFormat, VStack,
 };
 use jiff::civil::{Date, DateTime, Time};
@@ -25,6 +25,7 @@ struct Root {
     edit_time_24h: Signal<Option<Time>>,
     edit_time_12h: Signal<Option<Time>>,
     edit_dt: Signal<Option<DateTime>>,
+    edit_range: Signal<Option<DateRange>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -39,6 +40,10 @@ impl Root {
             edit_time_24h: Signal::new(Some(initial_time)),
             edit_time_12h: Signal::new(Some(initial_time)),
             edit_dt: Signal::new(Some(initial_date.to_datetime(initial_time))),
+            edit_range: Signal::new(Some(DateRange::new(
+                initial_date,
+                Date::constant(2026, 5, 16),
+            ))),
             root_child_id: None,
         }
     }
@@ -140,6 +145,28 @@ impl Widget for Root {
         let dt_edit_id = ctx.add(dt_edit);
         let dt_status_id = ctx.add(TextWidget::new_literal("").bind_text(dt_text).single_line());
 
+        // Section: DateRangeEdit
+        let range_edit_text = self.edit_range.map(|r| match r {
+            Some(r) => format!(
+                "Range edit: {:04}-{:02}-{:02} – {:04}-{:02}-{:02}",
+                r.start.year(),
+                r.start.month(),
+                r.start.day(),
+                r.end.year(),
+                r.end.month(),
+                r.end.day(),
+            ),
+            None => "Range edit: (empty)".to_string(),
+        });
+        let range_edit = DateRangeEdit::new(self.edit_range.clone())
+            .min_date(Date::constant(2020, 1, 1))
+            .max_date(Date::constant(2030, 12, 31))
+            .placeholder_start("Start")
+            .placeholder_end("End");
+        let range_edit_id = ctx.add(range_edit);
+        let range_edit_status_id =
+            ctx.add(TextWidget::new_literal("").bind_text(range_edit_text).single_line());
+
         // Assemble two columns.
         let cols = HStack::new()
             .spacing(24.0)
@@ -194,6 +221,12 @@ impl Widget for Root {
                             .spacing(12.0)
                             .add_child(dt_edit_id)
                             .add_child(dt_status_id),
+                    )
+                    .child(
+                        HStack::new()
+                            .spacing(12.0)
+                            .add_child(range_edit_id)
+                            .add_child(range_edit_status_id),
                     ),
             ),
         );

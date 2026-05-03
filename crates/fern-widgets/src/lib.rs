@@ -5,6 +5,8 @@ pub mod common;
 #[cfg(feature = "rich-text")]
 pub mod date_edit;
 #[cfg(feature = "rich-text")]
+pub mod date_range_edit;
+#[cfg(feature = "rich-text")]
 pub mod date_time_edit;
 #[cfg(feature = "rich-text")]
 pub mod time_edit;
@@ -85,6 +87,8 @@ pub use calendar::{Calendar, DateRange, WeekNumberDisplay};
 pub use card::Card;
 #[cfg(feature = "rich-text")]
 pub use date_edit::DateEdit;
+#[cfg(feature = "rich-text")]
+pub use date_range_edit::DateRangeEdit;
 #[cfg(feature = "rich-text")]
 pub use date_time_edit::DateTimeEdit;
 #[cfg(feature = "rich-text")]
