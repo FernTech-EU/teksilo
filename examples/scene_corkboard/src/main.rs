@@ -56,7 +56,7 @@
 //!
 //! Run with: `cargo run -p scene-corkboard`
 
-use fern_scene::{PathItem, RectItem, Scene, SceneView};
+use fern_scene::{A11yGroup, A11yNode, PathItem, RectItem, Scene, SceneView};
 use fern_ui::canvas::{Path, Point, Rect};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{Panel, TextWidget, VStack};
@@ -127,11 +127,25 @@ fn build_corkboard() -> SceneView {
         }
     }
 
-    // Heavyweight cards.
+    // Phase 5b: declare three logical groups for the three Acts.
+    // The screen reader announces "Act 1, Scene cards, 1 of 3" when
+    // landing on a card, regardless of where the card is visually
+    // placed in scene coordinates. Apps changing the visual layout
+    // (drag-to-move in Phase 6) won't disturb the AT-shape.
+    let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act I — Setup"));
+    let act2 = scene.add_a11y_group(A11yGroup::builder().label("Act II — Confrontation"));
+    let act3 = scene.add_a11y_group(A11yGroup::builder().label("Act III — Resolution"));
+    let acts = [act1, act2, act3];
+
+    // Heavyweight cards. The cards themselves don't yet route
+    // through the logical-tree (Phase 5b heavyweight grouping is
+    // the deferred auto-graft work — see docs/fern-scene-a11y.md);
+    // we still bookkeep their ids so the demo source documents the
+    // intent.
     let mut card_rects = Vec::with_capacity(CARDS.len());
-    for (i, (title, body)) in CARDS.iter().enumerate() {
-        let r = card_rect(i);
-        scene.add_widget(build_card(title, body), r);
+    for (_i, (title, body)) in CARDS.iter().enumerate() {
+        let r = card_rect(_i);
+        let _id = scene.add_widget(build_card(title, body), r);
         card_rects.push(r);
     }
 
@@ -139,9 +153,12 @@ fn build_corkboard() -> SceneView {
     // (Phase 4 lightweight tier — PathItem). The path runs from the
     // trailing-mid of card N to the leading-mid of card N+1, with a
     // gentle horizontal-then-vertical bend so cards on different rows
-    // get a step-shaped connector.
+    // get a step-shaped connector. Each connector also declares an
+    // AT `FlowTo` relation between its source and target cards so
+    // VoiceOver / NVDA users following data-flow get the right
+    // direction.
     let connector_color = Color::new(0.40, 0.55, 0.85, 0.9);
-    for pair in card_rects.windows(2) {
+    for (i, pair) in card_rects.windows(2).enumerate() {
         let a = pair[0];
         let b = pair[1];
         let from = Point::new(a.x + a.width, a.y + a.height * 0.5);
@@ -162,7 +179,20 @@ fn build_corkboard() -> SceneView {
         let min_y = from.y.min(to.y) - pad;
         let max_y = from.y.max(to.y) + pad;
         let bounds = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
-        scene.add_item(PathItem::new(path, bounds).stroke(connector_color, stroke_w));
+        let connector_id = scene.add_item(
+            PathItem::new(path, bounds)
+                .stroke(connector_color, stroke_w)
+                .access_label(format!("connector {} → {}", i + 1, i + 2)),
+        );
+        // Phase 5b: parent the connector under the act its source
+        // card belongs to. Screen-reader users walking the AT tree
+        // hear "Act I, contains: connector 1 → 2, connector 2 → 3"
+        // before reaching Act II.
+        let act_index = i / 3;
+        scene.set_a11y_parent(
+            A11yNode::Item(connector_id),
+            Some(A11yNode::Group(acts[act_index])),
+        );
     }
 
     SceneView::new(scene).default_size(scene_width, scene_height)
@@ -173,7 +203,7 @@ fn main() {
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-                .title("FernUI — Scene Corkboard (Phase 4: light items + cards)")
+                .title("FernUI — Scene Corkboard (Phase 5b: light items + cards + Act groups)")
                 .size(900, 600)
                 .root(|tree, _state| tree.add(build_corkboard())),
         )

@@ -40,7 +40,8 @@ not yet implemented.
 | 3 | `SpatialIndex` trait + `GridHashIndex` + viewport culling | ✅ landed |
 | 4 | `SceneItem` trait + lightweight built-ins | ✅ landed |
 | 5a | Visual-default a11y + keyboard navigation | ✅ landed (see `fern-scene-a11y.md`) |
-| 5b | A11y-shaping tools | not yet |
+| 5b | A11y-shaping tools (logical tree, relations, live, landmarks) | ✅ landed (see `fern-scene-a11y.md`) |
+| 5b extras | Auto-graft of widget descendants, custom focus / directional callbacks | not yet |
 | 6 | Selection, marquee, drag-to-move | not yet |
 | 7 | Polish + R-tree alternative + mini-map | not yet |
 

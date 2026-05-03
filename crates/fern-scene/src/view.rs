@@ -706,8 +706,10 @@ impl Widget for SceneView {
     }
 
     fn accessibility(&self, builder: &mut fern_core::accessibility::AccessNodeBuilder) {
+        use crate::a11y::A11yNode;
         use crate::scene::SceneEntryKind;
-        use fern_core::accessibility::SyntheticKind;
+        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+        use std::collections::{HashMap, HashSet};
 
         // SceneView itself is `Role::Pane` — a generic container
         // surfacing the scene as one navigable region. Heavyweight
@@ -718,9 +720,7 @@ impl Widget for SceneView {
 
         // Compute screen-space viewport for the at-visible-region
         // query. `last_viewport` was set by `layout_response`;
-        // `bounds_origin_signal` was set by `place_children`. Both
-        // fire whenever the SceneView is laid out, so they're up-
-        // to-date by the time the AT walker runs.
+        // `bounds_origin_signal` was set by `place_children`.
         let viewport_size = self.last_viewport.get();
         let bounds_origin = self.bounds_origin_signal.get();
         let viewport_screen = Rect::new(
@@ -734,55 +734,93 @@ impl Widget for SceneView {
             Some(inv) => inv.apply_rect(viewport_screen),
             None => Rect::ZERO,
         };
-
-        // Apply the off-screen-mode policy on top of the viewport
-        // region. `None` means "AllItems" — bypass the spatial-
-        // index query and walk every entry.
         let at_region = self
             .a11y_off_screen_mode
             .at_visible_region(visible_scene_region);
 
-        // Query order matters: items_in_rect's narrow phase is
-        // already AABB-exact, so we get the precise set without
-        // post-filtering. Insertion order is preserved via the
-        // entries vec when we iterate fall-through.
-        let candidate_ids: Vec<_> = match at_region {
-            Some(r) => self.scene.items_in_rect(r),
-            None => self.scene.ids(),
+        // The set of items the off-screen-mode policy says are
+        // AT-visible. Used to filter the second pass.
+        let visible_item_ids: HashSet<ItemId> = match at_region {
+            Some(r) => self.scene.items_in_rect(r).into_iter().collect(),
+            None => self.scene.ids().into_iter().collect(),
         };
 
-        for id in candidate_ids {
-            // Resolve the entry: skip widget kind (those emit
-            // through the arena walker as normal heavyweight
-            // children of SceneView) and fetch the lightweight
-            // SceneItem reference.
-            let item = match self.scene.entry_for(id) {
-                Some(SceneEntryKind::Item(item)) => item.as_ref(),
-                _ => continue,
+        // Build a `parent → ordered children` map of the logical
+        // tree. Roots (no declared parent) live under the synthetic
+        // key `None`. Insertion-order preserves the apps' declared
+        // child order: groups in `add_a11y_group` order, items in
+        // `add_item` order. The `None` bucket keeps groups before
+        // items so screen readers announce structure first.
+        let mut logical_children: HashMap<Option<A11yNode>, Vec<A11yNode>> = HashMap::new();
+        // Phase 1: place groups under their declared parents.
+        for group in &self.scene.a11y_groups {
+            let node = A11yNode::Group(group.id);
+            let parent = self.scene.a11y_parent_of(node);
+            logical_children.entry(parent).or_default().push(node);
+        }
+        // Phase 2: place visible lightweight items.
+        for entry in &self.scene.entries {
+            if !visible_item_ids.contains(&entry.id) {
+                continue;
+            }
+            let SceneEntryKind::Item(_) = &entry.kind else { continue };
+            let node = A11yNode::Item(entry.id);
+            let parent = self.scene.a11y_parent_of(node);
+            logical_children.entry(parent).or_default().push(node);
+        }
+        // Note: heavyweight `Widget` items declared via `add_widget`
+        // emit through the arena walker as normal direct children of
+        // SceneView. The Phase 5b auto-graft path that would re-
+        // parent them under a logical group is not yet implemented —
+        // see `docs/fern-scene-a11y.md` for the deferred work.
+
+        // Walk the logical tree DFS, depth-first, emitting synthetic
+        // NodeIds. Cycle guard: a node visited twice (the result of
+        // a malformed `set_a11y_parent(A, B); set_a11y_parent(B, A)`
+        // pairing) is skipped on its second appearance.
+        let mut visited: HashSet<A11yNode> = HashSet::new();
+        let roots = logical_children
+            .get(&None)
+            .cloned()
+            .unwrap_or_default();
+        for root in roots {
+            self.emit_logical_node(builder, root, None, &logical_children, &mut visited);
+        }
+
+        // Apply Phase 5b cross-tree decorations (relations / live
+        // regions / landmarks). Items / groups must already be in
+        // `children_collected` for the writes to land on the right
+        // node. Heavyweight widgets are not yet routed through here
+        // — the walker can't decorate widget-derived NodeIds from a
+        // sibling's accessibility() impl. Apps that need to point
+        // a `flow_to`/`controls` at a widget should use the
+        // synthetic NodeIds (Phase 5b decorating widgets is part of
+        // the deferred auto-graft work).
+        let owner = builder.owner_id();
+        let resolve = |node: A11yNode| -> Option<accesskit::NodeId> {
+            match node {
+                A11yNode::Item(id) => owner.map(|o| {
+                    synthetic_node_id(o, id.as_u64(), SyntheticKind::SceneItem)
+                }),
+                A11yNode::Group(id) => owner.map(|o| {
+                    synthetic_node_id(o, id.as_u64(), SyntheticKind::SceneGroup)
+                }),
+                A11yNode::Widget(_) => None,
+            }
+        };
+        for (from, kind, to) in self.scene.a11y_relations() {
+            let (Some(from_id), Some(to_id)) = (resolve(*from), resolve(*to)) else {
+                continue;
             };
-            // Project the item's scene-coord bounds to screen
-            // space via the current view transform. AT clients
-            // expect screen-coordinate bounds; that's the
-            // framework convention used elsewhere
-            // (`accessibility_impl::build_accessibility_recursive`
-            // sets bounds from `arena.bounds(id)` which is post-
-            // layout/post-transform screen).
-            let scene_bounds = item.bounds_in_scene();
-            let screen_bounds = view_transform.apply_rect(scene_bounds);
-            let ctx = crate::item::SceneItemA11yContext {
-                view_transform,
-                screen_bounds,
-                item_id: id,
-            };
-            builder.push_scene_child(id.as_u64(), SyntheticKind::SceneItem, |child| {
-                item.accessibility(child, &ctx);
-                child.inner_mut().set_bounds(accesskit::Rect {
-                    x0: screen_bounds.x as f64,
-                    y0: screen_bounds.y as f64,
-                    x1: (screen_bounds.x + screen_bounds.width) as f64,
-                    y1: (screen_bounds.y + screen_bounds.height) as f64,
-                });
-            });
+            self.apply_relation_to_collected(builder, from_id, *kind, to_id);
+        }
+        for (node, live) in &self.scene.a11y_live {
+            let Some(id) = resolve(*node) else { continue };
+            self.set_collected_live(builder, id, *live);
+        }
+        for (node, role) in &self.scene.a11y_landmarks {
+            let Some(id) = resolve(*node) else { continue };
+            self.set_collected_role(builder, id, *role);
         }
     }
 
@@ -816,6 +854,142 @@ impl SceneView {
     fn compute_visible_ids(&self, bounds: Rect) -> HashSet<ItemId> {
         let region = self.visible_scene_region(bounds);
         self.scene.items_in_rect(region).into_iter().collect()
+    }
+
+    // -- Phase 5b helpers used by `accessibility` -----------------------
+
+    /// Recursive DFS step: emit one node of the logical tree under
+    /// `parent_id` (`None` = SceneView's own node), then descend.
+    /// Cycle-guards via `visited`; the same node visited twice is
+    /// skipped on the second appearance, so a malformed parent
+    /// declaration doesn't infinite-loop the walker.
+    fn emit_logical_node(
+        &self,
+        builder: &mut fern_core::accessibility::AccessNodeBuilder,
+        node: crate::a11y::A11yNode,
+        parent_id: Option<accesskit::NodeId>,
+        logical_children: &std::collections::HashMap<
+            Option<crate::a11y::A11yNode>,
+            Vec<crate::a11y::A11yNode>,
+        >,
+        visited: &mut std::collections::HashSet<crate::a11y::A11yNode>,
+    ) {
+        use crate::a11y::A11yNode;
+        use fern_core::accessibility::SyntheticKind;
+
+        if !visited.insert(node) {
+            return;
+        }
+
+        let view_transform = self.view_transform();
+        let synthetic_id = match node {
+            A11yNode::Item(item_id) => {
+                let Some(item) = self.scene.item(item_id) else {
+                    return;
+                };
+                let scene_bounds = item.bounds_in_scene();
+                let screen_bounds = view_transform.apply_rect(scene_bounds);
+                let ctx = crate::item::SceneItemA11yContext {
+                    view_transform,
+                    screen_bounds,
+                    item_id,
+                };
+                builder.push_scene_child_under(
+                    parent_id,
+                    item_id.as_u64(),
+                    SyntheticKind::SceneItem,
+                    |child| {
+                        item.accessibility(child, &ctx);
+                        child.inner_mut().set_bounds(accesskit::Rect {
+                            x0: screen_bounds.x as f64,
+                            y0: screen_bounds.y as f64,
+                            x1: (screen_bounds.x + screen_bounds.width) as f64,
+                            y1: (screen_bounds.y + screen_bounds.height) as f64,
+                        });
+                    },
+                )
+            }
+            A11yNode::Group(group_id) => {
+                let Some(group) = self.scene.a11y_group(group_id) else {
+                    return;
+                };
+                let role = group.role;
+                let label = group.label.clone();
+                builder.push_scene_child_under(
+                    parent_id,
+                    group_id.as_u64(),
+                    SyntheticKind::SceneGroup,
+                    |child| {
+                        child.set_role(role);
+                        if let Some(label) = label {
+                            child.set_name(label);
+                        }
+                    },
+                )
+            }
+            A11yNode::Widget(_) => {
+                // Heavyweight widgets are emitted by the arena
+                // walker as natural descendants of SceneView. The
+                // Phase 5b auto-graft path that would route them
+                // through the logical tree is deferred — see
+                // `docs/fern-scene-a11y.md`. Skip silently.
+                return;
+            }
+        };
+
+        if let Some(children) = logical_children.get(&Some(node)) {
+            for child in children {
+                self.emit_logical_node(
+                    builder,
+                    *child,
+                    Some(synthetic_id),
+                    logical_children,
+                    visited,
+                );
+            }
+        }
+    }
+
+    /// Apply an [`A11yRelation`] to the synthetic node identified by
+    /// `from_id` in the builder's collected children. No-op (with
+    /// debug-assert) if `from_id` isn't found — the relation source
+    /// must have been emitted into the logical tree first.
+    fn apply_relation_to_collected(
+        &self,
+        builder: &mut fern_core::accessibility::AccessNodeBuilder,
+        from_id: accesskit::NodeId,
+        kind: crate::a11y::A11yRelation,
+        to_id: accesskit::NodeId,
+    ) {
+        use crate::a11y::A11yRelation;
+        builder.with_collected_node(from_id, |node| match kind {
+            A11yRelation::Controls => node.push_controlled(to_id),
+            A11yRelation::DescribedBy => node.push_described_by(to_id),
+            A11yRelation::LabelledBy => node.push_labelled_by(to_id),
+            A11yRelation::FlowTo => node.push_flow_to(to_id),
+        });
+    }
+
+    fn set_collected_live(
+        &self,
+        builder: &mut fern_core::accessibility::AccessNodeBuilder,
+        node_id: accesskit::NodeId,
+        live: accesskit::Live,
+    ) {
+        builder.with_collected_node(node_id, |node| {
+            node.set_live(live);
+        });
+    }
+
+    fn set_collected_role(
+        &self,
+        builder: &mut fern_core::accessibility::AccessNodeBuilder,
+        node_id: accesskit::NodeId,
+        role: accesskit::Role,
+    ) {
+        builder.with_collected_node(node_id, |node| {
+            node.set_role(role);
+        });
     }
 }
 
@@ -1779,5 +1953,251 @@ mod tests {
             synthetic_count, 1,
             "ViewportOnly mode must exclude the off-screen item"
         );
+    }
+
+    // -- Phase 5b logical AT structure -----------------------------------
+
+    #[test]
+    fn add_a11y_group_round_trip() {
+        let mut scene = Scene::new();
+        let id = scene.add_a11y_group(crate::a11y::A11yGroup::builder().label("Act 1"));
+        assert_eq!(scene.a11y_group(id).map(|g| g.label()), Some(Some("Act 1")));
+    }
+
+    #[test]
+    fn set_a11y_parent_reparents_item_under_group() {
+        // Item declared with a logical parent (Group) should be
+        // emitted under the group, NOT under the SceneView root.
+        use crate::a11y::{A11yGroup, A11yNode};
+        use crate::items::RectItem;
+        use fern_core::accessibility::{
+            is_synthetic, synthetic_node_id, SyntheticKind,
+        };
+
+        let mut scene = Scene::new();
+        let act1 = scene.add_a11y_group(A11yGroup::builder().label("Act 1"));
+        let card = scene.add_item(
+            RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)).access_label("Scene A"),
+        );
+        scene.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(act1)));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        // Group node and item node both exist as synthetic nodes.
+        let group_node_id =
+            synthetic_node_id(view_id, act1.as_u64(), SyntheticKind::SceneGroup);
+        let item_node_id =
+            synthetic_node_id(view_id, card.as_u64(), SyntheticKind::SceneItem);
+
+        let find_node = |needle: accesskit::NodeId| {
+            update.nodes.iter().find(|(id, _)| *id == needle)
+        };
+        let group_node = find_node(group_node_id).expect("group node exists");
+        let item_node = find_node(item_node_id).expect("item node exists");
+        assert!(is_synthetic(group_node.0));
+        assert!(is_synthetic(item_node.0));
+
+        // The group's children list contains the item node; the
+        // SceneView's children list does NOT contain the item node
+        // directly (the reparenting moved it).
+        assert!(
+            group_node.1.children().contains(&item_node_id),
+            "item must be a child of its declared logical parent group"
+        );
+        let scene_view_node_id =
+            fern_core::accessibility::widget_id_to_node_id(view_id);
+        let scene_view_node = find_node(scene_view_node_id).expect("scene view node");
+        assert!(
+            !scene_view_node.1.children().contains(&item_node_id),
+            "item must NOT also appear as a direct child of SceneView when reparented"
+        );
+        assert!(
+            scene_view_node.1.children().contains(&group_node_id),
+            "group is the root-level synthetic — should be a direct child of SceneView"
+        );
+    }
+
+    #[test]
+    fn nested_groups_emit_in_logical_dfs_order() {
+        // Group B parented under Group A → SceneView's children list
+        // contains A; A's contains B; B's contains its item.
+        use crate::a11y::{A11yGroup, A11yNode};
+        use crate::items::RectItem;
+        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+
+        let mut scene = Scene::new();
+        let outer = scene.add_a11y_group(A11yGroup::builder().label("Outer"));
+        let inner = scene.add_a11y_group(A11yGroup::builder().label("Inner"));
+        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        scene.set_a11y_parent(A11yNode::Group(inner), Some(A11yNode::Group(outer)));
+        scene.set_a11y_parent(A11yNode::Item(item), Some(A11yNode::Group(inner)));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        let outer_id =
+            synthetic_node_id(view_id, outer.as_u64(), SyntheticKind::SceneGroup);
+        let inner_id =
+            synthetic_node_id(view_id, inner.as_u64(), SyntheticKind::SceneGroup);
+        let item_id_synth =
+            synthetic_node_id(view_id, item.as_u64(), SyntheticKind::SceneItem);
+
+        let find = |needle: accesskit::NodeId| {
+            update
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == needle)
+                .map(|(_, n)| n)
+        };
+        let outer_node = find(outer_id).expect("outer group exists");
+        let inner_node = find(inner_id).expect("inner group exists");
+        let _item_node = find(item_id_synth).expect("item node exists");
+
+        assert!(outer_node.children().contains(&inner_id));
+        assert!(inner_node.children().contains(&item_id_synth));
+        assert!(!outer_node.children().contains(&item_id_synth));
+    }
+
+    #[test]
+    fn add_a11y_relation_writes_into_accesskit_arrays() {
+        // Declared FlowTo from item A → item B should land as a
+        // FlowTo entry on A's AccessKit Node.
+        use crate::a11y::{A11yNode, A11yRelation};
+        use crate::items::RectItem;
+        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+
+        let mut scene = Scene::new();
+        let a = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        let b = scene.add_item(RectItem::new(Rect::new(40.0, 10.0, 20.0, 20.0)));
+        scene.add_a11y_relation(A11yNode::Item(a), A11yRelation::FlowTo, A11yNode::Item(b));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        let a_id = synthetic_node_id(view_id, a.as_u64(), SyntheticKind::SceneItem);
+        let b_id = synthetic_node_id(view_id, b.as_u64(), SyntheticKind::SceneItem);
+        let a_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == a_id)
+            .map(|(_, n)| n)
+            .expect("a node exists");
+        // AccessKit's `flow_to` accessor returns the slice we pushed.
+        assert!(
+            a_node.flow_to().contains(&b_id),
+            "FlowTo relation must land on AccessKit's flow_to array"
+        );
+    }
+
+    #[test]
+    fn set_a11y_live_marks_node_as_live_region() {
+        use crate::a11y::A11yNode;
+        use crate::items::RectItem;
+        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+
+        let mut scene = Scene::new();
+        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        scene.set_a11y_live(A11yNode::Item(item), accesskit::Live::Polite);
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        let id = synthetic_node_id(view_id, item.as_u64(), SyntheticKind::SceneItem);
+        let node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == id)
+            .map(|(_, n)| n)
+            .expect("item node");
+        assert_eq!(node.live(), Some(accesskit::Live::Polite));
+    }
+
+    #[test]
+    fn set_a11y_landmark_overrides_role() {
+        use crate::a11y::A11yNode;
+        use crate::items::RectItem;
+        use fern_core::accessibility::{synthetic_node_id, SyntheticKind};
+
+        let mut scene = Scene::new();
+        let item = scene.add_item(RectItem::new(Rect::new(10.0, 10.0, 20.0, 20.0)));
+        // RectItem default role is GraphicsObject. Landmark override
+        // should re-set it to Region.
+        scene.set_a11y_landmark(A11yNode::Item(item), accesskit::Role::Region);
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        let id = synthetic_node_id(view_id, item.as_u64(), SyntheticKind::SceneItem);
+        let node = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == id)
+            .map(|(_, n)| n)
+            .expect("item node");
+        assert_eq!(node.role(), accesskit::Role::Region);
+    }
+
+    #[test]
+    fn remove_a11y_group_drops_dependent_decorations() {
+        // Removing a group must drop relations / live / landmarks
+        // / categories that target the group; child items declared
+        // under it fall back to the SceneView root.
+        use crate::a11y::{A11yCategory, A11yGroup, A11yNode, A11yRelation};
+        use crate::items::RectItem;
+
+        let mut scene = Scene::new();
+        let g = scene.add_a11y_group(A11yGroup::builder().label("G"));
+        let item = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        scene.set_a11y_parent(A11yNode::Item(item), Some(A11yNode::Group(g)));
+        scene.set_a11y_live(A11yNode::Group(g), accesskit::Live::Assertive);
+        scene.set_a11y_landmark(A11yNode::Group(g), accesskit::Role::Region);
+        scene.add_a11y_relation(
+            A11yNode::Item(item),
+            A11yRelation::Controls,
+            A11yNode::Group(g),
+        );
+        scene.set_a11y_categories(A11yNode::Group(g), &[A11yCategory::new("act")]);
+
+        scene.remove_a11y_group(g);
+
+        // Decorations that targeted the removed group are gone.
+        assert!(scene.a11y_group(g).is_none());
+        assert!(scene.a11y_live.is_empty());
+        assert!(scene.a11y_landmarks.is_empty());
+        assert!(scene.a11y_relations().is_empty());
+        assert!(scene.a11y_categories_of(A11yNode::Group(g)).is_none());
+        // Item's parent declaration is dropped — falls back to root.
+        assert!(scene.a11y_parent_of(A11yNode::Item(item)).is_none());
+    }
+
+    #[test]
+    fn parent_cycle_does_not_loop_walker() {
+        // Malformed: A → B → A. The walker visits each node once
+        // (HashSet guard) and never recurses indefinitely.
+        use crate::a11y::{A11yGroup, A11yNode};
+
+        let mut scene = Scene::new();
+        let a = scene.add_a11y_group(A11yGroup::builder().label("A"));
+        let b = scene.add_a11y_group(A11yGroup::builder().label("B"));
+        scene.set_a11y_parent(A11yNode::Group(a), Some(A11yNode::Group(b)));
+        scene.set_a11y_parent(A11yNode::Group(b), Some(A11yNode::Group(a)));
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // Just running sync_accessibility without panic / hang is
+        // the assertion: cycle guard works.
+        let _ = tree.sync_accessibility();
     }
 }

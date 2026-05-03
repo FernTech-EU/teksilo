@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
 use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::{ItemId, SceneItem};
 use fern_canvas::Rect;
@@ -56,6 +57,25 @@ pub struct Scene {
     /// keep indices accurate after the `retain`-driven shift.
     entry_index: HashMap<ItemId, usize>,
     index: Box<dyn SpatialIndex>,
+
+    // --- Phase 5b logical AT structure ----------------------------------
+    /// Logical AT groups declared by the app. Insertion-ordered so
+    /// the walker emits them in declaration order under their
+    /// declared parents.
+    pub(crate) a11y_groups: Vec<A11yGroup>,
+    /// `A11yGroupId` → index into `a11y_groups`.
+    pub(crate) a11y_group_index: HashMap<A11yGroupId, usize>,
+    /// Logical-parent declarations: `child → parent`. `parent = None`
+    /// (i.e. absent from the map) means "default to SceneView root".
+    pub(crate) a11y_parents: HashMap<A11yNode, A11yNode>,
+    /// AT relationships in declaration order.
+    pub(crate) a11y_relations: Vec<(A11yNode, A11yRelation, A11yNode)>,
+    /// Live-region declarations.
+    pub(crate) a11y_live: HashMap<A11yNode, accesskit::Live>,
+    /// Landmark declarations (role replacement).
+    pub(crate) a11y_landmarks: HashMap<A11yNode, accesskit::Role>,
+    /// Per-node category tags (rotor / quick-nav).
+    pub(crate) a11y_categories: HashMap<A11yNode, Vec<A11yCategory>>,
 }
 
 impl Scene {
@@ -77,6 +97,13 @@ impl Scene {
             entries: Vec::new(),
             entry_index: HashMap::new(),
             index,
+            a11y_groups: Vec::new(),
+            a11y_group_index: HashMap::new(),
+            a11y_parents: HashMap::new(),
+            a11y_relations: Vec::new(),
+            a11y_live: HashMap::new(),
+            a11y_landmarks: HashMap::new(),
+            a11y_categories: HashMap::new(),
         }
     }
 
@@ -138,13 +165,6 @@ impl Scene {
         }
     }
 
-    /// Crate-private: borrow an entry's kind by id. Used by
-    /// `SceneView::accessibility` to discriminate heavyweight vs
-    /// lightweight without forcing a public `SceneEntryKind` API.
-    pub(crate) fn entry_for(&self, id: ItemId) -> Option<&SceneEntryKind> {
-        let pos = *self.entry_index.get(&id)?;
-        Some(&self.entries.get(pos)?.kind)
-    }
 
     /// Update an item's scene rectangle. No-op if the id isn't in the
     /// scene. The spatial index is re-bucketed in lockstep so future
@@ -223,6 +243,150 @@ impl Scene {
     /// that want to verify an item was bucketed.
     pub fn index(&self) -> &dyn SpatialIndex {
         &*self.index
+    }
+
+    // ===================================================================
+    // Phase 5b — logical AT structure (groups / parents / relations)
+    // ===================================================================
+
+    /// Declare a virtual AT group. The group has no visual
+    /// counterpart — it exists purely so the AT walker can emit a
+    /// node in the AT tree under which any number of items / other
+    /// groups / widgets can be reparented via [`Scene::set_a11y_parent`].
+    ///
+    /// Use case: an `Act 1` group wrapping the Scene cards that
+    /// belong to the first act in a story corkboard; a `Subgraph A`
+    /// group wrapping a connected component in a node-graph editor;
+    /// a `Layer Foo` group wrapping geometry in a CAD canvas.
+    ///
+    /// Returns the [`A11yGroupId`] used to address the group later.
+    pub fn add_a11y_group(&mut self, builder: A11yGroupBuilder) -> A11yGroupId {
+        let id = A11yGroupId::next();
+        let group = A11yGroup {
+            id,
+            label: builder.label,
+            role: builder.role,
+        };
+        let pos = self.a11y_groups.len();
+        self.a11y_groups.push(group);
+        self.a11y_group_index.insert(id, pos);
+        id
+    }
+
+    /// Remove a previously-declared logical group. Any children that
+    /// declared this group as their parent fall back to the
+    /// SceneView root in the next AT-rebuild. No-op if the id isn't
+    /// known. Relations / live / landmarks / categories targeting
+    /// this group are removed as well.
+    pub fn remove_a11y_group(&mut self, id: A11yGroupId) {
+        let prev = self.a11y_groups.len();
+        self.a11y_groups.retain(|g| g.id != id);
+        if self.a11y_groups.len() != prev {
+            // Rebuild the index.
+            self.a11y_group_index.clear();
+            for (pos, group) in self.a11y_groups.iter().enumerate() {
+                self.a11y_group_index.insert(group.id, pos);
+            }
+        }
+        let target = A11yNode::Group(id);
+        // Drop parent edges that point at this group, and parent
+        // edges originating from this group.
+        self.a11y_parents
+            .retain(|child, parent| *child != target && *parent != target);
+        self.a11y_relations
+            .retain(|(from, _, to)| *from != target && *to != target);
+        self.a11y_live.remove(&target);
+        self.a11y_landmarks.remove(&target);
+        self.a11y_categories.remove(&target);
+    }
+
+    /// Borrow a logical group by id.
+    pub fn a11y_group(&self, id: A11yGroupId) -> Option<&A11yGroup> {
+        let pos = *self.a11y_group_index.get(&id)?;
+        self.a11y_groups.get(pos)
+    }
+
+    /// Declare a logical-parent relationship for AT. **Independent
+    /// of visual placement** — the child can live anywhere in scene
+    /// coordinates and still appear under the declared parent in
+    /// the AT tree.
+    ///
+    /// `parent = None` clears the declared parent so the child
+    /// falls back to the SceneView root in the next AT-rebuild
+    /// (this is also the default for nodes that never had a parent
+    /// declared).
+    ///
+    /// Cycle detection is the caller's responsibility — declaring
+    /// `A → B` and `B → A` produces a cycle the AT walker handles
+    /// by truncating at the first repeated node, but the result is
+    /// not what the user intended.
+    pub fn set_a11y_parent(&mut self, child: A11yNode, parent: Option<A11yNode>) {
+        match parent {
+            Some(p) => {
+                self.a11y_parents.insert(child, p);
+            }
+            None => {
+                self.a11y_parents.remove(&child);
+            }
+        }
+    }
+
+    /// The currently-declared logical parent of a node, if any.
+    pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode> {
+        self.a11y_parents.get(&child).copied()
+    }
+
+    /// Declare an AT relationship between two nodes. Multiple
+    /// relations between the same `from` and `to` are kept (apps
+    /// may declare both `LabelledBy` and `DescribedBy` between the
+    /// same pair). Used by the AT walker to populate AccessKit's
+    /// relationship arrays at TreeUpdate time.
+    pub fn add_a11y_relation(&mut self, from: A11yNode, kind: A11yRelation, to: A11yNode) {
+        self.a11y_relations.push((from, kind, to));
+    }
+
+    /// Read access to all declared relations. The walker calls this.
+    pub fn a11y_relations(&self) -> &[(A11yNode, A11yRelation, A11yNode)] {
+        &self.a11y_relations
+    }
+
+    /// Mark a node as a live region — AT clients announce changes
+    /// without focus. Pass `accesskit::Live::Off` to clear.
+    pub fn set_a11y_live(&mut self, node: A11yNode, live: accesskit::Live) {
+        if matches!(live, accesskit::Live::Off) {
+            self.a11y_live.remove(&node);
+        } else {
+            self.a11y_live.insert(node, live);
+        }
+    }
+
+    /// Mark a node as a landmark by overriding its role with one of
+    /// the `Role::Region`/`Main`/`Navigation`/`Search` etc. variants.
+    /// Pass `Role::Unknown` to clear.
+    pub fn set_a11y_landmark(&mut self, node: A11yNode, role: accesskit::Role) {
+        if matches!(role, accesskit::Role::Unknown) {
+            self.a11y_landmarks.remove(&node);
+        } else {
+            self.a11y_landmarks.insert(node, role);
+        }
+    }
+
+    /// Tag a node with one or more rotor categories. AT clients
+    /// that support categorized navigation surface them as quick-nav
+    /// targets (VoiceOver rotor, NVDA quick-nav). Pass an empty
+    /// slice to clear.
+    pub fn set_a11y_categories(&mut self, node: A11yNode, categories: &[A11yCategory]) {
+        if categories.is_empty() {
+            self.a11y_categories.remove(&node);
+        } else {
+            self.a11y_categories
+                .insert(node, categories.to_vec());
+        }
+    }
+
+    /// Read the categories declared for a node, if any.
+    pub fn a11y_categories_of(&self, node: A11yNode) -> Option<&[A11yCategory]> {
+        self.a11y_categories.get(&node).map(|v| v.as_slice())
     }
 }
 

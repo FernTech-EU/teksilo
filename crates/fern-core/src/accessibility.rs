@@ -423,6 +423,36 @@ impl AccessNodeBuilder {
         &mut self.inner
     }
 
+    /// The widget id this builder was constructed for, if any. Set
+    /// by [`AccessNodeBuilder::for_widget`]; used by the Phase 5b
+    /// scene-tree walker to derive synthetic `NodeId`s for items /
+    /// groups outside the closure form (`push_scene_child*`).
+    pub fn owner_id(&self) -> Option<crate::widget_id::WidgetId> {
+        self.owner
+    }
+
+    /// Run a mutator over a synthetic child node previously pushed
+    /// via [`push_scene_child`] (or its `_under` variant). Used by
+    /// the Phase 5b scene walker to apply cross-tree decorations
+    /// (relations / live regions / landmarks) after the initial
+    /// hierarchy emit. Returns `true` if the node was found.
+    ///
+    /// Cannot be used to mutate widget-derived NodeIds — those live
+    /// in the global TreeUpdate and are owned by other widgets.
+    pub fn with_collected_node<F: FnOnce(&mut Node)>(
+        &mut self,
+        node_id: NodeId,
+        f: F,
+    ) -> bool {
+        for (id, node) in self.children_collected.iter_mut() {
+            if *id == node_id {
+                f(node);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Mark this node as read-only. Used by `RichTextEditor::read_only` so
     /// screen readers announce the widget as a document rather than a form
     /// field.
@@ -617,6 +647,65 @@ impl AccessNodeBuilder {
             }
         }
         false
+    }
+
+    /// Like [`push_scene_child`] but lets the caller pick the
+    /// parent. `parent = None` attaches to the widget's own node
+    /// (same behavior as `push_scene_child`); `parent = Some(...)`
+    /// attaches to the previously-pushed scene-child with that id.
+    /// The Phase 5b logical-tree walker uses this to nest scene
+    /// items under declared `A11yGroup` parents.
+    ///
+    /// Returns the deterministic synthetic `NodeId` for the new
+    /// child. If `parent` was `Some` but the parent wasn't found
+    /// in `children_collected`, the child still gets created and
+    /// recorded but ends up attached to the widget's own node as a
+    /// fallback (and a debug-assert fires).
+    pub fn push_scene_child_under(
+        &mut self,
+        parent: Option<NodeId>,
+        element_id: u64,
+        kind: SyntheticKind,
+        customize: impl FnOnce(&mut AccessNodeBuilder),
+    ) -> NodeId {
+        debug_assert!(
+            matches!(kind, SyntheticKind::SceneItem | SyntheticKind::SceneGroup),
+            "push_scene_child_under requires SyntheticKind::SceneItem or ::SceneGroup"
+        );
+        let Some(owner) = self.owner else {
+            debug_assert!(
+                false,
+                "push_scene_child_under called on a builder with no owner — \
+                 widgets must only call this from Widget::accessibility"
+            );
+            return NodeId(0);
+        };
+        let node_id = synthetic_node_id(owner, element_id, kind);
+        let mut child_builder = AccessNodeBuilder::for_widget(owner);
+        customize(&mut child_builder);
+        let (_unused, node, grand_children) = child_builder.build(owner);
+        self.children_collected.push((node_id, node));
+        for (gid, gnode) in grand_children {
+            self.children_collected.push((gid, gnode));
+        }
+        match parent {
+            Some(parent_id) => {
+                let attached = self.attach_scene_child_under(parent_id, node_id);
+                if !attached {
+                    debug_assert!(
+                        false,
+                        "push_scene_child_under: parent {:?} not in children_collected — \
+                         caller must push the parent before its children",
+                        parent_id
+                    );
+                    self.inner.push_child(node_id);
+                }
+            }
+            None => {
+                self.inner.push_child(node_id);
+            }
+        }
+        node_id
     }
 
     /// Override a previously-pushed paragraph child's role to
