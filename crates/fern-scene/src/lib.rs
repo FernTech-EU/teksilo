@@ -67,4 +67,4 @@ pub use minimap::SceneMinimap;
 pub use state::SceneViewState;
 pub use scene::Scene;
 pub use selection::{SceneSelection, SceneSelectionMode};
-pub use view::{FocusDirection, SceneView};
+pub use view::{DebugOverlay, FocusDirection, SceneView};

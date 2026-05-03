@@ -109,6 +109,47 @@ struct DragTarget {
     current_scene: Point,
 }
 
+/// Visual debug overlays painted on top of normal scene rendering.
+///
+/// Every flag defaults to `false`. Use this to verify that culling /
+/// hit-test / spatial-index / dragging are doing what you expect
+/// while developing a scene-based feature; turn off before shipping.
+///
+/// Each flag adds a thin overlay paint with a distinct color so
+/// multiple flags can be combined without visual confusion:
+///
+/// - [`item_bounds`](Self::item_bounds): green outline around every
+///   visible scene item's `bounds_in_scene`.
+/// - [`content_bounds`](Self::content_bounds): blue outline around
+///   the scene's overall content extent (the union of all item
+///   bounds).
+/// - [`viewport`](Self::viewport): red outline around the visible
+///   scene region (the cull rect — the inverse-projected viewport).
+/// - [`selection_bounds`](Self::selection_bounds): orange outline
+///   around every currently-selected item.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DebugOverlay {
+    pub item_bounds: bool,
+    pub content_bounds: bool,
+    pub viewport: bool,
+    pub selection_bounds: bool,
+}
+
+impl DebugOverlay {
+    /// All overlays enabled. Useful to catch any anomaly visually.
+    pub const ALL: DebugOverlay = DebugOverlay {
+        item_bounds: true,
+        content_bounds: true,
+        viewport: true,
+        selection_bounds: true,
+    };
+
+    /// Whether at least one debug overlay is enabled.
+    pub fn is_active(&self) -> bool {
+        self.item_bounds || self.content_bounds || self.viewport || self.selection_bounds
+    }
+}
+
 /// Direction passed to a [`SceneView::focus_order`] callback when the
 /// app wants to override the default Tab cycle.
 ///
@@ -251,6 +292,14 @@ pub struct SceneView {
     /// the design" an item sits, independent of the current
     /// pan/zoom.
     a11y_bounds_space: crate::a11y::A11yBoundsSpace,
+    /// Debug overlay configuration. Default: all flags `false`
+    /// — no debug paint. When any flag is set, the SceneView
+    /// paints visual diagnostics (item bounding boxes,
+    /// content extent, viewport rect, etc.) on top of normal
+    /// scene rendering. Use to verify culling, hit-test, and
+    /// spatial-index behavior; intended for development only,
+    /// don't ship with this on.
+    debug_overlay: DebugOverlay,
 
     // --- Cached derived signals ---------------------------------------
     /// `view_transform` as a derived `Signal<Transform2D>`,
@@ -279,6 +328,7 @@ impl std::fmt::Debug for SceneView {
             .field("a11y_nested", &self.a11y_nested)
             .field("a11y_label", &self.a11y_label)
             .field("a11y_bounds_space", &self.a11y_bounds_space)
+            .field("debug_overlay", &self.debug_overlay)
             .finish_non_exhaustive()
     }
 }
@@ -336,6 +386,7 @@ impl SceneView {
             a11y_nested: false,
             a11y_label: None,
             a11y_bounds_space: crate::a11y::A11yBoundsSpace::default(),
+            debug_overlay: DebugOverlay::default(),
         }
     }
 
@@ -462,6 +513,31 @@ impl SceneView {
     /// Read-only accessor for the configured a11y bounds space.
     pub fn current_a11y_bounds_space(&self) -> crate::a11y::A11yBoundsSpace {
         self.a11y_bounds_space
+    }
+
+    /// Configure visual debug overlays. Default: all flags off.
+    /// Pass [`DebugOverlay::ALL`] to enable every overlay or
+    /// construct a custom config:
+    ///
+    /// ```ignore
+    /// SceneView::new(scene)
+    ///     .debug_overlay(DebugOverlay {
+    ///         item_bounds: true,
+    ///         viewport: true,
+    ///         ..Default::default()
+    ///     });
+    /// ```
+    ///
+    /// Intended for development only — overlay paint is cheap but
+    /// not free; ship with the default (off) config.
+    pub fn debug_overlay(mut self, overlay: DebugOverlay) -> Self {
+        self.debug_overlay = overlay;
+        self
+    }
+
+    /// Read-only accessor for the active debug overlay config.
+    pub fn current_debug_overlay(&self) -> DebugOverlay {
+        self.debug_overlay
     }
 
     /// Install a custom focus-order callback. When set,
@@ -1442,6 +1518,12 @@ impl Widget for SceneView {
                 );
             }
         }
+
+        // Phase 7 visual-debug overlays. All paint in scene coords
+        // so they ride the same view-transform projection as items.
+        if self.debug_overlay.is_active() {
+            self.paint_debug_overlay(bounds, canvas);
+        }
     }
 
     fn clips_children(&self) -> bool {
@@ -1716,6 +1798,59 @@ impl SceneView {
     fn compute_visible_ids(&self, bounds: Rect) -> HashSet<ItemId> {
         let region = self.visible_scene_region(bounds);
         self.scene.items_in_rect(region).into_iter().collect()
+    }
+
+    /// Paint enabled debug overlays on top of the scene rendering.
+    /// All paint commands are in scene coords — they ride the
+    /// same view-transform scope as items, so the overlays follow
+    /// the user's pan/zoom naturally.
+    fn paint_debug_overlay(&self, bounds: Rect, canvas: &mut fern_canvas::Canvas) {
+        let cfg = self.debug_overlay;
+        let region = self.visible_scene_region(bounds);
+        let stroke_w = 1.0;
+        // Distinct color per overlay so multiple flags compose
+        // visually without confusion.
+        let item_color = fern_tokens::Color::new(0.20, 0.75, 0.35, 0.85);
+        let content_color = fern_tokens::Color::new(0.30, 0.45, 0.95, 0.85);
+        let viewport_color = fern_tokens::Color::new(0.95, 0.30, 0.30, 0.85);
+        let selection_color = fern_tokens::Color::new(1.00, 0.60, 0.20, 0.95);
+
+        if cfg.item_bounds {
+            for entry in &self.scene.entries {
+                canvas.stroke_rect(
+                    entry.scene_rect,
+                    item_color,
+                    fern_canvas::StrokeStyle::solid(stroke_w),
+                );
+            }
+        }
+        if cfg.content_bounds {
+            if let Some(content) = union_rects(self.scene.entries.iter().map(|e| e.scene_rect)) {
+                canvas.stroke_rect(
+                    content,
+                    content_color,
+                    fern_canvas::StrokeStyle::solid(stroke_w),
+                );
+            }
+        }
+        if cfg.viewport {
+            canvas.stroke_rect(
+                region,
+                viewport_color,
+                fern_canvas::StrokeStyle::solid(stroke_w),
+            );
+        }
+        if cfg.selection_bounds {
+            for id in self.selection.selected() {
+                if let Some(rect) = self.scene.scene_rect(id) {
+                    canvas.stroke_rect(
+                        rect,
+                        selection_color,
+                        fern_canvas::StrokeStyle::solid(stroke_w * 2.0),
+                    );
+                }
+            }
+        }
     }
 
     // -- Phase 5b helpers used by `accessibility` -----------------------
@@ -4591,5 +4726,68 @@ mod tests {
         assert_eq!(view.current_a11y_bounds_space(), crate::A11yBoundsSpace::Screen);
         let view = view.a11y_bounds_space(crate::A11yBoundsSpace::Scene);
         assert_eq!(view.current_a11y_bounds_space(), crate::A11yBoundsSpace::Scene);
+    }
+
+    // -- Debug overlays ------------------------------------------------
+
+    #[test]
+    fn debug_overlay_default_is_inactive() {
+        let cfg = DebugOverlay::default();
+        assert!(!cfg.is_active());
+    }
+
+    #[test]
+    fn debug_overlay_all_is_active() {
+        let cfg = DebugOverlay::ALL;
+        assert!(cfg.is_active());
+        assert!(cfg.item_bounds);
+        assert!(cfg.content_bounds);
+        assert!(cfg.viewport);
+        assert!(cfg.selection_bounds);
+    }
+
+    #[test]
+    fn debug_overlay_setting_round_trips() {
+        let view = SceneView::new(Scene::new()).debug_overlay(DebugOverlay {
+            item_bounds: true,
+            ..Default::default()
+        });
+        let cfg = view.current_debug_overlay();
+        assert!(cfg.item_bounds);
+        assert!(!cfg.viewport);
+        assert!(cfg.is_active());
+    }
+
+    #[test]
+    fn debug_overlay_renders_when_enabled() {
+        // Smoke test: a SceneView with debug overlay on produces
+        // additional draw commands compared to one with overlays
+        // off, given identical scene contents.
+        let make_scene = || {
+            let mut s = Scene::new();
+            s.add_item(rect_item_at(20.0, 20.0));
+            s.add_item(rect_item_at(60.0, 20.0));
+            s
+        };
+
+        let mut tree_off = WidgetTree::new();
+        tree_off.add(SceneView::new(make_scene()));
+        tree_off.layout(SizeProposal::exact(400.0, 300.0));
+        let off_count = tree_off.render().draw_order.len();
+
+        let mut tree_on = WidgetTree::new();
+        tree_on.add(SceneView::new(make_scene()).debug_overlay(DebugOverlay::ALL));
+        tree_on.layout(SizeProposal::exact(400.0, 300.0));
+        let on_count = tree_on.render().draw_order.len();
+
+        // ALL adds at minimum: 2 item-bound strokes + 1 content
+        // outline + 1 viewport. Selection_bounds adds 0 because
+        // nothing is selected.
+        assert!(
+            on_count > off_count,
+            "debug overlay must produce more draws (on={}, off={})",
+            on_count,
+            off_count
+        );
     }
 }
