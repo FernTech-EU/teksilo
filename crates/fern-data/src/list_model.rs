@@ -17,6 +17,13 @@ struct ListModelInner<T> {
     items: Vec<T>,
     observers: Vec<ObserverEntry>,
     next_observer_id: u64,
+    /// Strong handle to the debug-registry adapter for this model.
+    /// Owned here so that the registration drops automatically when
+    /// the inner is freed (the adapter holds only a `Weak` to inner,
+    /// breaking the cycle). `None` until `.debug_named()` is called.
+    /// Compiled out in release.
+    #[cfg(debug_assertions)]
+    debug_adapter: Option<Rc<dyn crate::debug_registry::ModelDebug>>,
 }
 
 /// A concrete reactive list that stores items in a `Vec<T>`.
@@ -39,6 +46,8 @@ impl<T: 'static> ListModel<T> {
                 items: Vec::new(),
                 observers: Vec::new(),
                 next_observer_id: 1,
+                #[cfg(debug_assertions)]
+                debug_adapter: None,
             })),
         }
     }
@@ -50,6 +59,8 @@ impl<T: 'static> ListModel<T> {
                 items,
                 observers: Vec::new(),
                 next_observer_id: 1,
+                #[cfg(debug_assertions)]
+                debug_adapter: None,
             })),
         }
     }
@@ -193,6 +204,55 @@ impl<T: 'static> ListModel<T> {
             .collect();
         for cb in &callbacks {
             cb(&change);
+        }
+    }
+}
+
+impl<T: std::fmt::Debug + 'static> ListModel<T> {
+    /// Register this model with the debug inspector under `name`. In
+    /// release builds (`!cfg(debug_assertions)`) this is a no-op
+    /// pass-through so call sites stay free of `#[cfg]` lines.
+    ///
+    /// Idempotent on repeated calls — the latest registration wins.
+    /// The registration drops automatically when the last `ListModel`
+    /// handle is freed (the adapter the registry holds is `Weak`).
+    pub fn debug_named(self, _name: impl Into<String>) -> Self {
+        #[cfg(debug_assertions)]
+        {
+            let weak = Rc::downgrade(&self.inner);
+            let adapter: Rc<dyn crate::debug_registry::ModelDebug> =
+                Rc::new(ListModelDebug::<T> { weak });
+            let name = _name.into();
+            crate::debug_registry::register(name, Rc::downgrade(&adapter));
+            self.inner.borrow_mut().debug_adapter = Some(adapter);
+        }
+        self
+    }
+}
+
+#[cfg(debug_assertions)]
+struct ListModelDebug<T> {
+    weak: std::rc::Weak<RefCell<ListModelInner<T>>>,
+}
+
+#[cfg(debug_assertions)]
+impl<T: std::fmt::Debug + 'static> crate::debug_registry::ModelDebug for ListModelDebug<T> {
+    fn kind(&self) -> &'static str {
+        "ListModel"
+    }
+    fn len(&self) -> usize {
+        self.weak
+            .upgrade()
+            .map(|inner| inner.borrow().items.len())
+            .unwrap_or(0)
+    }
+    fn debug_dump(&self, out: &mut dyn std::fmt::Write) {
+        let Some(inner) = self.weak.upgrade() else {
+            return;
+        };
+        let guard = inner.borrow();
+        for (i, item) in guard.items.iter().enumerate() {
+            let _ = writeln!(out, "[{}] {:?}", i, item);
         }
     }
 }

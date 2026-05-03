@@ -129,6 +129,7 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
 
     let toggle_for_post_root = state.open.clone();
     let state_for_post_root = state.clone();
+    let persistence_wired = std::rc::Rc::new(std::cell::Cell::new(false));
 
     let post_root = DefaultPostRoot::new(move |tree, root_id| {
         // Register F12 toggle. Owner is the user's root widget so the
@@ -144,6 +145,18 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
             })
             .build();
         tree.shortcut_registry_mut().register_owned(shortcut, root_id);
+
+        // First time only: bridge state signals to SettingsStore (if
+        // the app has wired one). Idempotent guard via Cell so
+        // multi-window apps don't bridge twice.
+        if !persistence_wired.replace(true) {
+            if let Some(store) = tree
+                .app_context()
+                .app_state::<fern_settings::SettingsStore>()
+            {
+                crate::persistence::wire(&state_for_post_root, store);
+            }
+        }
 
         // Wrap the user root in an InspectorShell. The shell owns the
         // panel, the toolbar, the highlight overlay, the picker

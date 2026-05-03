@@ -1371,6 +1371,9 @@ dependencies = [
  "fern-app",
  "fern-canvas",
  "fern-core",
+ "fern-data",
+ "fern-i18n",
+ "fern-settings",
  "fern-tokens",
  "fern-widgets",
 ]

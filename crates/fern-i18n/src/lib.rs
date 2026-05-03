@@ -38,7 +38,7 @@ pub use localized_string::{LocalizedString, localized};
 pub use manager::{I18nManager, LocaleSwitchOutcome, ReloadError};
 pub use resolve::{resolve_message, resolve_message_widget};
 pub use thread_local::{
-    current_direction, current_locale, current_version_signal,
+    current_direction, current_locale, current_supported_locales, current_version_signal,
 };
 pub use unic_langid::LanguageIdentifier;
 

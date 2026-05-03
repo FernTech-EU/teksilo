@@ -27,6 +27,9 @@ repository.workspace = true
 fern-canvas = { workspace = true }
 fern-core = { workspace = true }
 fern-app = { workspace = true }
+fern-data = { workspace = true }
+fern-i18n = { workspace = true }
+fern-settings = { workspace = true }
 fern-tokens = { workspace = true }
 fern-widgets = { workspace = true }
 

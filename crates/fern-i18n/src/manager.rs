@@ -227,6 +227,13 @@ impl I18nManager {
         &self.source_locale
     }
 
+    /// All locales the app declared as supported via
+    /// `I18nConfig::supported_locales`. Read by the debug inspector's
+    /// Locale tab to populate its switcher dropdown.
+    pub fn supported_locales(&self) -> &[LanguageIdentifier] {
+        &self.supported
+    }
+
     /// Resolve an application string (`tr!`). Looks up the active locale's
     /// bundle, then the source-locale bundle, then returns the literal key
     /// as a placeholder if neither found one.

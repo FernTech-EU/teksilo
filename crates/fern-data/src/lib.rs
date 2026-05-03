@@ -5,6 +5,8 @@
 //! widgets like `ListView`, `TreeView`, and `Repeater`.
 
 pub mod data_change;
+#[cfg(debug_assertions)]
+pub mod debug_registry;
 pub mod list_data_source;
 pub mod list_model;
 pub mod selection_model;

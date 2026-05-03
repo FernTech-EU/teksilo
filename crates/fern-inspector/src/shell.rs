@@ -35,10 +35,13 @@ use crate::highlight::{BoundsTracker, HighlightLayer};
 use crate::picker::{PickResolver, PickerOverlay};
 use crate::state::{InspectorState, OverlayMode};
 use crate::tabs::accessibility::A11yTab;
+use crate::tabs::data_models::DataModelsTab;
 use crate::tabs::focus::FocusTab;
+use crate::tabs::locale::LocaleTab;
 use crate::tabs::overlays::OverlaysTab;
 use crate::tabs::properties::PropertiesTab;
 use crate::tabs::shortcuts::ShortcutsTab;
+use crate::tabs::theme::ThemeTab;
 use crate::tabs::tree::TreeTab;
 
 const PANEL_HEIGHT: f32 = 280.0;
@@ -147,16 +150,19 @@ fn empty_filler() -> impl Widget + 'static {
 }
 
 /// Build the inspector panel's content. Toolbar above a `TabWidget`
-/// with six tabs, all inside a `Panel`.
+/// with nine tabs, all inside a `Panel`.
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
     let active_tab = Signal::new(0_usize);
     let tabs = TabWidget::new(active_tab)
         .tab_literal("Tree", scrollable_tab(TreeTab::new(state.clone())))
         .tab_literal("Properties", scrollable_tab(PropertiesTab::new(state.clone())))
         .tab_literal("Accessibility", scrollable_tab(A11yTab::new(state.clone())))
+        .tab_literal("Theme", scrollable_tab(ThemeTab::new(state.clone())))
+        .tab_literal("Locale", scrollable_tab(LocaleTab::new(state.clone())))
         .tab_literal("Focus", scrollable_tab(FocusTab::new(state.clone())))
         .tab_literal("Shortcuts", scrollable_tab(ShortcutsTab::new(state.clone())))
-        .tab_literal("Overlays", scrollable_tab(OverlaysTab::new(state.clone())));
+        .tab_literal("Overlays", scrollable_tab(OverlaysTab::new(state.clone())))
+        .tab_literal("Models", scrollable_tab(DataModelsTab::new(state.clone())));
 
     let toolbar = build_toolbar(state.clone());
 

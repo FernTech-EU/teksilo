@@ -57,6 +57,12 @@ pub fn current_direction() -> Option<Signal<LayoutDirection>> {
     with_active(|mgr| mgr.direction_signal().clone())
 }
 
+/// Snapshot the supported-locales list from the active manager.
+/// Returns `None` if no manager is installed.
+pub fn current_supported_locales() -> Option<Vec<LanguageIdentifier>> {
+    with_active(|mgr| mgr.supported_locales().to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
