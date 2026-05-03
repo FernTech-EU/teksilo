@@ -124,23 +124,56 @@ pub struct SceneView {
     /// (the hash key is `(self_id, group_id, SyntheticKind::SceneGroup)`).
     /// `Cell` because the trait method is `&self`.
     self_widget_id: Cell<Option<WidgetId>>,
+
+    // --- Interactivity ------------------------------------------------
+    /// When `false`, `build()` skips registering scroll / pinch /
+    /// keyboard handlers and does not mark the SceneView focusable.
+    /// Programmatic `pan_to` / `zoom_to` still work — this only
+    /// gates user-driven navigation. Used by chart-style nested
+    /// scenes where the outer container is purely decorative
+    /// (axis chrome around an inner data SceneView).
+    interactive: bool,
+
+    // --- Cached derived signals ---------------------------------------
+    /// `view_transform` as a derived `Signal<Transform2D>`,
+    /// constructed once in `new()` and reused across rebuilds.
+    /// Exposed via [`view_transform_signal`](Self::view_transform_signal)
+    /// so consumers (e.g. axis labels in a parent SceneView) can
+    /// bind to it reactively without taking a snapshot every paint.
+    view_transform_signal: Signal<Transform2D>,
 }
 
 impl SceneView {
     /// Wrap a [`Scene`] in a viewport. The scene is moved into the
     /// view; query / mutate it later via [`SceneView::scene_mut`].
     pub fn new(scene: Scene) -> Self {
+        let pan_x = Signal::new_animated(0.0);
+        let pan_y = Signal::new_animated(0.0);
+        let zoom = Signal::new_animated(1.0);
+        let rotation = Signal::new_animated(0.0);
+        let bounds_origin_signal = Signal::new(Vec2::ZERO);
+        // Derived view-transform signal — composed once in `new` so
+        // it's stable across rebuilds. The same instance is used by
+        // `set_transform` in `build` and exposed publicly via
+        // [`view_transform_signal`](Self::view_transform_signal).
+        let view_transform_signal = pan_x
+            .zip3(&pan_y, &zoom)
+            .zip(&rotation)
+            .zip(&bounds_origin_signal)
+            .map(|(((px, py, z), r), bo)| {
+                compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
+            });
         Self {
             scene,
             materialized: HashMap::new(),
             widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
             last_viewport: Cell::new(Size::new(800.0, 600.0)),
-            pan_x: Signal::new_animated(0.0),
-            pan_y: Signal::new_animated(0.0),
-            zoom: Signal::new_animated(1.0),
-            rotation: Signal::new_animated(0.0),
-            bounds_origin_signal: Signal::new(Vec2::ZERO),
+            pan_x,
+            pan_y,
+            zoom,
+            rotation,
+            bounds_origin_signal,
             min_zoom: DEFAULT_MIN_ZOOM,
             max_zoom: DEFAULT_MAX_ZOOM,
             pan_anim_duration: DEFAULT_PAN_DURATION,
@@ -149,7 +182,60 @@ impl SceneView {
             a11y_off_screen_mode: crate::a11y::A11yOffScreenMode::default(),
             a11y_mode: crate::a11y::A11yMode::default(),
             self_widget_id: Cell::new(None),
+            interactive: true,
+            view_transform_signal,
         }
+    }
+
+    /// Disable user-driven navigation: scroll, pinch, and keyboard
+    /// handlers are not registered, and the SceneView is not made
+    /// focusable. Programmatic [`pan_to`](Self::pan_to) /
+    /// [`zoom_to`](Self::zoom_to) / [`fit_to_content`](Self::fit_to_content)
+    /// still work — this gates only user input.
+    ///
+    /// Use this for **outer** SceneViews in nested chart-style
+    /// patterns: an outer locked SceneView holds axis chrome
+    /// (`TextItem`s reading the inner's pan/zoom signals via
+    /// [`view_transform_signal`](Self::view_transform_signal)),
+    /// an inner interactive SceneView holds the data and accepts
+    /// pan/zoom from the user. Default: interactive (`true`).
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
+        self
+    }
+
+    /// Live `Signal<f32>` for the X pan offset. Use this from a
+    /// parent scene (or any reactive consumer) to derive values
+    /// that follow the SceneView's pan — typically axis-label
+    /// text in a chart-style outer SceneView.
+    pub fn pan_x_signal(&self) -> Signal<f32> {
+        self.pan_x.clone()
+    }
+
+    /// Live `Signal<f32>` for the Y pan offset.
+    pub fn pan_y_signal(&self) -> Signal<f32> {
+        self.pan_y.clone()
+    }
+
+    /// Live `Signal<f32>` for the zoom factor.
+    pub fn zoom_signal(&self) -> Signal<f32> {
+        self.zoom.clone()
+    }
+
+    /// Live `Signal<f32>` for the rotation in radians.
+    pub fn rotation_signal(&self) -> Signal<f32> {
+        self.rotation.clone()
+    }
+
+    /// Live `Signal<Transform2D>` for the composed view transform
+    /// (pan + zoom + rotation + bounds-origin). Folds in the
+    /// `bounds.origin` contribution so reactive consumers see the
+    /// exact transform the renderer applies. Updated whenever any
+    /// of the underlying signals change. Use this when the
+    /// consumer needs the full matrix (e.g. converting a screen
+    /// point to scene coords from outside the SceneView).
+    pub fn view_transform_signal(&self) -> Signal<Transform2D> {
+        self.view_transform_signal.clone()
     }
 
     /// Override the [`A11yMode`](crate::a11y::A11yMode) for this
@@ -380,6 +466,20 @@ impl Widget for SceneView {
         ctx.register_animated_signal(&self.zoom);
         ctx.register_animated_signal(&self.rotation);
 
+        // Walk every lightweight item and let it register its own
+        // reactive bindings against this SceneView. Items with
+        // signal-bound state (e.g. `TextItem::bind_text`) call
+        // `signal.bind_to(scene_view_id, registry, RepaintOnly)`
+        // here so a signal change dirties our paint and the next
+        // walk reads the current value. Items without bindings
+        // default to a no-op `register_bindings`.
+        let self_id_for_items = ctx.self_id();
+        for entry in self.scene.entries.iter() {
+            if let crate::scene::SceneEntryKind::Item(item) = &entry.kind {
+                item.register_bindings(ctx, self_id_for_items);
+            }
+        }
+
         // Phase 3: bind the four signals at Relayout on this node so
         // `place_children` re-runs and the viewport-cull set is
         // recomputed when pan/zoom/rotation change. The Repaint
@@ -401,31 +501,16 @@ impl Widget for SceneView {
         self.rotation
             .bind_to(self_id_for_relayout, registry, BindingLevel::Relayout);
 
-        // Derive the view transform as a single Signal<Transform2D>
-        // and bind it as a `set_transform` scope on this widget. The
-        // render walker pushes this around our entire subtree.
-        //
-        // The composition folds `bounds.origin` into the final
-        // translate so a SceneView placed at a non-zero parent
-        // offset still maps scene-coord (sx, sy) to screen
+        // The view-transform signal is constructed once in `new`
+        // (so it's stable across rebuilds and exposable via
+        // `view_transform_signal()`). Bind it as a `set_transform`
+        // scope on this widget; the render walker pushes it around
+        // our entire subtree. The composition folds `bounds.origin`
+        // into the final translate so a SceneView at a non-zero
+        // parent offset still maps scene-coord (sx, sy) to screen
         // (bounds.x + zoom*sx + pan.x, bounds.y + zoom*sy + pan.y).
-        // Without folding `bounds.origin` in, zoom would multiply
-        // the parent offset and the content would drift away from
-        // the viewport when zoomed.
-        let pan_x = self.pan_x.clone();
-        let pan_y = self.pan_y.clone();
-        let zoom = self.zoom.clone();
-        let rotation = self.rotation.clone();
-        let bounds_origin = self.bounds_origin_signal.clone();
-        let view_transform = pan_x
-            .zip3(&pan_y, &zoom)
-            .zip(&rotation)
-            .zip(&bounds_origin)
-            .map(|(((px, py, z), r), bo)| {
-                compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
-            });
         let self_id = ctx.self_id();
-        ctx.set_transform(self_id, view_transform);
+        ctx.set_transform(self_id, self.view_transform_signal.clone());
         // Capture for the AT-redirect hook (Phase 5b auto-graft).
         // The hook is `&self`; without a stash here it has no way
         // to derive its own `WidgetId` to compute synthetic NodeIds.
@@ -440,6 +525,14 @@ impl Widget for SceneView {
         let max_zoom = self.max_zoom;
 
         let mut handlers = HandlerSet::new();
+
+        // User-driven navigation (scroll, pinch, keyboard) is gated
+        // by `interactive`. When false (typically the outer scene
+        // in a nested chart-style layout), skip handler registration
+        // entirely — events bubble through to the inner SceneView,
+        // which handles them with its own handlers. Programmatic
+        // pan_to / zoom_to remain callable.
+        if self.interactive {
 
         {
             let pan_x = self.pan_x.clone();
@@ -625,6 +718,8 @@ impl Widget for SceneView {
             // the card.
             handlers = handlers.focusable(true);
         }
+
+        } // end of `if self.interactive`
 
         ctx.apply_self_handlers(handlers);
 
@@ -2806,6 +2901,235 @@ mod tests {
             group_node.children().contains(&widget_id_to_node_id(inner_id)),
             "ancestor walk must reach SceneView past the opt-out \
              intermediate"
+        );
+    }
+
+    // -- Nested-SceneView gap-filling APIs ------------------------------
+
+    #[test]
+    fn interactive_default_is_true() {
+        let view = SceneView::new(Scene::new());
+        assert!(
+            view.interactive,
+            "SceneView::interactive defaults to true"
+        );
+    }
+
+    #[test]
+    fn non_interactive_ignores_scroll() {
+        // When the outer SceneView is locked (chart chrome
+        // pattern), scroll events must not pan its view. The
+        // gesture handlers aren't registered, so the scroll is
+        // ignored at this widget — events bubble through to
+        // siblings / inner SceneViews that do handle them.
+        let scene = Scene::new();
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene).interactive(false));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let view = view_handle(&tree, view_id);
+        let pan_before = view.pan();
+
+        // Send a scroll directly to the SceneView. Without an
+        // on_scroll handler registered, the event is unhandled
+        // here and pan stays put.
+        tree.pointer_move(Point::new(100.0, 100.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 50.0, y: 50.0 },
+        });
+
+        let view = view_handle(&tree, view_id);
+        assert_eq!(
+            view.pan(),
+            pan_before,
+            "non-interactive SceneView must not pan on scroll"
+        );
+        // Animation target must also be unset — no tween started.
+        assert!(view.pan_x_animation_target().is_none());
+        assert!(view.pan_y_animation_target().is_none());
+    }
+
+    #[test]
+    fn interactive_does_pan_on_scroll() {
+        // Counterpoint: with the default `interactive = true`,
+        // scroll DOES animate pan. Pins that the gating doesn't
+        // accidentally drop scroll handling for normal scenes.
+        let scene = Scene::new();
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.pointer_move(Point::new(100.0, 100.0));
+        tree.dispatch_event(WidgetEvent::Scroll {
+            delta: ScrollDelta::Pixels { x: 50.0, y: 0.0 },
+        });
+
+        let view = view_handle(&tree, view_id);
+        let target = view
+            .pan_x_animation_target()
+            .expect("interactive scene must enqueue a pan animation");
+        assert!(target.abs() > 1.0, "pan_x animation target moved");
+    }
+
+    #[test]
+    fn pan_x_signal_returns_live_handle() {
+        // `pan_x_signal()` must return a live handle: external
+        // observers see updates when pan changes.
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let view = view_handle(&tree, view_id);
+        let signal = view.pan_x_signal();
+        assert_eq!(signal.get(), 0.0);
+
+        // Programmatic pan_to.
+        view.pan_to(Vec2::new(123.0, 0.0), Duration::ZERO);
+        // Animations land via tree.advance_time but Duration::ZERO
+        // settles immediately on `set` for finite-duration tweens.
+        // Verify the signal reflects the post-target state.
+        let target = view
+            .pan_x_animation_target()
+            .or_else(|| Some(signal.get()))
+            .unwrap();
+        assert!(
+            (target - 123.0).abs() < 1e-3,
+            "pan_x_signal must observe pan_to target (saw {})",
+            target
+        );
+    }
+
+    #[test]
+    fn view_transform_signal_updates_on_pan() {
+        // The composed view_transform signal must reflect pan
+        // changes for reactive consumers.
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(Scene::new()));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let view = view_handle(&tree, view_id);
+        let xform_signal = view.view_transform_signal();
+        let before = xform_signal.get();
+        assert!(before.is_identity(), "initial view_transform is identity");
+
+        // Set pan_x directly (bypasses tweening).
+        view.pan_x_signal().set(50.0);
+        let after = xform_signal.get();
+        // Translation component should reflect the pan.
+        let projected = after.apply_point(Point::new(0.0, 0.0));
+        assert!(
+            (projected.x - 50.0).abs() < 1e-3,
+            "view_transform_signal must update when pan_x changes \
+             (projected x = {})",
+            projected.x
+        );
+    }
+
+    #[test]
+    fn text_item_with_signal_text_repaints_on_signal_change() {
+        // The chart axis-label use case: TextItem::with_signal_text
+        // ties its rendered text to a signal. Changing the signal
+        // must dirty the SceneView's paint so the next render
+        // walks the items and emits the updated text.
+        //
+        // Binding dirties are processed at the start of `layout()`
+        // (via `process_state_changes`), not eagerly on `set()`.
+        // The test mirrors the real per-frame pattern: layout →
+        // render → mutate signal → next layout marks paint dirty.
+        use crate::items::TextItem;
+        use fern_core::signal::Signal;
+
+        let mut scene = Scene::new();
+        let label_text = Signal::new(String::from("0.0"));
+        scene.add_item(TextItem::with_signal_text(
+            label_text.clone(),
+            Rect::new(0.0, 0.0, 50.0, 20.0),
+        ));
+
+        let mut tree = WidgetTree::new();
+        let _view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+        assert!(
+            !tree.needs_paint(),
+            "after initial render, paint should be clean"
+        );
+
+        // Mutate the signal — RepaintOnly binding queues a dirty
+        // entry; the next `layout()` flushes it and marks the
+        // SceneView as needing paint.
+        label_text.set(String::from("123.4"));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            tree.needs_paint(),
+            "TextItem::with_signal_text signal change must dirty \
+             SceneView's paint via register_bindings"
+        );
+    }
+
+    #[test]
+    fn text_item_label_returns_static_text_for_static_items() {
+        // Existing semantic preserved: TextItem with static text
+        // returns it via `label()` when no override is set.
+        use crate::items::TextItem;
+        let item = TextItem::new("Hello", Rect::new(0.0, 0.0, 50.0, 20.0));
+        assert_eq!(crate::item::SceneItem::label(&item).as_deref(), Some("Hello"));
+    }
+
+    #[test]
+    fn text_item_label_returns_signal_snapshot_for_bound_items() {
+        // Bound text: `label()` snapshots the current signal value.
+        use crate::items::TextItem;
+        use fern_core::signal::Signal;
+        let signal = Signal::new(String::from("initial"));
+        let item =
+            TextItem::with_signal_text(signal.clone(), Rect::new(0.0, 0.0, 50.0, 20.0));
+        assert_eq!(crate::item::SceneItem::label(&item).as_deref(), Some("initial"));
+        signal.set(String::from("updated"));
+        assert_eq!(crate::item::SceneItem::label(&item).as_deref(), Some("updated"));
+    }
+
+    #[test]
+    fn nested_scene_chart_pattern_smoke() {
+        // End-to-end: outer locked SceneView holding axis-label
+        // TextItems bound to inner SceneView's pan_x_signal.
+        // Verifies the wiring composes cleanly without panic.
+        use crate::items::TextItem;
+        use fern_core::signal::Signal;
+
+        // Inner data scene.
+        let mut inner_scene = Scene::new();
+        inner_scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
+        let inner = SceneView::new(inner_scene);
+        let inner_pan_x = inner.pan_x_signal();
+        let axis_label_text: Signal<String> =
+            inner_pan_x.map(|px| format!("x = {:.1}", px));
+
+        // Outer chrome scene.
+        let mut outer_scene = Scene::new();
+        outer_scene.add_widget(inner, Rect::new(40.0, 0.0, 360.0, 280.0));
+        outer_scene.add_item(TextItem::with_signal_text(
+            axis_label_text.clone(),
+            Rect::new(0.0, 290.0, 80.0, 10.0),
+        ));
+        let outer = SceneView::new(outer_scene).interactive(false);
+
+        let mut tree = WidgetTree::new();
+        let _root_id = tree.add(outer);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.render();
+
+        // Mutate inner's pan via the outer scene's child handle.
+        // For the smoke test, just mutate the signal directly —
+        // axis_label_text is a derived signal, mutating its
+        // upstream (inner_pan_x) should propagate through. The
+        // next `layout()` flushes binding dirties.
+        inner_pan_x.set(42.0);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            tree.needs_paint(),
+            "outer SceneView must dirty paint when inner's \
+             pan_x_signal changes — derived axis-label text \
+             updates via `register_bindings`"
         );
     }
 }

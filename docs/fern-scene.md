@@ -141,6 +141,51 @@ Surface:
   axis-aligned bounding box of all scene items.
 - `SceneView::viewport_size() -> Size` — most recent viewport size
   observed during layout.
+- `SceneView::interactive(bool)` — gate user-driven navigation.
+  When `false`, scroll / pinch / keyboard handlers are skipped at
+  build time and the SceneView isn't focusable. Programmatic
+  `pan_to` / `zoom_to` still work. Use this for **outer** scenes
+  in nested chart-style layouts: a locked outer SceneView holds
+  axis chrome, an inner interactive SceneView holds the data.
+- `SceneView::pan_x_signal() -> Signal<f32>` / `pan_y_signal()` /
+  `zoom_signal()` / `rotation_signal()` — live signal handles
+  for the underlying view-transform components. Use these from a
+  parent scene (or any reactive consumer) to derive values that
+  follow the view — typically axis-label text bound to the
+  inner's `pan_x_signal`.
+- `SceneView::view_transform_signal() -> Signal<Transform2D>` —
+  the composed view transform as a derived signal. Updates
+  whenever any of pan / zoom / rotation / bounds-origin change.
+
+### Reactive `SceneItem`s
+
+Lightweight items can carry signal-bound state and trigger paint
+when those signals change. The `SceneItem::register_bindings`
+trait method (default no-op) lets an item bind its sources to
+the SceneView at the right `BindingLevel`; the SceneView's
+build pass walks every item and invokes it.
+
+`TextItem::with_signal_text(signal, bounds)` is the canonical
+example: text driven by a `Signal<String>`. Use this to derive
+axis labels from an inner SceneView's pan / zoom in chart-style
+nested layouts:
+
+```rust
+let inner = SceneView::new(data_scene);
+let inner_pan_x = inner.pan_x_signal();
+let label_text: Signal<String> = inner_pan_x.map(|px| format!("x = {:.1}", px));
+
+let mut outer_scene = Scene::new();
+outer_scene.add_widget(inner, Rect::new(40.0, 0.0, 360.0, 280.0));
+outer_scene.add_item(
+    TextItem::with_signal_text(label_text, Rect::new(0.0, 290.0, 80.0, 10.0))
+);
+let outer = SceneView::new(outer_scene).interactive(false);
+```
+
+Custom `SceneItem` impls override `register_bindings` to wire
+their own signal sources at `BindingLevel::RepaintOnly` (visual
+only) or `Relayout` if the binding affects bounds.
 
 The `Widget` impl:
 

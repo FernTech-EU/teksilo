@@ -21,6 +21,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use fern_canvas::{Canvas, Point, Rect, Transform2D};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::build_context::BuildContext;
+use fern_core::widget_id::WidgetId;
 
 /// Opaque identifier for an item in a [`Scene`](crate::Scene).
 /// Generated monotonically by `Scene::add_widget` / `add_item`.
@@ -79,7 +81,7 @@ pub struct SceneItemPaintContext {
 /// item `.access_*` chain (`access_label`, `access_role`,
 /// `access_description`, `access_hidden`) — same naming convention
 /// as the widget-level overrides.
-pub trait SceneItem: std::fmt::Debug + Send + 'static {
+pub trait SceneItem: std::fmt::Debug + 'static {
     /// Axis-aligned bounding box in scene coordinates. Used by the
     /// spatial index for bucketing / queries / culling. The trait
     /// allows the bounds to change per-frame (it's a method, not a
@@ -108,8 +110,32 @@ pub trait SceneItem: std::fmt::Debug + Send + 'static {
     /// and used by the default `accessibility` impl as the AT name
     /// when an item author hasn't overridden it via
     /// `.access_label(...)`.
-    fn label(&self) -> Option<&str> {
+    ///
+    /// Returns `Option<String>` (an owned value) so items with
+    /// signal-bound text can return a fresh snapshot each call
+    /// without lifetime gymnastics. The clone cost is paid per
+    /// AT walk / debug print, not per paint.
+    fn label(&self) -> Option<String> {
         None
+    }
+
+    /// Register reactive bindings the item depends on. Called by
+    /// `SceneView::build` for every item in the scene, with the
+    /// SceneView's own `WidgetId` as `scene_view_id`. Items that
+    /// have signal-bound state (e.g. a `TextItem` whose text is
+    /// driven by an inner SceneView's `pan_x_signal`) bind their
+    /// signals here at the appropriate level
+    /// ([`BindingLevel::RepaintOnly`](fern_core::binding::BindingLevel::RepaintOnly)
+    /// for visual-only changes — text content, color), so the
+    /// SceneView re-paints when the signal value changes.
+    ///
+    /// Default: no bindings — items with purely static state
+    /// don't override.
+    fn register_bindings(
+        &self,
+        _ctx: &mut BuildContext,
+        _scene_view_id: WidgetId,
+    ) {
     }
 
     /// Populate the AccessKit `AccessNodeBuilder` for this item.

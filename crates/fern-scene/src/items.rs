@@ -20,9 +20,33 @@
 
 use fern_canvas::{Canvas, Path, Point, Rect, StrokeStyle};
 use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::binding::BindingLevel;
+use fern_core::build_context::BuildContext;
+use fern_core::signal::Signal;
+use fern_core::widget_id::WidgetId;
 use fern_tokens::Color;
 
 use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
+
+/// Text source for [`TextItem`]: either a static string or a live
+/// `Signal<String>`. Signal-bound text refreshes on each paint and
+/// dirties the SceneView via `register_bindings` so the visual
+/// updates when the signal changes — used by chart-style nested
+/// scenes where outer axis labels read inner pan/zoom signals.
+#[derive(Debug)]
+enum TextSource {
+    Static(String),
+    Bound(Signal<String>),
+}
+
+impl TextSource {
+    fn current(&self) -> String {
+        match self {
+            TextSource::Static(s) => s.clone(),
+            TextSource::Bound(signal) => signal.get(),
+        }
+    }
+}
 
 /// Builder-level accessibility overrides shared by every built-in
 /// `SceneItem`. Mirrors the widget-level `.access_*` chain in CLAUDE.md
@@ -165,8 +189,8 @@ impl SceneItem for RectItem {
         }
     }
 
-    fn label(&self) -> Option<&str> {
-        self.label.as_deref()
+    fn label(&self) -> Option<String> {
+        self.label.clone()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -255,8 +279,8 @@ impl SceneItem for PathItem {
         }
     }
 
-    fn label(&self) -> Option<&str> {
-        self.label.as_deref()
+    fn label(&self) -> Option<String> {
+        self.label.clone()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -314,8 +338,8 @@ impl SceneItem for ImageItem {
         canvas.draw_image(self.bounds, self.name.clone());
     }
 
-    fn label(&self) -> Option<&str> {
-        self.label.as_deref()
+    fn label(&self) -> Option<String> {
+        self.label.clone()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -340,7 +364,7 @@ impl SceneItem for ImageItem {
 /// heavyweight `TextWidget` placed at `Scene::add_widget`.
 #[derive(Debug)]
 pub struct TextItem {
-    text: String,
+    text: TextSource,
     bounds: Rect,
     color: Color,
     label: Option<String>,
@@ -348,12 +372,32 @@ pub struct TextItem {
 }
 
 impl TextItem {
-    /// Construct a text item at `bounds`. The text wraps within the
-    /// rectangle; height is callers' responsibility to set
-    /// reasonably (Phase 4 doesn't auto-measure).
+    /// Construct a text item at `bounds` with static text. The
+    /// text wraps within the rectangle; height is callers'
+    /// responsibility to set reasonably (Phase 4 doesn't
+    /// auto-measure).
     pub fn new(text: impl Into<String>, bounds: Rect) -> Self {
         Self {
-            text: text.into(),
+            text: TextSource::Static(text.into()),
+            bounds,
+            color: Color::BLACK,
+            label: None,
+            a11y: ItemA11yOverrides::default(),
+        }
+    }
+
+    /// Construct a text item whose text is driven by a live
+    /// `Signal<String>`. The visual updates whenever the signal
+    /// value changes — `register_bindings` ties the signal to the
+    /// SceneView at `BindingLevel::RepaintOnly`, so a change
+    /// dirties paint and the next walk draws the current value.
+    ///
+    /// Use this for axis labels in chart-style outer scenes that
+    /// derive their text from an inner SceneView's
+    /// `pan_x_signal` / `zoom_signal` / `view_transform_signal`.
+    pub fn with_signal_text(text: Signal<String>, bounds: Rect) -> Self {
+        Self {
+            text: TextSource::Bound(text),
             bounds,
             color: Color::BLACK,
             label: None,
@@ -368,6 +412,9 @@ impl TextItem {
     }
 
     /// Human-readable label. Defaults to the text content if unset.
+    /// For signal-bound text, `label()` returns a snapshot of the
+    /// current signal value — apps that need a stable AT name
+    /// across pan updates should use `.access_label("X")` instead.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
@@ -382,18 +429,20 @@ impl SceneItem for TextItem {
     }
 
     fn paint(&self, canvas: &mut Canvas, _ctx: &SceneItemPaintContext) {
+        let text = self.text.current();
         canvas.draw_text(
-            &self.text,
+            &text,
             self.bounds,
             &fern_tokens::TextStyle::default(),
             self.color,
         );
     }
 
-    fn label(&self) -> Option<&str> {
-        // Fall back to the text itself so debug / a11y get a
-        // sensible default.
-        self.label.as_deref().or(Some(self.text.as_str()))
+    fn label(&self) -> Option<String> {
+        // Explicit override wins; otherwise fall back to the
+        // current text value (a fresh snapshot of the signal for
+        // bound items, a clone of the static string otherwise).
+        self.label.clone().or_else(|| Some(self.text.current()))
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -402,6 +451,16 @@ impl SceneItem for TextItem {
             builder.set_name(label);
         }
         self.a11y.apply(builder);
+    }
+
+    fn register_bindings(&self, ctx: &mut BuildContext, scene_view_id: WidgetId) {
+        if let TextSource::Bound(signal) = &self.text {
+            signal.bind_to(
+                scene_view_id,
+                ctx.binding_registry(),
+                BindingLevel::RepaintOnly,
+            );
+        }
     }
 }
 
@@ -461,8 +520,8 @@ impl SceneItem for GroupItem {
         false
     }
 
-    fn label(&self) -> Option<&str> {
-        self.label.as_deref()
+    fn label(&self) -> Option<String> {
+        self.label.clone()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -536,6 +595,6 @@ mod tests {
     #[test]
     fn text_item_label_falls_back_to_text() {
         let item = TextItem::new("Hello", Rect::new(0.0, 0.0, 100.0, 30.0));
-        assert_eq!(SceneItem::label(&item), Some("Hello"));
+        assert_eq!(SceneItem::label(&item).as_deref(), Some("Hello"));
     }
 }
