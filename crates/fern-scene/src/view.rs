@@ -4801,6 +4801,89 @@ mod tests {
     }
 
     #[test]
+    fn parent_child_drag_persists_across_two_drags() {
+        // Showcase regression: parent RectItem with declared TextItem
+        // child, dragged twice in a row. After the cascade refactor
+        // the second drag must compose with the first — neither parent
+        // nor child may snap back to original position.
+        use crate::items::{RectItem, TextItem};
+        use fern_canvas::Point;
+
+        let mut scene = Scene::new();
+        // Heavyweight child to flip `has_built_children` (matches
+        // realistic scenes with at least one widget tier).
+        scene.add_widget(FillWidget::new(), Rect::new(300.0, 300.0, 50.0, 50.0));
+        let parent_rect = scene.add_item(
+            RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
+                .fill(fern_tokens::Color::RED)
+                .draggable(true),
+        );
+        let label = scene.add_item(TextItem::new(
+            "child",
+            Rect::new(58.0, 70.0, 64.0, 20.0),
+        ));
+        scene.set_item_parent(label, Some(parent_rect));
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene)
+                .selection_mode(crate::selection::SceneSelectionMode::Multi),
+        );
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // -- Drag 1: press at (60,60), release at (100,100). Δ = +40,+40.
+        tree.pointer_move(Point::new(60.0, 60.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(60.0, 60.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(100.0, 100.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(100.0, 100.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // -- Drag 2: parent now at (90,90,80,60). Press inside it at
+        // (110,110), release at (150,150). Δ = +40,+40.
+        tree.pointer_move(Point::new(110.0, 110.0));
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: Point::new(110.0, 110.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.dispatch_event(WidgetEvent::PointerMove {
+            position: Point::new(150.0, 150.0),
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: Point::new(150.0, 150.0),
+            button: fern_core::event::PointerButton::Primary,
+            modifiers: fern_core::event::Modifiers::default(),
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let view = view_handle(&tree, view_id);
+        let parent_after = view.scene().scene_rect(parent_rect).unwrap();
+        let label_after = view.scene().scene_rect(label).unwrap();
+        // Parent: (50,50) + (40,40) + (40,40) = (130,130).
+        assert!(
+            (parent_after.x - 130.0).abs() < 1e-3 && (parent_after.y - 130.0).abs() < 1e-3,
+            "parent must compose two drags (expected 130,130; got {:?})",
+            parent_after
+        );
+        // Label: (58,70) + (40,40) + (40,40) = (138,150).
+        assert!(
+            (label_after.x - 138.0).abs() < 1e-3 && (label_after.y - 150.0).abs() < 1e-3,
+            "child must compose two drags via cascade (expected 138,150; got {:?})",
+            label_after
+        );
+    }
+
+    #[test]
     fn drag_in_empty_area_starts_marquee_not_move() {
         // Press in empty scene area (no item underneath) → marquee
         // mode wins; dragging across an item selects it instead of
