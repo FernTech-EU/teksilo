@@ -178,6 +178,25 @@ pub trait SceneItem: std::fmt::Debug + 'static {
         crate::items::AccessSubtreeMode::Inherit
     }
 
+    /// Per-item paint caching strategy. Default
+    /// [`CacheMode::None`](crate::cache::CacheMode::None): the
+    /// item's `paint` runs every frame.
+    ///
+    /// Returning [`CacheMode::ItemCoordinate`](crate::cache::CacheMode::ItemCoordinate)
+    /// asks the [`SceneView`](crate::SceneView) to record the
+    /// item's paint output in **local item coordinates** as a
+    /// [`RenderFrame`](fern_canvas::RenderFrame) and replay it on
+    /// subsequent frames instead of re-running `paint`. Only
+    /// suitable for items whose visual depends solely on data the
+    /// Scene knows about (geometry, flags, opacity) — not on
+    /// arbitrary signal state outside `local_bounds`. The cache
+    /// for an id is evicted on
+    /// [`ItemChange::LocalBoundsChanged`](crate::ItemChange) for
+    /// that id.
+    fn cache_mode(&self) -> crate::cache::CacheMode {
+        crate::cache::CacheMode::None
+    }
+
     /// Register reactive bindings the item depends on. Called once
     /// per [`SceneView::build`](crate::SceneView) for every item in
     /// the scene, with the SceneView's `WidgetId` as `view_id`. Items

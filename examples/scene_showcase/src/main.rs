@@ -773,6 +773,38 @@ fn build_showcase_view() -> SceneView {
     SceneView::new(scene)
         .selection_mode(SceneSelectionMode::Multi)
         .default_size(w, h)
+        // R5 background closure: paints a zoom-aware 50-unit grid in
+        // scene coords. The closure receives the visible scene region,
+        // so off-screen lines are skipped — at zoom 0.1× over a
+        // 50,000-unit scene we still emit only the lines on screen.
+        .background(|canvas, _ctx, region| {
+            let step = 50.0_f32;
+            let color = fern_ui::tokens::Color::new(0.85, 0.85, 0.88, 0.5);
+            let x0 = (region.x / step).floor() * step;
+            let y0 = (region.y / step).floor() * step;
+            let x_end = region.x + region.width;
+            let y_end = region.y + region.height;
+            let mut x = x0;
+            while x <= x_end {
+                canvas.draw_line(
+                    fern_ui::canvas::Point::new(x, region.y),
+                    fern_ui::canvas::Point::new(x, y_end),
+                    color,
+                    0.5_f32,
+                );
+                x += step;
+            }
+            let mut y = y0;
+            while y <= y_end {
+                canvas.draw_line(
+                    fern_ui::canvas::Point::new(region.x, y),
+                    fern_ui::canvas::Point::new(x_end, y),
+                    color,
+                    0.5_f32,
+                );
+                y += step;
+            }
+        })
 }
 
 // ---------------------------------------------------------------------------
