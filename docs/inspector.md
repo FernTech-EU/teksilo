@@ -64,6 +64,26 @@ The shortcut id is `__fern_inspector.toggle`. The double-underscore
 prefix marks it as framework-reserved — do not bind it from app code.
 It is also shown dimmed in the inspector's Shortcuts tab.
 
+## Panel keyboard shortcuts
+
+Once the panel is open, a handful of single-letter chords speed up
+common actions. They are **scoped to the panel subtree** — they only
+fire when focus is on the panel or one of its descendants, so the
+single-letter `P` / `B` / `T` chords don't hijack typing in the user
+app's text inputs. Click anywhere in the panel (a tab header, a
+button) to take focus, then:
+
+| Key | Action |
+|---|---|
+| **P** | Toggle the picker tool (same as the toolbar **Pick** button). |
+| **B** | Cycle bounds overlay: `Off → Sel → All → Off`. |
+| **T** | Switch to the next tab. |
+| **Shift+T** | Switch to the previous tab. |
+| **Esc** | If picker mode is active, stop picking. Otherwise close the panel. |
+
+All five share the framework-reserved `__fern_inspector.*` prefix and
+appear dimmed in the Shortcuts tab.
+
 ## Toolbar
 
 ```
@@ -85,8 +105,8 @@ It is also shown dimmed in the inspector's Shortcuts tab.
 
 | Tab | What it shows |
 |---|---|
-| **Tree** | Live widget hierarchy, indented by depth. Click a row to select. Top text input filters by case-insensitive substring match against each type's last segment. Excludes every InspectorShell subtree (multi-window safe). |
-| **Properties** | For the selected widget: type, bounds, dirty flags, parent, children count, activation, `clips_children`, `event_pass_through`, plus a single-line `debug_repr` row. **Copy** button at the top dumps every row plus the full multi-line Debug repr to the clipboard via `ClipboardHandle`. |
+| **Tree** | Live widget hierarchy, indented by depth. Click a row to select. Top text input filters by case-insensitive substring match against each type's last segment. When the picker resolves to a widget that's currently off-screen, the row scrolls into view automatically (skipped when the user clicked the row directly — the row is already on-screen). Excludes every InspectorShell subtree (multi-window safe). |
+| **Properties** | For the selected widget: type, bounds, dirty flags, parent, children count, activation, `clips_children`, `event_pass_through`, plus a single-line `debug_repr` row. **Copy** button dumps every row plus the full multi-line Debug repr to the clipboard via `ClipboardHandle`. **Right-click** any row to open a `Copy value` context menu that copies just that row's value. |
 | **Accessibility** | Role / name / value / advertised actions / toggled / expanded / selected / hidden, from the widget's `accessibility(builder)` output. |
 | **Theme** | Preset buttons (**Light** / **Dark**) — clicking calls `EventContext::set_theme(...)`. **Export** dumps the current `Theme` as pretty JSON to the clipboard; **Import** parses the clipboard JSON back into a `Theme` and applies it (silently ignores parse errors). Below: a curated read-only swatch list (accent, surfaces, text roles, borders, status colors). |
 | **Locale** | Every locale declared in `I18nConfig::supported_locales`. Click a row to call `EventContext::set_locale(...)`. The active locale is highlighted. |
@@ -218,6 +238,7 @@ through. Use the opacity slider to dim them for dense UIs.
 - Highlight overlay: [crates/fern-inspector/src/highlight.rs](../crates/fern-inspector/src/highlight.rs)
 - Picker tool: [crates/fern-inspector/src/picker.rs](../crates/fern-inspector/src/picker.rs)
 - Resize handle: [crates/fern-inspector/src/resize_handle.rs](../crates/fern-inspector/src/resize_handle.rs)
+- Panel keyboard shortcuts: [crates/fern-inspector/src/keyboard.rs](../crates/fern-inspector/src/keyboard.rs)
 - Persistence: [crates/fern-inspector/src/persistence.rs](../crates/fern-inspector/src/persistence.rs)
 - Tabs: [crates/fern-inspector/src/tabs/](../crates/fern-inspector/src/tabs/)
 - Debug-registry hook: [crates/fern-data/src/debug_registry.rs](../crates/fern-data/src/debug_registry.rs)

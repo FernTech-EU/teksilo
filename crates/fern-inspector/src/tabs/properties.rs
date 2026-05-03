@@ -1,19 +1,31 @@
 //! Properties tab — key/value rows for the selected widget plus a
 //! Copy button that writes the formatted dump to the clipboard.
+//!
+//! Right-click on a row opens a context menu with `Copy value` that
+//! copies just that row's value. Implemented with a manually-managed
+//! overlay (the framework's `.context_menu()` builder consumes the
+//! secondary click before our `on_pointer_event` could capture the
+//! row position).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::arena::WidgetArena;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
+use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
+use fern_core::overlay::{
+    DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+};
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
+use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_platform::ClipboardHandle;
 use fern_tokens::TextRole;
-use fern_widgets::Button;
 use fern_widgets::primitives::{HStack, Padding, VStack};
+use fern_widgets::{Button, MenuItem, MenuList};
 
 use crate::state::InspectorState;
 use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X, last_segment};
@@ -89,14 +101,22 @@ impl Widget for PropertiesTab {
 
 struct PropertiesRows {
     state: InspectorState,
-    rows: RefCell<Vec<KvRow>>,
+    /// Shared rows snapshot — RefCell inside Rc so the
+    /// `on_pointer_event` handler closure (which captures by move) and
+    /// the `paint` / `layout_response` methods (which read via
+    /// `&self`) can share the same data without ownership gymnastics.
+    rows: Rc<RefCell<Vec<KvRow>>>,
+    /// Overlay content id for the right-click context menu — set
+    /// during build, consumed by the secondary-click handler.
+    context_menu_id: Rc<Cell<Option<WidgetId>>>,
 }
 
 impl PropertiesRows {
     fn new(state: InspectorState) -> Self {
         Self {
             state,
-            rows: RefCell::new(Vec::new()),
+            rows: Rc::new(RefCell::new(Vec::new())),
+            context_menu_id: Rc::new(Cell::new(None)),
         }
     }
 }
@@ -117,6 +137,61 @@ impl Widget for PropertiesRows {
             ctx.binding_registry(),
             BindingLevel::Relayout,
         );
+
+        // Pre-register the context-menu MenuList as an orphan child.
+        // The framework activates it when `show_overlay` is called from
+        // the right-click handler. The menu's "Copy value" action
+        // reads `state.properties_context_value` — set just before the
+        // overlay opens — so a single static menu serves every row.
+        let value_sig = self.state.properties_context_value.clone();
+        let copy_item = MenuItem::new_literal("Copy value")
+            .on_activate_fn(move |c| {
+                if let Some(cb) = c.app_state::<ClipboardHandle>() {
+                    let _ = cb.set_text(&value_sig.get());
+                }
+            });
+        let menu = MenuList::new().item(copy_item);
+        let menu_id = ctx.add(menu);
+        self.context_menu_id.set(Some(menu_id));
+
+        // Right-click handler: stash the row's value into the shared
+        // signals, then activate + show the menu at the click point.
+        let rows_for_handler = self.rows.clone();
+        let key_sig = self.state.properties_context_key.clone();
+        let value_sig = self.state.properties_context_value.clone();
+        let menu_slot = self.context_menu_id.clone();
+        let handlers = HandlerSet::new().on_pointer_event(move |event, ctx| match event {
+            WidgetEvent::PointerDown {
+                position,
+                button: PointerButton::Secondary,
+                ..
+            } => {
+                let idx = (position.y / ROW_HEIGHT).floor() as usize;
+                let rows = rows_for_handler.borrow();
+                let Some(row) = rows.get(idx) else {
+                    return EventResponse::Ignored;
+                };
+                key_sig.set(row.key.clone());
+                value_sig.set(row.value.clone());
+                drop(rows);
+                if let Some(menu_id) = menu_slot.get() {
+                    ctx.activate(menu_id);
+                    ctx.show_overlay(OverlayRequest {
+                        content_id: menu_id,
+                        anchor: self_id,
+                        placement: OverlayPlacement::AtPointer(*position),
+                        dismiss: DismissBehavior::EscapeOrClickOutside,
+                        layer: OverlayLayer::InTree,
+                        parent_overlay: None,
+                        on_dismiss: None,
+                        fade_duration: None,
+                    });
+                }
+                EventResponse::Handled
+            }
+            _ => EventResponse::Ignored,
+        });
+        ctx.apply_self_handlers(handlers);
         Vec::new()
     }
 

@@ -157,6 +157,14 @@ pub struct InspectorState {
     /// button to write to the clipboard. Empty when no widget is
     /// selected.
     pub(crate) properties_dump: Signal<String>,
+    /// Value of the row the user just right-clicked in the Properties
+    /// tab. Set by the leaf's secondary-click handler before opening
+    /// the context menu; consumed by the menu's `Copy value`
+    /// activation handler. Empty when no row was clicked.
+    pub(crate) properties_context_value: Signal<String>,
+    /// Key (column-name) of the row the user just right-clicked.
+    /// Drives the dynamic menu label, e.g. `Copy "bounds"`.
+    pub(crate) properties_context_key: Signal<String>,
 }
 
 /// Default panel height in logical pixels. Used as the initial value
@@ -195,6 +203,8 @@ impl InspectorState {
             tree_filter: Signal::new(String::new()),
             panel_drag_anchor_y: Signal::new(None),
             properties_dump: Signal::new(String::new()),
+            properties_context_value: Signal::new(String::new()),
+            properties_context_key: Signal::new(String::new()),
         }
     }
 }

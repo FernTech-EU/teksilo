@@ -6,19 +6,20 @@
 //! filtered by case-insensitive substring match against the
 //! `last_segment` of each widget's type name.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use fern_canvas::{Canvas, Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::arena::WidgetArena;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
+use fern_core::signal::Signal;
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, TextRole};
-use fern_widgets::TextInput;
-use fern_widgets::primitives::{Padding, VStack};
+use fern_widgets::primitives::{Expand, Padding, VStack};
+use fern_widgets::{ScrollArea, TextInput};
 
 use crate::state::InspectorState;
 use crate::tabs::{ROW_HEIGHT, ROW_INDENT_PX, ROW_PADDING_X, last_segment};
@@ -56,8 +57,18 @@ impl Widget for TreeTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let filter_input = Padding::symmetric(4.0, 4.0)
             .child(TextInput::new(self.state.tree_filter.clone()).placeholder("filter type names…"));
-        let rows = TreeRows::new(self.state.clone());
-        let root = ctx.add(VStack::new().spacing(2.0).child(filter_input).child(rows));
+        // Build the ScrollArea ourselves so we can capture its
+        // `scroll_y_signal` and let `TreeRows` drive auto-scroll-into-view
+        // when the picker resolves to a widget that's currently off-screen.
+        let scroll_area = ScrollArea::new();
+        let scroll_y = scroll_area.scroll_y_signal().clone();
+        let rows = scroll_area.child(TreeRows::new(self.state.clone(), scroll_y));
+        let root = ctx.add(
+            VStack::new()
+                .spacing(2.0)
+                .child(filter_input)
+                .child(Expand::new().flex(1.0).child(rows)),
+        );
         self.root_child_id = Some(root);
         vec![root]
     }
@@ -88,17 +99,27 @@ impl Widget for TreeTab {
 /// Snapshot-driven rows leaf. Walks the arena from roots in
 /// `layout_response`, paints each row in `paint`, dispatches clicks
 /// via `on_pointer_event`. Excludes every InspectorShell subtree from
-/// the displayed list.
+/// the displayed list. Auto-scrolls the parent `ScrollArea` to bring
+/// an externally-changed selection into view (e.g. picker tool).
 struct TreeRows {
     state: InspectorState,
     rows: RefCell<Vec<TreeRow>>,
+    /// Vertical scroll offset of the enclosing `ScrollArea`. Mutated
+    /// in `layout_response` to keep the picker-selected row visible.
+    scroll_y: Signal<f32>,
+    /// Last selection observed by this leaf. Compared against the
+    /// current `state.selected_id` to detect changes that warrant
+    /// auto-scroll.
+    last_seen_selection: Cell<Option<WidgetId>>,
 }
 
 impl TreeRows {
-    fn new(state: InspectorState) -> Self {
+    fn new(state: InspectorState, scroll_y: Signal<f32>) -> Self {
         Self {
             state,
             rows: RefCell::new(Vec::new()),
+            scroll_y,
+            last_seen_selection: Cell::new(None),
         }
     }
 }
@@ -157,13 +178,36 @@ impl Widget for TreeRows {
         let height = rows.len() as f32 * ROW_HEIGHT;
         *self.rows.borrow_mut() = rows;
 
-        // Resolve any deferred click via local y.
+        // Resolve any deferred click via local y. Track whether this
+        // layout's selection change came from our own click — if it
+        // did, skip the auto-scroll-into-view (the user already sees
+        // the row they clicked and the jump would be jarring).
+        let click_consumed = self.state.pending_tree_click_y.get().is_some();
         if let Some(y) = self.state.pending_tree_click_y.get() {
             let idx = (y / ROW_HEIGHT).floor() as usize;
             if let Some(row) = self.rows.borrow().get(idx) {
                 self.state.selected_id.set(Some(row.id));
             }
             self.state.pending_tree_click_y.set(None);
+        }
+
+        // Auto-scroll: when the selection changes from somewhere
+        // outside this leaf (typically the picker), scroll the
+        // visible row near the top of the viewport with a small
+        // margin so the user sees what just got selected.
+        let cur_sel = self.state.selected_id.get();
+        if cur_sel != self.last_seen_selection.get() {
+            self.last_seen_selection.set(cur_sel);
+            if !click_consumed {
+                if let Some(id) = cur_sel {
+                    if let Some(idx) = self.rows.borrow().iter().position(|r| r.id == id) {
+                        let target = ((idx as f32) * ROW_HEIGHT - 20.0).max(0.0);
+                        if (self.scroll_y.get() - target).abs() > 0.5 {
+                            self.scroll_y.set(target);
+                        }
+                    }
+                }
+            }
         }
 
         proposal.resolve(0.0, height).into()

@@ -32,6 +32,7 @@ use fern_widgets::primitives::{Expand, FixedSize, HStack, Padding, VStack, ZStac
 use fern_widgets::{Button, Panel, SegmentedControl, Slider, TabWidget};
 
 use crate::highlight::{BoundsTracker, HighlightLayer};
+use crate::keyboard::PanelShortcutHost;
 use crate::picker::{PickResolver, PickerOverlay};
 use crate::resize_handle::ResizeHandle;
 use crate::state::{InspectorState, OverlayMode};
@@ -99,12 +100,17 @@ impl Widget for InspectorShell {
         // collapses both handle and panel to zero so the user-root
         // takes the full window. Open shows the handle on top of the
         // panel (handle drags drive `state.panel_height`).
+        // The panel content is wrapped in `PanelShortcutHost` so the
+        // P / B / T / Shift+T / Esc shortcuts are scoped to the panel
+        // subtree — single-letter chords don't hijack typing in the
+        // user app's text inputs.
+        let panel_inner = PanelShortcutHost::new(state.clone(), build_panel(state.clone()));
         let panel_block = VStack::new()
             .child(ResizeHandle::new(state.clone()))
             .child(
                 FixedSize::new()
                     .bind_height(state.panel_height.clone())
-                    .child(build_panel(state.clone())),
+                    .child(panel_inner),
             );
         let panel_index = state.open.map(|open| if *open { 1usize } else { 0 });
         let panel_switcher = fern_widgets::primitives::Switcher::new(panel_index)
@@ -172,7 +178,9 @@ fn empty_filler() -> impl Widget + 'static {
 /// with nine tabs, all inside a `Panel`.
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
     let tabs = TabWidget::new(state.active_tab.clone())
-        .tab_literal("Tree", scrollable_tab(TreeTab::new(state.clone())))
+        // Tree tab is self-scrolling (it owns its own ScrollArea so it
+        // can drive scroll-into-view when the picker selects a widget).
+        .tab_literal("Tree", TreeTab::new(state.clone()))
         .tab_literal("Properties", scrollable_tab(PropertiesTab::new(state.clone())))
         .tab_literal("Accessibility", scrollable_tab(A11yTab::new(state.clone())))
         .tab_literal("Theme", scrollable_tab(ThemeTab::new(state.clone())))

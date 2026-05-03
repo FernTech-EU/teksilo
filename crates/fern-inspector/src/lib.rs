@@ -9,6 +9,8 @@
 #[cfg(debug_assertions)]
 mod highlight;
 #[cfg(debug_assertions)]
+mod keyboard;
+#[cfg(debug_assertions)]
 mod persistence;
 #[cfg(debug_assertions)]
 mod picker;
