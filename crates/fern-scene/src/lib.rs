@@ -45,6 +45,7 @@
 
 pub mod a11y;
 pub mod animation;
+pub mod flags;
 pub mod index;
 pub mod item;
 pub mod items;
@@ -59,6 +60,7 @@ pub use a11y::{
     A11yBoundsSpace, A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode,
     A11yOffScreenMode, A11yRelation,
 };
+pub use flags::ItemFlags;
 pub use index::{GridHashIndex, SpatialIndex};
 pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextItem};

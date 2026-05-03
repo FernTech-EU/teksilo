@@ -11,11 +11,34 @@
 use std::collections::HashMap;
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
+use crate::flags::ItemFlags;
 use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::{ItemId, SceneItem};
 use crate::transform::local_to_parent;
 use fern_canvas::{Point, Rect, Transform2D};
 use fern_core::widget::Widget;
+
+/// Which axes a [`SceneView`](crate::SceneView) is allowed to pan
+/// along. Set on the [`Scene`] (not the View) because a given scene
+/// model often makes sense at one orientation only — a horizontal
+/// timeline, a vertical timeline, a fixed-extent diagram. All views
+/// of the same scene inherit the constraint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PanAxes {
+    /// No user-driven pan in either axis. Programmatic
+    /// [`SceneView::set_pan`](crate::SceneView::set_pan) /
+    /// [`pan_to`](crate::SceneView::pan_to) become no-ops too.
+    None,
+    /// Pan only along X. Vertical scroll deltas pass through to
+    /// ancestor scrollables.
+    Horizontal,
+    /// Pan only along Y. Horizontal scroll deltas pass through to
+    /// ancestor scrollables.
+    Vertical,
+    /// Default: pan freely in both axes.
+    #[default]
+    Both,
+}
 
 /// A single entry in a [`Scene`]. The two variants mirror the two
 /// content tiers: heavyweight `Widget`s consumed into the arena at
@@ -47,6 +70,14 @@ pub(crate) struct SceneEntry {
     /// `scene_transform` is the parent's `scene_transform` composed
     /// with the child's `local_to_parent`.
     pub(crate) parent: Option<ItemId>,
+    /// Per-item behavior flags. Read once from
+    /// [`SceneItem::initial_flags`] at insert time, mutable through
+    /// [`Scene::set_flags`] / [`Scene::set_flag`].
+    pub(crate) flags: ItemFlags,
+    /// Multiplicative opacity in `[0.0, 1.0]`. Composes through the
+    /// parent chain: an item's `effective_opacity` is the product
+    /// of every ancestor's opacity and its own.
+    pub(crate) opacity: f32,
 }
 
 pub(crate) enum SceneEntryKind {
@@ -79,6 +110,17 @@ pub struct Scene {
     entry_index: HashMap<ItemId, usize>,
     index: Box<dyn SpatialIndex>,
 
+    /// User-declared scene extent. `None` means "auto-compute from
+    /// items each query". Set via [`Scene::set_scene_rect`]. When
+    /// `Some`, [`SceneView`] uses this for pan clamping.
+    user_scene_rect: Option<Rect>,
+    /// Which axes the view is allowed to pan along. Default
+    /// [`PanAxes::Both`].
+    pan_axes: PanAxes,
+    /// Whether the view honors zoom gestures (Ctrl+wheel, pinch,
+    /// keyboard `+`/`-`). Default `true`.
+    zoomable: bool,
+
     // --- logical AT structure ----------------------------------------
     pub(crate) a11y_groups: Vec<A11yGroup>,
     pub(crate) a11y_group_index: HashMap<A11yGroupId, usize>,
@@ -101,6 +143,9 @@ impl Scene {
             entries: Vec::new(),
             entry_index: HashMap::new(),
             index,
+            user_scene_rect: None,
+            pan_axes: PanAxes::Both,
+            zoomable: true,
             a11y_groups: Vec::new(),
             a11y_group_index: HashMap::new(),
             a11y_parents: HashMap::new(),
@@ -134,17 +179,20 @@ impl Scene {
             },
             z: 0.0,
             parent: None,
+            flags: ItemFlags::default(),
+            opacity: 1.0,
         };
         self.push_entry(entry)
     }
 
     /// Place a lightweight [`SceneItem`] at `local_pos`. The item's
-    /// `local_bounds` is read once at insert time for the spatial
-    /// index. The item is **not** added to the arena — it's painted
+    /// `local_bounds` and `initial_flags` are read once at insert
+    /// time. The item is **not** added to the arena — it's painted
     /// directly from `SceneView::paint`.
     pub fn add_item<I: SceneItem + 'static>(&mut self, item: I, local_pos: Point) -> ItemId {
         let id = ItemId::next();
         let local_bounds = item.local_bounds();
+        let flags = item.initial_flags();
         let entry = SceneEntry {
             id,
             local_pos,
@@ -153,6 +201,8 @@ impl Scene {
             kind: SceneEntryKind::Item(Box::new(item)),
             z: 0.0,
             parent: None,
+            flags,
+            opacity: 1.0,
         };
         self.push_entry(entry)
     }
@@ -312,6 +362,152 @@ impl Scene {
                 }
             }
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Flags, visibility, opacity (per item)
+    // -----------------------------------------------------------------
+
+    /// Read an item's [`ItemFlags`] bitset.
+    pub fn flags(&self, id: ItemId) -> Option<ItemFlags> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries[pos].flags)
+    }
+
+    /// Replace an item's flags wholesale. No-op if unknown.
+    pub fn set_flags(&mut self, id: ItemId, flags: ItemFlags) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].flags = flags;
+        }
+    }
+
+    /// Set or clear a single flag on an item. No-op if unknown.
+    pub fn set_flag(&mut self, id: ItemId, flag: ItemFlags, on: bool) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].flags.set(flag, on);
+        }
+    }
+
+    /// Toggle the [`ItemFlags::IS_VISIBLE`] bit. Convenience for
+    /// the common "hide this item" operation.
+    pub fn set_visible(&mut self, id: ItemId, visible: bool) {
+        self.set_flag(id, ItemFlags::IS_VISIBLE, visible);
+    }
+
+    /// Whether the item is visible AND every ancestor in its chain
+    /// is visible. Returns `true` when nothing in the chain has
+    /// `IS_VISIBLE` cleared. `false` for unknown ids.
+    pub fn is_effectively_visible(&self, id: ItemId) -> bool {
+        let cap = self.entries.len();
+        let mut hops = 0;
+        let mut cur = Some(id);
+        while let Some(cid) = cur {
+            let Some(&pos) = self.entry_index.get(&cid) else {
+                return false;
+            };
+            let entry = &self.entries[pos];
+            if !entry.flags.contains(ItemFlags::IS_VISIBLE) {
+                return false;
+            }
+            cur = entry.parent;
+            hops += 1;
+            if hops > cap {
+                break;
+            }
+        }
+        true
+    }
+
+    /// Read an item's local opacity multiplier (`1.0` by default).
+    pub fn opacity(&self, id: ItemId) -> Option<f32> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(self.entries[pos].opacity)
+    }
+
+    /// Set an item's local opacity, clamped to `[0.0, 1.0]`.
+    pub fn set_opacity(&mut self, id: ItemId, opacity: f32) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            self.entries[pos].opacity = opacity.clamp(0.0, 1.0);
+        }
+    }
+
+    /// Effective opacity composed up the parent chain — the product
+    /// of every ancestor's opacity and this item's. `1.0` for an
+    /// unknown id (so callers don't end up multiplying by a stale
+    /// value).
+    pub fn effective_opacity(&self, id: ItemId) -> f32 {
+        let cap = self.entries.len();
+        let mut hops = 0;
+        let mut cur = Some(id);
+        let mut acc = 1.0_f32;
+        while let Some(cid) = cur {
+            let Some(&pos) = self.entry_index.get(&cid) else {
+                return acc;
+            };
+            let entry = &self.entries[pos];
+            acc *= entry.opacity;
+            cur = entry.parent;
+            hops += 1;
+            if hops > cap {
+                break;
+            }
+        }
+        acc
+    }
+
+    // -----------------------------------------------------------------
+    // Scene rect (Qt setSceneRect) + pan/zoom policy
+    // -----------------------------------------------------------------
+
+    /// Declare the scene's logical extent. `None` (the default)
+    /// means "auto-compute from items each query"; `Some(rect)`
+    /// fixes the extent regardless of item placement. Used by
+    /// [`SceneView`] for pan clamping and `fit_to_content`.
+    pub fn set_scene_rect(&mut self, rect: Option<Rect>) {
+        self.user_scene_rect = rect;
+    }
+
+    /// The resolved scene extent — user-declared via
+    /// [`Scene::set_scene_rect`] if set, otherwise the AABB
+    /// enclosing every item's scene rect. `None` when neither is
+    /// available (the user didn't declare and the scene is empty).
+    pub fn scene_rect_extent(&self) -> Option<Rect> {
+        if let Some(r) = self.user_scene_rect {
+            return Some(r);
+        }
+        let ids = self.ids();
+        let mut acc: Option<Rect> = None;
+        for id in ids {
+            let Some(r) = self.scene_rect(id) else {
+                continue;
+            };
+            acc = Some(match acc {
+                None => r,
+                Some(a) => union_two_rects(a, r),
+            });
+        }
+        acc
+    }
+
+    /// Set the axes the view may pan along. Default
+    /// [`PanAxes::Both`].
+    pub fn pan_axes(&mut self, axes: PanAxes) {
+        self.pan_axes = axes;
+    }
+
+    /// The currently-declared pan axes.
+    pub fn current_pan_axes(&self) -> PanAxes {
+        self.pan_axes
+    }
+
+    /// Set whether the view honors zoom gestures. Default `true`.
+    pub fn zoomable(&mut self, on: bool) {
+        self.zoomable = on;
+    }
+
+    /// Whether the scene currently allows zoom.
+    pub fn is_zoomable(&self) -> bool {
+        self.zoomable
     }
 
     // -----------------------------------------------------------------
@@ -658,6 +854,15 @@ pub(crate) fn rects_intersect(a: Rect, b: Rect) -> bool {
         && b.y < a.y + a.height
 }
 
+/// AABB of the union of two rectangles.
+fn union_two_rects(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    let r = a.right().max(b.right());
+    let bot = a.bottom().max(b.bottom());
+    Rect::new(x, y, r - x, bot - y)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -851,5 +1056,123 @@ mod tests {
         let b = Rect::new(10.0, 0.0, 10.0, 10.0);
         assert!(!rects_intersect(a, b));
         assert!(!rects_intersect(b, a));
+    }
+
+    #[test]
+    fn flags_default_carries_visible_enabled_selectable() {
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(0.0, 0.0),
+        );
+        let f = scene.flags(id).unwrap();
+        assert!(f.contains(ItemFlags::IS_VISIBLE));
+        assert!(f.contains(ItemFlags::IS_ENABLED));
+        assert!(f.contains(ItemFlags::IS_SELECTABLE));
+        assert!(!f.contains(ItemFlags::IS_DRAGGABLE));
+    }
+
+    #[test]
+    fn draggable_builder_sets_is_draggable_flag() {
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)).draggable(true),
+            Point::ZERO,
+        );
+        assert!(scene.flags(id).unwrap().contains(ItemFlags::IS_DRAGGABLE));
+    }
+
+    #[test]
+    fn set_visible_flag_chains_through_parent() {
+        let mut scene = Scene::new();
+        let parent = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::ZERO,
+        );
+        let child = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)),
+            Point::ZERO,
+        );
+        scene.set_item_parent(child, Some(parent));
+        assert!(scene.is_effectively_visible(child));
+        scene.set_visible(parent, false);
+        assert!(!scene.is_effectively_visible(child));
+        assert!(!scene.is_effectively_visible(parent));
+    }
+
+    #[test]
+    fn effective_opacity_composes_through_chain() {
+        let mut scene = Scene::new();
+        let p = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::ZERO,
+        );
+        let c = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)),
+            Point::ZERO,
+        );
+        scene.set_item_parent(c, Some(p));
+        scene.set_opacity(p, 0.5);
+        scene.set_opacity(c, 0.5);
+        assert!((scene.effective_opacity(c) - 0.25).abs() < 1e-5);
+    }
+
+    #[test]
+    fn opacity_clamps_to_unit_range() {
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::ZERO,
+        );
+        scene.set_opacity(id, 1.5);
+        assert_eq!(scene.opacity(id), Some(1.0));
+        scene.set_opacity(id, -0.3);
+        assert_eq!(scene.opacity(id), Some(0.0));
+    }
+
+    #[test]
+    fn scene_rect_extent_uses_user_set_when_present() {
+        let mut scene = Scene::new();
+        let user = Rect::new(0.0, 0.0, 1000.0, 1000.0);
+        scene.set_scene_rect(Some(user));
+        assert_eq!(scene.scene_rect_extent(), Some(user));
+        scene.set_scene_rect(None);
+        // No items, no auto-extent.
+        assert_eq!(scene.scene_rect_extent(), None);
+    }
+
+    #[test]
+    fn scene_rect_extent_auto_unions_items_when_unset() {
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(5.0, 5.0),
+        );
+        scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            Point::new(100.0, 100.0),
+        );
+        let extent = scene.scene_rect_extent().unwrap();
+        // (5,5)-(15,15) ∪ (100,100)-(120,120) = (5,5)-(120,120).
+        assert!((extent.x - 5.0).abs() < 1e-3);
+        assert!((extent.y - 5.0).abs() < 1e-3);
+        assert!((extent.width - 115.0).abs() < 1e-3);
+        assert!((extent.height - 115.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn pan_axes_default_is_both() {
+        let scene = Scene::new();
+        assert_eq!(scene.current_pan_axes(), PanAxes::Both);
+        assert!(scene.is_zoomable());
+    }
+
+    #[test]
+    fn pan_axes_set_round_trip() {
+        let mut scene = Scene::new();
+        scene.pan_axes(PanAxes::Horizontal);
+        assert_eq!(scene.current_pan_axes(), PanAxes::Horizontal);
+        scene.zoomable(false);
+        assert!(!scene.is_zoomable());
     }
 }

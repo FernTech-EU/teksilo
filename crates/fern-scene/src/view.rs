@@ -188,6 +188,13 @@ pub struct SceneView {
     /// Fallback size when the parent's `SizeProposal` is unspecified
     /// on either axis.
     default_size: Size,
+    /// When `true`, [`SceneView::layout_response`] returns the
+    /// scene's `scene_rect_extent` as the view's wanted size — the
+    /// view sizes itself to its scene. User pan / zoom / drag-to-
+    /// move are still gated by [`Scene::pan_axes`] and
+    /// [`Scene::is_zoomable`]; the default policy is "no pan, no
+    /// zoom" because the entire scene is already on-screen.
+    adopt_scene_size: bool,
     /// Latest viewport size observed during layout. Cached so
     /// imperative methods like [`SceneView::fit_to_content`] can
     /// reason about the visible rectangle without re-running layout.
@@ -379,6 +386,7 @@ impl SceneView {
             materialized: HashMap::new(),
             widget_to_item: HashMap::new(),
             default_size: Size::new(800.0, 600.0),
+            adopt_scene_size: false,
             last_viewport: Rc::new(Cell::new(Size::new(800.0, 600.0))),
             pan_x,
             pan_y,
@@ -708,6 +716,17 @@ impl SceneView {
         self
     }
 
+    /// When set, the view's `layout_response` returns the scene's
+    /// `scene_rect_extent` as its own wanted size — the view sizes
+    /// itself to its scene rather than to `default_size`. Pairs
+    /// naturally with [`Scene::pan_axes`] / [`Scene::zoomable`]
+    /// to embed bounded, non-navigable scenes inline (mini diagrams,
+    /// fixed corkboards). Default `false`.
+    pub fn adopt_scene_size(mut self, on: bool) -> Self {
+        self.adopt_scene_size = on;
+        self
+    }
+
     /// Minimum zoom factor (default 0.1×). Applied as a clamp to all
     /// programmatic and gesture-driven zoom changes.
     pub fn min_zoom(mut self, v: f32) -> Self {
@@ -801,27 +820,55 @@ impl SceneView {
     /// and the test seam allows snapping. For an explicit snap, call
     /// [`SceneView::set_pan`].
     pub fn pan_to(&self, target: Vec2, duration: Duration) {
+        let target = self.gate_pan_target(target);
         self.pan_x.animate_to(target.x, duration, Easing::EaseOut);
         self.pan_y.animate_to(target.y, duration, Easing::EaseOut);
     }
 
-    /// Snap pan to `target` without animation.
+    /// Snap pan to `target` without animation. Gated by the scene's
+    /// [`PanAxes`](crate::scene::PanAxes) policy.
     pub fn set_pan(&self, target: Vec2) {
+        let target = self.gate_pan_target(target);
         self.pan_x.set(target.x);
         self.pan_y.set(target.y);
     }
 
     /// Animate zoom to `target` over `duration`, clamped to
-    /// `[min_zoom, max_zoom]`.
+    /// `[min_zoom, max_zoom]`. No-op when the scene declares
+    /// [`Scene::zoomable(false)`](crate::Scene::zoomable).
     pub fn zoom_to(&self, target: f32, duration: Duration) {
+        if !self.scene.is_zoomable() || self.adopt_scene_size {
+            return;
+        }
         let clamped = target.clamp(self.min_zoom, self.max_zoom);
         self.zoom.animate_to(clamped, duration, Easing::EaseOut);
     }
 
-    /// Snap zoom to `target` without animation, clamped.
+    /// Snap zoom to `target` without animation, clamped. No-op when
+    /// the scene declares zoom disabled.
     pub fn set_zoom(&self, target: f32) {
+        if !self.scene.is_zoomable() || self.adopt_scene_size {
+            return;
+        }
         let clamped = target.clamp(self.min_zoom, self.max_zoom);
         self.zoom.set(clamped);
+    }
+
+    /// Project `target` through the scene's pan-axes policy. The
+    /// orthogonal axis is held at its current value when the policy
+    /// excludes it; `PanAxes::None` (and `adopt_scene_size`) holds
+    /// both axes at their current pan.
+    fn gate_pan_target(&self, target: Vec2) -> Vec2 {
+        use crate::scene::PanAxes;
+        if self.adopt_scene_size {
+            return Vec2::new(self.pan_x.get(), self.pan_y.get());
+        }
+        match self.scene.current_pan_axes() {
+            PanAxes::Both => target,
+            PanAxes::None => Vec2::new(self.pan_x.get(), self.pan_y.get()),
+            PanAxes::Horizontal => Vec2::new(target.x, self.pan_y.get()),
+            PanAxes::Vertical => Vec2::new(self.pan_x.get(), target.y),
+        }
     }
 
     /// Animate rotation to `target` over `duration` (radians).
@@ -1155,17 +1202,42 @@ impl Widget for SceneView {
             let last_viewport_for_scroll = self.last_viewport.clone();
             let cursor_pos_for_scroll = self.cursor_pos.clone();
             let zoom_dur = self.zoom_anim_duration;
+            // Snapshot the scene's interaction policy at build time.
+            // Subsequent `Scene::pan_axes` / `Scene::zoomable` changes
+            // take effect on the next rebuild.
+            let pan_axes = self.scene.current_pan_axes();
+            let zoomable = self.scene.is_zoomable() && !self.adopt_scene_size;
             handlers = handlers.on_scroll(move |event, _ctx| {
+                use crate::scene::PanAxes;
                 let WidgetEvent::Scroll { delta, modifiers } = event else {
                     return EventResponse::Ignored;
                 };
-                let (dx, dy) = match delta {
+                let (mut dx, mut dy) = match delta {
                     ScrollDelta::Pixels { x, y } => (*x, *y),
                     ScrollDelta::Lines { x, y } => (*x * line_height, *y * line_height),
                 };
+                // Apply the scene's pan-axes policy: zero out the
+                // restricted axis so it passes through to ancestor
+                // scrollables instead of being absorbed.
+                match pan_axes {
+                    PanAxes::Both => {}
+                    PanAxes::None => {
+                        dx = 0.0;
+                        dy = 0.0;
+                    }
+                    PanAxes::Horizontal => {
+                        dy = 0.0;
+                    }
+                    PanAxes::Vertical => {
+                        dx = 0.0;
+                    }
+                }
                 // Ctrl+wheel = zoom about the viewport center.
                 // Unmodified wheel / trackpad pan = pan the view.
                 if modifiers.ctrl() {
+                    if !zoomable {
+                        return EventResponse::Ignored;
+                    }
                     // Zoom magnitude scales with vertical scroll
                     // distance. Sign convention: scroll up (negative
                     // ScrollDelta after platform negation) → zoom in.
@@ -1228,6 +1300,11 @@ impl Widget for SceneView {
                     pan_y.set(new_pan.y);
                     return EventResponse::Handled;
                 }
+                // No-op / pass-through when both axes are zeroed by
+                // the policy.
+                if dx == 0.0 && dy == 0.0 {
+                    return EventResponse::Ignored;
+                }
                 // Convention: positive scroll delta on the y-axis
                 // means content scrolls "up" in the viewport, which
                 // is equivalent to panning the *view* down — i.e. the
@@ -1254,7 +1331,13 @@ impl Widget for SceneView {
             let zoom = self.zoom.clone();
             let rotation = self.rotation.clone();
             let bounds_origin_for_pinch = self.bounds_origin_signal.clone();
+            let zoomable_pinch = self.scene.is_zoomable() && !self.adopt_scene_size;
+            let pan_axes_pinch = self.scene.current_pan_axes();
             handlers = handlers.on_pinch(move |phase, _ctx| {
+                use crate::scene::PanAxes;
+                if !zoomable_pinch {
+                    return;
+                }
                 let PinchPhase::Changed {
                     center,
                     scale,
@@ -1283,6 +1366,15 @@ impl Widget for SceneView {
                 // requested.
                 zoom.set(z_new);
                 rotation.set(r_new);
+                // Apply pan-axes policy to the pinch's pan
+                // adjustment so a horizontal-only scene doesn't
+                // accidentally drift on Y from the gesture math.
+                let new_pan = match pan_axes_pinch {
+                    PanAxes::Both => new_pan,
+                    PanAxes::None => pan_old,
+                    PanAxes::Horizontal => Vec2::new(new_pan.x, pan_old.y),
+                    PanAxes::Vertical => Vec2::new(pan_old.x, new_pan.y),
+                };
                 pan_x.set(new_pan.x);
                 pan_y.set(new_pan.y);
             });
@@ -1322,10 +1414,15 @@ impl Widget for SceneView {
             let zoom_for_xform = self.zoom.clone();
             let rotation_for_xform = self.rotation.clone();
             let bounds_origin_for_xform = self.bounds_origin_signal.clone();
+            let pan_axes_keys = self.scene.current_pan_axes();
+            let zoomable_keys = self.scene.is_zoomable() && !self.adopt_scene_size;
             handlers = handlers.on_key(move |event, _ctx| {
+                use crate::scene::PanAxes;
                 let WidgetEvent::KeyDown { key, .. } = event else {
                     return EventResponse::Ignored;
                 };
+                let allow_pan_x = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Horizontal);
+                let allow_pan_y = matches!(pan_axes_keys, PanAxes::Both | PanAxes::Vertical);
                 // Pan step = quarter of the smaller viewport axis,
                 // capped to a sensible minimum so unusually small
                 // viewports still feel responsive.
@@ -1353,32 +1450,34 @@ impl Widget for SceneView {
                     }
                 };
                 match key {
-                    Key::ArrowLeft => {
+                    Key::ArrowLeft if allow_pan_x => {
                         let target = pan_x.animation_target().unwrap_or_else(|| pan_x.get())
                             + pan_step;
                         pan_x.animate_to(target, pan_dur, Easing::EaseOut);
                     }
-                    Key::ArrowRight => {
+                    Key::ArrowRight if allow_pan_x => {
                         let target = pan_x.animation_target().unwrap_or_else(|| pan_x.get())
                             - pan_step;
                         pan_x.animate_to(target, pan_dur, Easing::EaseOut);
                     }
-                    Key::ArrowUp => {
+                    Key::ArrowUp if allow_pan_y => {
                         let target = pan_y.animation_target().unwrap_or_else(|| pan_y.get())
                             + pan_step;
                         pan_y.animate_to(target, pan_dur, Easing::EaseOut);
                     }
-                    Key::ArrowDown => {
+                    Key::ArrowDown if allow_pan_y => {
                         let target = pan_y.animation_target().unwrap_or_else(|| pan_y.get())
                             - pan_step;
                         pan_y.animate_to(target, pan_dur, Easing::EaseOut);
                     }
-                    other if other.to_char() == Some('+') || other.to_char() == Some('=') => {
+                    other if zoomable_keys
+                        && (other.to_char() == Some('+') || other.to_char() == Some('=')) =>
+                    {
                         let z_new = (zoom.get() * 1.25).clamp(min_zoom, max_zoom);
                         zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
                         recenter_zoom(z_new);
                     }
-                    other if other.to_char() == Some('-') => {
+                    other if zoomable_keys && other.to_char() == Some('-') => {
                         let z_new = (zoom.get() * 0.8).clamp(min_zoom, max_zoom);
                         zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
                         recenter_zoom(z_new);
@@ -1553,7 +1652,19 @@ impl Widget for SceneView {
     }
 
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        let size = proposal.resolve(self.default_size.width, self.default_size.height);
+        // When `adopt_scene_size` is set, the view sizes itself to
+        // the scene's resolved extent so the entire scene fits
+        // inside the view's bounds. Falls back to `default_size`
+        // when the scene has no extent declared and no items.
+        let (default_w, default_h) = if self.adopt_scene_size {
+            match self.scene.scene_rect_extent() {
+                Some(r) => (r.right(), r.bottom()),
+                None => (self.default_size.width, self.default_size.height),
+            }
+        } else {
+            (self.default_size.width, self.default_size.height)
+        };
+        let size = proposal.resolve(default_w, default_h);
         // Cache for `fit_to_content` and friends. `bounds_origin` is
         // refreshed in `place_children`, which runs whenever the
         // SceneView has at least one child — i.e. always in real
@@ -1579,17 +1690,19 @@ impl Widget for SceneView {
             // feel unstable to the user.
             let mut snapshot = self.lightweight_bounds_snapshot.borrow_mut();
             snapshot.clear();
-            // Iterate ids and compute the scene AABB for each draggable
-            // item (the parent chain may have shifted it). The snapshot
-            // is used by the on_drag handler's hit-test for drag-start
-            // — refreshed each layout pass so a parent move between
-            // drag events doesn't leave the snapshot stale.
+            // Snapshot draggable lightweight items' scene-AABBs for
+            // the drag-start hit-test. Refreshed each layout pass so
+            // a parent move between drag events doesn't leave the
+            // snapshot stale.
             let ids: Vec<crate::item::ItemId> = self.scene.ids();
             for id in ids {
-                let Some(item) = self.scene.item(id) else {
+                if self.scene.item(id).is_none() {
+                    continue;
+                }
+                let Some(flags) = self.scene.flags(id) else {
                     continue;
                 };
-                if !item.is_draggable() {
+                if !flags.contains(crate::flags::ItemFlags::IS_DRAGGABLE) {
                     continue;
                 }
                 if let Some(scene_rect) = self.scene.scene_rect(id) {
@@ -1742,10 +1855,18 @@ impl Widget for SceneView {
             if self.scene.item(id).is_none() {
                 continue;
             }
-            // Items that are either the drag target itself OR a
-            // declared descendant of the drag target paint with a
-            // visual delta in scene coords — a child label follows
-            // its dragged rect parent visually until the rebuild
+            // Skip items whose chain is invisible or which carry the
+            // HAS_NO_CONTENTS flag (logical-only).
+            if !self.scene.is_effectively_visible(id) {
+                continue;
+            }
+            let flags = self.scene.flags(id).unwrap_or_default();
+            if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
+                continue;
+            }
+            // Items that are either the drag target or a declared
+            // descendant paint with a visual delta in scene coords —
+            // a child follows its dragged parent until the rebuild
             // commits the new local_pos.
             let drag_delta = drag_target
                 .filter(|t| t.item_id == id || self.scene.is_descendant_of(id, t.item_id))
@@ -1757,19 +1878,28 @@ impl Widget for SceneView {
                 });
 
             // Compose `local→scene`, optionally with a scene-coord
-            // drag offset baked in (`scene_transform.then(translate)`
-            // = "scene-transform first, then translate in scene
-            // space"). Push it beneath the existing view transform so
-            // the item's `paint` works in local coords. `save` /
-            // `restore` keep neighbouring items' transforms isolated.
+            // drag offset baked in. Push beneath the view transform
+            // so the item's `paint` works in local coords. `save` /
+            // `restore` isolate neighbouring items' transforms.
             let mut local_to_scene = self.scene.scene_transform(id);
             if let Some(t) = drag_delta {
                 local_to_scene = local_to_scene.then(&t);
             }
             canvas.save();
             canvas.apply_transform(local_to_scene);
+            // Effective opacity composes through the parent chain.
+            // Pushed via `Canvas::set_opacity` / `restore_opacity`
+            // so the scope is balanced regardless of paint paths.
+            let alpha = self.scene.effective_opacity(id);
+            let opacity_pushed = alpha < 0.999;
+            if opacity_pushed {
+                canvas.set_opacity(alpha);
+            }
             if let Some(item) = self.scene.item(id) {
                 item.paint(canvas, &item_ctx);
+            }
+            if opacity_pushed {
+                canvas.restore_opacity();
             }
             canvas.restore();
         }
@@ -5693,5 +5823,80 @@ mod tests {
             on_count,
             off_count
         );
+    }
+
+    // -----------------------------------------------------------------
+    // R2: scene policy + adopt_scene_size
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn adopt_scene_size_returns_scene_extent_from_layout_response() {
+        use crate::items::RectItem;
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 200.0, 150.0)),
+            fern_canvas::Point::new(0.0, 0.0),
+        );
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene).adopt_scene_size(true));
+        // Propose nothing; the view must size itself to the scene.
+        tree.layout(SizeProposal::unspecified());
+        let bounds = tree.bounds(view_id);
+        assert!((bounds.width - 200.0).abs() < 1e-3, "width = {}", bounds.width);
+        assert!((bounds.height - 150.0).abs() < 1e-3, "height = {}", bounds.height);
+    }
+
+    #[test]
+    fn pan_axes_none_makes_set_pan_a_noop() {
+        let mut scene = Scene::new();
+        scene.pan_axes(crate::scene::PanAxes::None);
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let view = view_handle(&tree, view_id);
+        view.set_pan(Vec2::new(123.0, 456.0));
+        assert_eq!(view.pan(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn pan_axes_horizontal_blocks_vertical_set_pan() {
+        let mut scene = Scene::new();
+        scene.pan_axes(crate::scene::PanAxes::Horizontal);
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let view = view_handle(&tree, view_id);
+        view.set_pan(Vec2::new(50.0, 75.0));
+        let pan = view.pan();
+        assert!((pan.x - 50.0).abs() < 1e-3);
+        assert!(pan.y.abs() < 1e-3, "Y axis must stay 0 (got {})", pan.y);
+    }
+
+    #[test]
+    fn zoomable_false_makes_zoom_to_a_noop() {
+        let mut scene = Scene::new();
+        scene.zoomable(false);
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let view = view_handle(&tree, view_id);
+        let z0 = view.zoom();
+        view.set_zoom(2.5);
+        assert!((view.zoom() - z0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn adopt_scene_size_disables_user_pan() {
+        let mut scene = Scene::new();
+        scene.add_item(
+            crate::items::RectItem::new(Rect::new(0.0, 0.0, 200.0, 150.0)),
+            fern_canvas::Point::ZERO,
+        );
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene).adopt_scene_size(true));
+        tree.layout(SizeProposal::unspecified());
+        let view = view_handle(&tree, view_id);
+        view.set_pan(Vec2::new(99.0, 99.0));
+        assert_eq!(view.pan(), Vec2::ZERO);
     }
 }

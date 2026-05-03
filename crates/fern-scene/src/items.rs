@@ -119,7 +119,7 @@ pub struct RectItem {
     fill: Option<Color>,
     stroke: Option<(Color, f32)>,
     label: Option<String>,
-    draggable: bool,
+    flags: crate::flags::ItemFlags,
     a11y: ItemA11yOverrides,
 }
 
@@ -134,7 +134,7 @@ impl RectItem {
             fill: None,
             stroke: None,
             label: None,
-            draggable: false,
+            flags: crate::flags::ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -160,7 +160,7 @@ impl RectItem {
 
     /// Opt the rectangle into drag-to-move.
     pub fn draggable(mut self, draggable: bool) -> Self {
-        self.draggable = draggable;
+        self.flags.set(crate::flags::ItemFlags::IS_DRAGGABLE, draggable);
         self
     }
 
@@ -189,8 +189,8 @@ impl SceneItem for RectItem {
         self.label.clone()
     }
 
-    fn is_draggable(&self) -> bool {
-        self.draggable
+    fn initial_flags(&self) -> crate::flags::ItemFlags {
+        self.flags
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -220,7 +220,7 @@ pub struct PathItem {
     fill: Option<Color>,
     stroke: Option<(Color, f32)>,
     label: Option<String>,
-    draggable: bool,
+    flags: crate::flags::ItemFlags,
     a11y: ItemA11yOverrides,
 }
 
@@ -235,7 +235,7 @@ impl PathItem {
             fill: None,
             stroke: None,
             label: None,
-            draggable: false,
+            flags: crate::flags::ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -260,7 +260,7 @@ impl PathItem {
 
     /// Opt the path into drag-to-move.
     pub fn draggable(mut self, draggable: bool) -> Self {
-        self.draggable = draggable;
+        self.flags.set(crate::flags::ItemFlags::IS_DRAGGABLE, draggable);
         self
     }
 
@@ -332,8 +332,8 @@ impl SceneItem for PathItem {
         self.label.clone()
     }
 
-    fn is_draggable(&self) -> bool {
-        self.draggable
+    fn initial_flags(&self) -> crate::flags::ItemFlags {
+        self.flags
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -376,7 +376,7 @@ pub struct ImageItem {
     local_bounds: Rect,
     name: String,
     label: Option<String>,
-    draggable: bool,
+    flags: crate::flags::ItemFlags,
     a11y: ItemA11yOverrides,
 }
 
@@ -388,7 +388,7 @@ impl ImageItem {
             local_bounds,
             name: name.into(),
             label: None,
-            draggable: false,
+            flags: crate::flags::ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -401,7 +401,7 @@ impl ImageItem {
 
     /// Opt the image into drag-to-move.
     pub fn draggable(mut self, draggable: bool) -> Self {
-        self.draggable = draggable;
+        self.flags.set(crate::flags::ItemFlags::IS_DRAGGABLE, draggable);
         self
     }
 
@@ -425,8 +425,8 @@ impl SceneItem for ImageItem {
         self.label.clone()
     }
 
-    fn is_draggable(&self) -> bool {
-        self.draggable
+    fn initial_flags(&self) -> crate::flags::ItemFlags {
+        self.flags
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
@@ -450,7 +450,7 @@ pub struct TextItem {
     local_bounds: Rect,
     color: Color,
     label: Option<String>,
-    draggable: bool,
+    flags: crate::flags::ItemFlags,
     a11y: ItemA11yOverrides,
 }
 
@@ -462,7 +462,7 @@ impl TextItem {
             local_bounds,
             color: Color::BLACK,
             label: None,
-            draggable: false,
+            flags: crate::flags::ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
         }
     }
@@ -477,14 +477,14 @@ impl TextItem {
             local_bounds,
             color: Color::BLACK,
             label: None,
-            draggable: false,
+            flags: crate::flags::ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
         }
     }
 
     /// Opt the text into drag-to-move.
     pub fn draggable(mut self, draggable: bool) -> Self {
-        self.draggable = draggable;
+        self.flags.set(crate::flags::ItemFlags::IS_DRAGGABLE, draggable);
         self
     }
 
@@ -526,8 +526,8 @@ impl SceneItem for TextItem {
         self.label.clone().or_else(|| Some(self.text.current()))
     }
 
-    fn is_draggable(&self) -> bool {
-        self.draggable
+    fn initial_flags(&self) -> crate::flags::ItemFlags {
+        self.flags
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) {
