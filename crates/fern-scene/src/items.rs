@@ -279,6 +279,60 @@ impl SceneItem for PathItem {
         }
     }
 
+    fn hit_test(&self, scene_point: Point) -> bool {
+        // Per-segment hit-test for stroked paths: a click "near"
+        // any line segment counts as a hit, where "near" is the
+        // stroke half-width plus a 2px tolerance for fingertip /
+        // mouse imprecision. The default AABB hit-test is too
+        // loose for thin connector lines (a long diagonal line
+        // has an AABB the size of its bounding rect; clicking
+        // anywhere in the rect would falsely hit the line). The
+        // per-segment check matches what users see.
+        //
+        // Filled paths still use AABB (matches the visual).
+        // Mixed fill+stroke uses AABB (the fill region is the
+        // dominant target). Stroke-only paths use the segment
+        // walk.
+        let stroke_width = match self.stroke {
+            Some((_, w)) => w,
+            None => return self.bounds.contains(scene_point),
+        };
+        if self.fill.is_some() {
+            return self.bounds.contains(scene_point);
+        }
+        // Stroke-only path: walk segments.
+        let tolerance = stroke_width.max(0.0) * 0.5 + 2.0;
+        let mut current = Point::ZERO;
+        let mut start = Point::ZERO;
+        for cmd in &self.path.commands {
+            match cmd {
+                fern_canvas::PathCommand::MoveTo(p) => {
+                    current = *p;
+                    start = *p;
+                }
+                fern_canvas::PathCommand::LineTo(p) => {
+                    if point_to_segment_distance(scene_point, current, *p) <= tolerance {
+                        return true;
+                    }
+                    current = *p;
+                }
+                fern_canvas::PathCommand::Close => {
+                    if point_to_segment_distance(scene_point, current, start) <= tolerance {
+                        return true;
+                    }
+                    current = start;
+                }
+                // Quad / cubic / arc segments fall back to AABB
+                // hit. Apps building precision paths with curves
+                // can override `hit_test` directly.
+                _ => {
+                    return self.bounds.contains(scene_point);
+                }
+            }
+        }
+        false
+    }
+
     fn label(&self) -> Option<String> {
         self.label.clone()
     }
@@ -290,6 +344,29 @@ impl SceneItem for PathItem {
         }
         self.a11y.apply(builder);
     }
+}
+
+/// Shortest distance from a point to a line segment, in scene
+/// coordinates. Used by `PathItem::hit_test` to score per-segment
+/// proximity for stroke-only paths.
+fn point_to_segment_distance(p: Point, a: Point, b: Point) -> f32 {
+    let abx = b.x - a.x;
+    let aby = b.y - a.y;
+    let len2 = abx * abx + aby * aby;
+    if len2 < 1e-6 {
+        // Degenerate segment (a == b) — distance to point a.
+        let dx = p.x - a.x;
+        let dy = p.y - a.y;
+        return (dx * dx + dy * dy).sqrt();
+    }
+    let apx = p.x - a.x;
+    let apy = p.y - a.y;
+    let t = ((apx * abx + apy * aby) / len2).clamp(0.0, 1.0);
+    let cx = a.x + t * abx;
+    let cy = a.y + t * aby;
+    let dx = p.x - cx;
+    let dy = p.y - cy;
+    (dx * dx + dy * dy).sqrt()
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +658,78 @@ mod tests {
         let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 50.0))
             .stroke(Color::BLACK, 1.5);
         assert_eq!(item.bounds_in_scene(), Rect::new(0.0, 0.0, 100.0, 50.0));
+    }
+
+    #[test]
+    fn path_item_per_segment_hit_test_stroke_only() {
+        // A diagonal stroke from (0,0) to (100,100) — AABB is the
+        // 100×100 square, but only points near the diagonal line
+        // should hit. Per-segment distance check: tolerance =
+        // stroke_half_width (1) + 2 = 3.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 100.0));
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0))
+            .stroke(Color::BLACK, 2.0);
+
+        // Point on the line at the midpoint.
+        assert!(item.hit_test(Point::new(50.0, 50.0)));
+        // Point 2px from the line (within tolerance 3).
+        assert!(item.hit_test(Point::new(52.0, 50.0)));
+        // Point 10px from the line (outside tolerance) but inside
+        // AABB — should NOT hit with per-segment.
+        assert!(!item.hit_test(Point::new(80.0, 20.0)));
+        // Outside AABB.
+        assert!(!item.hit_test(Point::new(200.0, 200.0)));
+    }
+
+    #[test]
+    fn path_item_filled_uses_aabb_hit_test() {
+        // A filled path's AABB is the visual target — a click
+        // anywhere in the AABB hits.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0))
+            .line_to(Point::new(100.0, 100.0))
+            .line_to(Point::new(0.0, 100.0))
+            .close();
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0))
+            .fill(Color::RED);
+        // Point inside the AABB (and the closed quad).
+        assert!(item.hit_test(Point::new(50.0, 50.0)));
+        // Point outside AABB.
+        assert!(!item.hit_test(Point::new(200.0, 50.0)));
+    }
+
+    #[test]
+    fn path_item_close_segment_hit_tested() {
+        // A triangle: stroke-only. The Close command should
+        // produce a hit on the closing segment back to the start.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0))
+            .line_to(Point::new(50.0, 100.0))
+            .close();
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0))
+            .stroke(Color::BLACK, 2.0);
+
+        // On the diagonal closing segment from (50,100) to (0,0):
+        // midpoint is (25, 50).
+        assert!(item.hit_test(Point::new(25.0, 50.0)));
+    }
+
+    #[test]
+    fn path_item_curve_falls_back_to_aabb() {
+        // Quad/cubic/arc segments fall back to AABB hit-test
+        // (precise curve-distance is out of scope for the
+        // built-in). Verify a stroke-only quad behaves like AABB.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .quad_to(Point::new(50.0, 100.0), Point::new(100.0, 0.0));
+        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0))
+            .stroke(Color::BLACK, 2.0);
+        // Inside AABB but far from any reasonable curve point.
+        assert!(item.hit_test(Point::new(50.0, 99.0)));
     }
 
     #[test]
