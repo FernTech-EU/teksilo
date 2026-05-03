@@ -876,13 +876,6 @@ impl SceneView {
         self.item_cache.borrow_mut().evict(id);
     }
 
-    /// Drop every cached entry. Useful in tests or when a global
-    /// theme change makes existing recordings stale. The cache
-    /// repopulates lazily as items repaint.
-    pub fn clear_item_cache(&self) {
-        *self.item_cache.borrow_mut() = crate::cache::ItemCoordinateCache::new();
-    }
-
     /// Number of cached entries currently held. Diagnostic / test
     /// hook — apps shouldn't normally need this.
     pub fn item_cache_len(&self) -> usize {
@@ -6807,27 +6800,11 @@ mod tests {
         let view = view_handle(&tree, view_id);
         assert_eq!(view.item_cache_len(), 1);
 
-        // Mutate via Scene API → the signal fires → the observer evicts.
-        // `view_handle` returns a shared `&SceneView`; the SceneView
-        // exposes `scene()` for read-only access. To mutate we go
-        // through the tree's internal mutable accessor, which the
-        // existing tests do via direct arena access — but a simpler
-        // path here is to grab the cache's len before & after a manual
-        // signal emission. We trigger the eviction by re-routing
-        // through `Scene::set_local_bounds`, which requires `&mut Scene`,
-        // so we drop the tree borrow and rebuild.
-        //
-        // Easier: drive the signal directly. The observer pattern
-        // doesn't care about the source — the framework's job is to
-        // dirty paint, the observer's job is to evict. We do the
-        // latter by emitting a synthetic LocalBoundsChanged via the
-        // Scene's mutator API, accessed through the public
-        // item_change_signal handle on a fresh Scene reference.
-        //
-        // Pragmatic: just call invalidate_item_cache (covered by the
-        // sibling test) and use this slot to verify that
-        // ItemCoordinateCache transitions correctly across explicit
-        // mutation by inspecting len after mutation.
+        // Drive the signal directly to verify the observer wired in
+        // `build()` reacts and evicts the entry. Going through a
+        // Scene mutator would require `&mut Scene`, which we don't
+        // have through `view_handle` — the observer doesn't care
+        // about the source.
         view.scene().item_change_signal().set(
             crate::scene::ItemChange::LocalBoundsChanged {
                 id,
@@ -6835,8 +6812,6 @@ mod tests {
                 new: Rect::new(0.0, 0.0, 1.0, 1.0),
             },
         );
-        // Observer runs synchronously on signal set; the cache for
-        // `id` must now be empty.
         assert!(
             !view.item_cache.borrow().contains(id),
             "LocalBoundsChanged via item_change_signal must evict cache entry"
