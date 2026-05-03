@@ -1406,6 +1406,7 @@ dependencies = [
  "fern-canvas",
  "fern-core",
  "fern-data",
+ "fern-i18n",
  "fern-tokens",
  "fern-widgets",
 ]

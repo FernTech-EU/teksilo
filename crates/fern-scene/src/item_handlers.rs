@@ -126,21 +126,25 @@ impl SceneItemHandlerSet {
         self
     }
 
-    /// Set a tooltip string. The regular variant accepts whatever
-    /// resolves into `String` — including, in a future i18n
-    /// integration, `LocalizedString` (the type produced by `tr!`).
-    pub fn tooltip(&mut self, t: impl Into<String>) -> &mut Self {
-        self.tooltip = Some(t.into());
+    /// Set a tooltip string. Accepts anything convertible into
+    /// [`LocalizedString`](fern_i18n::LocalizedString) — most commonly
+    /// `tr!(...)` for translated copy. Plain strings auto-convert.
+    /// The text is resolved eagerly at builder time.
+    pub fn tooltip(
+        &mut self,
+        t: impl Into<fern_i18n::LocalizedString>,
+    ) -> &mut Self {
+        let ls: fern_i18n::LocalizedString = t.into();
+        self.tooltip = Some(ls.resolve_now());
         self
     }
 
-    /// Untranslated twin of [`tooltip`](Self::tooltip). Same runtime
-    /// behavior; use as a grep-able marker for explicitly-untranslated
-    /// tooltip strings (debug demos, engine-internal copy).
+    /// Untranslated twin of [`tooltip`](Self::tooltip). Wraps the
+    /// argument via [`LocalizedString::literal`](fern_i18n::LocalizedString::literal)
+    /// — a grep-marker for call sites that intentionally bypass i18n.
     #[doc(hidden)]
     pub fn tooltip_literal(&mut self, t: impl Into<String>) -> &mut Self {
-        self.tooltip = Some(t.into());
-        self
+        self.tooltip(fern_i18n::LocalizedString::literal(t))
     }
 
     /// Mark whether the item accepts dropped payloads.

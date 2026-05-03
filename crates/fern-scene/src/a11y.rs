@@ -122,17 +122,18 @@ pub struct A11yGroupBuilder {
 
 impl A11yGroupBuilder {
     /// Human-readable label for the group, announced when AT clients
-    /// land on the group node.
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+    /// land on the group node. Accepts anything convertible into
+    /// [`LocalizedString`](fern_i18n::LocalizedString).
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
         self
     }
 
     /// Untranslated twin of [`label`](Self::label).
     #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Override the AccessKit role. Default: `Role::Group`. Apps

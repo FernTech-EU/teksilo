@@ -612,16 +612,19 @@ impl SceneView {
     /// region should have a domain-specific name (e.g. "Chart
     /// data area"). Default `None` — the SceneView has no
     /// explicit AT name.
-    pub fn a11y_label(mut self, label: impl Into<String>) -> Self {
-        self.a11y_label = Some(label.into());
+    pub fn a11y_label(
+        mut self,
+        label: impl Into<fern_i18n::LocalizedString>,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.a11y_label = Some(ls.resolve_now());
         self
     }
 
     /// Untranslated twin of [`a11y_label`](Self::a11y_label).
     #[doc(hidden)]
-    pub fn a11y_label_literal(mut self, label: impl Into<String>) -> Self {
-        self.a11y_label = Some(label.into());
-        self
+    pub fn a11y_label_literal(self, label: impl Into<String>) -> Self {
+        self.a11y_label(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Whether the SceneView is currently marked as logically

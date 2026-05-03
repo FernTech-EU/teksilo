@@ -12,6 +12,7 @@ fern-tokens = { workspace = true }
 fern-canvas = { workspace = true }
 fern-core = { workspace = true }
 fern-data = { workspace = true }
+fern-i18n = { workspace = true }
 accesskit = { workspace = true }
 
 [dev-dependencies]

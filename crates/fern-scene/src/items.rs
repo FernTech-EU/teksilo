@@ -102,36 +102,46 @@ impl ItemA11yOverrides {
 /// `a11y: ItemA11yOverrides` field.
 macro_rules! item_a11y_builders {
     () => {
-        /// Override the AT name announced for this item.
-        pub fn access_label(mut self, label: impl Into<String>) -> Self {
-            self.a11y.label = Some(label.into());
+        /// Override the AT name announced for this item. Accepts
+        /// anything convertible into [`LocalizedString`] — most
+        /// commonly `tr!(...)` for translated labels, or any plain
+        /// string (which auto-converts via `From<String>`).
+        pub fn access_label(
+            mut self,
+            label: impl Into<fern_i18n::LocalizedString>,
+        ) -> Self {
+            let ls: fern_i18n::LocalizedString = label.into();
+            self.a11y.label = Some(ls.resolve_now());
             self
         }
 
         /// Untranslated twin of [`access_label`](Self::access_label).
-        /// Use for grep-able marker that the string is intentionally
-        /// not flowing through any future i18n pipeline (debug demos,
-        /// engine-internal labels). Same runtime behavior.
+        /// Wraps a raw string in
+        /// [`LocalizedString::literal`](fern_i18n::LocalizedString::literal)
+        /// — a grep-marker for call sites that intentionally bypass
+        /// the i18n pipeline (debug demos, engine-internal labels).
         #[doc(hidden)]
-        pub fn access_label_literal(mut self, label: impl Into<String>) -> Self {
-            self.a11y.label = Some(label.into());
-            self
+        pub fn access_label_literal(self, label: impl Into<String>) -> Self {
+            self.access_label(fern_i18n::LocalizedString::literal(label))
         }
 
         /// Long-form context appended to the item's announcement.
-        pub fn access_description(mut self, description: impl Into<String>) -> Self {
-            self.a11y.description = Some(description.into());
+        pub fn access_description(
+            mut self,
+            description: impl Into<fern_i18n::LocalizedString>,
+        ) -> Self {
+            let ls: fern_i18n::LocalizedString = description.into();
+            self.a11y.description = Some(ls.resolve_now());
             self
         }
 
         /// Untranslated twin of [`access_description`](Self::access_description).
         #[doc(hidden)]
         pub fn access_description_literal(
-            mut self,
+            self,
             description: impl Into<String>,
         ) -> Self {
-            self.a11y.description = Some(description.into());
-            self
+            self.access_description(fern_i18n::LocalizedString::literal(description))
         }
 
         /// Override the AccessKit role for this item.
@@ -217,16 +227,19 @@ impl RectItem {
     }
 
     /// Human-readable label used for debug and the default AT name.
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+    /// Takes anything convertible into [`LocalizedString`] — most
+    /// commonly `tr!(...)`. Plain strings auto-convert.
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
         self
     }
 
-    /// Untranslated twin of [`label`](Self::label).
+    /// Untranslated twin of [`label`](Self::label). Wraps the
+    /// argument via [`LocalizedString::literal`](fern_i18n::LocalizedString::literal).
     #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Opt the rectangle into drag-to-move.
@@ -328,16 +341,16 @@ impl PathItem {
     }
 
     /// Human-readable label.
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
         self
     }
 
     /// Untranslated twin of [`label`](Self::label).
     #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Opt the path into drag-to-move.
@@ -480,16 +493,16 @@ impl ImageItem {
     }
 
     /// Human-readable label.
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
         self
     }
 
     /// Untranslated twin of [`label`](Self::label).
     #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Opt the image into drag-to-move.
@@ -552,10 +565,17 @@ pub struct TextItem {
 }
 
 impl TextItem {
-    /// A static-text item in local coordinates.
-    pub fn new(text: impl Into<String>, local_bounds: Rect) -> Self {
+    /// A static-text item in local coordinates. The `text` is
+    /// resolved eagerly via [`LocalizedString::resolve_now`] at
+    /// construction; locale changes rebuild the composite parent,
+    /// which re-creates this `TextItem` with a fresh translation.
+    pub fn new(
+        text: impl Into<fern_i18n::LocalizedString>,
+        local_bounds: Rect,
+    ) -> Self {
+        let ls: fern_i18n::LocalizedString = text.into();
         Self {
-            text: TextSource::Static(text.into()),
+            text: TextSource::Static(ls.resolve_now()),
             local_bounds,
             color: Color::BLACK,
             label: None,
@@ -564,13 +584,11 @@ impl TextItem {
         }
     }
 
-    /// Untranslated twin of [`new`](Self::new). Same runtime behavior;
-    /// use as a grep-able marker that the text is intentionally not
-    /// flowing through any future i18n pipeline (engine-internal
-    /// debug labels, glyph atlas previews, etc.).
+    /// Untranslated twin of [`new`](Self::new). Wraps the argument
+    /// via [`LocalizedString::literal`](fern_i18n::LocalizedString::literal).
     #[doc(hidden)]
     pub fn new_literal(text: impl Into<String>, local_bounds: Rect) -> Self {
-        Self::new(text, local_bounds)
+        Self::new(fern_i18n::LocalizedString::literal(text), local_bounds)
     }
 
     /// A text item whose content is driven by a `Signal<String>`.
@@ -601,16 +619,16 @@ impl TextItem {
     }
 
     /// Override the AT label (defaults to the current text content).
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
         self
     }
 
     /// Untranslated twin of [`label`](Self::label).
     #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 
     item_a11y_builders!();
@@ -705,16 +723,16 @@ impl GroupItem {
 
     /// Human-readable label, used as the default AT group name and
     /// (when `show_label` is enabled) rendered inline at top-leading.
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+    pub fn label(mut self, label: impl Into<fern_i18n::LocalizedString>) -> Self {
+        let ls: fern_i18n::LocalizedString = label.into();
+        self.label = Some(ls.resolve_now());
         self
     }
 
     /// Untranslated twin of [`label`](Self::label).
     #[doc(hidden)]
-    pub fn label_literal(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
-        self
+    pub fn label_literal(self, label: impl Into<String>) -> Self {
+        self.label(fern_i18n::LocalizedString::literal(label))
     }
 
     /// Render the label inline at paint time.
