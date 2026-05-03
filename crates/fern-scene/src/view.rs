@@ -458,7 +458,13 @@ impl SceneView {
             .zip3(&pan_y, &zoom)
             .zip(&rotation)
             .zip(&bounds_origin_signal)
-            .map(|(((px, py, z), r), bo)| {
+            // Coalesce the five underlying sources into one. Without
+            // this, every animation tick that updates pan/zoom/rotation
+            // simultaneously would register five binding entries per
+            // observing widget, multiplying the per-tick dirty-poll
+            // work. `map_coalesced` collapses to a single composite
+            // source with the same dirty-on-any / clear-all semantics.
+            .map_coalesced(|(((px, py, z), r), bo)| {
                 compose_view(Vec2::new(*px + bo.x, *py + bo.y), *z, *r)
             });
         Self {
@@ -1225,6 +1231,13 @@ impl Widget for SceneView {
             self.selection.commit_marquee(&self.scene, rect, additive);
             self.marquee.set(None);
         }
+
+        // Pull fresh `local_bounds` for every item flagged
+        // `dynamic_bounds` (added via [`Scene::add_item_dynamic`]).
+        // Static items pay nothing here; dynamic items get their
+        // signal-driven AABBs read back into the entry + spatial
+        // index so hit-test and viewport-cull stay correct.
+        self.scene.refresh_dynamic_bounds();
 
         // Bind the drag-rebuild signal so the next drop triggers a
         // rebuild and the drains above run. `BindingLevel::Rebuild`

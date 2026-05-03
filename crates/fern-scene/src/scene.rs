@@ -113,6 +113,14 @@ pub(crate) struct SceneEntry {
     /// `None` until the app calls `Scene::set_item_handlers` /
     /// `Scene::handlers_mut`.
     pub(crate) handlers: Option<Box<SceneItemHandlerSet>>,
+    /// Whether the item's `local_bounds` may change between
+    /// build/layout passes (a signal-driven AABB). Static items
+    /// (default) snapshot bounds at insert and only update through
+    /// explicit [`Scene::set_local_bounds`]. Dynamic items added via
+    /// [`Scene::add_item_dynamic`] have their `local_bounds` re-read
+    /// each rebuild via [`Scene::refresh_dynamic_bounds`], with the
+    /// spatial index re-bucketed when the value changes.
+    pub(crate) dynamic_bounds: bool,
 }
 
 pub(crate) enum SceneEntryKind {
@@ -222,6 +230,7 @@ impl Scene {
             flags: ItemFlags::default(),
             opacity: 1.0,
             handlers: None,
+            dynamic_bounds: false,
         };
         self.push_entry(entry)
     }
@@ -231,6 +240,36 @@ impl Scene {
     /// time. The item is **not** added to the arena — it's painted
     /// directly from `SceneView::paint`.
     pub fn add_item<I: SceneItem + 'static>(&mut self, item: I, local_pos: Point) -> ItemId {
+        self.add_item_inner(item, local_pos, false)
+    }
+
+    /// Like [`add_item`](Self::add_item) but flags the entry as
+    /// having signal-driven `local_bounds`. The Scene re-reads
+    /// `item.local_bounds()` each rebuild via
+    /// [`refresh_dynamic_bounds`](Self::refresh_dynamic_bounds) — the
+    /// SceneView calls that at the start of every build pass. The
+    /// spatial index gets re-bucketed when the read-back differs
+    /// from the cached value, so `items_in_rect` / hit-test stay
+    /// correct without app-side `set_local_bounds` plumbing.
+    ///
+    /// Use only when the bounds genuinely depend on a `Signal<T>`
+    /// the item reads in `local_bounds`. Static items pay an
+    /// unnecessary per-rebuild bounds read otherwise; prefer
+    /// [`add_item`](Self::add_item) for the common case.
+    pub fn add_item_dynamic<I: SceneItem + 'static>(
+        &mut self,
+        item: I,
+        local_pos: Point,
+    ) -> ItemId {
+        self.add_item_inner(item, local_pos, true)
+    }
+
+    fn add_item_inner<I: SceneItem + 'static>(
+        &mut self,
+        item: I,
+        local_pos: Point,
+        dynamic_bounds: bool,
+    ) -> ItemId {
         let id = ItemId::next();
         let local_bounds = item.local_bounds();
         let flags = item.initial_flags();
@@ -245,8 +284,37 @@ impl Scene {
             flags,
             opacity: 1.0,
             handlers: None,
+            dynamic_bounds,
         };
         self.push_entry(entry)
+    }
+
+    /// Re-read every dynamic item's current `local_bounds`, applying
+    /// `set_local_bounds` (and re-bucketing the spatial index) for
+    /// any entry whose value has changed. No-op for static entries.
+    /// Called by [`SceneView`](crate::SceneView) at the start of each
+    /// `build()` so signal-driven bounds propagate to bucketing
+    /// without explicit app-side calls.
+    pub fn refresh_dynamic_bounds(&mut self) {
+        // Snapshot ids first to avoid borrow conflicts.
+        let dynamic_ids: Vec<ItemId> = self
+            .entries
+            .iter()
+            .filter(|e| e.dynamic_bounds)
+            .map(|e| e.id)
+            .collect();
+        for id in dynamic_ids {
+            let Some(&pos) = self.entry_index.get(&id) else {
+                continue;
+            };
+            let SceneEntryKind::Item(item) = &self.entries[pos].kind else {
+                continue;
+            };
+            let new = item.local_bounds();
+            if new != self.entries[pos].local_bounds {
+                self.set_local_bounds(id, new);
+            }
+        }
     }
 
     fn push_entry(&mut self, entry: SceneEntry) -> ItemId {
@@ -739,19 +807,71 @@ impl Scene {
     // Removal
     // -----------------------------------------------------------------
 
-    /// Remove an item by id. No-op if unknown. Children of the
-    /// removed item are NOT auto-removed in R1 — orphaned ids carry
-    /// `parent: Some(removed_id)`. R6 makes this recursive.
+    /// Remove an item by id, recursively dropping every descendant.
+    ///
+    /// Mirrors Qt's `QGraphicsScene::removeItem` semantics: deleting
+    /// a parent deletes its children too. No-op if `id` is unknown.
+    /// Fires one [`ItemChange::Removed`] per id, descendants first
+    /// then the named parent — observers see a consistent
+    /// "leaves-then-root" order.
+    ///
+    /// To remove `id` without deleting its children, call
+    /// [`Scene::orphan`] first to promote them to root-level, then
+    /// `remove(id)`.
     pub fn remove(&mut self, id: ItemId) {
-        let prev = self.entries.len();
-        self.entries.retain(|e| e.id != id);
-        if self.entries.len() != prev {
-            self.entry_index.clear();
-            for (pos, entry) in self.entries.iter().enumerate() {
-                self.entry_index.insert(entry.id, pos);
+        use std::collections::HashSet;
+        if !self.entry_index.contains_key(&id) {
+            return;
+        }
+        // Descendants, deepest-first via collect_descendants's BFS
+        // (the order is leaf-to-root because we push children as we
+        // visit each parent). Append the named id last.
+        let mut to_remove: Vec<ItemId> = Vec::new();
+        self.collect_descendants(id, &mut to_remove);
+        to_remove.reverse();
+        to_remove.push(id);
+        let removal_set: HashSet<ItemId> = to_remove.iter().copied().collect();
+        self.entries.retain(|e| !removal_set.contains(&e.id));
+        self.entry_index.clear();
+        for (pos, entry) in self.entries.iter().enumerate() {
+            self.entry_index.insert(entry.id, pos);
+        }
+        for removed_id in to_remove {
+            self.index.remove(removed_id);
+            self.item_change_signal
+                .set(ItemChange::Removed { id: removed_id });
+        }
+    }
+
+    /// Promote `id`'s direct children to root-level (clear their
+    /// `parent` field). Used when an app wants to remove `id` without
+    /// dropping its children — call `orphan(id)` then `remove(id)`.
+    /// No-op when `id` is unknown or has no children.
+    ///
+    /// Fires one [`ItemChange::ParentChanged`] per detached child.
+    /// Scene transforms shift: the children no longer compose `id`'s
+    /// transform up the chain. Apps wanting visual stability across
+    /// the orphan call should bake `id`'s `scene_transform` into
+    /// each child's `local_pos` + `transform` first.
+    pub fn orphan(&mut self, id: ItemId) {
+        if !self.entry_index.contains_key(&id) {
+            return;
+        }
+        let children: Vec<ItemId> = self
+            .entries
+            .iter()
+            .filter(|e| e.parent == Some(id))
+            .map(|e| e.id)
+            .collect();
+        for child in children {
+            if let Some(&pos) = self.entry_index.get(&child) {
+                self.entries[pos].parent = None;
+                self.item_change_signal.set(ItemChange::ParentChanged {
+                    id: child,
+                    old: Some(id),
+                    new: None,
+                });
             }
-            self.index.remove(id);
-            self.item_change_signal.set(ItemChange::Removed { id });
         }
     }
 
@@ -760,16 +880,19 @@ impl Scene {
     // -----------------------------------------------------------------
 
     /// All items whose scene-AABB intersects `scene_rect`.
-    /// Backed by the spatial index plus a strict narrow phase.
+    ///
+    /// Broad phase: the spatial index returns every id bucketed in
+    /// any cell touched by `scene_rect`. Narrow phase: each candidate
+    /// goes through [`scene_rect`](Self::scene_rect), which itself
+    /// dispatches via `entry_index` (an `HashMap<ItemId, usize>`),
+    /// so the per-candidate cost is O(parent-chain-depth) — not
+    /// O(N). Total query is O(visible × chain) instead of O(N).
     pub fn items_in_rect(&self, scene_rect: Rect) -> Vec<ItemId> {
-        let candidates = self.index.query(scene_rect);
-        candidates
+        self.index
+            .query(scene_rect)
             .into_iter()
             .filter(|id| {
-                self.entry_index
-                    .get(id)
-                    .and_then(|&pos| self.entries.get(pos))
-                    .and_then(|_| self.scene_rect(*id))
+                self.scene_rect(*id)
                     .map(|r| rects_intersect(r, scene_rect))
                     .unwrap_or(false)
             })
@@ -1459,5 +1582,129 @@ mod tests {
         let hits = scene.items_along_path(&path);
         assert!(hits.contains(&a));
         assert!(!hits.contains(&b));
+    }
+
+    // -----------------------------------------------------------------
+    // R6 — code-level fixes
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn scene_remove_recursively_removes_descendants() {
+        let mut scene = Scene::new();
+        let parent = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)),
+            Point::ZERO,
+        );
+        let child = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            Point::ZERO,
+        );
+        let grandchild = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 5.0, 5.0)),
+            Point::ZERO,
+        );
+        scene.set_item_parent(child, Some(parent));
+        scene.set_item_parent(grandchild, Some(child));
+        assert_eq!(scene.entries.len(), 3);
+        scene.remove(parent);
+        // Parent + child + grandchild all gone.
+        assert!(scene.scene_rect(parent).is_none());
+        assert!(scene.scene_rect(child).is_none());
+        assert!(scene.scene_rect(grandchild).is_none());
+        assert_eq!(scene.entries.len(), 0);
+    }
+
+    #[test]
+    fn scene_orphan_promotes_children_to_root() {
+        let mut scene = Scene::new();
+        let parent = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)),
+            Point::ZERO,
+        );
+        let child = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            Point::ZERO,
+        );
+        scene.set_item_parent(child, Some(parent));
+        scene.orphan(parent);
+        // Child's parent is now None.
+        assert_eq!(scene.parent_of(child), None);
+        // Both still present.
+        scene.remove(parent);
+        assert!(scene.scene_rect(child).is_some());
+    }
+
+    #[test]
+    fn add_item_dynamic_re_reads_bounds_on_refresh() {
+        // An item whose `local_bounds` reads from a Cell. Mutating
+        // the cell + calling refresh_dynamic_bounds must update the
+        // entry and re-bucket the spatial index.
+        use crate::item::{SceneItem, SceneItemPaintContext};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        #[derive(Debug)]
+        struct DynRect {
+            bounds: Rc<Cell<Rect>>,
+        }
+        impl SceneItem for DynRect {
+            fn local_bounds(&self) -> Rect {
+                self.bounds.get()
+            }
+            fn set_local_bounds(&mut self, b: Rect) {
+                self.bounds.set(b);
+            }
+            fn paint(&self, _: &mut fern_canvas::Canvas, _: &SceneItemPaintContext) {}
+        }
+
+        let bounds = Rc::new(Cell::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        let mut scene = Scene::new();
+        let id = scene.add_item_dynamic(
+            DynRect { bounds: bounds.clone() },
+            Point::ZERO,
+        );
+        // Initially items_in_rect over the small AABB hits.
+        assert!(scene.items_in_rect(Rect::new(0.0, 0.0, 50.0, 50.0)).contains(&id));
+        // Grow the bounds via the Cell — Scene's cached entry/index
+        // is stale until refresh_dynamic_bounds runs.
+        bounds.set(Rect::new(0.0, 0.0, 500.0, 500.0));
+        scene.refresh_dynamic_bounds();
+        // After refresh, the spatial index sees the larger AABB.
+        assert!(scene.items_in_rect(Rect::new(400.0, 400.0, 10.0, 10.0)).contains(&id));
+    }
+
+    #[test]
+    fn add_item_static_does_not_track_signal_changes() {
+        // Counterpart to the dynamic test: a static item's bounds
+        // are snapshotted at insert time; refresh_dynamic_bounds
+        // does not re-read them.
+        use crate::item::{SceneItem, SceneItemPaintContext};
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        #[derive(Debug)]
+        struct DynRect {
+            bounds: Rc<Cell<Rect>>,
+        }
+        impl SceneItem for DynRect {
+            fn local_bounds(&self) -> Rect {
+                self.bounds.get()
+            }
+            fn set_local_bounds(&mut self, b: Rect) {
+                self.bounds.set(b);
+            }
+            fn paint(&self, _: &mut fern_canvas::Canvas, _: &SceneItemPaintContext) {}
+        }
+
+        let bounds = Rc::new(Cell::new(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            DynRect { bounds: bounds.clone() },
+            Point::ZERO,
+        );
+        bounds.set(Rect::new(0.0, 0.0, 500.0, 500.0));
+        scene.refresh_dynamic_bounds();
+        // Static entry's spatial index unchanged.
+        assert!(!scene.items_in_rect(Rect::new(400.0, 400.0, 10.0, 10.0)).contains(&id));
     }
 }
