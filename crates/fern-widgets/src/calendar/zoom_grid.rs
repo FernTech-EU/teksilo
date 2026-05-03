@@ -97,11 +97,16 @@ impl Widget for MonthsGrid {
                     }),
                 );
                 let cell_id = ctx.add(cell);
-                row = row.add_child(cell_id);
+                // Wrap each cell in Expand so the COLUMNS cells share
+                // the row's width equally. Without this the HStack
+                // would lay them out at their natural text width and
+                // they'd bunch up on the leading edge.
+                let expanded_cell_id = ctx.add(
+                    crate::primitives::Expand::horizontal().child_id(cell_id),
+                );
+                row = row.add_child(expanded_cell_id);
             }
-            // Each row is wrapped in Expand so cells distribute evenly.
-            let row_id = ctx.add(crate::primitives::Expand::horizontal().child(row));
-            rows.push(row_id);
+            rows.push(ctx.add(row));
         }
         let mut col = VStack::new().spacing(CELL_SPACING);
         for id in rows {
@@ -220,10 +225,14 @@ impl Widget for YearsGrid {
                     }),
                 );
                 let cell_id = ctx.add(cell);
-                row = row.add_child(cell_id);
+                // Wrap each cell in Expand so the COLUMNS cells share
+                // the row's width equally (same fix as `MonthsGrid`).
+                let expanded_cell_id = ctx.add(
+                    crate::primitives::Expand::horizontal().child_id(cell_id),
+                );
+                row = row.add_child(expanded_cell_id);
             }
-            let row_id = ctx.add(crate::primitives::Expand::horizontal().child(row));
-            rows.push(row_id);
+            rows.push(ctx.add(row));
         }
         let mut col = VStack::new().spacing(CELL_SPACING);
         for id in rows {
