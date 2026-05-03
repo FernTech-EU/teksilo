@@ -151,6 +151,14 @@ pub struct TextInputField {
     /// widgets that need the caret (e.g. `DateEdit` for segment
     /// stepping) read this via [`TextInputField::caret_position`].
     caret_position: Signal<usize>,
+    /// Late-bound handle to the inner `SharedState`, populated in
+    /// `build()`. Lets composing widgets capture a `caret_setter`
+    /// closure BEFORE the field is moved into the tree, then call
+    /// it later to programmatically reposition the caret. Required
+    /// because the inner state doesn't exist before `build()` runs,
+    /// but the composing widget loses ownership of `self` once it
+    /// hands the field to `ctx.add(...)`.
+    state_slot: std::rc::Rc<std::cell::RefCell<Option<SharedState>>>,
 }
 
 impl std::fmt::Debug for TextInputField {
@@ -185,6 +193,7 @@ impl TextInputField {
             state: None,
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
+            state_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
         }
     }
 
@@ -368,6 +377,35 @@ impl TextInputField {
     pub fn caret_position(&self) -> Signal<usize> {
         self.caret_position.clone()
     }
+
+    /// Returns a callable that programmatically sets the caret
+    /// position (in char offsets) on the field. Capture this on the
+    /// builder BEFORE `ctx.add(...)` consumes the field; call it
+    /// after a programmatic text rewrite to restore the caret to the
+    /// right column instead of leaving it at the document end (the
+    /// default behaviour of `cursor.insert_text`).
+    ///
+    /// The returned closure becomes a no-op until `build()` runs;
+    /// after build it walks the field's inner state and moves the
+    /// document cursor to `position`, clamped to the document
+    /// length. Used by `DateEdit` / `TimeEdit` segment-stepping to
+    /// keep the caret within its current segment after Up/Down.
+    pub fn caret_setter(&self) -> std::rc::Rc<dyn Fn(usize)> {
+        let slot = self.state_slot.clone();
+        std::rc::Rc::new(move |position: usize| {
+            if let Some(state) = slot.borrow().as_ref() {
+                let st = state.borrow();
+                st.cursor.set_position(
+                    position,
+                    fern_text::text_document::MoveMode::MoveAnchor,
+                );
+                let actual = st.cursor.position();
+                if st.cursor_position.get() != actual {
+                    st.cursor_position.set(actual);
+                }
+            }
+        })
+    }
 }
 
 impl Widget for TextInputField {
@@ -475,6 +513,11 @@ impl Widget for TextInputField {
             suffix: initial_suffix,
         });
         self.state = Some(shared_state.clone());
+        // Late-populate the slot so `caret_setter()` closures captured
+        // before build can now reach the inner state. Idempotent on
+        // rebuild — overwrites the slot with the freshly created
+        // SharedState.
+        *self.state_slot.borrow_mut() = Some(shared_state.clone());
 
         // Reset feedback to Pristine whenever the user types — prior
         // Invalid / Corrected announcements should clear as soon as

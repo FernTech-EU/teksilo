@@ -451,10 +451,13 @@ impl Widget for TimeEdit {
             field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
         }
 
-        // Capture caret signal BEFORE moving the field into the tree
-        // — used by the segment-stepping handler attached on the
-        // wrapping container below.
+        // Capture caret signal AND a caret setter BEFORE moving the
+        // field into the tree. The setter restores the caret after a
+        // programmatic text rewrite (otherwise `cursor.insert_text`
+        // parks the caret at document end and the user loses their
+        // segment between every Up/Down step).
         let caret_for_step = field.caret_position();
+        let caret_setter_for_step = field.caret_setter();
 
         // A11y override: focused field announces as TimeInput, not
         // TextInput. The field's caret/selection/character AT stays.
@@ -478,6 +481,7 @@ impl Widget for TimeEdit {
             let min_for_step = self.min_time;
             let max_for_step = self.max_time;
             let caret_for_step = caret_for_step.clone();
+            let caret_setter = caret_setter_for_step.clone();
             Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
                 let caret = caret_for_step.get();
                 let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
@@ -489,6 +493,9 @@ impl Widget for TimeEdit {
                 let clamped = clamp_time(stepped, min_for_step, max_for_step);
                 value_for_step.set(Some(clamped));
                 text_for_step.set(format_value(&pattern_for_step, None, Some(clamped)));
+                // Restore the caret — see the matching note in
+                // `date_edit::DateEdit::build` for the rationale.
+                caret_setter(caret);
                 if let Some(cb) = on_changed_for_step.as_ref() {
                     cb(Some(clamped), ctx_evt);
                 }

@@ -261,3 +261,86 @@ fn years_grid_decade_calculation() {
     assert_eq!(YearsGrid::decade_of(1999), 1990);
     assert_eq!(YearsGrid::decade_of(0), 0);
 }
+
+#[test]
+fn calendar_title_button_click_demotes_mode() {
+    use fern_canvas::Point;
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = Calendar::single(date);
+    let mode = cal.mode_signal();
+    let mut tree = light_tree();
+    let id = tree.add(cal);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    assert_eq!(mode.get(), CalendarMode::Days);
+
+    // Click in the horizontal centre of the calendar at a y near
+    // the top — that's where the header label sits ("May 2026").
+    let bounds = tree.bounds(id);
+    let click_pos = Point::new(bounds.x + bounds.width / 2.0, bounds.y + 20.0);
+    tree.dispatch_event(WidgetEvent::PointerDown {
+        position: click_pos,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+    tree.dispatch_event(WidgetEvent::PointerUp {
+        position: click_pos,
+        button: PointerButton::Primary,
+        modifiers: Modifiers::NONE,
+    });
+
+    // After the click, mode should have demoted to Months.
+    assert_eq!(
+        mode.get(),
+        CalendarMode::Months,
+        "tap on header title should demote mode Days → Months; \
+         got {:?}. The TitleButton's on_tap is not firing.",
+        mode.get()
+    );
+}
+
+#[test]
+fn calendar_title_button_clickable_across_centered_band() {
+    // Verify the click target spans the full width between the
+    // chevron buttons — the bug fix's whole point. Clicks at three
+    // positions across the centred band (just-right-of-prev-chevrons,
+    // dead-center, and just-left-of-next-chevrons) all flip mode.
+    use fern_canvas::Point;
+    use fern_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = Calendar::single(date);
+    let mode = cal.mode_signal();
+    let mut tree = light_tree();
+    let id = tree.add(cal);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    let bounds = tree.bounds(id);
+    let header_y = bounds.y + 20.0;
+
+    for pct in [0.30_f32, 0.50, 0.70] {
+        // Reset mode each iteration (tests interact independently).
+        mode.set(CalendarMode::Days);
+        let click_pos = Point::new(bounds.x + bounds.width * pct, header_y);
+        tree.dispatch_event(WidgetEvent::PointerDown {
+            position: click_pos,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        tree.dispatch_event(WidgetEvent::PointerUp {
+            position: click_pos,
+            button: PointerButton::Primary,
+            modifiers: Modifiers::NONE,
+        });
+        assert_eq!(
+            mode.get(),
+            CalendarMode::Months,
+            "click at {pct:.0}% of header width should flip mode; \
+             title button bounds don't span the centred band."
+        );
+    }
+}

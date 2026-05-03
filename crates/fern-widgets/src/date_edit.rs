@@ -518,11 +518,13 @@ impl Widget for DateEdit {
             field = field.on_blur_fn(move |ctx_evt| commit(ctx_evt));
         }
 
-        // Capture caret signal BEFORE moving the field into the tree
-        // so the segment-stepping handler installed on `self` (below,
-        // via `apply_self_handlers`) can read live caret position.
-        // Bridged to the inner state inside `TextInputField::build`.
+        // Capture caret signal AND a caret setter BEFORE moving the
+        // field into the tree. The setter is a no-op until `build()`
+        // populates the field's state slot; segment_step uses it to
+        // restore the caret AFTER rewriting text (otherwise
+        // `cursor.insert_text` parks the caret at the document end).
         let caret_for_step = field.caret_position();
+        let caret_setter_for_step = field.caret_setter();
 
         // A11y override on the field: AT users who tab into the
         // editable surface hear "Date input" rather than "Edit text".
@@ -550,6 +552,7 @@ impl Widget for DateEdit {
             let min_for_step = self.min_date;
             let max_for_step = self.max_date;
             let caret_for_step = caret_for_step.clone();
+            let caret_setter = caret_setter_for_step.clone();
             Rc::new(move |delta: i32, ctx_evt: &mut EventContext| {
                 let caret = caret_for_step.get();
                 let Some((_, _, kind)) = segment_at_position(&pattern_for_step, caret)
@@ -561,6 +564,11 @@ impl Widget for DateEdit {
                 let clamped = clamp_date(stepped, min_for_step, max_for_step);
                 value_for_step.set(Some(clamped));
                 text_for_step.set(format_value(&pattern_for_step, Some(clamped), None));
+                // Restore the caret to where it was — `text_signal.set`
+                // → field text effect → `cursor.insert_text` parked the
+                // caret at the document end. Without this restore the
+                // user has to re-click the segment between every Up/Down.
+                caret_setter(caret);
                 if let Some(cb) = on_changed_for_step.as_ref() {
                     cb(Some(clamped), ctx_evt);
                 }
