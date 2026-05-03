@@ -210,6 +210,48 @@ pub enum A11yMode {
     StrictlyParallel,
 }
 
+/// Coordinate space the AT walker reports `SceneItem` bounds in.
+///
+/// The framework convention is **screen-projected** bounds — the
+/// rectangle a sighted user would see on the physical monitor, after
+/// pan/zoom/rotation has been applied. Screen readers consume this
+/// for spatial nav (Apple's "explore by touch", touch-screen navi-
+/// gation, magnifier follow-focus). 99% of apps want this default.
+///
+/// **Scene** bounds are the raw scene-coord rectangle stored on the
+/// item, with no view-transform applied. Use this only for the
+/// rare AT clients that reason about scene topology rather than
+/// viewport position — typically when a SceneView's contents have
+/// a logical, fixed coordinate system that the user thinks in (a
+/// CAD canvas where "the bracket is at (240, 180)" means a fixed
+/// physical machine position regardless of zoom level).
+///
+/// Picking the wrong one makes "go to the next item" navigation
+/// either a) ignore the user's current pan (Screen mode in a
+/// scene-coord-aware app) or b) report bounds that drift under
+/// pan/zoom (Scene mode in a viewport-aware app). Default is
+/// `Screen` — change only when you've confirmed your AT users
+/// genuinely want the alternative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum A11yBoundsSpace {
+    /// Screen-projected bounds — `view_transform * bounds_in_scene`.
+    /// The framework default; matches the convention used by every
+    /// other widget in the framework.
+    Screen,
+    /// Raw scene-coordinate bounds, with no view-transform applied.
+    /// Apps with a logical fixed coordinate system (CAD canvases,
+    /// blueprint editors) may want this so AT users can reason
+    /// about "where in the design" an item sits, independent of
+    /// the current pan/zoom.
+    Scene,
+}
+
+impl Default for A11yBoundsSpace {
+    fn default() -> Self {
+        Self::Screen
+    }
+}
+
 impl Default for A11yMode {
     fn default() -> Self {
         A11yMode::Cooperative

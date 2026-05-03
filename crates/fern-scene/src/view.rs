@@ -244,6 +244,13 @@ pub struct SceneView {
     /// data area" for an inner chart SceneView). Default `None`
     /// — the SceneView has no explicit name.
     a11y_label: Option<String>,
+    /// Coordinate space for `SceneItem` bounds reported to AT.
+    /// Default `Screen` (view-projected). Apps with a logical
+    /// fixed coordinate system (CAD canvases, blueprint editors)
+    /// may want `Scene` so AT users can reason about "where in
+    /// the design" an item sits, independent of the current
+    /// pan/zoom.
+    a11y_bounds_space: crate::a11y::A11yBoundsSpace,
 
     // --- Cached derived signals ---------------------------------------
     /// `view_transform` as a derived `Signal<Transform2D>`,
@@ -271,6 +278,7 @@ impl std::fmt::Debug for SceneView {
             .field("focus_order_callback", &self.focus_order_callback.is_some())
             .field("a11y_nested", &self.a11y_nested)
             .field("a11y_label", &self.a11y_label)
+            .field("a11y_bounds_space", &self.a11y_bounds_space)
             .finish_non_exhaustive()
     }
 }
@@ -327,6 +335,7 @@ impl SceneView {
             focus_order_callback: None,
             a11y_nested: false,
             a11y_label: None,
+            a11y_bounds_space: crate::a11y::A11yBoundsSpace::default(),
         }
     }
 
@@ -436,6 +445,23 @@ impl SceneView {
     /// nested. Read-only accessor for tests / diagnostics.
     pub fn is_nested(&self) -> bool {
         self.a11y_nested
+    }
+
+    /// Coordinate space for `SceneItem` bounds reported to AT.
+    /// Default [`A11yBoundsSpace::Screen`](crate::A11yBoundsSpace::Screen)
+    /// (view-projected, matches the framework's standard widget
+    /// behavior). Switch to
+    /// [`A11yBoundsSpace::Scene`](crate::A11yBoundsSpace::Scene) for
+    /// apps where AT users reason about scene topology rather than
+    /// viewport position (CAD canvases, blueprint editors).
+    pub fn a11y_bounds_space(mut self, space: crate::a11y::A11yBoundsSpace) -> Self {
+        self.a11y_bounds_space = space;
+        self
+    }
+
+    /// Read-only accessor for the configured a11y bounds space.
+    pub fn current_a11y_bounds_space(&self) -> crate::a11y::A11yBoundsSpace {
+        self.a11y_bounds_space
     }
 
     /// Install a custom focus-order callback. When set,
@@ -1727,6 +1753,15 @@ impl SceneView {
                 if let Some(item) = self.scene.item(item_id) {
                     let scene_bounds = item.bounds_in_scene();
                     let screen_bounds = view_transform.apply_rect(scene_bounds);
+                    // Choose which space to advertise to AT clients
+                    // per `a11y_bounds_space`. The `SceneItemA11yContext`
+                    // always carries the screen-projected rect (so item
+                    // impls don't have to re-do the math); only the
+                    // `set_bounds` write to AccessKit varies.
+                    let advertised_bounds = match self.a11y_bounds_space {
+                        crate::a11y::A11yBoundsSpace::Screen => screen_bounds,
+                        crate::a11y::A11yBoundsSpace::Scene => scene_bounds,
+                    };
                     let ctx = crate::item::SceneItemA11yContext {
                         view_transform,
                         screen_bounds,
@@ -1739,10 +1774,10 @@ impl SceneView {
                         |child| {
                             item.accessibility(child, &ctx);
                             child.inner_mut().set_bounds(accesskit::Rect {
-                                x0: screen_bounds.x as f64,
-                                y0: screen_bounds.y as f64,
-                                x1: (screen_bounds.x + screen_bounds.width) as f64,
-                                y1: (screen_bounds.y + screen_bounds.height) as f64,
+                                x0: advertised_bounds.x as f64,
+                                y0: advertised_bounds.y as f64,
+                                x1: (advertised_bounds.x + advertised_bounds.width) as f64,
+                                y1: (advertised_bounds.y + advertised_bounds.height) as f64,
                             });
                         },
                     )
@@ -4478,5 +4513,83 @@ mod tests {
     fn identity_state_is_default() {
         let s: crate::SceneViewState = Default::default();
         assert!(s.is_identity());
+    }
+
+    // -- a11y_bounds_space ---------------------------------------------
+
+    #[test]
+    fn a11y_bounds_default_to_screen_projection() {
+        use crate::items::RectItem;
+        use fern_core::accessibility::is_synthetic;
+        use fern_tokens::Color;
+
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        // Pan + zoom: screen bounds become (200 - panx, 100 - pany)
+        // at zoom 2.0 → corners (200, 100, 40, 40).
+        let view = view_handle(&tree, view_id);
+        view.set_zoom(2.0);
+
+        let update = tree.sync_accessibility();
+        let item_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| is_synthetic(*id))
+            .map(|(_, n)| n)
+            .expect("synthetic item node");
+
+        // Default Screen mode: bounds reflect 2x scale.
+        let bounds = item_node.bounds().expect("item bounds set");
+        let width = bounds.x1 - bounds.x0;
+        assert!((width - 40.0).abs() < 0.5, "screen width should reflect zoom");
+    }
+
+    #[test]
+    fn a11y_bounds_scene_mode_reports_raw_scene_coords() {
+        use crate::items::RectItem;
+        use fern_core::accessibility::is_synthetic;
+        use fern_tokens::Color;
+
+        let mut scene = Scene::new();
+        scene.add_item(
+            RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED),
+        );
+
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene).a11y_bounds_space(crate::A11yBoundsSpace::Scene),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let view = view_handle(&tree, view_id);
+        view.set_zoom(2.0);
+
+        let update = tree.sync_accessibility();
+        let item_node = update
+            .nodes
+            .iter()
+            .find(|(id, _)| is_synthetic(*id))
+            .map(|(_, n)| n)
+            .expect("synthetic item node");
+
+        // Scene mode: bounds match the raw scene rect, ignoring zoom.
+        let bounds = item_node.bounds().expect("item bounds set");
+        let width = bounds.x1 - bounds.x0;
+        assert!((width - 20.0).abs() < 0.5, "scene-mode width must equal raw scene width");
+        assert!((bounds.x0 - 100.0).abs() < 0.5);
+        assert!((bounds.y0 - 50.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn current_a11y_bounds_space_accessor_reflects_setting() {
+        let view = SceneView::new(Scene::new());
+        assert_eq!(view.current_a11y_bounds_space(), crate::A11yBoundsSpace::Screen);
+        let view = view.a11y_bounds_space(crate::A11yBoundsSpace::Scene);
+        assert_eq!(view.current_a11y_bounds_space(), crate::A11yBoundsSpace::Scene);
     }
 }

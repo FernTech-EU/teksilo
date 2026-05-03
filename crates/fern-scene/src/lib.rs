@@ -56,8 +56,8 @@ pub mod transform;
 pub mod view;
 
 pub use a11y::{
-    A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yOffScreenMode,
-    A11yRelation,
+    A11yBoundsSpace, A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode,
+    A11yOffScreenMode, A11yRelation,
 };
 pub use index::{GridHashIndex, SpatialIndex};
 pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
