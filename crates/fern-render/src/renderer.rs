@@ -960,10 +960,48 @@ impl Renderer {
                             index_binding
                         );
                         quad_source = None;
-                        let x = (rect.x * scale_factor).max(0.0) as u32;
-                        let y = (rect.y * scale_factor).max(0.0) as u32;
-                        let w = (rect.width * scale_factor).ceil().max(0.0) as u32;
-                        let h = (rect.height * scale_factor).ceil().max(0.0) as u32;
+                        // Apply the current transform stack to the
+                        // clip rect. Without this, a clip emitted
+                        // inside a SceneView's view-transform scope
+                        // (e.g. ScrollArea or nested SceneView as
+                        // a heavyweight scene_rect widget) would
+                        // mask the rendered content to the rect's
+                        // PRE-transform position — the contents
+                        // visually pan/zoom with the outer view but
+                        // the clip mask stays fixed in screen
+                        // space, "eating" the widget as the user
+                        // pans or zooms out.
+                        //
+                        // Rotation-free transforms (the common case
+                        // for SceneView pan + zoom) produce an
+                        // axis-aligned transformed rect; for rotated
+                        // transforms we take the AABB of the four
+                        // corners, which over-clips slightly but
+                        // remains correct for visibility.
+                        let p_tl = apply_transform_pixel(
+                            [rect.x, rect.y],
+                            &current_transform,
+                        );
+                        let p_tr = apply_transform_pixel(
+                            [rect.x + rect.width, rect.y],
+                            &current_transform,
+                        );
+                        let p_bl = apply_transform_pixel(
+                            [rect.x, rect.y + rect.height],
+                            &current_transform,
+                        );
+                        let p_br = apply_transform_pixel(
+                            [rect.x + rect.width, rect.y + rect.height],
+                            &current_transform,
+                        );
+                        let min_x = p_tl[0].min(p_tr[0]).min(p_bl[0]).min(p_br[0]);
+                        let min_y = p_tl[1].min(p_tr[1]).min(p_bl[1]).min(p_br[1]);
+                        let max_x = p_tl[0].max(p_tr[0]).max(p_bl[0]).max(p_br[0]);
+                        let max_y = p_tl[1].max(p_tr[1]).max(p_bl[1]).max(p_br[1]);
+                        let x = (min_x * scale_factor).max(0.0) as u32;
+                        let y = (min_y * scale_factor).max(0.0) as u32;
+                        let w = ((max_x - min_x) * scale_factor).ceil().max(0.0) as u32;
+                        let h = ((max_y - min_y) * scale_factor).ceil().max(0.0) as u32;
                         // Clamp to viewport — wgpu requires x+w <= width, y+h <= height.
                         let x = x.min(viewport_width);
                         let y = y.min(viewport_height);
