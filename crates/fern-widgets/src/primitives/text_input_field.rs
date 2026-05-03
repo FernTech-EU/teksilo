@@ -443,21 +443,31 @@ impl Widget for TextInputField {
         }
 
         // Cache mask-aware natural width. When a mask is set, the
-        // visual content envelope is exactly the empty template
-        // (`__/__/____` for `99/99/9999`); measure it in the theme
-        // body font + a small caret slack so the field's intrinsic
-        // tracks its real content instead of the generic 200 dp
-        // fallback. This is what lets composing widgets like
-        // `DateEdit` report a natural width that follows the format
-        // pattern instead of the 200 dp default. Without a mask the
-        // 200 dp fallback (set in `new()`) stays.
+        // visual content envelope is the FILLED template — every
+        // editable position holding its widest plausible glyph
+        // (`0` for digits, `M` for letters, etc.) and every fixed
+        // position holding its literal. Measuring the empty
+        // (`__/__/____`) template instead would shortchange the
+        // field by the difference between an underscore and a real
+        // glyph: ~2 dp per digit slot for `0`, ~5 dp per letter
+        // slot for `M`, which adds up to a multi-character shortfall
+        // for date / 12h time fields. We want the natural width to
+        // hold the fully-typed value without overflow.
+        //
+        // Without a mask the 200 dp fallback (set in `new()`) stays.
         if let Some(ref m) = self.mask {
-            let template = m.empty_template(mask_placeholder_char);
+            // Measure the worst-case glyph row PLUS one extra `M` of
+            // safety: one for caret breathing room past the last
+            // position, plus a defensive cushion for any per-glyph
+            // measurement variance between our heuristic fallback
+            // and the real glyph shaper. Without this safety char,
+            // dates were observed to clip the trailing 2 characters
+            // and 12h time fields clipped the AM/PM letters.
+            let mut widest = worst_case_template(m);
+            widest.push('M');
             let style = &theme_snapshot.typography.body;
-            let measured = measure_width_px(ctx, &template, style);
-            // Slack: half a digit so the caret never sits flush against
-            // the right border on the last position.
-            let slack = style.size * 0.3;
+            let measured = measure_width_px(ctx, &widest, style);
+            let slack = style.size;
             self.natural_width = measured + slack;
         }
 
@@ -1378,12 +1388,44 @@ fn run_validator_and_apply(
     }
 }
 
+/// Build the worst-case-glyph version of an [`InputMask`] for
+/// natural-width measurement: every editable slot holds the widest
+/// plausible character its class can accept, and every fixed slot
+/// holds its literal. Used by `build()` to size the field's
+/// intrinsic envelope so a fully-typed value never overflows the
+/// reported natural width.
+///
+/// Per-class worst-case glyph (Inter and most UI sans-serifs):
+/// - `Digit` → `0` (tabular figures are constant-width, but `0` is
+///    representative for fonts that aren't)
+/// - `Letter` / `Alphanumeric` / `Any` → `M` (widest cap glyph)
+/// - `HexDigit` → `0`
+fn worst_case_template(mask: &InputMask) -> String {
+    let mut s = String::with_capacity(mask.len());
+    for pos in mask.positions() {
+        match pos {
+            MaskPosition::Editable { class, .. } => {
+                s.push(match class {
+                    MaskClass::Digit | MaskClass::HexDigit => '0',
+                    MaskClass::Letter | MaskClass::Alphanumeric | MaskClass::Any => 'M',
+                });
+            }
+            MaskPosition::Fixed(c) => s.push(*c),
+        }
+    }
+    s
+}
+
 /// Measure the advance width of `text` in logical pixels using the
 /// app-wide `SharedTypesetter` (the same backend the field paints
-/// with). Falls back to a rough heuristic when no typesetter is
-/// installed (headless tests) so the caller still gets a non-zero
-/// width and any cap / floor logic behaves reasonably. Mirrors the
-/// helper SpinBox uses for `width_chars` measurement.
+/// with). Falls back to a per-character-class heuristic when no
+/// typesetter is installed (headless tests) so the caller still gets
+/// a non-zero width and any natural-width / cap logic behaves
+/// reasonably even there. The fallback weights match Inter's body
+/// proportions closely enough that the difference between an
+/// underscore and a wide cap glyph (`M`) shows up in headless tests
+/// — important for verifying the worst-case-glyph mask measurement
+/// without booting a typesetter.
 fn measure_width_px(ctx: &mut BuildContext, text: &str, style: &TextStyle) -> f32 {
     if text.is_empty() {
         return 0.0;
@@ -1393,5 +1435,18 @@ fn measure_width_px(ctx: &mut BuildContext, text: &str, style: &TextStyle) -> f3
         let layout = backend.borrow_mut().layout_single_line(text, style, None);
         return layout.width;
     }
-    text.chars().count() as f32 * style.size * 0.55
+    let em = style.size;
+    text.chars()
+        .map(|c| match c {
+            ' ' => 0.30,
+            '_' => 0.45,
+            ':' | '.' | ',' | ';' | '/' | '|' | '!' | 'i' | 'l' | 'I' => 0.30,
+            '0'..='9' => 0.55,
+            'M' | 'W' | 'm' | 'w' => 0.85,
+            'A'..='Z' => 0.65,
+            'a'..='z' => 0.50,
+            _ => 0.55,
+        })
+        .map(|w: f32| w * em)
+        .sum()
 }
