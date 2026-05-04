@@ -312,29 +312,31 @@ impl Widget for BoundsTracker {
         }
 
         // Update bounds snapshot + bands + hover_info when AllBounds
-        // is active.
+        // is active. Walk the user-root subtrees only — never
+        // `arena.roots()` — so the inspector's own chrome (panel,
+        // overlays) doesn't show up in the bounds overlay or the
+        // hover tooltip.
         let mode = self.state.overlay_mode.get();
         if mode == OverlayMode::AllBounds {
-            let excludes = self.state.shell_root_ids.get();
+            let user_roots = self.state.user_root_ids.get();
             if let Some(arena) = ctx.arena() {
                 let mut snap: Vec<BoundsEntry> = Vec::new();
                 let mut bands: Vec<BandEntry> = Vec::new();
-                for &root in arena.roots().iter() {
-                    if excludes.contains(&root) {
-                        continue;
-                    }
-                    collect_bounds_and_bands(arena, root, &excludes, &mut snap, &mut bands);
+                for &root in user_roots.iter() {
+                    collect_bounds_and_bands(arena, root, &mut snap, &mut bands);
                 }
                 self.state.bounds_snapshot.set(snap);
                 self.state.band_snapshot.set(bands);
 
-                // Resolve the hovered widget into a HoverInfo if it
-                // exists and is not within any inspector subtree.
+                // Resolve the hovered widget into a HoverInfo only if
+                // it lives inside one of the user-root subtrees —
+                // hovering over the inspector panel itself shouldn't
+                // pop a tooltip describing the panel's internals.
                 let new_hover = self
                     .state
                     .hover_id
                     .get()
-                    .filter(|id| !is_in_any_subtree(arena, *id, &excludes))
+                    .filter(|id| is_in_any_user_root(arena, *id, &user_roots))
                     .and_then(|id| {
                         let node = arena.get(id)?;
                         let bounds = arena.bounds(id);
@@ -374,16 +376,17 @@ impl Widget for BoundsTracker {
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 }
 
-/// Walks ancestors of `id` looking for any id in `excludes`. Used to
-/// skip every InspectorShell subtree (one per window) when resolving
-/// the hovered widget.
-fn is_in_any_subtree(arena: &WidgetArena, id: WidgetId, excludes: &[WidgetId]) -> bool {
-    if excludes.is_empty() {
+/// Walks ancestors of `id` looking for any user_root_id. Returns
+/// true when `id` (or one of its ancestors) is itself a user-root —
+/// i.e. `id` lives inside the user app subtree, not the inspector
+/// chrome.
+fn is_in_any_user_root(arena: &WidgetArena, id: WidgetId, user_roots: &[WidgetId]) -> bool {
+    if user_roots.is_empty() {
         return false;
     }
     let mut cur = Some(id);
     while let Some(c) = cur {
-        if excludes.contains(&c) {
+        if user_roots.contains(&c) {
             return true;
         }
         cur = arena.parent(c);
@@ -403,11 +406,10 @@ fn last_segment(s: &str) -> &str {
 fn collect_bounds_and_bands(
     arena: &WidgetArena,
     id: WidgetId,
-    excludes: &[WidgetId],
     out: &mut Vec<BoundsEntry>,
     bands: &mut Vec<BandEntry>,
 ) {
-    if excludes.contains(&id) || !arena.is_active(id) {
+    if !arena.is_active(id) {
         return;
     }
     let Some(node) = arena.get(id) else { return };
@@ -423,14 +425,14 @@ fn collect_bounds_and_bands(
     let children: Vec<WidgetId> = arena.children(id).to_vec();
     if label == "Padding" && children.len() == 1 {
         let child = children[0];
-        if !excludes.contains(&child) && arena.is_active(child) {
+        if arena.is_active(child) {
             let inner = arena.bounds(child);
             push_padding_bands(bounds, inner, bands);
         }
     } else if (label == "HStack" || label == "VStack") && children.len() >= 2 {
         let active_children: Vec<Rect> = children
             .iter()
-            .filter(|c| !excludes.contains(c) && arena.is_active(**c))
+            .filter(|c| arena.is_active(**c))
             .map(|c| arena.bounds(*c))
             .filter(|r| r.width > 0.0 && r.height > 0.0)
             .collect();
@@ -440,7 +442,7 @@ fn collect_bounds_and_bands(
     }
 
     for child in children {
-        collect_bounds_and_bands(arena, child, excludes, out, bands);
+        collect_bounds_and_bands(arena, child, out, bands);
     }
 }
 

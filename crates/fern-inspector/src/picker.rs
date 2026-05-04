@@ -123,26 +123,25 @@ impl Widget for PickResolver {
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         if let Some(point) = self.state.pending_pick_point.get() {
-            // Multi-window: try every shell exclusion in turn. The
-            // hit-test API takes a single exclude id, so we walk all
-            // shells looking for a non-shell hit. With one window this
-            // collapses to the previous behavior.
-            let excludes = self.state.shell_root_ids.get();
-            let hit = if excludes.is_empty() {
-                ctx.widget_at_point(point, None)
-            } else {
-                excludes
-                    .iter()
-                    .find_map(|&shell| ctx.widget_at_point(point, Some(shell)))
-            };
+            // Hit-test inside each user-root subtree (one per window).
+            // Walking the user_root subtrees rather than `arena.roots()`
+            // means we never resolve into the inspector's own chrome
+            // (panel, picker overlay, highlight) — it sits as a
+            // sibling of the user_root inside the InspectorShell, not
+            // a descendant. First match wins, deepest-first per
+            // subtree.
+            let user_roots = self.state.user_root_ids.get();
+            let arena = ctx.arena();
+            let hit = user_roots
+                .iter()
+                .find_map(|&root| arena.and_then(|a| a.hit_test_in_subtree(root, point)));
             if let Some(id) = hit {
                 self.state.selected_id.set(Some(id));
             }
             self.state.pending_pick_point.set(None);
             // Always exit picker mode after a pointer event resolved
-            // — even if the hit-test missed (e.g. point landed inside
-            // the excluded subtree). The user can re-enter pick mode
-            // from the toolbar.
+            // — even if the hit-test missed. The user can re-enter
+            // pick mode from the toolbar.
             if self.state.picker_mode.get() {
                 self.state.picker_mode.set(false);
             }

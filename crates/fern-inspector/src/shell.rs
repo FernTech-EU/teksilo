@@ -31,6 +31,7 @@ use fern_core::widget_id::WidgetId;
 use fern_widgets::primitives::{Expand, FixedSize, HStack, Padding, VStack, ZStack};
 use fern_widgets::{Button, Panel, SegmentedControl, Slider, TabWidget};
 
+use crate::fill_width_fixed_height::FillWidthFixedHeight;
 use crate::highlight::{BoundsTracker, HighlightLayer};
 use crate::keyboard::PanelShortcutHost;
 use crate::picker::{PickResolver, PickerOverlay};
@@ -118,14 +119,22 @@ impl Widget for InspectorShell {
         // P / B / T / Shift+T / Esc shortcuts are scoped to the panel
         // subtree — single-letter chords don't hijack typing in the
         // user app's text inputs.
+        // Inner panel content (ResizeHandle + panel body). Each piece
+        // is wrapped in `FillWidthFixedHeight` so the ResizeHandle and
+        // panel body both stretch the full window width — `FixedSize`
+        // alone reports its child's natural width which leaves the
+        // right side of the window blank.
         let panel_inner = PanelShortcutHost::new(state.clone(), build_panel(state.clone()));
+        let resize_handle_height = Signal::new(crate::resize_handle::HANDLE_HEIGHT);
         let panel_block = VStack::new()
-            .child(ResizeHandle::new(state.clone()))
-            .child(
-                FixedSize::new()
-                    .bind_height(state.panel_height.clone())
-                    .child(panel_inner),
-            );
+            .child(FillWidthFixedHeight::new(
+                resize_handle_height,
+                ResizeHandle::new(state.clone()),
+            ))
+            .child(FillWidthFixedHeight::new(
+                state.panel_height.clone(),
+                panel_inner,
+            ));
         let panel_index = state.open.map(|open| if *open { 1usize } else { 0 });
         let panel_switcher = fern_widgets::primitives::Switcher::new(panel_index)
             .child(empty_filler())
@@ -149,11 +158,7 @@ impl Widget for InspectorShell {
             .child(Expand::new().flex(1.0).child(z))
             .child(bounds_tracker)
             .child(pick_resolver)
-            .child(
-                FixedSize::new()
-                    .bind_height(height_signal)
-                    .child(panel_switcher),
-            );
+            .child(FillWidthFixedHeight::new(height_signal, panel_switcher));
 
         let root = ctx.add(stack);
         self.root_child_id = Some(root);

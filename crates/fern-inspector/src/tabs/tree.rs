@@ -161,12 +161,13 @@ impl Widget for TreeRows {
         // Snapshot tree once per layout pass (cheap — a flat traversal).
         let mut rows: Vec<TreeRow> = Vec::new();
         if let Some(arena) = ctx.arena() {
-            let excludes = self.state.shell_root_ids.get();
-            for &root in arena.roots().iter() {
-                if excludes.contains(&root) {
-                    continue;
-                }
-                push_subtree(arena, root, 0, &excludes, &mut rows);
+            // Walk the user-root subtrees only — never `arena.roots()`
+            // (which after wrapping is just the InspectorShell). This
+            // keeps the inspector's own panel / overlays out of the
+            // Tree listing without needing per-node exclusion logic.
+            let user_roots = self.state.user_root_ids.get();
+            for &root in user_roots.iter() {
+                push_subtree(arena, root, 0, &mut rows);
             }
         }
         // Apply filter — case-insensitive substring match against the
@@ -247,16 +248,7 @@ impl Widget for TreeRows {
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 }
 
-fn push_subtree(
-    arena: &WidgetArena,
-    id: WidgetId,
-    depth: u32,
-    excludes: &[WidgetId],
-    out: &mut Vec<TreeRow>,
-) {
-    if excludes.contains(&id) {
-        return;
-    }
+fn push_subtree(arena: &WidgetArena, id: WidgetId, depth: u32, out: &mut Vec<TreeRow>) {
     if !arena.is_active(id) {
         return;
     }
@@ -267,6 +259,6 @@ fn push_subtree(
     out.push(TreeRow { id, depth, label });
     let children: Vec<WidgetId> = arena.children(id).to_vec();
     for child in children {
-        push_subtree(arena, child, depth + 1, excludes, out);
+        push_subtree(arena, child, depth + 1, out);
     }
 }

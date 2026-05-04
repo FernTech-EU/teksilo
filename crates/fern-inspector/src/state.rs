@@ -67,12 +67,18 @@ pub struct InspectorState {
     /// pending hit-test resolution by `PickResolver` in the next
     /// layout pass. `None` between picks.
     pub pending_pick_point: Signal<Option<Point>>,
-    /// Post-root ids of every InspectorShell currently mounted (one
-    /// per window). Pushed by `state::install`'s post_root closure
-    /// when each window's shell is created. Used as the multi-window
-    /// `exclude` set so the picker / hover tooltip never resolve to
-    /// the inspector's own UI in any window.
-    pub shell_root_ids: Signal<Vec<WidgetId>>,
+    /// User-root widget ids — one per InspectorShell (so one per
+    /// window). Pushed by `state::install`'s post_root closure with
+    /// the `root_id` argument it receives. Used as the **starting
+    /// points** for tree walks (Tree tab, BoundsTracker) and for
+    /// scoped hit-tests (PickResolver) so the inspector's picker /
+    /// listings only see the user app and never resolve into the
+    /// inspector's own chrome. Note: previous slices misnamed this
+    /// `shell_root_ids` and stored the InspectorShell id itself —
+    /// that was over-aggressive (after wrapping, the shell IS the
+    /// only root, so excluding it left nothing to walk) and broke the
+    /// picker.
+    pub user_root_ids: Signal<Vec<WidgetId>>,
     /// Set by the tree tab's tap handler with the widget-local y
     /// coordinate of the click; the tab's own `layout_response`
     /// reads this on the next pass, divides by row height, and updates
@@ -185,7 +191,7 @@ impl InspectorState {
             selected_bounds: Signal::new(None),
             picker_mode: Signal::new(false),
             pending_pick_point: Signal::new(None),
-            shell_root_ids: Signal::new(Vec::new()),
+            user_root_ids: Signal::new(Vec::new()),
             pending_tree_click_y: Signal::new(None),
             overlay_mode: Signal::new(OverlayMode::SelectionOnly),
             overlay_opacity: Signal::new(0.7),
@@ -313,13 +319,13 @@ pub(crate) fn install(builder: FernAppBuilder) -> FernAppBuilder {
         // panel, the toolbar, the highlight overlay, the picker
         // overlay, and the bounds-tracker / pick-resolver helpers.
         let shell_id = tree.add(InspectorShell::new(root_id, state_for_post_root.clone()));
-        // Multi-window: every window's shell adds its id to the
-        // exclusion vec so neither the picker nor the hover tooltip
-        // ever resolves to inspector UI in any window.
-        let mut ids = state_for_post_root.shell_root_ids.get();
-        if !ids.contains(&shell_id) {
-            ids.push(shell_id);
-            state_for_post_root.shell_root_ids.set(ids);
+        // Multi-window: every window's user-root id is appended so
+        // the inspector's tree-walking consumers (picker, Tree tab,
+        // BoundsTracker) target the right per-window app subtree.
+        let mut ids = state_for_post_root.user_root_ids.get();
+        if !ids.contains(&root_id) {
+            ids.push(root_id);
+            state_for_post_root.user_root_ids.set(ids);
         }
         shell_id
     });

@@ -433,6 +433,20 @@ impl WidgetArena {
         None
     }
 
+    /// Hit-test starting from a specific subtree root rather than the
+    /// arena's top-level roots. Same semantics as
+    /// [`hit_test_at`](Self::hit_test_at) but scoped — useful when
+    /// callers want to ignore everything outside a known subtree
+    /// (e.g. the inspector's picker hit-tests inside the user-root
+    /// subtree so it never resolves to its own chrome).
+    pub fn hit_test_in_subtree(
+        &self,
+        start: WidgetId,
+        point: fern_canvas::Point,
+    ) -> Option<WidgetId> {
+        self.hit_test_recursive(start, point, None)
+    }
+
     fn hit_test_recursive(
         &self,
         id: WidgetId,
