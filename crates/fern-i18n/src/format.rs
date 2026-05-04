@@ -654,102 +654,77 @@ fn locale_signal_or_default() -> Signal<LanguageIdentifier> {
     }
 }
 
-fn format_number_signal(prop: Prop<f64>, opts: NumberOptions) -> Signal<String> {
-    let locale = locale_signal_or_default();
-    let initial = render_number_now(&prop, &opts, &locale.get());
-    let out = Signal::new(initial);
-    let weak = out
-        .downgrade()
-        .expect("Signal::new returns mutable; downgrade cannot fail");
-    install_recompute(&out, weak.clone(), &locale, &prop, opts);
-    out
-}
+// Format-signal builders use derived-signal chaining (`zip` / `zip3` /
+// `map`) instead of `observe + attach_keepalive`. Reason: callers are
+// allowed to pass a derived `Signal<T>` (e.g. produced by `Signal::map`)
+// to `format(...)`, and `Signal::observe` panics on read-only signals.
+// Derived signals dirty-track through to upstream mutable roots
+// automatically, so the framework's binding system invalidates correctly
+// without an explicit observer-push from this layer.
+//
+// All three flavours share the same shape:
+//   - resolve the locale signal (always mutable; falls back to a fresh
+//     `Signal::new(und)` when no manager is installed)
+//   - resolve the version signal (Some when a manager is installed)
+//   - chain `value × locale × version → String` via the right combinator
+//     for the (Static-vs-Bound) × (version-vs-no-version) cell.
 
-fn render_number_now(prop: &Prop<f64>, opts: &NumberOptions, lang: &LanguageIdentifier) -> String {
-    let value = prop.get();
+fn render_number(value: f64, lang: &LanguageIdentifier, opts: &NumberOptions) -> String {
     match cached_number_formatter(lang, opts) {
         Some(fmt) => fmt.format(value),
         None => value.to_string(),
     }
 }
 
-fn install_recompute(
-    out: &Signal<String>,
-    weak: fern_core::signal::WeakSignal<String>,
-    locale: &Signal<LanguageIdentifier>,
-    value: &Prop<f64>,
-    opts: NumberOptions,
-) {
-    let recompute_locale = {
-        let weak = weak.clone();
-        let value = value.clone();
-        let opts = opts.clone();
-        let locale = locale.clone();
-        move |_: &LanguageIdentifier| {
-            if let Some(target) = weak.upgrade() {
-                target.set(render_number_now(&value, &opts, &locale.get()));
-            }
+fn render_civil(
+    value: &jiff::civil::DateTime,
+    lang: &LanguageIdentifier,
+    opts: &DateTimeOptions,
+) -> String {
+    match cached_datetime_formatter(lang, opts) {
+        Some(fmt) => fmt.format_civil(value),
+        None => value.to_string(),
+    }
+}
+
+fn render_zoned(
+    value: &jiff::Zoned,
+    lang: &LanguageIdentifier,
+    opts: &DateTimeOptions,
+) -> String {
+    match cached_datetime_formatter(lang, opts) {
+        Some(fmt) => fmt.format_zoned(value),
+        None => value.to_string(),
+    }
+}
+
+fn format_number_signal(prop: Prop<f64>, opts: NumberOptions) -> Signal<String> {
+    let locale = locale_signal_or_default();
+    let version = current_version_signal();
+
+    match (prop, version) {
+        (Prop::Static(value), Some(version)) => {
+            let opts = opts.clone();
+            locale
+                .zip(&version)
+                .map(move |(lang, _ver)| render_number(value, lang, &opts))
         }
-    };
-    let h_locale = locale.observe(recompute_locale);
-    out.attach_keepalive(h_locale);
-
-    if let Prop::Bound(value_signal) = value {
-        let recompute_value = {
-            let weak = weak.clone();
+        (Prop::Static(value), None) => {
             let opts = opts.clone();
-            let locale = locale.clone();
-            let value = value.clone();
-            move |_: &f64| {
-                if let Some(target) = weak.upgrade() {
-                    target.set(render_number_now(&value, &opts, &locale.get()));
-                }
-            }
-        };
-        let h_value = value_signal.observe(recompute_value);
-        out.attach_keepalive(h_value);
-    }
-
-    // Hot-reload + locale-bundle changes increment the version signal;
-    // a new bundle for the same locale name should still re-render.
-    if let Some(version) = current_version_signal() {
-        let recompute_ver = {
-            let weak = weak.clone();
-            let value = value.clone();
+            locale.map(move |lang| render_number(value, lang, &opts))
+        }
+        (Prop::Bound(value_signal), Some(version)) => {
             let opts = opts.clone();
-            let locale = locale.clone();
-            move |_: &u64| {
-                if let Some(target) = weak.upgrade() {
-                    target.set(render_number_now(&value, &opts, &locale.get()));
-                }
-            }
-        };
-        let h_ver = version.observe(recompute_ver);
-        out.attach_keepalive(h_ver);
-    }
-}
-
-fn render_civil_now(
-    prop: &Prop<jiff::civil::DateTime>,
-    opts: &DateTimeOptions,
-    lang: &LanguageIdentifier,
-) -> String {
-    let value = prop.get();
-    match cached_datetime_formatter(lang, opts) {
-        Some(fmt) => fmt.format_civil(&value),
-        None => value.to_string(),
-    }
-}
-
-fn render_zoned_now(
-    prop: &Prop<jiff::Zoned>,
-    opts: &DateTimeOptions,
-    lang: &LanguageIdentifier,
-) -> String {
-    let value = prop.get();
-    match cached_datetime_formatter(lang, opts) {
-        Some(fmt) => fmt.format_zoned(&value),
-        None => value.to_string(),
+            value_signal
+                .zip3(&locale, &version)
+                .map(move |(v, lang, _ver)| render_number(*v, lang, &opts))
+        }
+        (Prop::Bound(value_signal), None) => {
+            let opts = opts.clone();
+            value_signal
+                .zip(&locale)
+                .map(move |(v, lang)| render_number(*v, lang, &opts))
+        }
     }
 }
 
@@ -758,56 +733,32 @@ fn format_datetime_signal_civil(
     opts: DateTimeOptions,
 ) -> Signal<String> {
     let locale = locale_signal_or_default();
-    let initial = render_civil_now(&prop, &opts, &locale.get());
-    let out = Signal::new(initial);
-    let weak = out
-        .downgrade()
-        .expect("Signal::new returns mutable; downgrade cannot fail");
+    let version = current_version_signal();
 
-    let recompute_locale = {
-        let weak = weak.clone();
-        let prop = prop.clone();
-        let opts = opts.clone();
-        let locale = locale.clone();
-        move |_: &LanguageIdentifier| {
-            if let Some(target) = weak.upgrade() {
-                target.set(render_civil_now(&prop, &opts, &locale.get()));
-            }
+    match (prop, version) {
+        (Prop::Static(value), Some(version)) => {
+            let opts = opts.clone();
+            locale
+                .zip(&version)
+                .map(move |(lang, _ver)| render_civil(&value, lang, &opts))
         }
-    };
-    out.attach_keepalive(locale.observe(recompute_locale));
-
-    if let Prop::Bound(value_signal) = &prop {
-        let recompute_value = {
-            let weak = weak.clone();
-            let prop = prop.clone();
+        (Prop::Static(value), None) => {
             let opts = opts.clone();
-            let locale = locale.clone();
-            move |_: &jiff::civil::DateTime| {
-                if let Some(target) = weak.upgrade() {
-                    target.set(render_civil_now(&prop, &opts, &locale.get()));
-                }
-            }
-        };
-        out.attach_keepalive(value_signal.observe(recompute_value));
-    }
-
-    if let Some(version) = current_version_signal() {
-        let recompute_ver = {
-            let weak = weak.clone();
-            let prop = prop.clone();
+            locale.map(move |lang| render_civil(&value, lang, &opts))
+        }
+        (Prop::Bound(value_signal), Some(version)) => {
             let opts = opts.clone();
-            let locale = locale.clone();
-            move |_: &u64| {
-                if let Some(target) = weak.upgrade() {
-                    target.set(render_civil_now(&prop, &opts, &locale.get()));
-                }
-            }
-        };
-        out.attach_keepalive(version.observe(recompute_ver));
+            value_signal
+                .zip3(&locale, &version)
+                .map(move |(v, lang, _ver)| render_civil(v, lang, &opts))
+        }
+        (Prop::Bound(value_signal), None) => {
+            let opts = opts.clone();
+            value_signal
+                .zip(&locale)
+                .map(move |(v, lang)| render_civil(v, lang, &opts))
+        }
     }
-
-    out
 }
 
 fn format_datetime_signal_zoned(
@@ -815,54 +766,30 @@ fn format_datetime_signal_zoned(
     opts: DateTimeOptions,
 ) -> Signal<String> {
     let locale = locale_signal_or_default();
-    let initial = render_zoned_now(&prop, &opts, &locale.get());
-    let out = Signal::new(initial);
-    let weak = out
-        .downgrade()
-        .expect("Signal::new returns mutable; downgrade cannot fail");
+    let version = current_version_signal();
 
-    let recompute_locale = {
-        let weak = weak.clone();
-        let prop = prop.clone();
-        let opts = opts.clone();
-        let locale = locale.clone();
-        move |_: &LanguageIdentifier| {
-            if let Some(target) = weak.upgrade() {
-                target.set(render_zoned_now(&prop, &opts, &locale.get()));
-            }
+    match (prop, version) {
+        (Prop::Static(value), Some(version)) => {
+            let opts = opts.clone();
+            locale
+                .zip(&version)
+                .map(move |(lang, _ver)| render_zoned(&value, lang, &opts))
         }
-    };
-    out.attach_keepalive(locale.observe(recompute_locale));
-
-    if let Prop::Bound(value_signal) = &prop {
-        let recompute_value = {
-            let weak = weak.clone();
-            let prop = prop.clone();
+        (Prop::Static(value), None) => {
             let opts = opts.clone();
-            let locale = locale.clone();
-            move |_: &jiff::Zoned| {
-                if let Some(target) = weak.upgrade() {
-                    target.set(render_zoned_now(&prop, &opts, &locale.get()));
-                }
-            }
-        };
-        out.attach_keepalive(value_signal.observe(recompute_value));
-    }
-
-    if let Some(version) = current_version_signal() {
-        let recompute_ver = {
-            let weak = weak.clone();
-            let prop = prop.clone();
+            locale.map(move |lang| render_zoned(&value, lang, &opts))
+        }
+        (Prop::Bound(value_signal), Some(version)) => {
             let opts = opts.clone();
-            let locale = locale.clone();
-            move |_: &u64| {
-                if let Some(target) = weak.upgrade() {
-                    target.set(render_zoned_now(&prop, &opts, &locale.get()));
-                }
-            }
-        };
-        out.attach_keepalive(version.observe(recompute_ver));
+            value_signal
+                .zip3(&locale, &version)
+                .map(move |(v, lang, _ver)| render_zoned(v, lang, &opts))
+        }
+        (Prop::Bound(value_signal), None) => {
+            let opts = opts.clone();
+            value_signal
+                .zip(&locale)
+                .map(move |(v, lang)| render_zoned(v, lang, &opts))
+        }
     }
-
-    out
 }
