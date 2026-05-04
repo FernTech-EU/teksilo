@@ -465,64 +465,73 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                     let event_count = export.events.len() as i64;
                     let json = serde_json_export_label(&export);
 
-                    // Phase 3.2: offer a real "Save as JSON…" file
-                    // picker via `rfd`. The OS-native save dialog
-                    // blocks the UI thread until dismissed; the
-                    // FernUI app is hidden behind it anyway, so the
-                    // synchronous API is ergonomically fine here.
+                    // Open a "Save as JSON…" dialog via the async
+                    // file-dialog service. The result callback runs
+                    // back on the main thread once the OS dialog
+                    // closes; the event loop keeps ticking in the
+                    // meantime so other windows / animations stay
+                    // responsive.
                     let suggested_name = format!(
                         "fern-export-{}.json",
                         sanitize_filename(&install_id_for_fetch)
                     );
-                    let saved_to = rfd::FileDialog::new()
-                        .set_title("Save your data export as JSON")
-                        .set_file_name(&suggested_name)
-                        .add_filter("JSON", &["json"])
-                        .save_file();
+                    use fern_platform::file_dialog::{
+                        EventContextFileDialogExt, FileDialogRequest, FileDialogResult,
+                    };
+                    let request = FileDialogRequest::save_file()
+                        .title("Save your data export as JSON")
+                        .default_file_name(&suggested_name)
+                        .add_filter("JSON", &["json"]);
 
-                    match saved_to {
-                        Some(path) => match std::fs::write(&path, json.as_bytes()) {
-                            Ok(()) => {
-                                let mut details = String::new();
-                                for (n, ev) in export.events.iter().enumerate().take(20) {
-                                    if !details.is_empty() {
-                                        details.push('\n');
+                    // The closure captures `export`, `json`, and
+                    // `event_count` by move so they remain available
+                    // when the dialog resolves on a later event-loop
+                    // tick.
+                    let submit = ctx.save_file(request, move |result, ctx| match result {
+                        FileDialogResult::Saved(Some(path)) => {
+                            match std::fs::write(&path, json.as_bytes()) {
+                                Ok(()) => {
+                                    let mut details = String::new();
+                                    for (n, ev) in export.events.iter().enumerate().take(20) {
+                                        if !details.is_empty() {
+                                            details.push('\n');
+                                        }
+                                        details.push_str(&format!("{}. {}", n + 1, ev.name));
                                     }
-                                    details.push_str(&format!("{}. {}", n + 1, ev.name));
-                                }
-                                if export.events.len() > 20 {
-                                    details.push_str(&format!(
-                                        "\n… and {} more.",
-                                        export.events.len() - 20
-                                    ));
-                                }
-                                MessageBox::information(tr_widget!(
-                                    privacy_fetch_success_title()
-                                ))
-                                .text(tr_widget!(privacy_fetch_success_text(
-                                    count = event_count
-                                )))
-                                .informative_text_literal(format!(
-                                    "{}\n\n{details}",
-                                    tr_widget!(privacy_fetch_saved_to(
-                                        path = path.display().to_string()
+                                    if export.events.len() > 20 {
+                                        details.push_str(&format!(
+                                            "\n… and {} more.",
+                                            export.events.len() - 20
+                                        ));
+                                    }
+                                    MessageBox::information(tr_widget!(
+                                        privacy_fetch_success_title()
                                     ))
-                                    .resolve_now()
-                                ))
-                                .buttons(MessageBoxButtons::Ok)
-                                .present(ctx);
-                            }
-                            Err(e) => {
-                                MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
-                                    .text(tr_widget!(privacy_fetch_write_error(
-                                        path = path.display().to_string(),
-                                        error = e.to_string(),
+                                    .text(tr_widget!(privacy_fetch_success_text(
+                                        count = event_count
                                     )))
+                                    .informative_text_literal(format!(
+                                        "{}\n\n{details}",
+                                        tr_widget!(privacy_fetch_saved_to(
+                                            path = path.display().to_string()
+                                        ))
+                                        .resolve_now()
+                                    ))
                                     .buttons(MessageBoxButtons::Ok)
                                     .present(ctx);
+                                }
+                                Err(e) => {
+                                    MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
+                                        .text(tr_widget!(privacy_fetch_write_error(
+                                            path = path.display().to_string(),
+                                            error = e.to_string(),
+                                        )))
+                                        .buttons(MessageBoxButtons::Ok)
+                                        .present(ctx);
+                                }
                             }
-                        },
-                        None => {
+                        }
+                        FileDialogResult::Saved(None) => {
                             // User cancelled the save dialog — fall
                             // back to the inline display so the
                             // export isn't lost (Art. 20 portability
@@ -549,6 +558,22 @@ fn build_identity_row(telemetry: &OpenedTelemetry) -> Panel {
                                 .buttons(MessageBoxButtons::Ok)
                                 .present(ctx);
                         }
+                        FileDialogResult::Error(msg) => {
+                            MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
+                                .text_literal(msg)
+                                .buttons(MessageBoxButtons::Ok)
+                                .present(ctx);
+                        }
+                        // The save_file kind only returns Saved(_) /
+                        // Error(_) — but match exhaustively for
+                        // forward-compat with future result variants.
+                        _ => {}
+                    });
+                    if let Err(msg) = submit {
+                        MessageBox::warning(tr_widget!(privacy_fetch_error_title()))
+                            .text_literal(msg)
+                            .buttons(MessageBoxButtons::Ok)
+                            .present(ctx);
                     }
                 }
                 Err(e) => {

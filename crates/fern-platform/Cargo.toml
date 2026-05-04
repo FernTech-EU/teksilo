@@ -17,6 +17,12 @@ wgpu = { workspace = true }
 accesskit = { workspace = true }
 accesskit_winit = "0.32"
 arboard = { workspace = true, optional = true }
+raw-window-handle = "0.6"
+rfd = { version = "0.15", default-features = false, features = [
+    "xdg-portal",
+    "async-std",
+], optional = true }
+async-std = { version = "1", optional = true }
 
 [features]
 default = []
@@ -25,6 +31,19 @@ default = []
 # the app-state registry during `FernAppBuilder::run`, reachable
 # from widgets via `EventContext::app_state::<ClipboardHandle>()`.
 clipboard = ["dep:arboard"]
+
+# Defines the FileDialog trait surface (FileDialogBackend trait,
+# FileDialogHandle, FileDialogRequest, FileDialogResult,
+# FileDialogEventPayload, MemoryFileDialog). No external runtime
+# deps beyond fern-core. Lets a host app ship its own backend
+# without paying for rfd. Apps that want native dialogs enable
+# `rfd-backend` instead, which implies this feature.
+file-dialog = []
+
+# Adds `RfdAsyncBackend` — a native-dialog adapter backed by the
+# `rfd` crate plus an `async-std` worker pool to drive its futures
+# off the UI thread. Implies `file-dialog`.
+rfd-backend = ["file-dialog", "dep:rfd", "dep:async-std"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

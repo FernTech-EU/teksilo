@@ -15,6 +15,7 @@
 use super::config::WindowConfig;
 use super::id::FernWindowId;
 use super::state::WindowState;
+use crate::raw_handle::ParentHandle;
 
 /// App-level window operations exposed to handlers.
 ///
@@ -45,6 +46,19 @@ pub trait WindowOps {
     /// Close a specific window by id. The window is fully torn down
     /// before the next event-loop tick.
     fn close_window_by_id(&mut self, id: FernWindowId);
+
+    /// Extract the platform parent handle of the window currently
+    /// dispatching the event (the one that owns the in-flight
+    /// `EventContext`). Used by native-dialog integrations
+    /// (`fern_platform::file_dialog`) to parent OS dialogs to the
+    /// originating FernUI window.
+    ///
+    /// Returns `None` for the standalone / test sink and on rare
+    /// platform paths where the underlying surface refuses a handle
+    /// (e.g. during shutdown).
+    fn current_parent_handle(&self) -> Option<ParentHandle> {
+        None
+    }
 }
 
 /// No-op implementation used by standalone `WidgetTree`s constructed

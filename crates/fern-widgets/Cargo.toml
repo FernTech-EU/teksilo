@@ -8,12 +8,10 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-# Rich-text widgets. Depends on fern-platform for `ClipboardHandle` —
-# the clipboard module uses it unconditionally and degrades gracefully
-# when the app hasn't installed a handle into the app-state registry
-# (headless tests, builds without the `fern-app/clipboard` feature).
-# `arboard` is NOT pulled in by this feature; only the handle surface.
-rich-text = ["dep:fern-text", "dep:fern-platform"]
+# Rich-text widgets. fern-platform is now an unconditional dep of
+# the crate (used by the privacy widget for the file-dialog API),
+# so the `dep:fern-platform` gate it previously carried is dropped.
+rich-text = ["dep:fern-text"]
 # Preview catalog impls — opt-in `WidgetCatalog` implementations
 # alongside each widget, registered with the `inventory` crate so the
 # `fern-preview-ui` previewer GUI discovers them at link time. Off by
@@ -34,12 +32,12 @@ fern-i18n = { workspace = true }
 fern-telemetry = { workspace = true }
 # JSON rendering for the privacy widget's "Get my data" viewer.
 serde_json = { workspace = true }
-# Native file-picker for the privacy widget's "Save as JSON…" flow.
-# rfd routes to xdg-desktop-portal on Linux (lightweight), Cocoa on
-# macOS, Win32 on Windows. ~50 KB binary cost; sync API used so the
-# dialog blocks the UI thread for the duration the OS dialog is up
-# (the FernUI app is hidden behind the dialog anyway).
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
+# `PrivacySettings` widget reaches native file dialogs through
+# `fern_platform::file_dialog::EventContextFileDialogExt`. The
+# `file-dialog` feature on fern-platform brings in just the trait
+# surface — no rfd, no async-std. The real `RfdAsyncBackend` is opt-in
+# via `fern-app/rfd-backend` (chained from `fern-ui/file-dialog`).
+fern-platform = { workspace = true, features = ["file-dialog"] }
 fern-preview = { workspace = true, optional = true }
 # `open` powers rich-tooltip links that point at real URLs
 # (http, https, mailto, file paths, …). Small, pure-Rust, no deps
@@ -54,11 +52,6 @@ jiff = { workspace = true }
 # its own `rich-text` feature. Widgets never name either crate
 # directly, keeping fern-widgets's dependency surface minimal.
 fern-text = { workspace = true, optional = true, features = ["rich-text"] }
-# fern-platform for `ClipboardHandle` — only the handle type surface
-# is used by rich-text. The real system clipboard backend pulls in
-# `arboard` through `fern-platform/clipboard`, which is chained in by
-# `fern-app/clipboard` → `fern-ui/clipboard`, not by this feature.
-fern-platform = { workspace = true, optional = true }
 
 [dev-dependencies]
 accesskit_consumer = "0.35.0"

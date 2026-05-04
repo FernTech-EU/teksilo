@@ -31,6 +31,7 @@ cargo run -p fern-widgets-previewer            # Widget catalog previewer
 cargo run -p data-grid                          # TableView showcase (1k rows × 6 cols)
 cargo run -p tree-table                         # TreeTable showcase (mock filesystem)
 cargo run -p datetime-pickers                   # Calendar / DateEdit / TimeEdit / DateTimeEdit gallery
+cargo run -p file-dialogs                       # Native file open / save / pick-folder showcase
 ```
 
 ## Tools
@@ -104,7 +105,8 @@ fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by f
                      locale ∪ hot-reload) change.
 fern-ui-macros       fern! DSL proc macro (re-exported by fern-ui as fern!)
 fern-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
-fern-platform        winit + AccessKit adapter, event translation, clipboard, OS theme
+fern-platform        winit + AccessKit adapter, event translation, clipboard, OS theme,
+                     native file dialogs (FileDialogBackend trait + RfdAsyncBackend)
 fern-app             FernAppBuilder, WindowManager, event loop
 fern-ui              Umbrella crate with re-exports and feature flags
 fern-resources       Resource handling and embedding infrastructure
@@ -622,6 +624,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Ancestor key intercept (`.on_key_preview`) and subtree state signals (`.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)`) — strict-ancestors-only, see Event System above
 - Reactive data models (fern-data: `ListModel`, `TreeModel`, `TreeSlice`, `SelectionModel`, `SortFilterListModel<T>`, `SortFilterTreeModel<T>` with `TreeFilterMode` `HideNonMatching`/`KeepAncestors`/`KeepDescendants`)
 - Settings & persistence (fern-settings: `SettingsStore` dotted-key Signal<T> K/V, `SettingsFile<T>` with versioned migrations, `PersistedListModel`/`PersistedTreeModel`, generic `MruList<T: MruEntry>`, `WindowStateService` with framework-driven auto save/restore + monitor-aware sanitize on restore; see `docs/settings.md`)
+- Native file dialogs (fern-platform/file_dialog: `FileDialogBackend` trait + `FileDialogHandle` registered in app-state, `FileDialogRequest` builder for open / open-multi / pick-folder / save, `FileDialogResult`, `MemoryFileDialog` test backend, `RfdAsyncBackend` real implementation behind the `rfd-backend` feature using rfd 0.15 + xdg-portal + async-std; `EventContextFileDialogExt` extension trait adds `ctx.pick_file(...)`, `ctx.pick_files(...)`, `ctx.pick_folder(...)`, `ctx.save_file(...)`. Result delivery: backend posts `FileDialogEventPayload` through `AppEventPoster::post_external` → fern-app's `AppEvent::External` arm downcasts and routes to the originating window's tree → `FileDialogHandle::deliver` pops the callback and invokes it on the main thread with a fresh `EventContext`. macOS NSOpenPanel runs on the AppKit main run loop internally; the future drives the wakeup machinery from an async-std worker. Pending callbacks are tagged with the originating `FernWindowId` and purged via `WindowManager::close_window` when the window closes — no use-after-free of widget state. Apps wire up with `FernAppBuilder::install_file_dialog()` (or `.app_state(FileDialogHandle::new(my_backend))` for a custom backend). Demo: `examples/file_dialogs`.)
 - Debug inspector (fern-inspector: in-app introspection panel, debug builds only, gated by `cfg(debug_assertions)`; F12 toggles a bottom panel with 9 tabs (Tree, Properties, Accessibility, Theme, Locale, Focus, Shortcuts, Overlays, Models); bounds-overlay visualization (Off/Selection/All) with cursor-following type+size tooltip and Padding/StackGap tinted bands; picker tool with multi-window subtree exclusion; theme JSON Export/Import; resizable panel with persisted height; tree filter input + auto-scroll-into-view; Properties Copy button + right-click `Copy value` context menu + Debug repr row; Models tab with click-to-select per row; panel-scoped Ctrl+P/Ctrl+B/Ctrl+Tab/Ctrl+Shift+Tab/Esc keyboard shortcuts; persistence via `__fern_inspector.*` settings keys when `SettingsStore` is wired. Apps opt in with `FernAppBuilder.install_inspector_in_debug()` (no-op in release) — the extension trait is re-exported from `fern_ui::prelude::*` behind the umbrella's default-on `inspector` feature, so no separate `fern-inspector` dep is needed. See `docs/inspector.md`. Data models opt into the Models tab via `ListModel::debug_named("…")` / `TreeModel::debug_named` / `SelectionModel::debug_named`.)
 - Controls: Button, Checkbox, RadioButton, Toggle, Slider, ComboBox, SegmentedControl, ProgressBar, Link, Badge, SpinBox, SplitButton
 - Containers: Panel, Card, Accordion, ToolBox, ScrollArea, ScrollBar, Tooltip, SplitView, TabWidget, Dialog, Popover, Snackbar, Wizard, Breadcrumb, GroupBox, MessageBox
@@ -672,6 +675,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - Previewer infrastructure: `crates/fern-preview/src/lib.rs` (trait + registry), `crates/fern-preview-ui/src/lib.rs` (GUI library)
 - Drag-and-drop: `crates/fern-core/src/drag_payload.rs`, `crates/fern-core/src/drag_state.rs`
 - Clipboard: `crates/fern-platform/src/clipboard.rs`
+- File dialogs: [crates/fern-platform/src/file_dialog.rs](crates/fern-platform/src/file_dialog.rs) (trait, handle, request, result, payload, mock, `RfdAsyncBackend`, `EventContextFileDialogExt`). Wiring: `WindowOps::current_parent_handle` in [crates/fern-core/src/window/ops.rs](crates/fern-core/src/window/ops.rs); `EventContext::parent_window_handle` + `EventContext::poster` in [crates/fern-core/src/widget.rs](crates/fern-core/src/widget.rs); `WidgetTree::run_with_event_context` in [crates/fern-core/src/widget_tree.rs](crates/fern-core/src/widget_tree.rs); `FernAppHandler::try_route_file_dialog_payload` and the `AppEvent::External` downcast arm in [crates/fern-app/src/app.rs](crates/fern-app/src/app.rs); window-close purge hook in [crates/fern-app/src/window_manager.rs](crates/fern-app/src/window_manager.rs)'s `close_window`. Demo: [examples/file_dialogs/src/main.rs](examples/file_dialogs/src/main.rs).
 - Text input: `crates/fern-widgets/src/text_input.rs`, `crates/fern-widgets/src/primitives/text_input_field.rs`
 - Rich text: `crates/fern-widgets/src/rich_text/` (state, paint, clipboard, keyboard, mouse, hit_test, context_menu, frame_loop, policy, image_cache)
 - New widgets: `crates/fern-widgets/src/spin_box.rs`, `crates/fern-widgets/src/split_button.rs`, `crates/fern-widgets/src/group_box.rs`, `crates/fern-widgets/src/group_header.rs`, `crates/fern-widgets/src/message_box.rs`, `crates/fern-widgets/src/tool_box.rs`, `crates/fern-widgets/src/keystroke_format.rs`, `crates/fern-widgets/src/privacy_settings.rs`

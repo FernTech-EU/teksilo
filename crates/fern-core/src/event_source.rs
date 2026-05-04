@@ -79,14 +79,30 @@ impl SubscriptionHandle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SubscriptionId(pub(crate) u64);
 
-/// Posts subscription events from background threads back to the UI thread.
+/// Posts events from background threads back to the UI thread.
 ///
 /// fern-core cannot depend on winit or fern-app, so this trait acts as the
 /// boundary: fern-app provides an implementation that wraps the
-/// `EventLoopProxy<AppEvent>` and converts the call into a
-/// `AppEvent::SubscriptionEvent` user-event.
+/// `EventLoopProxy<AppEvent>` and converts the calls into the
+/// matching `AppEvent::*` user-event variants.
+///
+/// Two posting paths share this trait:
+///
+/// - `post_subscription_event` — backend events for widgets that
+///   subscribed via [`BuildContext::subscribe_event`](crate::build_context::BuildContext).
+/// - `post_external` — arbitrary typed payloads delivered as
+///   [`AppEvent::External`](crate::app_event::AppEvent::External). Used
+///   by async OS-driven integrations (file dialogs, future background
+///   tasks) that resolve off the UI thread and need to deliver typed
+///   results back to the main loop.
 pub trait AppEventPoster: Send + Sync + 'static {
     fn post_subscription_event(&self, sub_id: SubscriptionId, event: Box<dyn Any + Send>);
+
+    /// Post an arbitrary typed payload as `AppEvent::External(_)`.
+    /// Default body is a no-op so existing implementations stay
+    /// source-compatible; the real implementation in fern-app
+    /// forwards to `EventLoopProxy::send_event`.
+    fn post_external(&self, _payload: Box<dyn Any + Send>) {}
 }
 
 /// Type-erased wrapper around a registered [`EventSource`].
@@ -205,6 +221,25 @@ impl TreeAppContext {
     pub fn with_app_state(mut self, registry: HashMap<TypeId, Box<dyn Any>>) -> Self {
         self.app_state = registry;
         self
+    }
+
+    /// Install an [`AppEventPoster`] so background work (file dialogs,
+    /// future async-result features) can post typed payloads back to
+    /// the UI loop via `AppEvent::External`. The builder calls this
+    /// unconditionally during `FernAppBuilder::run` — the poster is
+    /// cheap (a thin wrapper around the event-loop proxy) and being
+    /// reachable means widgets do not have to depend on the event-source
+    /// feature for unrelated async-result delivery.
+    pub fn with_poster(mut self, poster: Arc<dyn AppEventPoster>) -> Self {
+        self.poster = Some(poster);
+        self
+    }
+
+    /// Borrow the registered [`AppEventPoster`] if one was installed.
+    /// Used by integrations that need to post typed payloads back to
+    /// the UI loop from an external thread (e.g. file-dialog backends).
+    pub fn poster(&self) -> Option<&Arc<dyn AppEventPoster>> {
+        self.poster.as_ref()
     }
 
     /// Look up an app-state value of type `T` previously registered via

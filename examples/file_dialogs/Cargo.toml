@@ -1,0 +1,14 @@
+[package]
+name = "file-dialogs"
+edition = "2024"
+version.workspace = true
+license-file.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "file-dialogs"
+path = "src/main.rs"
+
+[dependencies]
+fern-ui = { workspace = true, features = ["file-dialog"] }
