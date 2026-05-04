@@ -102,8 +102,14 @@ appear dimmed in the Shortcuts tab.
 ```
 
 - **Pick** — toggles the picker tool. While picking, a transparent
-  overlay covers the user-root area and the next click selects the
-  widget under the cursor. The picker auto-exits after one pick.
+  overlay covers the user-root area. Clicking on a widget opens a
+  context menu listing the deepest-hit widget plus its ancestors
+  (up to 10 entries, walking up to the user-root inclusive). Pick
+  any row to select that level — useful for composites where the
+  deepest hit is an inner leaf (e.g. a `TextWidget` inside a
+  `Button`) but you want the wrapping widget. Click outside the
+  menu or press Escape to dismiss; the picker auto-exits after one
+  selection or dismissal.
 - **Bounds overlay** — `Off` (no overlay), `Sel` (stroke around the
   selected widget only), `All` (stroke every widget; layout
   primitives in cyan, content widgets in magenta; cursor-following

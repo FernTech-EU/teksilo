@@ -104,6 +104,16 @@ impl Widget for InspectorShell {
             ctx.set_dormant(picker_overlay_id);
         }
 
+        // Pre-register the picker chain menu as an orphan widget,
+        // parked dormant. The picker activates + shows it via
+        // `ctx.show_overlay` once `pending_pick_chain` is populated;
+        // the rows read live from that signal so the menu rebuilds
+        // for each pick. Same orphan-dormant pattern that
+        // `PropertiesRows` uses for its "Copy value" context menu.
+        let pick_menu_id = build_pick_chain_menu(ctx, state.clone());
+        ctx.set_dormant(pick_menu_id);
+        state.pick_menu_id.set(Some(pick_menu_id));
+
         let z = ZStack::new()
             .add_child(self.user_root_id)
             .child(highlight)
@@ -334,4 +344,61 @@ fn scrollable_tab(content: impl Widget + 'static) -> impl Widget + 'static {
 /// rather than spanning the panel.
 fn fill_width(content: impl Widget + 'static) -> impl Widget + 'static {
     Expand::horizontal().flex(0.0).child(content)
+}
+
+/// Maximum number of ancestor rows the picker chain menu can show.
+/// Mirrors the cap in `PickResolver::layout_response` — both must
+/// match: the menu pre-registers exactly this many `Button` slots,
+/// each gated by `visible_when` so unused slots stay dormant for
+/// shorter chains.
+const PICK_CHAIN_MAX: usize = 10;
+
+/// Build the picker's chain menu. A `Panel(VStack)` of
+/// `PICK_CHAIN_MAX` `Button` rows; each row's label is bound to
+/// `state.pending_pick_chain[i]` so a single static structure
+/// serves every pick. Rows beyond the current chain length collapse
+/// via `visible_when` (a row that resolves to no chain entry stays
+/// dormant and reports zero size). Returns the panel's `WidgetId`
+/// so the caller can park it dormant + reference it from the
+/// picker's `OverlayRequest`.
+fn build_pick_chain_menu(ctx: &mut BuildContext, state: InspectorState) -> WidgetId {
+    let chain_signal = state.pending_pick_chain.clone();
+    let mut row_ids: Vec<WidgetId> = Vec::with_capacity(PICK_CHAIN_MAX);
+    for i in 0..PICK_CHAIN_MAX {
+        let label_signal = chain_signal.map(move |chain| {
+            chain
+                .get(i)
+                .map(|entry| format!("{}  ·  #{:?}", entry.label, entry.id))
+                .unwrap_or_default()
+        });
+        let visible_signal = chain_signal.map(move |chain| chain.len() > i);
+        let state_for_action = state.clone();
+        let row = Button::new_literal("")
+            .bind_label(label_signal)
+            .on_activate_fn(move |c| {
+                let chain = state_for_action.pending_pick_chain.get();
+                if let Some(entry) = chain.get(i) {
+                    state_for_action.selected_id.set(Some(entry.id));
+                }
+                state_for_action.pending_pick_chain.set(Vec::new());
+                if state_for_action.picker_mode.get() {
+                    state_for_action.picker_mode.set(false);
+                }
+                c.dismiss_all_overlays();
+            });
+        let row_id = ctx.add(row);
+        ctx.visible_when(row_id, visible_signal);
+        row_ids.push(row_id);
+    }
+    let mut menu_vstack = VStack::new().spacing(0.0);
+    for id in row_ids {
+        menu_vstack = menu_vstack.add_child(id);
+    }
+    let panel = Panel::new()
+        .background(fern_tokens::SurfaceRole::Raised)
+        .border_color(fern_tokens::BorderRole::Default)
+        .border_width(1.0)
+        .padding(4.0)
+        .child(menu_vstack);
+    ctx.add(panel)
 }

@@ -3,16 +3,20 @@
 //! `InspectorState::pending_pick_point`.
 
 use fern_canvas::{Canvas, Rect, SizeProposal};
-use fern_tokens::Color;
 use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::binding::BindingLevel;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, PointerButton, WidgetEvent};
+use fern_core::overlay::{
+    DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+};
 use fern_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
+use fern_tokens::Color;
 
-use crate::state::InspectorState;
+use crate::state::{InspectorState, PickChainEntry};
+use crate::tabs::last_segment;
 
 /// Transparent leaf widget that covers the user-root subregion when
 /// picker mode is active. Captures the next pointer-down and stashes
@@ -43,19 +47,48 @@ impl std::fmt::Debug for PickerOverlay {
 
 impl Widget for PickerOverlay {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Capture primary pointer-down anywhere within our slot.
-        // `PickResolver` resolves the point → widget id on the next
-        // layout pass and turns picker mode off.
+        // Two-stage flow:
+        //
+        // 1. **PointerDown** stashes the click point. The framework
+        //    runs layout next; `PickResolver` reads the point, hit-
+        //    tests against each user-root subtree, walks the parent
+        //    chain (up to 10 entries), and stores the chain into
+        //    `state.pending_pick_chain` together with
+        //    `state.pick_menu_anchor`. `picker_mode` stays on so the
+        //    overlay remains active and the next pointer event still
+        //    routes here.
+        //
+        // 2. **PointerUp** (or any subsequent pointer event in the
+        //    same drag) reads the now-populated chain and presents
+        //    the chain menu via `ctx.show_overlay`. The menu's per-
+        //    row `Button::on_activate_fn` commits a selection, exits
+        //    picker mode, and dismisses the overlay; the menu's
+        //    `on_dismiss` does the same when the user dismisses with
+        //    Escape or click-outside.
+        //
+        // Splitting across PointerDown and PointerUp lets us hit-test
+        // *inside* a layout pass (where `LayoutContext::arena` is
+        // available) while still showing the overlay from a path
+        // that has `EventContext` access — neither context covers
+        // both surfaces alone.
+        let self_id = ctx.self_id();
         let state_for_handler = self.state.clone();
         let handlers = HandlerSet::new()
             .focusable(false)
-            .on_pointer_event(move |event, _ctx| match event {
+            .on_pointer_event(move |event, ctx| match event {
                 WidgetEvent::PointerDown {
                     position,
                     button: PointerButton::Primary,
                     ..
                 } => {
                     state_for_handler.pending_pick_point.set(Some(*position));
+                    EventResponse::Handled
+                }
+                WidgetEvent::PointerUp {
+                    button: PointerButton::Primary,
+                    ..
+                } => {
+                    show_chain_menu(&state_for_handler, ctx, self_id);
                     EventResponse::Handled
                 }
                 // Eat all other pointer events while picking so the
@@ -135,19 +168,93 @@ impl Widget for PickResolver {
             let hit = user_roots
                 .iter()
                 .find_map(|&root| arena.and_then(|a| a.hit_test_in_subtree(root, point)));
-            if let Some(id) = hit {
-                self.state.selected_id.set(Some(id));
+            if let (Some(id), Some(arena)) = (hit, arena) {
+                // Walk parent chain — deepest first. Stop at the
+                // containing user-root id (inclusive) or after the
+                // 10th entry. Capping the chain at 10 keeps the menu
+                // scannable on dense composites (e.g. a `Button` deep
+                // inside `Padding(Card(VStack(...)))`); deeper
+                // ancestors are accessible by re-picking on the
+                // chosen widget.
+                const MAX_CHAIN: usize = 10;
+                let label_for = |wid: WidgetId| -> String {
+                    arena
+                        .get(wid)
+                        .map(|node| last_segment(node.widget.type_name()).to_string())
+                        .unwrap_or_else(|| format!("#{wid:?}"))
+                };
+                let mut chain: Vec<PickChainEntry> = Vec::with_capacity(MAX_CHAIN);
+                chain.push(PickChainEntry {
+                    id,
+                    label: label_for(id),
+                });
+                let mut cur = id;
+                while chain.len() < MAX_CHAIN && !user_roots.contains(&cur) {
+                    match arena.parent(cur) {
+                        Some(parent) => {
+                            chain.push(PickChainEntry {
+                                id: parent,
+                                label: label_for(parent),
+                            });
+                            cur = parent;
+                        }
+                        None => break,
+                    }
+                }
+                self.state.pending_pick_chain.set(chain);
+                self.state.pick_menu_anchor.set(Some(point));
             }
             self.state.pending_pick_point.set(None);
-            // Always exit picker mode after a pointer event resolved
-            // — even if the hit-test missed. The user can re-enter
-            // pick mode from the toolbar.
-            if self.state.picker_mode.get() {
-                self.state.picker_mode.set(false);
-            }
+            // Picker_mode stays on until the menu's selection /
+            // dismissal callback turns it off — see the menu wiring
+            // in `InspectorShell::build`.
         }
         proposal.resolve(0.0, 0.0).into()
     }
 
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+}
+
+/// Bridge from the picker's `PointerUp` handler to the chain-menu
+/// overlay registered in `InspectorShell::build`. Reads the chain
+/// + anchor stashed by `PickResolver` in the previous layout pass,
+/// activates the pre-registered menu widget, and submits the
+/// overlay request through `EventContext`. Clearing the anchor
+/// signal here gates re-entry: subsequent `PointerUp` events that
+/// arrive before the next picker click are no-ops.
+fn show_chain_menu(
+    state: &InspectorState,
+    ctx: &mut fern_core::widget::EventContext<'_>,
+    overlay_anchor: WidgetId,
+) {
+    let Some(point) = state.pick_menu_anchor.get() else {
+        return;
+    };
+    let Some(menu_id) = state.pick_menu_id.get() else {
+        return;
+    };
+    if state.pending_pick_chain.get().is_empty() {
+        return;
+    }
+    state.pick_menu_anchor.set(None);
+    ctx.activate(menu_id);
+    let state_for_dismiss = state.clone();
+    ctx.show_overlay(OverlayRequest {
+        content_id: menu_id,
+        anchor: overlay_anchor,
+        placement: OverlayPlacement::AtPointer(point),
+        dismiss: DismissBehavior::EscapeOrClickOutside,
+        layer: OverlayLayer::InTree,
+        parent_overlay: None,
+        on_dismiss: Some(std::rc::Rc::new(move || {
+            // Click-outside / Escape: discard the chain and exit
+            // picker mode. The Pick toolbar button can re-enter
+            // the picker.
+            state_for_dismiss.pending_pick_chain.set(Vec::new());
+            if state_for_dismiss.picker_mode.get() {
+                state_for_dismiss.picker_mode.set(false);
+            }
+        })),
+        fade_duration: None,
+    });
 }

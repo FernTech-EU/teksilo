@@ -55,7 +55,7 @@ fn click_passes_through_inspector_shell_to_user_button() {
 }
 
 #[test]
-fn picker_resolves_click_to_user_widget() {
+fn picker_click_populates_chain_with_button_ancestor() {
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let button = tree.add(Button::new_literal("Click Me").on_activate_fn(|_| {}));
     let state = InspectorState::new(false);
@@ -71,20 +71,72 @@ fn picker_resolves_click_to_user_widget() {
     state.picker_mode.set(true);
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
-    // Click at the button center; the picker should record the point
-    // and the resolver should populate `selected_id` on the next layout.
+    // Click at the button center.
     let center = Point::new(200.0, 150.0);
     tree.pointer_move(center);
     tree.pointer_down_button(center, fern_core::event::PointerButton::Primary);
-    tree.pointer_up_button(center, fern_core::event::PointerButton::Primary);
 
-    // Run another layout so PickResolver gets to hit-test.
+    // PickResolver runs in layout — populates `pending_pick_chain`
+    // with the deepest hit + ancestors up to the user-root.
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
-    let selected = state.selected_id.get().expect("picker should select a widget");
-    // Walk parent chain — the resolved id should be the button itself
-    // OR one of its descendants (Button is a composing widget; the
-    // deepest-hit at click position is typically its inner label).
+    let chain = state.pending_pick_chain.get();
+    assert!(
+        !chain.is_empty(),
+        "PickResolver should populate the chain after a pick click"
+    );
+    // The chain ends at (or includes) the user-root id (which IS the
+    // button — `Button::new_literal` registers Button as the root
+    // of this test tree). The deepest-hit is somewhere inside the
+    // Button composite. Both endpoints belong to the button's
+    // subtree.
+    let chain_ids: Vec<_> = chain.iter().map(|e| e.id).collect();
+    assert!(
+        chain_ids.contains(&button),
+        "chain {chain_ids:?} should include the user-root button id ({button:?})"
+    );
+
+    // No selection yet — the user must pick a row from the menu.
+    assert!(
+        state.selected_id.get().is_none(),
+        "selected_id should remain None until the user activates a chain row"
+    );
+    assert!(
+        state.picker_mode.get(),
+        "picker_mode stays on while the chain menu is being shown / awaited"
+    );
+
+    // PointerUp shows the chain menu via `ctx.show_overlay`. Once
+    // the user activates a row, that row's `on_activate` commits the
+    // selection, clears the chain, and exits picker mode. We
+    // simulate the deepest row's activation by reading the menu id
+    // and synthetically clicking the first child Button.
+    tree.pointer_up_button(center, fern_core::event::PointerButton::Primary);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let menu_id = state
+        .pick_menu_id
+        .get()
+        .expect("InspectorShell should have registered a chain-menu id");
+    let menu_kids = tree.children(menu_id);
+    assert_eq!(
+        menu_kids.len(),
+        1,
+        "menu Panel wraps a single child (the inner VStack)"
+    );
+    let vstack_id = menu_kids[0];
+    let row_ids = tree.children(vstack_id);
+    assert!(!row_ids.is_empty(), "menu VStack should have row children");
+    // Activate row 0 (the deepest entry) — that's what a click on the
+    // top menu row would do. `synthetic_click` dispatches a click
+    // event so the row's `on_activate_fn` fires.
+    tree.click(row_ids[0]);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let selected = state
+        .selected_id
+        .get()
+        .expect("activating a chain row should set selected_id");
     let mut cur = Some(selected);
     let mut found_button = false;
     while let Some(id) = cur {
@@ -96,12 +148,15 @@ fn picker_resolves_click_to_user_widget() {
     }
     assert!(
         found_button,
-        "picker resolved to {:?}, expected the button (id={:?}) or one of its descendants",
-        selected, button
+        "selected {selected:?} should be the button or one of its descendants"
     );
     assert!(
         !state.picker_mode.get(),
-        "picker should disengage automatically after one pick"
+        "picker_mode should turn off after a chain row is activated"
+    );
+    assert!(
+        state.pending_pick_chain.get().is_empty(),
+        "chain should be cleared after activation"
     );
 }
 

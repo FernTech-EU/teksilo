@@ -28,6 +28,16 @@ pub enum OverlayMode {
     AllBounds,
 }
 
+/// One row in the picker's chain menu — a widget id paired with the
+/// last segment of its type name (e.g. `Button`, `Padding`) so the
+/// menu's row labels can be derived without re-walking the arena
+/// from the click handler.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PickChainEntry {
+    pub id: WidgetId,
+    pub label: String,
+}
+
 impl OverlayMode {
     /// Cycle Off → Selection → All → Off. Used by the toolbar's
     /// keyboard-friendly Tab cycle.
@@ -67,6 +77,33 @@ pub struct InspectorState {
     /// pending hit-test resolution by `PickResolver` in the next
     /// layout pass. `None` between picks.
     pub pending_pick_point: Signal<Option<Point>>,
+    /// Ancestor chain produced by the picker. Index 0 is the deepest
+    /// widget under the click point; subsequent entries walk up the
+    /// arena tree (parent → grandparent → …) and stop at the
+    /// containing user-root id (inclusive) or after 10 entries —
+    /// whichever comes first. Each entry carries the resolved type
+    /// label (last segment of `Widget::type_name()`) alongside the
+    /// id so the menu rows can display a stable string without
+    /// re-walking the arena. Cleared back to empty once the user
+    /// commits a selection from the menu or dismisses it. While
+    /// non-empty, the picker shows a context menu listing each entry
+    /// so the developer can choose the right level of a composite
+    /// (e.g. the `Button` ancestor instead of the deepest-hit
+    /// `TextWidget` inside it). See `PickResolver::layout_response`
+    /// for the producer side and `PickerOverlay`'s pointer handler
+    /// for the consumer side.
+    pub pending_pick_chain: Signal<Vec<PickChainEntry>>,
+    /// Window-local point at which to anchor the picker chain menu.
+    /// Set together with `pending_pick_chain` by `PickResolver` and
+    /// passed to `OverlayPlacement::AtPointer`. Cleared once the
+    /// menu is shown.
+    pub pick_menu_anchor: Signal<Option<Point>>,
+    /// Pre-registered menu panel id. Created once by `InspectorShell`
+    /// in `build()` and parked dormant. The picker activates it +
+    /// shows it as an overlay, with each row's `Button::bind_label`
+    /// reading from `pending_pick_chain`. Same orphan-dormant pattern
+    /// the `PropertiesRows` "Copy value" context menu uses.
+    pub(crate) pick_menu_id: Signal<Option<WidgetId>>,
     /// User-root widget ids — one per InspectorShell (so one per
     /// window). Pushed by `state::install`'s post_root closure with
     /// the `root_id` argument it receives. Used as the **starting
@@ -194,6 +231,9 @@ impl InspectorState {
             selected_bounds: Signal::new(None),
             picker_mode: Signal::new(false),
             pending_pick_point: Signal::new(None),
+            pending_pick_chain: Signal::new(Vec::new()),
+            pick_menu_anchor: Signal::new(None),
+            pick_menu_id: Signal::new(None),
             user_root_ids: Signal::new(Vec::new()),
             pending_tree_click_y: Signal::new(None),
             overlay_mode: Signal::new(OverlayMode::SelectionOnly),
