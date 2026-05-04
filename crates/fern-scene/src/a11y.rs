@@ -1,16 +1,19 @@
-//! Accessibility policies for `SceneView`.
+//! Accessibility policies for [`SceneView`](crate::SceneView).
 //!
-//! Phase 5a ships the **visual-default** path: an off-screen-mode
-//! enum + helper that decides which items the AT walker should
-//! emit. Phase 5b layers the parallel-structural API on top
-//! (logical groups, parents, relations, auto-graft, custom focus
-//! callbacks) — see `docs/fern-scene-a11y.md` for the full picture.
+//! Two layers cooperate. The **visual-default** path emits AT nodes
+//! for every visible heavyweight widget and every visible lightweight
+//! item with role + screen-projected bounds, gated by an
+//! [`A11yOffScreenMode`] policy that decides which off-viewport items
+//! are still announced. The **logical-structural API** (groups,
+//! parents, relations, auto-graft, custom focus callbacks) layers
+//! over the top — see [`docs/fern-scene-a11y.md`](https://github.com/fernui/fern-ui/blob/main/docs/fern-scene-a11y.md)
+//! for the full picture.
 //!
-//! Defaults are chosen so a quick prototype is accessible out of
-//! the box: every visible heavyweight widget participates in the
-//! AT walker as a normal direct child of `SceneView`, every visible
-//! lightweight item gets a synthetic AT node with role +
-//! screen-projected bounds, and Tab cycles in reading order.
+//! Defaults are chosen so a quick prototype is accessible out of the
+//! box: heavyweight widgets emit normally, lightweight items get
+//! synthetic nodes, Tab cycles in reading order. Apps shape the
+//! reading experience by declaring [`A11yGroup`]s, reparenting nodes,
+//! and installing a focus-order callback.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -20,7 +23,7 @@ use fern_core::widget_id::WidgetId;
 use crate::item::ItemId;
 
 // ---------------------------------------------------------------------------
-// Logical AT structure — Phase 5b
+// Logical AT structure
 // ---------------------------------------------------------------------------
 
 /// Opaque identifier for a logical AT group declared via
@@ -145,7 +148,7 @@ impl A11yGroupBuilder {
 }
 
 /// A logical AT group. Pure structure — no visual counterpart, no
-/// hit-test, no paint. Used by Phase 5b to declare AT-shape that
+/// hit-test, no paint. Declares AT-shape that
 /// diverges from visual scene layout (Acts containing Scene cards,
 /// Subgraphs containing Nodes, Layers containing Components).
 #[derive(Debug)]
@@ -200,7 +203,7 @@ pub enum A11yMode {
     /// children of `SceneView` (or their declared logical parent
     /// if `set_a11y_parent` placed them). Heavyweight widgets
     /// emit through the arena walker as natural descendants of
-    /// `SceneView`. Phase 5b's logical-tree machinery layers on
+    /// `SceneView`. The logical-tree machinery layers on
     /// top.
     Cooperative,
 
@@ -275,7 +278,7 @@ impl Default for A11yMode {
 /// user can interact with right now" while letting screen-reader
 /// users discover items just outside the visible region by jumping
 /// to the next/prev — at which point `SceneView::focus_item` auto-
-/// pans the view to bring the focused item into view (Phase 5+).
+/// pans the view to bring the focused item into view.
 #[derive(Debug, Clone, Copy)]
 pub enum A11yOffScreenMode {
     /// Emit *every* item in the scene as a synthetic AT node.

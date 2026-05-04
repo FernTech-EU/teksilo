@@ -1,4 +1,4 @@
-//! `fern-scene` — pannable/zoomable scene viewport for FernUI.
+//! `fern-scene` — pannable / zoomable scene viewport for FernUI.
 //!
 //! A sub-toolkit for **scene-based applications** — story corkboards,
 //! mind maps, node-graph editors, timeline views — where content is
@@ -6,39 +6,39 @@
 //! algorithm. Two tiers of content coexist under one view transform:
 //!
 //! - **Heavyweight tier:** any `Widget` (Button, TextInput, Panel,
-//!   composite components) at a `scene_rect`, fully interactive and
-//!   accessible, with full event/focus/animation/a11y machinery
-//!   intact.
-//! - **Lightweight tier:** `SceneItem`s (paths, rects, images, custom
-//!   paint) without arena overhead — for the "background furniture" of
-//!   a scene where thousands of items render cheaply. *(Phase 4+.)*
+//!   composite components) at a parent-relative position, fully
+//!   interactive and accessible, with full event / focus / animation /
+//!   a11y machinery intact.
+//! - **Lightweight tier:** [`SceneItem`]s (paths, rects, images,
+//!   custom paint) without arena overhead — for the "background
+//!   furniture" of a scene where thousands of items render cheaply.
 //!
-//! The crate is built on top of fern-core's existing per-node
-//! `set_transform` scope (which composes through hit-test, paint, and
-//! a11y) and the platform's already-plumbed pinch / scroll-with-
-//! modifiers / animated-`Signal<f32>` infrastructure — so OS gestures,
-//! reduced-motion snapping, and the four-gate idle scheduler fall out
-//! for free.
+//! The crate is built on top of fern-core's per-node `set_transform`
+//! scope (which composes through hit-test, paint, and a11y) and the
+//! platform's pinch / scroll / animated-`Signal<f32>` infrastructure
+//! — so OS gestures, reduced-motion snapping, and the four-gate idle
+//! scheduler fall out for free.
 //!
-//! See `docs/plans/scene-plan.md` for the full design and phasing,
-//! `docs/fern-scene.md` for usage, and `docs/fern-scene-a11y.md` for
-//! the accessibility-shaping API once that lands.
+//! See [`docs/fern-scene.md`](https://github.com/fernui/fern-ui/blob/main/docs/fern-scene.md)
+//! for the user-facing reference and
+//! [`docs/fern-scene-a11y.md`](https://github.com/fernui/fern-ui/blob/main/docs/fern-scene-a11y.md)
+//! for the accessibility-shaping API.
 //!
-//! ## Phase 1 surface
-//!
-//! What ships in Phase 1 is the model + a static viewport: build a
-//! `Scene`, drop heavyweight widgets at fixed scene coordinates, hand
-//! it to a `SceneView`. No view transform yet (identity), no
-//! pan/zoom, no spatial index, no lightweight items. Subsequent phases
-//! layer those on without API churn.
+//! ## Quick start
 //!
 //! ```ignore
-//! use fern_scene::{ItemId, Scene, SceneView};
-//! use fern_canvas::Rect;
+//! use fern_scene::{ItemId, RectItem, Scene, SceneView};
+//! use fern_canvas::{Point, Rect};
 //!
 //! let mut scene = Scene::new();
-//! let _id: ItemId = scene.add_widget(my_card_widget(), Rect::new(0.0, 0.0, 200.0, 120.0));
-//! scene.add_widget(my_card_widget(), Rect::new(220.0, 0.0, 200.0, 120.0));
+//! let _w: ItemId = scene.add_widget(
+//!     my_card_widget(),
+//!     Rect::new(0.0, 0.0, 200.0, 120.0),
+//! );
+//! scene.add_item(
+//!     RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).fill(fern_tokens::Color::RED),
+//!     Point::new(220.0, 0.0),
+//! );
 //! let view = SceneView::new(scene);
 //! tree.add(view);
 //! ```

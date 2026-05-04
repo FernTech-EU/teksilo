@@ -1,6 +1,6 @@
 //! Spatial index for [`Scene`](crate::Scene) items.
 //!
-//! Phase 3 ships a uniform grid hash; Phase 7 adds an R-tree alternative
+//! `GridHashIndex` (default) is a uniform grid hash; an R-tree alternative
 //! behind the same trait. The trait is deliberately small — three
 //! mutating operations (`insert`, `remove`, `query`) plus two query
 //! methods (`contains`, `len`) — so swapping implementations is a
@@ -17,7 +17,7 @@
 //! - Pathological case (one giant item that spans hundreds of cells)
 //!   is rare and easily worked around by raising `cell_size` for
 //!   that scene; an R-tree handles non-uniform density better and is
-//!   the Phase 7 fallback for editor-style scenes.
+//!   an editor-style fallback for many overlapping items.
 //!
 //! Default `cell_size` is `256.0` logical pixels — large enough that
 //! typical card-sized items (~200 px) bucket into 1–4 cells and small
