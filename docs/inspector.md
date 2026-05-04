@@ -119,7 +119,7 @@ appear dimmed in the Shortcuts tab.
 | **Tree** | Live widget hierarchy, indented by depth. Click a row to select. Top text input filters by case-insensitive substring match against each type's last segment. When the picker resolves to a widget that's currently off-screen, the row scrolls into view automatically (skipped when the user clicked the row directly — the row is already on-screen). Excludes every InspectorShell subtree (multi-window safe). |
 | **Properties** | For the selected widget: type, bounds, dirty flags, parent, children count, activation, `clips_children`, `event_pass_through`, plus a single-line `debug_repr` row. **Copy** button dumps every row plus the full multi-line Debug repr to the clipboard via `ClipboardHandle`. **Right-click** any row to open a `Copy value` context menu that copies just that row's value. |
 | **Accessibility** | Role / name / value / advertised actions / toggled / expanded / selected / hidden, from the widget's `accessibility(builder)` output. |
-| **Theme** | Preset buttons (**Light** / **Dark**) — clicking calls `EventContext::set_theme(...)`. **Export** dumps the current `Theme` as pretty JSON to the clipboard; **Import** parses the clipboard JSON back into a `Theme` and applies it (silently ignores parse errors). Below: a curated read-only swatch list (accent, surfaces, text roles, borders, status colors). |
+| **Theme** | Preset buttons (**Light** / **Dark**) — clicking calls `EventContext::set_theme(...)`. **Apply** folds every per-row draft back into the active theme; **Reset** discards drafts and re-syncs from the active theme. **Export** dumps the current `Theme` as pretty JSON to the clipboard; **Import** parses the clipboard JSON back into a `Theme` and applies it (silently ignores parse errors). Below: a curated list of editable colors (accent, surfaces, text roles, borders, status colors). Each row carries a `ColorEdit` field — clicking it opens a `ColorPicker` popover with HSV canvas, hue / alpha strips, RGB spinners, hex input, and preset swatches. The picker writes through to the row's draft on every drag; Apply commits the batch. |
 | **Locale** | Every locale declared in `I18nConfig::supported_locales`. Click a row to call `EventContext::set_locale(...)`. The active locale is highlighted. |
 | **Focus** | Current focused widget plus its ancestor chain (root → leaf). Leaf shown in primary color, ancestors dimmed. |
 | **Shortcuts** | Every shortcut in the tree's `ShortcutRegistry` with its effective primary keystroke. Framework-reserved ids (`__`-prefixed) are dimmed. |
@@ -232,9 +232,12 @@ through. Use the opacity slider to dim them for dense UIs.
 - **Bounds-overlay AllBounds mode walks the arena once per layout
   pass.** Cost is ~O(N) per frame while active. Toggle to `Off` /
   `Sel` when not actively inspecting layout.
-- **Theme tab does not yet support per-color editing.** Slice 4 ships
-  the preset switcher only; per-color RGB / hex editing waits for
-  the real `ColorPicker` widget (Phase B in `widgets-plan.md`).
+- **Theme tab edits a curated subset of `ColorTokens`.** Sixteen
+  commonly-edited fields are surfaced; the remaining tokens
+  (typography, spacing, etc.) are read-only. The Apply / Reset
+  buttons commit or discard the per-row drafts; Light / Dark /
+  Import switch the active theme and re-sync drafts via the same
+  observer.
 - **Multi-window picker exclusion** now tracks every InspectorShell
   id in `state.shell_root_ids: Signal<Vec<WidgetId>>`. The picker
   walks every shell id when hit-testing, so opening a second window
