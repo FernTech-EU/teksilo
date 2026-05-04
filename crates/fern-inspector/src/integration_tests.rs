@@ -311,6 +311,57 @@ fn panel_resize_handle_tracks_cursor_one_to_one() {
 }
 
 #[test]
+fn tree_tab_renders_rows_for_user_root() {
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+    let state = InspectorState::new(true); // panel open
+    let shell_id = tree.add(InspectorShell::new(button, state.clone()));
+    let mut ids = state.user_root_ids.get();
+    ids.push(button);
+    state.user_root_ids.set(ids);
+    let _ = shell_id;
+
+    // Match simple-button's window dimensions (the example the user
+    // is running) — at 400×300 the 280 px default panel dominates the
+    // window so any TreeRows sizing or hit-test bug shows up here.
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    // Walk down to find a tall (>= 30 px) leaf widget INSIDE the
+    // Tree tab area whose bounds height equals N * 18 (ROW_HEIGHT).
+    // TreeRows reports its bounds height as `rows.len() * ROW_HEIGHT`.
+    // A height of 0 means push_subtree found nothing in the user-root
+    // subtree — the symptom the user reported.
+    fn find_tree_rows_height(
+        tree: &WidgetTree,
+        id: WidgetId,
+    ) -> Option<(WidgetId, f32)> {
+        let kids = tree.children(id);
+        if kids.is_empty() {
+            let h = tree.bounds(id).height;
+            if h >= 54.0 && (h % 18.0).abs() < 0.01 {
+                return Some((id, h));
+            }
+            return None;
+        }
+        for k in kids {
+            if let Some(p) = find_tree_rows_height(tree, k) {
+                return Some(p);
+            }
+        }
+        None
+    }
+
+    let h = find_tree_rows_height(&tree, shell_id)
+        .map(|(_, h)| h)
+        .unwrap_or(0.0);
+    assert!(
+        h >= 54.0,
+        "TreeRows reports {h} px height — push_subtree found no widgets in the user-root \
+         subtree (button + descendants), so the Tree tab is empty"
+    );
+}
+
+#[test]
 fn click_at_window_center_reaches_button_bounds() {
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
 
