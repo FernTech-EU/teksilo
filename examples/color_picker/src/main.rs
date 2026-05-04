@@ -1,5 +1,5 @@
 //! ColorPicker showcase — every layout / configuration of the new
-//! color-selection widgets in one window.
+//! color-selection widgets in one scrollable window.
 //!
 //! Run with: `cargo run -p color-picker-demo`.
 //!
@@ -22,10 +22,11 @@
 //! 9. **Disabled** — `.enabled(false)` on a ColorPicker.
 
 use fern_ui::core::WidgetPlacement;
+use fern_ui::i18n::I18nConfig;
 use fern_ui::prelude::*;
 use fern_ui::tokens::{Color, Theme};
 use fern_ui::widgets::{
-    ColorEdit, ColorPicker, ColorPickerLayout, HStack, HexColorInput, Padding, Panel,
+    ColorEdit, ColorPicker, ColorPickerLayout, HStack, HexColorInput, Padding, Panel, ScrollArea,
     TextWidget, VStack,
 };
 
@@ -58,103 +59,101 @@ impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let _theme = ctx.theme_signal().get();
 
-        let root = ctx.add(
-            Padding::uniform(20.0).child(
-                VStack::new()
+        let content = VStack::new()
+            .spacing(20.0)
+            // Heading.
+            .child(
+                TextWidget::new_literal("ColorPicker gallery")
+                    .style(TextStyleRole::BodyBold)
+                    .color(TextRole::Primary),
+            )
+            .child(
+                TextWidget::new_literal(
+                    "All ColorPicker / HexColorInput / ColorEdit configurations \
+                     driving live Signal<Color> sources.",
+                )
+                .style(TextStyleRole::Body)
+                .color(TextRole::Secondary),
+            )
+            // Section 1 — Standard layout.
+            .child(section(
+                "Standard layout (default)",
+                HStack::new()
                     .spacing(20.0)
-                    // Heading.
+                    .child(ColorPicker::new(self.bound_color.clone()))
+                    .child(live_preview(self.bound_color.clone())),
+            ))
+            // Section 2 — With alpha.
+            .child(section(
+                "With alpha enabled",
+                HStack::new()
+                    .spacing(20.0)
                     .child(
-                        TextWidget::new_literal("ColorPicker gallery")
-                            .style(TextStyleRole::BodyBold)
-                            .color(TextRole::Primary),
+                        ColorPicker::new(self.alpha_color.clone()).alpha_enabled(true),
+                    )
+                    .child(live_preview(self.alpha_color.clone())),
+            ))
+            // Section 3 — Compact layout.
+            .child(section(
+                "Compact layout (popover-friendly)",
+                ColorPicker::new(self.bound_color.clone()).layout(ColorPickerLayout::Compact),
+            ))
+            // Section 4 — Wide layout.
+            .child(section(
+                "Wide layout",
+                ColorPicker::new(self.alpha_color.clone())
+                    .alpha_enabled(true)
+                    .layout(ColorPickerLayout::Wide)
+                    .show_hsv_spinners(true),
+            ))
+            // Section 5 — HSV spinners only.
+            .child(section(
+                "HSV spinners only",
+                ColorPicker::new(self.bound_color.clone())
+                    .show_rgb_spinners(false)
+                    .show_hsv_spinners(true),
+            ))
+            // Section 6 — Custom swatches (Material-flavored).
+            .child(section(
+                "Custom swatch palette",
+                ColorPicker::new(self.bound_color.clone()).swatches(material_palette()),
+            ))
+            // Section 7 — HexColorInput standalone.
+            .child(section(
+                "HexColorInput bound to a live Panel background",
+                HStack::new()
+                    .spacing(12.0)
+                    .child(
+                        HexColorInput::new(self.hex_only_color.clone())
+                            .label("Background"),
+                    )
+                    .child(live_preview(self.hex_only_color.clone())),
+            ))
+            // Section 8 — ColorEdit row.
+            .child(section(
+                "ColorEdit (compact trigger + popover)",
+                HStack::new()
+                    .spacing(12.0)
+                    .child(ColorEdit::new(self.edit_color_a.clone()))
+                    .child(
+                        ColorEdit::new(self.edit_color_b.clone()).alpha_enabled(true),
                     )
                     .child(
-                        TextWidget::new_literal(
-                            "All ColorPicker / HexColorInput / ColorEdit configurations \
-                             driving live Signal<Color> sources.",
-                        )
-                        .style(TextStyleRole::Body)
-                        .color(TextRole::Secondary),
-                    )
-                    // Section 1 — Standard layout.
-                    .child(section(
-                        "Standard layout (default)",
-                        HStack::new()
-                            .spacing(20.0)
-                            .child(ColorPicker::new(self.bound_color.clone()))
-                            .child(live_preview(self.bound_color.clone(), false)),
-                    ))
-                    // Section 2 — With alpha.
-                    .child(section(
-                        "With alpha enabled",
-                        HStack::new()
-                            .spacing(20.0)
-                            .child(
-                                ColorPicker::new(self.alpha_color.clone())
-                                    .alpha_enabled(true),
-                            )
-                            .child(live_preview(self.alpha_color.clone(), true)),
-                    ))
-                    // Section 3 — Compact layout.
-                    .child(section(
-                        "Compact layout (popover-friendly)",
-                        ColorPicker::new(self.bound_color.clone())
-                            .layout(ColorPickerLayout::Compact),
-                    ))
-                    // Section 4 — Wide layout.
-                    .child(section(
-                        "Wide layout",
-                        ColorPicker::new(self.alpha_color.clone())
-                            .alpha_enabled(true)
-                            .layout(ColorPickerLayout::Wide)
-                            .show_hsv_spinners(true),
-                    ))
-                    // Section 5 — HSV spinners only.
-                    .child(section(
-                        "HSV spinners only",
-                        ColorPicker::new(self.bound_color.clone())
-                            .show_rgb_spinners(false)
-                            .show_hsv_spinners(true),
-                    ))
-                    // Section 6 — Custom swatches (Material-flavored).
-                    .child(section(
-                        "Custom swatch palette",
-                        ColorPicker::new(self.bound_color.clone()).swatches(material_palette()),
-                    ))
-                    // Section 7 — HexColorInput standalone.
-                    .child(section(
-                        "HexColorInput bound to a live Panel background",
-                        HStack::new()
-                            .spacing(12.0)
-                            .child(
-                                HexColorInput::new(self.hex_only_color.clone())
-                                    .label("Background"),
-                            )
-                            .child(live_preview(self.hex_only_color.clone(), false)),
-                    ))
-                    // Section 8 — ColorEdit row.
-                    .child(section(
-                        "ColorEdit (compact trigger + popover)",
-                        HStack::new()
-                            .spacing(12.0)
-                            .child(ColorEdit::new(self.edit_color_a.clone()))
-                            .child(
-                                ColorEdit::new(self.edit_color_b.clone())
-                                    .alpha_enabled(true),
-                            )
-                            .child(
-                                ColorEdit::nullable(self.edit_color_c.clone())
-                                    .picker_layout(ColorPickerLayout::Standard),
-                            ),
-                    ))
-                    // Section 9 — Disabled.
-                    .child(section(
-                        "Disabled",
-                        ColorPicker::new(self.bound_color.clone())
-                            .layout(ColorPickerLayout::Compact)
-                            .enabled(false),
-                    )),
-            ),
+                        ColorEdit::nullable(self.edit_color_c.clone())
+                            .picker_layout(ColorPickerLayout::Standard),
+                    ),
+            ))
+            // Section 9 — Disabled.
+            .child(section(
+                "Disabled",
+                ColorPicker::new(self.bound_color.clone())
+                    .layout(ColorPickerLayout::Compact)
+                    .enabled(false),
+            ));
+
+        let root = ctx.add(
+            ScrollArea::new()
+                .child(Padding::uniform(20.0).child(content)),
         );
         self.root_child_id = Some(root);
         vec![root]
@@ -201,7 +200,7 @@ fn section(title: &'static str, body: impl Widget + 'static) -> impl Widget + 's
 
 /// A 64×64 panel filled with the bound color — visible feedback that the
 /// signal binding works end-to-end.
-fn live_preview(color: Signal<Color>, _alpha: bool) -> impl Widget + 'static {
+fn live_preview(color: Signal<Color>) -> impl Widget + 'static {
     use fern_ui::core::ColorProp;
     let bg: ColorProp = color.into();
     Panel::new()
@@ -235,6 +234,10 @@ fn material_palette() -> Vec<Color> {
 fn main() {
     FernAppBuilder::new()
         .theme(Theme::light_default())
+        // Register fern-widgets' own translatable strings so internal
+        // labels (Role::Slider names, swatch hex readouts, etc.) resolve
+        // instead of falling back to literal Fluent keys.
+        .i18n(I18nConfig::new().framework_locales(fern_ui::widgets::framework_locales()))
         .initial_window(
             WindowConfig::new()
                 .title("FernUI — ColorPicker gallery")

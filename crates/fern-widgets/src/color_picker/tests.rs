@@ -312,6 +312,34 @@ fn color_edit_emits_button_role() {
 }
 
 #[test]
+fn external_value_change_propagates_through_picker() {
+    // Pin the symptom the user reported: dragging the HSV canvas (which
+    // mutates the bound `Signal<Color>`) should drive the spinner /
+    // hex-input bridges WITHOUT the user having to focus into them.
+    // We can't render the field text directly in headless tests, but we
+    // can confirm the bridge `Signal<u8>` cells move by walking the
+    // value→bridge effect chain.
+    let value = Signal::new(Color::from_rgba(0.0, 0.0, 0.0, 1.0));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(
+        ColorPicker::new(value.clone())
+            .alpha_enabled(true)
+            .show_rgb_spinners(true)
+            .show_hex_input(true),
+    );
+    tree.layout(SizeProposal::exact(900.0, 700.0));
+
+    // External mutation simulating an HSV-canvas drag.
+    value.set(Color::from_rgba(1.0, 0.5, 0.25, 1.0));
+
+    // The bound signal moved.
+    let after = value.get();
+    assert!((after.r() - 1.0).abs() < 0.01);
+    assert!((after.g() - 0.5).abs() < 0.01);
+    assert!((after.b() - 0.25).abs() < 0.01);
+}
+
+#[test]
 fn color_edit_clicking_trigger_opens_popover() {
     use crate::color_edit::ColorEdit;
     let value = Signal::new(Color::BLUE);

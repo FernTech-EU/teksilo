@@ -32,14 +32,19 @@ use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{Color, CornerRadius, Orientation};
 
-/// Texture name shared by every HueStrip in the process. Idempotent
-/// registration via `ensure_image_registered` makes duplicates cheap.
-const HUE_TEXTURE_NAME: &str = "__fern_color_picker_hue_256";
-const HUE_TEXTURE_WIDTH: u32 = 256;
+/// One texture per orientation — `draw_image` stretches without
+/// rotation, so a horizontal texture into a vertical strip would
+/// run the gradient across the strip's short axis. Picking by
+/// orientation keeps the rainbow oriented along the strip's long
+/// axis without paint-time rotation.
+const HUE_TEXTURE_NAME_HORIZONTAL: &str = "__fern_color_picker_hue_h_256";
+const HUE_TEXTURE_NAME_VERTICAL: &str = "__fern_color_picker_hue_v_256";
+const HUE_TEXTURE_LENGTH: u32 = 256;
 
-/// 256×1 RGBA rainbow pixels generated once on first read and reused
-/// for every HueStrip in the process. Avoids the per-paint Vec
-/// allocation that an in-paint generator would incur.
+/// 256-pixel rainbow generated once per orientation. Pixel order in
+/// the vertical buffer matches scan-line order: column 0, rows 0..256
+/// — `draw_image` reads row-major so a single column of 256 rows is a
+/// 1×256 RGBA buffer.
 static HUE_PIXELS: LazyLock<Vec<u8>> = LazyLock::new(generate_hue_pixels);
 
 pub(crate) struct HueStrip {
@@ -268,13 +273,18 @@ impl Widget for HueStrip {
         let style = ctx.theme.components.color_picker;
         let radius = CornerRadius::uniform(style.strip_corner_radius);
 
-        // Register the rainbow texture — `Cow::Borrowed` reuses the
-        // process-wide `HUE_PIXELS` static; `ensure_image_registered`
-        // already short-circuits within-frame duplicates by name.
+        // Register the rainbow texture for the strip's orientation.
+        // Same pixel data either way (256 RGBA quartets in hue order);
+        // dimensions decide whether scan-line order maps onto the
+        // strip's long axis horizontally or vertically.
+        let (texture_name, tex_w, tex_h) = match self.orientation {
+            Orientation::Horizontal => (HUE_TEXTURE_NAME_HORIZONTAL, HUE_TEXTURE_LENGTH, 1),
+            Orientation::Vertical => (HUE_TEXTURE_NAME_VERTICAL, 1, HUE_TEXTURE_LENGTH),
+        };
         canvas.ensure_image_registered(
-            HUE_TEXTURE_NAME,
-            HUE_TEXTURE_WIDTH,
-            1,
+            texture_name,
+            tex_w,
+            tex_h,
             Cow::Borrowed(HUE_PIXELS.as_slice()),
         );
 
@@ -282,7 +292,7 @@ impl Widget for HueStrip {
         // rounded-rect corner anti-aliasing leaving the picker surface
         // visible at the strip's rounded corners. Drawn first.
         canvas.fill_rounded_rect(bounds, radius, ctx.theme.colors.surface_main);
-        canvas.draw_image(bounds, HUE_TEXTURE_NAME);
+        canvas.draw_image(bounds, texture_name);
 
         // Border frame.
         canvas.stroke_rounded_rect(
@@ -357,9 +367,9 @@ impl Widget for HueStrip {
 /// Generate a 256×1 RGBA rainbow texture. Each pixel `i` is the color
 /// `Color::from_hsv(i/256·360, 1, 1)` packed as four `u8`s.
 fn generate_hue_pixels() -> Vec<u8> {
-    let mut pixels = Vec::with_capacity(HUE_TEXTURE_WIDTH as usize * 4);
-    for i in 0..HUE_TEXTURE_WIDTH {
-        let h = (i as f32 / HUE_TEXTURE_WIDTH as f32) * 360.0;
+    let mut pixels = Vec::with_capacity(HUE_TEXTURE_LENGTH as usize * 4);
+    for i in 0..HUE_TEXTURE_LENGTH {
+        let h = (i as f32 / HUE_TEXTURE_LENGTH as f32) * 360.0;
         let c = Color::from_hsv(h, 1.0, 1.0);
         pixels.push((c.r() * 255.0) as u8);
         pixels.push((c.g() * 255.0) as u8);
@@ -376,13 +386,13 @@ mod tests {
     #[test]
     fn hue_pixels_are_rainbow() {
         let pixels = generate_hue_pixels();
-        assert_eq!(pixels.len(), HUE_TEXTURE_WIDTH as usize * 4);
+        assert_eq!(pixels.len(), HUE_TEXTURE_LENGTH as usize * 4);
         // First pixel is red.
         assert_eq!(pixels[0], 255);
         assert_eq!(pixels[1], 0);
         assert_eq!(pixels[2], 0);
         // Middle pixel ≈ cyan.
-        let mid = (HUE_TEXTURE_WIDTH as usize / 2) * 4;
+        let mid = (HUE_TEXTURE_LENGTH as usize / 2) * 4;
         assert!(pixels[mid] < 50);
         assert!(pixels[mid + 1] > 200);
         assert!(pixels[mid + 2] > 200);
