@@ -45,9 +45,23 @@ use fern_ui::widgets::{
     EventContextMessageBoxExt, Expand, FixedSize, Grid, GroupBox, GroupHeader, HStack,
     IconLocation, IconWidget, ImageFit, ImageWidget, Link, MaxSize, MenuItem, MenuList, MessageBox,
     MessageBoxButtons, Padding, Panel, ProgressBar, RadioButton, ScrollArea, SegmentedControl,
-    Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabItem, TabWidget,
-    TextInput, TextWidget, Toggle, ToolBox, ToolBoxItem, Toolbar, TrackSize, VStack, Wrap,
+    Slider, Spacer, SplitButton, SplitView, StandardButton, StatusBar, TabId, TabInfo,
+    TabWidget, TextInput, TextWidget, Toggle, ToolBox, ToolBoxItem, Toolbar, TrackSize, VStack,
+    Wrap,
 };
+
+/// `fern!`-DSL-friendly helper: a free fn returns a `TabInfo` that
+/// the DSL accepts as a property value. (Method-chain expressions
+/// like `TabInfo::new().title(...)` need `#{...}` escaping in the
+/// DSL, which forces an `_id`-suffixed method lookup — wrong shape
+/// for `TabWidget::static_tab`.)
+fn tab_info(name: &'static str) -> TabInfo {
+    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal(name))
+}
+
+fn tab_info_disabled(name: &'static str) -> TabInfo {
+    tab_info(name).enabled(false)
+}
 
 // ---------------------------------------------------------------------------
 // Application intents
@@ -81,7 +95,7 @@ struct Signals {
     cb_sounds: Signal<bool>,
     toggle_disabled_state: Signal<bool>,
     slider_disabled_state: Signal<f32>,
-    tabs_selected: Signal<usize>,
+    tabs_selected: Signal<Option<TabId>>,
     tool_box_selected: Signal<usize>,
     combo_selected: Signal<Option<String>>,
     visibility_signal: Signal<bool>,
@@ -109,7 +123,7 @@ impl Signals {
             cb_sounds: ctx.signal(true),
             toggle_disabled_state: ctx.signal(false),
             slider_disabled_state: ctx.signal(30.0_f32),
-            tabs_selected: ctx.signal(0_usize),
+            tabs_selected: ctx.signal(None),
             tool_box_selected: ctx.signal(0_usize),
             combo_selected: ctx.signal(None::<String>),
             visibility_signal: ctx.signal(false),
@@ -1691,8 +1705,8 @@ impl WidgetCatalog {
     fn nav_builder(&self, ctx: &mut BuildContext, theme: &Theme, sigs: &Signals) -> WidgetId {
         let tabs = ctx.add(
             TabWidget::new(sigs.tabs_selected.clone())
-                .tab_literal(
-                    "Overview",
+                .static_tab(
+                    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Overview")),
                     Panel::new().padding(16.0).child(
                         VStack::new()
                             .spacing(8.0)
@@ -1720,8 +1734,8 @@ impl WidgetCatalog {
                             ),
                     ),
                 )
-                .tab_literal(
-                    "Usage",
+                .static_tab(
+                    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Usage")),
                     Panel::new().padding(16.0).child(
                         VStack::new()
                             .spacing(8.0)
@@ -1741,8 +1755,8 @@ impl WidgetCatalog {
                             ),
                     ),
                 )
-                .tab_literal(
-                    "Structure",
+                .static_tab(
+                    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Structure")),
                     Panel::new().padding(16.0).child(
                         VStack::new()
                             .spacing(8.0)
@@ -1763,21 +1777,20 @@ impl WidgetCatalog {
                             ),
                     ),
                 )
-                .tab_item(
-                    TabItem::new_literal(
-                        "Disabled",
-                        Panel::new().padding(16.0).child(
-                            TextWidget::new_literal(
-                                "Disabled panes are still listed in the tab bar but \
-                                 cannot be activated by click or keyboard.",
-                            )
-                            .style(TextStyleRole::Body)
-                            .color(TextRole::Primary),
-                        ),
-                    )
-                    .enabled(false),
+                .static_tab(
+                    TabInfo::new()
+                        .title(fern_ui::i18n::LocalizedString::literal("Disabled"))
+                        .enabled(false),
+                    Panel::new().padding(16.0).child(
+                        TextWidget::new_literal(
+                            "Disabled panes are still listed in the tab bar but \
+                             cannot be activated by click or keyboard.",
+                        )
+                        .style(TextStyleRole::Body)
+                        .color(TextRole::Primary),
+                    ),
                 )
-                .trailing_slot(
+                .bar_trailing_slot(
                     Button::new_literal("More")
                         .style(ButtonVariant::Flat)
                         .on_activate_fn(|_| println!("LinkClicked")),
@@ -2977,7 +2990,7 @@ impl WidgetCatalog {
                 FixedSize {
                     bind_height: 240.0_f32
                     TabWidget(sigs.tabs_selected.clone()) {
-                        tab_literal: "Overview", Panel {
+                        static_tab: tab_info("Overview"), Panel {
                             padding: 16.0
                             VStack {
                                 spacing: 8.0
@@ -3000,7 +3013,7 @@ impl WidgetCatalog {
                                 }
                             }
                         }
-                        tab_literal: "Usage", Panel {
+                        static_tab: tab_info("Usage"), Panel {
                             padding: 16.0
                             VStack {
                                 spacing: 8.0
@@ -3016,7 +3029,7 @@ impl WidgetCatalog {
                                 }
                             }
                         }
-                        tab_literal: "Structure", Panel {
+                        static_tab: tab_info("Structure"), Panel {
                             padding: 16.0
                             VStack {
                                 spacing: 8.0
@@ -3033,15 +3046,17 @@ impl WidgetCatalog {
                                 }
                             }
                         }
-                        tab_item: TabItem::new_literal("Disabled", Panel::new().padding(16.0).child(
-                                            TextWidget::new_literal(
-                                                "Disabled panes are still listed in the tab bar but \
-                                                 cannot be activated by click or keyboard."
-                                            ).style(TextStyleRole::Body).color(TextRole::Primary)
-                                        )) {
-                            enabled: false
+                        static_tab: tab_info_disabled("Disabled"), Panel {
+                            padding: 16.0
+                            TextWidget::new_literal(
+                                "Disabled panes are still listed in the tab bar but \
+                                 cannot be activated by click or keyboard."
+                            ) {
+                                style: TextStyleRole::Body
+                                color: TextRole::Primary
+                            }
                         }
-                        trailing_slot: Button::new_literal("More") {
+                        bar_trailing_slot: Button::new_literal("More") {
                             style: ButtonVariant::Flat
                             on_activate_fn: |_| println!("LinkClicked")
                         }

@@ -1567,23 +1567,27 @@ impl WidgetCatalog for TabWidget {
     fn display_name() -> &'static str { "TabWidget" }
     fn variants() -> Vec<PreviewVariant> {
         fn build_three_tabs() -> Box<dyn Widget> {
-            let selected = Signal::new(0_usize);
+            use crate::tab_widget::{TabId, TabInfo};
+            let selected: Signal<Option<TabId>> = Signal::new(None);
             Box::new(
                 FixedSize::new()
                     .bind_width(420.0_f32)
                     .bind_height(220.0_f32)
                     .child(
                         TabWidget::new(selected)
-                            .tab_literal(
-                                "Overview",
+                            .static_tab(
+                                TabInfo::new()
+                                    .title(fern_i18n::LocalizedString::literal("Overview")),
                                 Center::new().child(sample_text("Overview tab content")),
                             )
-                            .tab_literal(
-                                "Details",
+                            .static_tab(
+                                TabInfo::new()
+                                    .title(fern_i18n::LocalizedString::literal("Details")),
                                 Center::new().child(sample_text("Details tab content")),
                             )
-                            .tab_literal(
-                                "Settings",
+                            .static_tab(
+                                TabInfo::new()
+                                    .title(fern_i18n::LocalizedString::literal("Settings")),
                                 Center::new().child(sample_text("Settings tab content")),
                             ),
                     ),

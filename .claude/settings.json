@@ -5,7 +5,13 @@
       "Bash(cargo test *)",
       "Bash(cargo build *)",
       "Bash(cargo check *)",
-      "Bash(rtk grep *)"
+      "Bash(rtk grep *)",
+      "Bash(rtk proxy grep *)",
+      "Bash(rtk proxy cargo test *)",
+      "Bash(rtk proxy cargo build *)",
+      "Bash(cargo doc *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo tree *)"
     ]
   }
 }

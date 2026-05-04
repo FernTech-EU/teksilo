@@ -1,783 +1,870 @@
+//! Tabbed-container widgets.
+//!
+//! Two public entry points:
+//!
+//! - [`TabBar<T>`] — a header strip driven by a `ListModel<T>` /
+//!   [`ListDataSource`](fern_data::ListDataSource) and a
+//!   [`TabDelegate<T>`]. Use it stand-alone when you want only the
+//!   tab strip (e.g., a document tab strip whose content lives in a
+//!   different panel or window).
+//!
+//! - [`TabWidget`] — the all-in-one composition: bar above, content
+//!   `Switcher` below, sharing one selection signal. Two
+//!   construction flavors:
+//!     - [`static_tab(info, content)`](TabWidget::static_tab) —
+//!       fixed tabs accumulated at construction.
+//!     - [`dynamic_tab::<S>(kind, factory)`](TabWidget::dynamic_tab) +
+//!       [`dynamic_model(model)`](TabWidget::dynamic_model) — apps
+//!       register a content factory per tab `kind` (`"plain-text-doc"`,
+//!       `"image"`, …); the live tab list is a mutable
+//!       `ListModel<TabHandle>` mutated at runtime (open / close /
+//!       reorder).
+//!
+//! Static tabs always render first, in declaration order; dynamic
+//! tabs follow. Selection is by stable [`TabId`] — drag-reorder and
+//! model mutations never silently send the active selection to a
+//! different tab.
+
+use std::any::Any;
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_canvas::{Rect, Size, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::build_context::BuildContext;
-use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::signal::Signal;
 use fern_core::binding::BindingLevel;
+use fern_core::build_context::BuildContext;
+use fern_core::signal::Signal;
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
+    LayoutContext, LayoutResponse, PendingChild, Widget, WidgetPlacement,
 };
-use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
-use fern_tokens::{Color, CornerRadius};
+use fern_data::ListModel;
 
-use crate::primitives::{Expand, HStack, Switcher, VStack};
-use crate::scroll_area::{ScrollArea, ScrollBarPolicy, ScrollBarMode};
+use crate::primitives::{Expand, Switcher, VStack};
 
-const FALLBACK_CHAR_WIDTH: f32 = 8.0;
-const FALLBACK_LINE_HEIGHT: f32 = 16.0;
-const HEADER_MIN_WIDTH: f32 = 72.0;
-const HEADER_PADDING_V: f32 = 6.0;
+mod bar;
+mod delegate;
+mod handle;
+mod header;
+mod id;
+mod info;
 
-struct TabEntry {
-    label: String,
-    content: PendingChild,
-    enabled: bool,
+#[cfg(test)]
+mod a11y_tests;
+#[cfg(test)]
+mod tests;
+
+pub use bar::{
+    TabBar, DEFAULT_BAR_SLOT_SPACING, DEFAULT_MAX_TAB_WIDTH, DEFAULT_MIN_TAB_WIDTH,
+    DEFAULT_PINNED_TAB_WIDTH, DEFAULT_TAB_SPACING,
+};
+pub use delegate::{ContextMenuFactory, TabBarOrientation, TabDelegate, TabSizing};
+pub use handle::{TabHandle, STATIC_KIND};
+pub use id::TabId;
+pub use info::{IconFactory, TabInfo};
+
+// ─── Static + dynamic content factory types ─────────────────────────
+
+/// Closure that builds a static tab's content widget. Called once
+/// per static tab — on the [`TabWidget`]'s first build that includes
+/// it. The resulting pane is then memoized: rebuilds caused by
+/// adjacent dynamic-model mutations reuse the same pane WidgetId, so
+/// internal state (focus, scroll, animation progress, …) survives.
+pub type StaticContentFactory = Rc<dyn Fn(&TabHandle) -> Box<dyn Widget>>;
+
+/// Closure that builds a dynamic tab's content widget from its
+/// handle and downcast typed payload. Internal — apps register via
+/// [`TabWidget::dynamic_tab::<S>`](TabWidget::dynamic_tab) which
+/// hides the `Any` downcast behind the type parameter.
+pub(crate) type DynamicContentFactory =
+    Rc<dyn Fn(&TabHandle, &dyn Any) -> Box<dyn Widget>>;
+
+// ─── Static-tab content shapes ──────────────────────────────────────
+
+/// One static tab's content + presentation. Three shapes:
+///
+/// - `Owned`: a one-shot `Box<dyn Widget>` from `static_tab(impl Widget)`.
+///   Consumed on the slot's first registration.
+/// - `Factory`: a `Fn(&TabHandle) -> Box<dyn Widget>` from
+///   `static_tab_factory`. Called once on the slot's first
+///   registration.
+/// - `PreId`: a pre-registered `WidgetId` from `static_tab_id`,
+///   wrapped in an alias on first registration. Stable for the
+///   widget's lifetime.
+enum StaticContentSource {
+    Owned(Option<Box<dyn Widget>>),
+    Factory(StaticContentFactory),
+    PreId(Option<WidgetId>),
 }
 
-/// A single tab definition used by `TabWidget`.
-pub struct TabItem {
-    label: String,
-    content: PendingChild,
-    enabled: bool,
-}
-
-impl std::fmt::Debug for TabItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TabItem")
-            .field("label", &self.label)
-            .field("enabled", &self.enabled)
-            .finish()
-    }
-}
-
-impl TabItem {
-    pub fn new(
-        label: impl Into<fern_i18n::LocalizedString>,
-        content: impl Widget + 'static,
-    ) -> Self {
-        let ls: fern_i18n::LocalizedString = label.into();
-        Self {
-            label: ls.resolve_now(),
-            content: PendingChild::Deferred(Box::new(content)),
-            enabled: true,
-        }
-    }
-
-    /// Construct from a pre-registered content widget id.
-    pub fn from_id(
-        label: impl Into<fern_i18n::LocalizedString>,
-        id: WidgetId,
-    ) -> Self {
-        let ls: fern_i18n::LocalizedString = label.into();
-        Self {
-            label: ls.resolve_now(),
-            content: PendingChild::Id(id),
-            enabled: true,
-        }
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) — wraps a raw label in `LocalizedString::literal`.
-    #[doc(hidden)]
-    pub fn new_literal(label: impl Into<String>, content: impl Widget + 'static) -> Self {
-        Self::new(fern_i18n::LocalizedString::literal(label), content)
-    }
-
-    /// Shim for `from_id(...)` accepting a raw string label.
-    #[doc(hidden)]
-    pub fn from_id_literal(label: impl Into<String>, id: WidgetId) -> Self {
-        Self::from_id(fern_i18n::LocalizedString::literal(label), id)
-    }
-
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TabHeaderInteraction {
-    Idle,
-    Hovered,
-}
-
-#[derive(Debug)]
-struct TabPane {
-    label: String,
-    child_id: Option<WidgetId>,
-    pending_child: Option<PendingChild>,
-}
-
-impl TabPane {
-    fn new(label: String, child: PendingChild) -> Self {
-        Self {
-            label,
-            child_id: None,
-            pending_child: Some(child),
+impl StaticContentSource {
+    fn into_widget(&mut self, handle: &TabHandle) -> Box<dyn Widget> {
+        match self {
+            StaticContentSource::Owned(opt) => opt
+                .take()
+                .expect("static tab content has already been consumed"),
+            StaticContentSource::Factory(f) => f(handle),
+            StaticContentSource::PreId(opt) => {
+                let id = opt
+                    .take()
+                    .expect("static tab pre-registered id has already been consumed");
+                Box::new(AliasWidget { target: Some(id), child_id: None })
+            }
         }
     }
 }
 
-impl Widget for TabPane {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        if let Some(pending) = self.pending_child.take() {
-            self.child_id = Some(match pending {
-                PendingChild::Id(id) => id,
-                PendingChild::Deferred(w) => ctx.add_boxed(w),
-            });
-        }
-        self.child_id.into_iter().collect()
-    }
-
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
-        self.child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::TabPanel);
-        builder.set_name(&self.label);
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        self.child_id.into_iter().collect()
-    }
+/// One static tab slot. The `pane_id` is `None` until the slot's
+/// first build and stable thereafter — that's what makes static
+/// content survive sibling rebuilds.
+struct StaticTabSlot {
+    handle: TabHandle,
+    source: StaticContentSource,
+    pane_id: Option<WidgetId>,
 }
 
-#[derive(Debug)]
-struct TabHeader {
-    label: String,
-    index: usize,
-    enabled: bool,
-    selected: Signal<usize>,
-    header_ids: Rc<RefCell<Vec<WidgetId>>>,
-    /// Shared buffer of the matching TabPanel widget ids, populated
-    /// during TabWidget's build(). Read in `accessibility()` to
-    /// publish the Tab→TabPanel `aria-controls` relation.
-    panel_ids: Rc<RefCell<Vec<WidgetId>>>,
-    enabled_tabs: Rc<Vec<bool>>,
-    interaction: Signal<TabHeaderInteraction>,
-    /// Focus origin at the moment focus was gained. The focus ring only
-    /// paints when this is `Some(Keyboard)` — pointer-clicking a tab moves
-    /// focus to it but must not show the ring, matching IntelliJ's and
-    /// VS Code's behavior. Follows the same pattern used by
-    /// `SegmentedControl`, `Slider`, and `Toggle`.
-    focus_origin: Signal<Option<fern_core::focus::FocusOrigin>>,
+/// One bar slot (leading or trailing). Memoized: registered on
+/// first build via [`Self::resolve`], reused on subsequent builds.
+struct BarSlot {
+    pending: Option<PendingChild>,
+    resolved: Option<WidgetId>,
 }
 
-impl TabHeader {
-    fn new(
-        label: String,
-        index: usize,
-        enabled: bool,
-        selected: Signal<usize>,
-        header_ids: Rc<RefCell<Vec<WidgetId>>>,
-        panel_ids: Rc<RefCell<Vec<WidgetId>>>,
-        enabled_tabs: Rc<Vec<bool>>,
-    ) -> Self {
-        Self {
-            label,
-            index,
-            enabled,
-            selected,
-            header_ids,
-            panel_ids,
-            enabled_tabs,
-            interaction: Signal::new(TabHeaderInteraction::Idle),
-            focus_origin: Signal::new(None),
-        }
+impl BarSlot {
+    fn new(child: PendingChild) -> Self {
+        Self { pending: Some(child), resolved: None }
     }
 
-    fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
-        let pad_h = ctx.theme.components.tab.padding_horizontal;
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        let text_width = if let Some(backend) = ctx.text_backend {
-            backend
-                .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
-                .width
-        } else {
-            self.label.len() as f32 * FALLBACK_CHAR_WIDTH
+    /// Resolve the slot to a stable WidgetId, registering the pending
+    /// widget on first call. Subsequent calls return the same id.
+    fn resolve(&mut self, ctx: &mut BuildContext) -> WidgetId {
+        if let Some(id) = self.resolved {
+            return id;
+        }
+        let id = match self.pending.take().expect("bar slot already resolved without id") {
+            PendingChild::Id(id) => id,
+            PendingChild::Deferred(w) => ctx.add_boxed(w),
         };
-        // Reserve the focus-ring envelope on both sides so the ring isn't clipped.
-        (text_width + pad_h * 2.0 + envelope * 2.0).max(HEADER_MIN_WIDTH + envelope * 2.0)
+        self.resolved = Some(id);
+        id
     }
 }
 
-impl Widget for TabHeader {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let self_id = ctx.self_id();
-        let interaction = ctx.signal(TabHeaderInteraction::Idle);
-        let focus_origin: Signal<Option<fern_core::focus::FocusOrigin>> = ctx.signal(None);
-        let registry = ctx.binding_registry();
+// ─── TabWidget — the public composition ─────────────────────────────
 
-        self.selected
-            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        interaction.bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        focus_origin.bind_to(self_id, registry, BindingLevel::RepaintOnly);
-        self.interaction = interaction.clone();
-        self.focus_origin = focus_origin.clone();
-
-        let index = self.index;
-        let enabled = self.enabled;
-        let selected = self.selected.clone();
-        let header_ids = self.header_ids.clone();
-        let enabled_tabs = self.enabled_tabs.clone();
-
-        // Shared hover flag the focus handler reads to decide the origin:
-        // if the pointer is over the tab at the moment focus is gained,
-        // the focus came from a click and we mark it as `Pointer`.
-        // Otherwise we assume `Keyboard`. This matches how SegmentedControl,
-        // Slider, and Toggle handle it.
-        let handler_set = HandlerSet::new()
-            .on_tap(move |_pos, _ctx: &mut EventContext| {
-                if enabled {
-                    selected.set(index);
-                }
-            })
-            .on_hover({
-                let interaction = interaction.clone();
-                move |entered: bool, _ctx: &mut EventContext| {
-                    if !enabled {
-                        interaction.set(TabHeaderInteraction::Idle);
-                        return;
-                    }
-                    interaction.set(if entered {
-                        TabHeaderInteraction::Hovered
-                    } else {
-                        TabHeaderInteraction::Idle
-                    });
-                }
-            })
-            .on_focus({
-                let focus_origin = focus_origin.clone();
-                let interaction_for_focus = interaction.clone();
-                move |gained: bool, _ctx: &mut EventContext| {
-                    if !enabled || !gained {
-                        focus_origin.set(None);
-                        return;
-                    }
-                    // If the pointer is currently over this tab, focus came
-                    // from a click — mark as Pointer so paint() skips the
-                    // focus ring. Otherwise treat it as a keyboard-driven
-                    // focus.
-                    let origin = if interaction_for_focus.get() == TabHeaderInteraction::Hovered {
-                        fern_core::focus::FocusOrigin::Pointer
-                    } else {
-                        fern_core::focus::FocusOrigin::Keyboard
-                    };
-                    focus_origin.set(Some(origin));
-                }
-            })
-            .on_key({
-                let selected = self.selected.clone();
-                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    if !enabled {
-                        return EventResponse::Ignored;
-                    }
-                    let headers = header_ids.borrow();
-                    if headers.is_empty() {
-                        return EventResponse::Ignored;
-                    }
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowRight,
-                            ..
-                        } => {
-                            let next = next_enabled_index(&enabled_tabs, index, 1);
-                            selected.set(next);
-                            ctx.request_focus(headers[next]);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowLeft,
-                            ..
-                        } => {
-                            let next = next_enabled_index(&enabled_tabs, index, -1);
-                            selected.set(next);
-                            ctx.request_focus(headers[next]);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyDown {
-                            key: Key::Enter | Key::Space,
-                            ..
-                        } => {
-                            selected.set(index);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                }
-            })
-            .on_access_action({
-                let selected = self.selected.clone();
-                move |action, _ctx: &mut EventContext| {
-                    if enabled && action == fern_core::accesskit::Action::Click {
-                        selected.set(index);
-                        EventResponse::Handled
-                    } else {
-                        EventResponse::Ignored
-                    }
-                }
-            })
-            .focusable(enabled)
-            .cursor(if enabled {
-                CursorIcon::Pointer
-            } else {
-                CursorIcon::Default
-            });
-
-        ctx.apply_self_handlers(handler_set);
-
-        Vec::new()
-    }
-
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
-        let tab_style = ctx.theme.components.tab;
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        // Reserve the focus-ring envelope around the visual tab.
-        let min_height = tab_style.editor_tab_height + envelope * 2.0;
-        let width = proposal.width.unwrap_or_else(|| self.estimate_width(ctx));
-        let height = if let Some(backend) = ctx.text_backend {
-            let text_height = backend
-                .borrow_mut()
-                .layout_single_line(&self.label, &ctx.theme.typography.small, None)
-                .height;
-            (text_height + HEADER_PADDING_V * 2.0 + envelope * 2.0).max(min_height)
-        } else {
-            (FALLBACK_LINE_HEIGHT + HEADER_PADDING_V * 2.0 + envelope * 2.0).max(min_height)
-        };
-        Size::new(width, proposal.height.unwrap_or(height)).into()
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Int UI tab visual — IntelliJ new UI / VS Code convention:
-        //
-        //   * Selected, enabled:
-        //       background = `surface_content` (same fill as the pane
-        //         below, so the tab "merges" into the content area)
-        //       label      = `text_primary`
-        //       indicator  = 1 dp `accent` bar at the **top** edge
-        //       bottom     = the tab's `surface_content` fill extends
-        //         all the way to `bounds.bottom`, overpainting the
-        //         TabBar's own 1 dp separator so there is NO visible
-        //         bottom border under the selected tab — the tab and
-        //         the content pane read as one continuous surface.
-        //
-        //   * Unselected, hovered:
-        //       background = `surface_hover`, inset from the envelope
-        //       label      = `text_primary`
-        //       bottom     = separator remains visible
-        //
-        //   * Unselected, idle:
-        //       background = TRANSPARENT
-        //       label      = `text_secondary`
-        //       bottom     = separator remains visible
-        //
-        //   * Disabled: TRANSPARENT background, `text_disabled` label,
-        //     no top indicator, separator remains visible.
-        //
-        //   * Focus ring: 2 dp `focus_ring` stroke drawn outside the
-        //     reserved envelope — but **only on keyboard focus**. A
-        //     click-to-focus does not trigger the ring.
-
-        let selected = self.selected.get() == self.index;
-        let interaction = self.interaction.get();
-        let colors = &ctx.theme.colors;
-        let tab_style = ctx.theme.components.tab;
-        let shape = &ctx.theme.shape;
-        let pad_h = tab_style.padding_horizontal;
-        let top_indicator = shape.border_width;
-
-        // Envelope reserves space for the keyboard focus ring on all
-        // four sides. The visual rect is the symmetric inset — the label
-        // never shifts, and selected-tab bottom-border erasure is handled
-        // by the TabBar drawing its separator *inside* the visual rect
-        // (at `bounds.bottom - envelope - 1`) so the selected tab's fill
-        // naturally covers it without any out-of-bounds painting.
-        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
-        let visual = Rect::new(
-            bounds.x + envelope,
-            bounds.y + envelope,
-            (bounds.width - envelope * 2.0).max(0.0),
-            (bounds.height - envelope * 2.0).max(0.0),
-        );
-
-        // Background fill.
-        let background = if !self.enabled {
-            Color::TRANSPARENT
-        } else if selected {
-            colors.surface_content
-        } else if interaction == TabHeaderInteraction::Hovered {
-            colors.surface_hover
-        } else {
-            Color::TRANSPARENT
-        };
-        if background.a() > 0.0 {
-            canvas.fill_rect(visual, background);
-        }
-
-        // 1 dp accent indicator along the top edge of the selected tab.
-        // Drawn after the fill so it sits on top of it.
-        if selected && self.enabled {
-            let indicator = Rect::new(visual.x, visual.y, visual.width, top_indicator);
-            canvas.fill_rect(indicator, colors.accent);
-        }
-
-        let text_color = if !self.enabled {
-            colors.text_disabled
-        } else if selected || interaction == TabHeaderInteraction::Hovered {
-            colors.text_primary
-        } else {
-            colors.text_secondary
-        };
-        let text_rect = Rect::new(
-            visual.x + pad_h,
-            visual.y + HEADER_PADDING_V,
-            (visual.width - pad_h * 2.0).max(0.0),
-            (visual.height - HEADER_PADDING_V * 2.0).max(0.0),
-        );
-        canvas.draw_text(
-            &self.label,
-            text_rect,
-            &ctx.theme.typography.small,
-            text_color,
-        );
-
-        // Focus ring — ONLY on keyboard focus. Click-to-focus sets
-        // `focus_origin = Pointer` and this branch is skipped.
-        if self.focus_origin.get() == Some(fern_core::focus::FocusOrigin::Keyboard) {
-            let half_stroke = shape.focus_ring_width * 0.5;
-            let ring_rect = Rect::new(
-                bounds.x + half_stroke,
-                bounds.y + half_stroke,
-                (bounds.width - half_stroke * 2.0).max(0.0),
-                (bounds.height - half_stroke * 2.0).max(0.0),
-            );
-            let ring_radius =
-                shape.radius_control + shape.focus_ring_offset + half_stroke;
-            canvas.stroke_rounded_rect(
-                ring_rect,
-                CornerRadius::uniform(ring_radius),
-                colors.focus_ring,
-                shape.focus_ring_width,
-            );
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::Tab);
-        builder.set_name(&self.label);
-        if !self.enabled {
-            builder.set_disabled();
-        } else {
-            builder.add_action(fern_core::accesskit::Action::Click);
-        }
-        builder.add_action(fern_core::accesskit::Action::Focus);
-        builder.set_selected(self.selected.get() == self.index);
-        // Publish the Tab -> TabPanel relation. AccessKit / ARIA models
-        // this via `controls`: the tab "controls" the panel that becomes
-        // visible when it's activated. Read from the shared buffer the
-        // parent TabWidget populated during build().
-        if let Some(&panel_id) = self.panel_ids.borrow().get(self.index) {
-            builder.push_controlled(fern_core::accessibility::widget_id_to_node_id(panel_id));
-        }
-    }
-}
-
-fn next_enabled_index(enabled_tabs: &[bool], current: usize, direction: isize) -> usize {
-    if enabled_tabs.is_empty() {
-        return current;
-    }
-
-    let len = enabled_tabs.len() as isize;
-    let mut offset = 1_isize;
-    while offset <= len {
-        let candidate = (current as isize + direction * offset).rem_euclid(len) as usize;
-        if enabled_tabs[candidate] {
-            return candidate;
-        }
-        offset += 1;
-    }
-    current
-}
-
-#[derive(Debug)]
-struct TabBar {
-    header_ids: Vec<WidgetId>,
-    trailing_child_id: Option<WidgetId>,
-    root_child_id: Option<WidgetId>,
-}
-
-impl TabBar {
-    fn new(header_ids: Vec<WidgetId>, trailing_child_id: Option<WidgetId>) -> Self {
-        Self {
-            header_ids,
-            trailing_child_id,
-            root_child_id: None,
-        }
-    }
-}
-
-impl Widget for TabBar {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let mut headers = HStack::new().spacing(4.0);
-        for &header_id in &self.header_ids {
-            headers = headers.add_child(header_id);
-        }
-
-        // TabHeader's intrinsic height is `editor_tab_height + envelope*2`
-        // — it reserves the focus-ring envelope on all four sides. The
-        // ScrollArea's preferred height must match, or the 38-dp-tall
-        // headers get clipped inside a 30-dp viewport, causing visible
-        // pixel shifts in labels whenever layout is re-run. The snapshot
-        // is read once at build time because the enclosing ScrollArea
-        // keeps its preferred size frozen; theme-driven size changes are
-        // picked up on the next rebuild.
-        let snapshot = ctx.theme_signal().get();
-        let shape = &snapshot.shape;
-        let envelope = shape.focus_ring_offset + shape.focus_ring_width;
-        let header_min_height = snapshot.components.tab.editor_tab_height + envelope * 2.0;
-        let headers_scroll_id = ctx.add(
-            ScrollArea::new()
-                .child(headers)
-                .scroll_bar_style(ScrollBarMode::Overlay)
-                .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
-                .horizontal_scroll_bar_policy(ScrollBarPolicy::AsNeeded)
-                .widget_resizable(true)
-                .preferred_size(0.0, header_min_height),
-        );
-
-        let mut row = HStack::new().spacing(8.0).child(
-            Expand::horizontal()
-                
-                .child_id(headers_scroll_id),
-        );
-
-        if let Some(trailing_child_id) = self.trailing_child_id {
-            row = row.add_child(trailing_child_id);
-        }
-
-        let root_id = ctx.add(row);
-        self.root_child_id = Some(root_id);
-        vec![root_id]
-    }
-
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Int UI tab bar is a flat row on the same surface as the content.
-        // The only chrome is a 1 dp horizontal separator that runs along
-        // the bottom of the **visual** tab row. Each TabHeader reserves a
-        // focus-ring envelope on all four sides, so the visual row bottom
-        // sits at `bounds.bottom - envelope`, not at `bounds.bottom`.
-        // Drawing the separator there places it *inside* the headers'
-        // visual rect — the selected header's `surface_content` fill then
-        // overpaints it in its own column, producing the "tab merges into
-        // content pane" effect without depending on out-of-bounds painting.
-        let border_width = ctx.theme.shape.border_width;
-        let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
-        let separator = fern_canvas::Rect::new(
-            bounds.x,
-            (bounds.bottom() - envelope - border_width).max(bounds.y),
-            bounds.width,
-            border_width,
-        );
-        canvas.fill_rect(separator, ctx.theme.colors.border);
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(fern_core::accesskit::Role::TabList);
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        self.root_child_id.into_iter().collect()
-    }
-}
-
-/// A tabbed container with keyboard navigation, a trailing action slot,
-/// and dormant content panes backed by `Switcher`.
+/// All-in-one tabbed container. Builds a [`TabBar`] above a
+/// `Switcher` of content panes, sharing one selection signal.
 pub struct TabWidget {
-    selected: Signal<usize>,
-    entries: Vec<TabEntry>,
-    trailing_slot: Option<PendingChild>,
+    selected_id: Signal<Option<TabId>>,
+    /// Internal index signal driving the inner `Switcher`'s
+    /// visibility. Self-owned (persists across rebuilds) and kept in
+    /// sync with `selected_id` via a single one-way effect installed
+    /// in [`build`](Widget::build) — the bar manages its own id↔index
+    /// bridge for keyboard / click / scroll, so this is just the
+    /// content-pane mirror.
+    switcher_index: Signal<usize>,
+
+    /// Bar orientation — **reactive**. `Horizontal` (default) places
+    /// the bar above the content; `Vertical` places it on the leading
+    /// edge with content on the trailing side. Bound at
+    /// [`BindingLevel::Rebuild`](fern_core::binding::BindingLevel::Rebuild)
+    /// in [`build`](Widget::build), so flipping it from outside the
+    /// widget re-runs the build with the new layout (the inner
+    /// content panes are memoized across this rebuild — their
+    /// internal state is preserved).
+    orientation: Signal<TabBarOrientation>,
+
+    static_tabs: Vec<StaticTabSlot>,
+    dynamic_registry: HashMap<&'static str, DynamicContentFactory>,
+    dynamic_model: Option<ListModel<TabHandle>>,
+
+    /// Lazily-populated map from a dynamic tab's stable [`TabId`] to
+    /// its content-pane WidgetId. Lets pane widgets (with their
+    /// internal mutable state — focus, scroll, animation, …) survive
+    /// across rebuilds caused by reorder, pin/unpin toggles, or
+    /// adjacent insertions / removals. Pruned every build to drop
+    /// entries whose tab is no longer in the model.
+    dyn_pane_ids: HashMap<TabId, WidgetId>,
+
+    // Bar configuration — forwarded to the inner TabBar.
+    /// Reactive sizing strategy. `None` until `.tab_sizing(...)`
+    /// or `.sizing_signal(...)` is called; defaulted by the bar
+    /// (`TabSizing::Shared`) otherwise. When a signal is bound,
+    /// the [`TabWidget`] also binds it at
+    /// [`BindingLevel::Rebuild`](fern_core::binding::BindingLevel::Rebuild)
+    /// so toggling the signal swaps Shared ↔ Independent live.
+    sizing: Option<Signal<TabSizing>>,
+    /// Background color/role applied to **every** tab — selected,
+    /// idle, and hovered all use this one value, so the strip reads
+    /// as visually uniform. Set via [`Self::tab_background`].
+    /// `None` (default) means transparent.
+    tab_background: Option<fern_core::color_prop::ColorProp>,
+    min_tab_width: Option<f32>,
+    max_tab_width: Option<f32>,
+    pinned_tab_width: Option<f32>,
+    show_scroll_arrows: Option<bool>,
+    show_overflow_dropdown: Option<bool>,
+    reorderable: bool,
+    on_close: Option<Rc<dyn Fn(TabId)>>,
+    on_reorder: Option<Rc<dyn Fn(TabId, usize)>>,
+    on_pin_toggle: Option<Rc<dyn Fn(TabId, bool)>>,
+    bar_leading_slot: Option<BarSlot>,
+    bar_trailing_slot: Option<BarSlot>,
+
     root_child_id: Option<WidgetId>,
-}
-
-impl TabWidget {
-    pub fn new(selected: Signal<usize>) -> Self {
-        Self {
-            selected,
-            entries: Vec::new(),
-            trailing_slot: None,
-            root_child_id: None,
-        }
-    }
-
-    pub fn tab(
-        mut self,
-        label: impl Into<fern_i18n::LocalizedString>,
-        content: impl Widget + 'static,
-    ) -> Self {
-        let ls: fern_i18n::LocalizedString = label.into();
-        self.entries.push(TabEntry {
-            label: ls.resolve_now(),
-            content: PendingChild::Deferred(Box::new(content)),
-            enabled: true,
-        });
-        self
-    }
-
-    /// Add a tab whose content is a pre-registered widget id.
-    pub fn tab_id(
-        mut self,
-        label: impl Into<fern_i18n::LocalizedString>,
-        content_id: WidgetId,
-    ) -> Self {
-        let ls: fern_i18n::LocalizedString = label.into();
-        self.entries.push(TabEntry {
-            label: ls.resolve_now(),
-            content: PendingChild::Id(content_id),
-            enabled: true,
-        });
-        self
-    }
-
-    /// Shim (permanent, `#[doc(hidden)]`) for `tab(...)` accepting a raw label.
-    #[doc(hidden)]
-    pub fn tab_literal(
-        self,
-        label: impl Into<String>,
-        content: impl Widget + 'static,
-    ) -> Self {
-        self.tab(fern_i18n::LocalizedString::literal(label), content)
-    }
-
-    /// Shim for `tab_id(...)` accepting a raw label.
-    #[doc(hidden)]
-    pub fn tab_literal_id(self, label: impl Into<String>, content_id: WidgetId) -> Self {
-        self.tab_id(fern_i18n::LocalizedString::literal(label), content_id)
-    }
-
-    pub fn tab_item(mut self, item: TabItem) -> Self {
-        self.entries.push(TabEntry {
-            label: item.label,
-            content: item.content,
-            enabled: item.enabled,
-        });
-        self
-    }
-
-    /// Alias for `tab_item(...)` accepting a `TabItem` constructed from
-    /// a pre-registered widget id via `TabItem::from_id`.
-    pub fn tab_item_id(self, item: TabItem) -> Self {
-        self.tab_item(item)
-    }
-
-    pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing_slot = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    pub fn trailing_slot_id(mut self, id: WidgetId) -> Self {
-        self.trailing_slot = Some(PendingChild::Id(id));
-        self
-    }
 }
 
 impl std::fmt::Debug for TabWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TabWidget")
-            .field("tab_count", &self.entries.len())
+            .field("selected", &self.selected_id.get())
+            .field("static_tabs", &self.static_tabs.len())
+            .field("dynamic_registry", &self.dynamic_registry.keys().collect::<Vec<_>>())
+            .field("has_dynamic_model", &self.dynamic_model.is_some())
             .finish()
+    }
+}
+
+impl TabWidget {
+    /// Construct an empty `TabWidget`. Selection is `None` until
+    /// the first `static_tab(...)` / `dynamic_model(...)` adds a
+    /// tab and the framework activates it.
+    pub fn new(selected: Signal<Option<TabId>>) -> Self {
+        Self {
+            selected_id: selected,
+            switcher_index: Signal::new(0_usize),
+            orientation: Signal::new(TabBarOrientation::Horizontal),
+            static_tabs: Vec::new(),
+            dynamic_registry: HashMap::new(),
+            dynamic_model: None,
+            dyn_pane_ids: HashMap::new(),
+            sizing: None,
+            tab_background: None,
+            min_tab_width: None,
+            max_tab_width: None,
+            pinned_tab_width: None,
+            show_scroll_arrows: None,
+            show_overflow_dropdown: None,
+            reorderable: false,
+            on_close: None,
+            on_reorder: None,
+            on_pin_toggle: None,
+            bar_leading_slot: None,
+            bar_trailing_slot: None,
+            root_child_id: None,
+        }
+    }
+
+    /// Configure the bar to render vertically — pills stacked
+    /// top-to-bottom on the leading edge, content fills the trailing
+    /// area (sidebar / IDE-perspective convention). Equivalent to
+    /// `self.orientation_signal().set(TabBarOrientation::Vertical)`.
+    pub fn vertical(self) -> Self {
+        self.orientation.set(TabBarOrientation::Vertical);
+        self
+    }
+
+    /// Configure the bar to render horizontally — pills laid out
+    /// left-to-right above the content (browser tab convention).
+    /// This is the default.
+    pub fn horizontal(self) -> Self {
+        self.orientation.set(TabBarOrientation::Horizontal);
+        self
+    }
+
+    /// Replace the internal orientation signal with an external one
+    /// — lets a parent widget toggle orientation reactively (e.g. a
+    /// "View → Vertical Tabs" toolbar button) without recreating the
+    /// `TabWidget`.
+    pub fn orientation_signal(mut self, signal: Signal<TabBarOrientation>) -> Self {
+        self.orientation = signal;
+        self
+    }
+
+    /// Add a static tab — fixed for the widget's lifetime, with a
+    /// pre-built content widget. The content is registered in the
+    /// arena on the [`TabWidget`]'s first build and **memoized** —
+    /// subsequent rebuilds (caused by adjacent dynamic-model
+    /// mutations) reuse the same pane WidgetId, preserving any
+    /// internal state the content owns.
+    pub fn static_tab(
+        mut self,
+        info: TabInfo,
+        content: impl Widget + 'static,
+    ) -> Self {
+        let handle = TabHandle::static_handle(TabId::fresh(), info);
+        self.static_tabs.push(StaticTabSlot {
+            handle,
+            source: StaticContentSource::Owned(Some(Box::new(content))),
+            pane_id: None,
+        });
+        self
+    }
+
+    /// Add a static tab whose content is constructed by a factory
+    /// closure. The factory is called once — on the slot's first
+    /// build — and the resulting pane is memoized just like
+    /// [`static_tab`](Self::static_tab).
+    pub fn static_tab_factory(
+        mut self,
+        info: TabInfo,
+        factory: impl Fn(&TabHandle) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        let handle = TabHandle::static_handle(TabId::fresh(), info);
+        self.static_tabs.push(StaticTabSlot {
+            handle,
+            source: StaticContentSource::Factory(Rc::new(factory)),
+            pane_id: None,
+        });
+        self
+    }
+
+    /// Element-valued slot variant for the `fern!` DSL — accepts a
+    /// pre-registered widget id rather than a `Box<dyn Widget>`.
+    /// Equivalent to [`static_tab`](Self::static_tab) with an
+    /// already-built child; the id is wrapped in a tab pane on
+    /// first build and the pane id is memoized thereafter.
+    pub fn static_tab_id(mut self, info: TabInfo, content_id: WidgetId) -> Self {
+        let handle = TabHandle::static_handle(TabId::fresh(), info);
+        self.static_tabs.push(StaticTabSlot {
+            handle,
+            source: StaticContentSource::PreId(Some(content_id)),
+            pane_id: None,
+        });
+        self
+    }
+
+    /// Add a static tab with a caller-provided [`TabId`] — useful
+    /// when external code (an app-event handler, a session-restore
+    /// path, a deep link) needs to flip selection to this tab by id.
+    /// The pane is memoized like [`static_tab`](Self::static_tab).
+    pub fn static_tab_with_id(
+        mut self,
+        id: TabId,
+        info: TabInfo,
+        content: impl Widget + 'static,
+    ) -> Self {
+        let handle = TabHandle::static_handle(id, info);
+        self.static_tabs.push(StaticTabSlot {
+            handle,
+            source: StaticContentSource::Owned(Some(Box::new(content))),
+            pane_id: None,
+        });
+        self
+    }
+
+    /// Factory variant of [`static_tab_with_id`](Self::static_tab_with_id).
+    pub fn static_tab_factory_with_id(
+        mut self,
+        id: TabId,
+        info: TabInfo,
+        factory: impl Fn(&TabHandle) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        let handle = TabHandle::static_handle(id, info);
+        self.static_tabs.push(StaticTabSlot {
+            handle,
+            source: StaticContentSource::Factory(Rc::new(factory)),
+            pane_id: None,
+        });
+        self
+    }
+
+    /// Register a dynamic-tab content factory keyed by `kind`. The
+    /// `<S>` type parameter pins the payload type — the framework
+    /// downcasts `handle.payload` to `S` before calling the
+    /// factory and panics with a clear message on kind/payload
+    /// mismatch, so `Any` never leaks into app code.
+    pub fn dynamic_tab<S: Any + 'static>(
+        mut self,
+        kind: &'static str,
+        factory: impl Fn(&TabHandle, &S) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        assert!(
+            kind != STATIC_KIND,
+            "tab kind '{}' is reserved by the framework for static tabs",
+            STATIC_KIND
+        );
+        debug_assert!(
+            !self.dynamic_registry.contains_key(kind),
+            "dynamic_tab kind '{kind}' is already registered — duplicate registration"
+        );
+        let kind_for_panic = kind;
+        let typed_factory: DynamicContentFactory = Rc::new(move |handle, payload| {
+            let typed = payload.downcast_ref::<S>().unwrap_or_else(|| {
+                panic!(
+                    "tab kind '{}' was registered for {} but the handle's \
+                     payload has a different type",
+                    kind_for_panic,
+                    std::any::type_name::<S>(),
+                )
+            });
+            factory(handle, typed)
+        });
+        self.dynamic_registry.insert(kind, typed_factory);
+        self
+    }
+
+    /// Connect the dynamic-tab data source. Mutations rebuild the
+    /// dynamic-tab subtree; static tabs are unaffected.
+    pub fn dynamic_model(mut self, model: ListModel<TabHandle>) -> Self {
+        self.dynamic_model = Some(model);
+        self
+    }
+
+    // ── Bar configuration (forwarded to inner TabBar) ──────────────
+
+    /// Set the per-tab sizing strategy as a static value. Internally
+    /// stores it as a `Signal<TabSizing>` so the widget can be
+    /// retrofitted to reactive control via [`Self::sizing_signal`]
+    /// without breaking existing call sites.
+    pub fn tab_sizing(mut self, mode: TabSizing) -> Self {
+        self.sizing = Some(Signal::new(mode));
+        self
+    }
+
+    /// Bind the per-tab sizing strategy to an external signal —
+    /// flipping the signal swaps Shared ↔ Independent live, with no
+    /// rebuild on the parent's part. The signal is bound at
+    /// `BindingLevel::Rebuild` inside [`build`](Widget::build);
+    /// memoized panes survive the rebuild so per-tab state is
+    /// preserved.
+    pub fn sizing_signal(mut self, signal: Signal<TabSizing>) -> Self {
+        self.sizing = Some(signal);
+        self
+    }
+
+    /// Set the background color for every tab in the strip. Accepts
+    /// any `Color`, `SurfaceRole`, or `Signal<Color>` (via
+    /// [`ColorProp`](fern_core::color_prop::ColorProp)). All tabs —
+    /// selected, idle, and hovered — render the same background, so
+    /// selection is conveyed only by the accent indicator and the
+    /// label-color shift (Int UI editor-strip convention). Default
+    /// is transparent.
+    pub fn tab_background(
+        mut self,
+        color: impl Into<fern_core::color_prop::ColorProp>,
+    ) -> Self {
+        self.tab_background = Some(color.into());
+        self
+    }
+    pub fn min_tab_width(mut self, dp: f32) -> Self {
+        self.min_tab_width = Some(dp);
+        self
+    }
+    pub fn max_tab_width(mut self, dp: f32) -> Self {
+        self.max_tab_width = Some(dp);
+        self
+    }
+    pub fn pinned_tab_width(mut self, dp: f32) -> Self {
+        self.pinned_tab_width = Some(dp);
+        self
+    }
+    pub fn show_scroll_arrows(mut self, on: bool) -> Self {
+        self.show_scroll_arrows = Some(on);
+        self
+    }
+    pub fn show_overflow_dropdown(mut self, on: bool) -> Self {
+        self.show_overflow_dropdown = Some(on);
+        self
+    }
+    pub fn reorderable(mut self, on: bool) -> Self {
+        self.reorderable = on;
+        self
+    }
+
+    /// Install a close-tab handler. Receives the [`TabId`] of the
+    /// closed tab (not its index — indices are presentation-only).
+    /// If unset, the default behavior is to remove the tab from
+    /// [`dynamic_model`](Self::dynamic_model) (static tabs cannot
+    /// be closed by default).
+    pub fn on_close(mut self, f: impl Fn(TabId) + 'static) -> Self {
+        self.on_close = Some(Rc::new(f));
+        self
+    }
+
+    /// Install a reorder handler. Receives `(moved_tab_id,
+    /// destination_index)` in the unified static-then-dynamic
+    /// ordering. If unset, the default behavior is to reorder
+    /// within the dynamic region of [`dynamic_model`](Self::dynamic_model).
+    /// Implies [`reorderable(true)`](Self::reorderable).
+    pub fn on_reorder(mut self, f: impl Fn(TabId, usize) + 'static) -> Self {
+        self.on_reorder = Some(Rc::new(f));
+        self.reorderable = true;
+        self
+    }
+
+    /// Install a pin-toggle handler — receives `(tab_id,
+    /// new_pinned_flag)` when the user drags a tab across the
+    /// pinned ↔ unpinned boundary. Apps decide whether to actually
+    /// mutate the tab's `info.pinned`.
+    pub fn on_pin_toggle(mut self, f: impl Fn(TabId, bool) + 'static) -> Self {
+        self.on_pin_toggle = Some(Rc::new(f));
+        self
+    }
+
+    pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self {
+        self.bar_leading_slot =
+            Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
+        self
+    }
+    pub fn bar_trailing_slot(mut self, w: impl Widget + 'static) -> Self {
+        self.bar_trailing_slot =
+            Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
+        self
+    }
+
+    /// Element-valued variant of
+    /// [`bar_leading_slot`](Self::bar_leading_slot) accepting a
+    /// pre-registered `WidgetId` (for the `fern!` DSL).
+    pub fn bar_leading_slot_id(mut self, id: WidgetId) -> Self {
+        self.bar_leading_slot = Some(BarSlot::new(PendingChild::Id(id)));
+        self
+    }
+    /// Element-valued variant of
+    /// [`bar_trailing_slot`](Self::bar_trailing_slot).
+    pub fn bar_trailing_slot_id(mut self, id: WidgetId) -> Self {
+        self.bar_trailing_slot = Some(BarSlot::new(PendingChild::Id(id)));
+        self
     }
 }
 
 impl Widget for TabWidget {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let entries = std::mem::take(&mut self.entries);
-        let enabled_tabs = Rc::new(
-            entries
-                .iter()
-                .map(|entry| entry.enabled)
-                .collect::<Vec<_>>(),
-        );
-        let mut header_ids = Vec::with_capacity(entries.len());
-        let shared_header_ids = Rc::new(RefCell::new(Vec::with_capacity(entries.len())));
-        // Parallel buffer for TabPanel ids. Switcher's build() pushes
-        // each child's WidgetId into this buffer as it adds it to the
-        // arena (see `Switcher::capture_child_ids_into`). TabHeader's
-        // `accessibility()` reads `panel_ids[index]` to publish the
-        // tab -> panel `controls` relation.
-        let shared_panel_ids = Rc::new(RefCell::new(Vec::with_capacity(entries.len())));
-        let mut switcher =
-            Switcher::new(self.selected.clone()).capture_child_ids_into(shared_panel_ids.clone());
+        let self_id = ctx.self_id();
 
-        for (index, entry) in entries.into_iter().enumerate() {
-            let header_id = ctx.add(TabHeader::new(
-                entry.label.clone(),
-                index,
-                entry.enabled,
-                self.selected.clone(),
-                shared_header_ids.clone(),
-                shared_panel_ids.clone(),
-                enabled_tabs.clone(),
-            ));
-            header_ids.push(header_id);
-            shared_header_ids.borrow_mut().push(header_id);
+        // Bind orientation at Rebuild level — toggling the signal
+        // (e.g. via a toolbar button) rebuilds TabWidget with the
+        // new outer layout (HStack ↔ VStack) and a fresh TabBar in
+        // the new orientation. Memoized panes survive the rebuild.
+        self.orientation
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+        let orientation = self.orientation.get();
 
-            switcher = switcher.child_boxed(Box::new(TabPane::new(entry.label, entry.content)));
+        // Subscribe to dynamic-model mutations so add / remove /
+        // reorder triggers a TabWidget rebuild that picks up the
+        // new tab list.
+        if let Some(model) = &self.dynamic_model {
+            let version = ctx.signal(0_u64);
+            version.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+            let observer = model.observe_changes({
+                let v = version.clone();
+                move |_change| v.set(v.get().wrapping_add(1))
+            });
+            ctx.own_handle(observer);
         }
 
-        let trailing_child_id = self.trailing_slot.take().map(|pending| match pending {
-            PendingChild::Id(id) => id,
-            PendingChild::Deferred(w) => ctx.add_boxed(w),
-        });
-        let tab_bar_id = ctx.add(TabBar::new(header_ids, trailing_child_id));
-        let switcher_id = ctx.add(switcher);
-        // Content sits flush under the tab bar — the TabBar paints its own
-        // 1 dp bottom separator, and selected tabs overpaint that with
-        // their 3 dp underline. No inset, no extra divider.
-        let content_id = ctx.add(Expand::vertical().child_id(switcher_id));
+        // Snapshot static + dynamic into a single ordered handle
+        // list. Static tabs come first, in declaration order.
+        let static_count = self.static_tabs.len();
+        let dyn_count = self
+            .dynamic_model
+            .as_ref()
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let total = static_count + dyn_count;
 
-        let root_id = ctx.add(
-            VStack::new()
-                .add_child(tab_bar_id)
-                .add_child(content_id),
+        let mut all_handles: Vec<TabHandle> = Vec::with_capacity(total);
+        for slot in &self.static_tabs {
+            all_handles.push(slot.handle.clone());
+        }
+        if let Some(model) = &self.dynamic_model {
+            for i in 0..dyn_count {
+                if let Some(h) = model.with_item(i, |h| h.clone()) {
+                    all_handles.push(h);
+                }
+            }
+        }
+
+        // Index → id lookup table. Used by the close / reorder /
+        // pin callback wrappers below to translate the bar's
+        // index-shaped events into id-shaped app callbacks. The
+        // id ↔ selection bridge itself lives inside [`TabBar`] now;
+        // TabWidget hands the bar `selected_id` and `id_of` directly.
+        let index_to_id: Rc<Vec<TabId>> =
+            Rc::new(all_handles.iter().map(|h| h.id).collect());
+        let id_to_index: Rc<HashMap<TabId, usize>> = Rc::new(
+            index_to_id
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(i, id)| (id, i))
+                .collect(),
         );
 
+        // Drive `switcher_index` from `selected_id`. One-way only:
+        // the inner `Switcher` reads the index to pick which pane is
+        // visible, but never writes back — selection mutations all
+        // flow through `selected_id` (the bar updates it on click,
+        // app code may set it externally). Pre-sync handles the
+        // initial state and stale-id cases without needing a
+        // bidirectional effect.
+        if total > 0 {
+            let target_idx = self
+                .selected_id
+                .get()
+                .and_then(|id| id_to_index.get(&id).copied())
+                .unwrap_or_else(|| self.switcher_index.get().min(total - 1));
+            if self.switcher_index.get() != target_idx {
+                self.switcher_index.set(target_idx);
+            }
+        }
+        let id_to_idx = id_to_index.clone();
+        let switcher_idx = self.switcher_index.clone();
+        ctx.effect(&self.selected_id, move |maybe_id| {
+            if let Some(id) = maybe_id {
+                if let Some(&i) = id_to_idx.get(id) {
+                    if switcher_idx.get() != i {
+                        switcher_idx.set(i);
+                    }
+                }
+            }
+        });
+
+        // Internal model fed to the inner TabBar — a snapshot of
+        // the unified handle list. Rebuilds when dynamic_model
+        // mutates (via the version signal above).
+        let internal_model = ListModel::from_vec(all_handles.clone());
+
+        // Translate `TabInfo` fields into the TabDelegate's
+        // closure-shaped accessors.
+        let delegate = TabDelegate::new(|_, h: &TabHandle| {
+            h.info
+                .title
+                .clone()
+                .unwrap_or_else(|| fern_i18n::LocalizedString::literal(""))
+        })
+        .icon(|_, h: &TabHandle| h.info.icon.as_ref().map(|f| f()))
+        .closable(|_, h: &TabHandle| h.info.closable)
+        .pinned(|_, h: &TabHandle| h.info.pinned)
+        .enabled(|_, h: &TabHandle| h.info.enabled)
+        .tooltip(|_, h: &TabHandle| {
+            // Pinned tabs render icon-only; promote `title` to the
+            // tooltip if the caller didn't set one explicitly so
+            // the user can still identify the tab on hover.
+            if h.info.pinned && h.info.tooltip.is_none() {
+                h.info.title.clone()
+            } else {
+                h.info.tooltip.clone()
+            }
+        });
+
+        // Shared panel-id buffer: the Switcher writes panel widget
+        // ids into it as panes are added; the bar's headers read
+        // it to publish the Tab → TabPanel `controls()`
+        // accessibility relation.
+        let panel_ids = Rc::new(RefCell::new(Vec::with_capacity(total)));
+
+        // Build + configure the inner TabBar. Selection is plumbed
+        // through as id-based — the bar maintains its own private
+        // index-side signal and bridges the two internally.
+        let mut bar = match orientation {
+            TabBarOrientation::Horizontal => TabBar::horizontal(
+                internal_model,
+                delegate,
+                self.selected_id.clone(),
+                |_, h: &TabHandle| h.id,
+            ),
+            TabBarOrientation::Vertical => TabBar::vertical(
+                internal_model,
+                delegate,
+                self.selected_id.clone(),
+                |_, h: &TabHandle| h.id,
+            ),
+        }
+        .with_panel_ids(panel_ids.clone());
+
+        if let Some(ref sizing) = self.sizing {
+            // Bind at Rebuild level so flipping the signal triggers
+            // a TabWidget rebuild that picks up the new sizing
+            // mode. Memoized panes survive — only the bar is
+            // rebuilt with the new layout.
+            sizing.bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
+            bar = bar.tab_sizing(sizing.get());
+        }
+        if let Some(ref bg) = self.tab_background {
+            bar = bar.tab_background(bg.clone());
+        }
+        if let Some(w) = self.min_tab_width {
+            bar = bar.min_tab_width(w);
+        }
+        if let Some(w) = self.max_tab_width {
+            bar = bar.max_tab_width(w);
+        }
+        if let Some(w) = self.pinned_tab_width {
+            bar = bar.pinned_tab_width(w);
+        }
+        if let Some(s) = self.show_scroll_arrows {
+            bar = bar.show_scroll_arrows(s);
+        }
+        if let Some(s) = self.show_overflow_dropdown {
+            bar = bar.show_overflow_dropdown(s);
+        }
+        if self.reorderable {
+            bar = bar.reorderable(true);
+        }
+
+        // Wrap callbacks: bar speaks in indices, app speaks in
+        // TabIds. We translate at the boundary using the
+        // `index_to_id` lookup captured at build time.
+        let close_cb = self.on_close.clone();
+        let dyn_model_for_close = self.dynamic_model.clone();
+        let idx_to_id_for_close = index_to_id.clone();
+        bar = bar.on_close(move |i: usize| {
+            if let Some(&id) = idx_to_id_for_close.get(i) {
+                if let Some(ref f) = close_cb {
+                    f(id);
+                } else if i >= static_count {
+                    // Default: remove from dynamic_model. Static
+                    // tabs are not auto-closable.
+                    if let Some(ref model) = dyn_model_for_close {
+                        let dyn_idx = i - static_count;
+                        if dyn_idx < model.len() {
+                            let _ = model.remove(dyn_idx);
+                        }
+                    }
+                }
+            }
+        });
+
+        // `on_reorder(...)` setter sets `reorderable = true`, so the
+        // single `self.reorderable` flag is the only gate we need.
+        let reorder_cb = self.on_reorder.clone();
+        let dyn_model_for_reorder = self.dynamic_model.clone();
+        let idx_to_id_for_reorder = index_to_id.clone();
+        if self.reorderable {
+            bar = bar.on_reorder(move |from: usize, to: usize| {
+                if let Some(&id) = idx_to_id_for_reorder.get(from) {
+                    if let Some(ref f) = reorder_cb {
+                        f(id, to);
+                    } else if from >= static_count && to >= static_count {
+                        // Default: reorder within the dynamic region
+                        // only. Static tabs are pinned in place.
+                        if let Some(ref model) = dyn_model_for_reorder {
+                            let from_dyn = from - static_count;
+                            let to_dyn = to - static_count;
+                            if from_dyn < model.len() && to_dyn < model.len() {
+                                model.move_item(from_dyn, to_dyn);
+                            }
+                        }
+                    } else {
+                        // Cross-boundary reorder: silently rejected
+                        // by the default handler. Surface it once
+                        // per process so developers don't chase a
+                        // ghost — install an explicit `on_reorder`
+                        // to interleave static and dynamic tabs.
+                        warn_cross_boundary_reorder_once(from, to, static_count);
+                    }
+                }
+            });
+        }
+
+        if let Some(f) = self.on_pin_toggle.clone() {
+            let idx_to_id = index_to_id.clone();
+            bar = bar.on_pin_toggle(move |i: usize, pinned: bool| {
+                if let Some(&id) = idx_to_id.get(i) {
+                    f(id, pinned);
+                }
+            });
+        }
+
+        if let Some(ref mut slot) = self.bar_leading_slot {
+            let id = slot.resolve(ctx);
+            bar = bar.bar_leading_slot_id(id);
+        }
+        if let Some(ref mut slot) = self.bar_trailing_slot {
+            let id = slot.resolve(ctx);
+            bar = bar.bar_trailing_slot_id(id);
+        }
+        let bar_id = ctx.add(bar);
+
+        // Build the content panes. Static tabs and dynamic tabs both
+        // memoize their pane WidgetId — once registered, the pane
+        // outlives sibling rebuilds (caused by dynamic-model
+        // mutations) so internal state survives.
+        //
+        // Static panes: `pane_id` lives in the slot struct; the
+        // factory runs once on first build.
+        // Dynamic panes: `dyn_pane_ids` maps `TabId → WidgetId`,
+        // populated lazily on first sighting and pruned at end of
+        // build to drop tabs no longer in the model.
+        let mut pane_ids: Vec<WidgetId> = Vec::with_capacity(total);
+
+        for slot in self.static_tabs.iter_mut() {
+            let pane_id = match slot.pane_id {
+                Some(id) => id,
+                None => {
+                    let content = slot.source.into_widget(&slot.handle);
+                    let id = ctx.add(TabPane::new(slot.handle.clone(), content));
+                    slot.pane_id = Some(id);
+                    id
+                }
+            };
+            pane_ids.push(pane_id);
+        }
+
+        let mut alive_dyn: HashSet<TabId> = HashSet::with_capacity(dyn_count);
+        for handle in all_handles.iter().skip(static_count) {
+            alive_dyn.insert(handle.id);
+            let pane_id = match self.dyn_pane_ids.get(&handle.id) {
+                Some(&id) => id,
+                None => {
+                    let factory = self.dynamic_registry.get(handle.kind).unwrap_or_else(|| {
+                        panic!(
+                            "tab kind '{}' has no registered content factory — \
+                             add a `dynamic_tab::<S>(\"{}\", |handle, state| ...)` \
+                             registration before connecting the model",
+                            handle.kind, handle.kind,
+                        )
+                    });
+                    let content = factory(handle, handle.payload.as_ref());
+                    let id = ctx.add(TabPane::new(handle.clone(), content));
+                    self.dyn_pane_ids.insert(handle.id, id);
+                    id
+                }
+            };
+            pane_ids.push(pane_id);
+        }
+        // Prune dynamic-pane memo entries for tabs the model no
+        // longer carries — their widgets become unreachable from any
+        // root and the arena will reap them.
+        self.dyn_pane_ids.retain(|id, _| alive_dyn.contains(id));
+
+        let mut switcher = Switcher::new(self.switcher_index.clone())
+            .capture_child_ids_into(panel_ids);
+        for &pane_id in &pane_ids {
+            switcher = switcher.child_id(pane_id);
+        }
+        let switcher_id = ctx.add(switcher);
+        // Tab content area must claim BOTH axes: full panel width
+        // (so per-tab content fills the bounds, not just its natural
+        // width) AND full panel height (slack below the tab bar).
+        // `respect_intrinsic` makes the cross-axis fall back to the
+        // switcher's intrinsic when a parent queries us with an
+        // unspecified proposal, instead of reporting 0.
+        let content_id = ctx.add(Expand::new().respect_intrinsic().child_id(switcher_id));
+
+        let root_id = match orientation {
+            TabBarOrientation::Horizontal => {
+                ctx.add(VStack::new().add_child(bar_id).add_child(content_id))
+            }
+            TabBarOrientation::Vertical => {
+                ctx.add(crate::primitives::HStack::new().add_child(bar_id).add_child(content_id))
+            }
+        };
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -800,274 +887,163 @@ impl Widget for TabWidget {
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
-}
 
-#[cfg(test)]
-mod a11y_tests;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use fern_core::event::Modifiers;
-    use fern_core::widget_tree::WidgetTree;
-    use fern_tokens::Theme;
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    #[derive(Debug)]
-    struct FixedLeaf(f32, f32);
-
-    impl Widget for FixedLeaf {
-        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
-            Size::new(self.0, self.1).into()
-        }
-    }
-
-    #[derive(Debug)]
-    struct BuildCountingLeaf {
-        build_count: Rc<Cell<usize>>,
-    }
-
-    impl Widget for BuildCountingLeaf {
-        fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
-            self.build_count.set(self.build_count.get() + 1);
-            Vec::new()
-        }
-
-        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> fern_core::widget::LayoutResponse {
-            proposal.resolve(120.0, 48.0).into()
-        }
-    }
-
-    fn header_id(tree: &WidgetTree, tabs_id: WidgetId, index: usize) -> WidgetId {
-        let root = tree.child_widget(tabs_id, 0);
-        let tab_bar = tree.child_widget(root, 0);
-        let row = tree.child_widget(tab_bar, 0);
-        let expand = tree.child_widget(row, 0);
-        let scroll = tree.child_widget(expand, 0);
-        let headers = tree.child_widget(scroll, 0);
-        tree.child_widget(headers, index)
-    }
-
-    fn switcher_id(tree: &WidgetTree, tabs_id: WidgetId) -> WidgetId {
-        // Root VStack now has two children: tab bar (index 0) and the
-        // content Expand (index 1). The padding wrapper was dropped —
-        // content sits flush under the tab bar's own bottom separator.
-        let root = tree.child_widget(tabs_id, 0);
-        let expand = tree.child_widget(root, 1);
-        tree.child_widget(expand, 0)
-    }
-
-    #[test]
-    fn access_click_updates_selected_index() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let tabs = tree.add(
-            TabWidget::new(selected.clone())
-                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
-                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
-        );
-
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-        let second_header = header_id(&tree, tabs, 1);
-        tree.dispatch_event(WidgetEvent::AccessAction { action: fern_core::accesskit::Action::Click, target: Some(second_header), target_node: fern_core::accessibility::root_node_id(), data: None });
-
-        assert_eq!(selected.get(), 1);
-    }
-
-    #[test]
-    fn keyboard_navigation_updates_selection_and_focus() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let tabs = tree.add(
-            TabWidget::new(selected.clone())
-                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
-                .tab_literal("Details", FixedLeaf(140.0, 52.0))
-                .tab_literal("Activity", FixedLeaf(160.0, 56.0)),
-        );
-
-        tree.layout(SizeProposal::exact(640.0, 320.0));
-
-        tree.press_key(Key::Tab, Modifiers::NONE);
-        tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(selected.get(), 1);
-
-        let second_header = header_id(&tree, tabs, 1);
-        assert_eq!(tree.focused(), Some(second_header));
-
-        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
-        assert_eq!(selected.get(), 0);
-    }
-
-    #[test]
-    fn inactive_panes_are_dormant() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let tabs = tree.add(
-            TabWidget::new(selected.clone())
-                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
-                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
-        );
-
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-
-        let switcher = switcher_id(&tree, tabs);
-        let zstack = tree.child_widget(switcher, 0);
-        let panes = tree.children(zstack);
-        assert_eq!(panes.len(), 2);
-        assert!(tree.is_visible(panes[0]));
-        assert!(!tree.is_visible(panes[1]));
-
-        selected.set(1);
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-
-        assert!(!tree.is_visible(panes[0]));
-        assert!(tree.is_visible(panes[1]));
-    }
-
-    #[test]
-    fn panes_preserve_state_across_switches() {
-        let selected = Signal::new(0_usize);
-        let first_builds = Rc::new(Cell::new(0));
-        let second_builds = Rc::new(Cell::new(0));
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-
-        tree.add(
-            TabWidget::new(selected.clone())
-                .tab_literal(
-                    "Overview",
-                    BuildCountingLeaf {
-                        build_count: first_builds.clone(),
-                    },
-                )
-                .tab_literal(
-                    "Details",
-                    BuildCountingLeaf {
-                        build_count: second_builds.clone(),
-                    },
-                ),
-        );
-
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-        assert_eq!(first_builds.get(), 1);
-        assert_eq!(second_builds.get(), 1);
-
-        selected.set(1);
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-        selected.set(0);
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-
-        assert_eq!(first_builds.get(), 1);
-        assert_eq!(second_builds.get(), 1);
-    }
-
-    #[test]
-    fn accessibility_roles_are_exposed() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        tree.add(
-            TabWidget::new(selected)
-                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
-                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
-        );
-
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-
-        let tab_list = tree.find_by_role(fern_core::accesskit::Role::TabList);
-        let tab = tree.find_by_role(fern_core::accesskit::Role::Tab);
-        let tab_panel = tree.find_by_role(fern_core::accesskit::Role::TabPanel);
-
-        assert!(tab_list.is_some());
-        assert!(tab.is_some());
-        assert!(tab_panel.is_some());
-
-        let info = tree.accessibility_node(tab.unwrap());
-        assert_eq!(info.role(), fern_core::accesskit::Role::Tab);
-        assert!(
-            info.actions()
-                .contains(&fern_core::accesskit::Action::Click)
-        );
-    }
-
-    #[test]
-    fn disabled_tabs_do_not_activate_and_are_skipped_by_keyboard() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let tabs = tree.add(
-            TabWidget::new(selected.clone())
-                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
-                .tab_item(TabItem::new_literal("Locked", FixedLeaf(120.0, 48.0)).enabled(false))
-                .tab_literal("Activity", FixedLeaf(120.0, 48.0)),
-        );
-
-        tree.layout(SizeProposal::exact(640.0, 320.0));
-
-        let disabled_header = header_id(&tree, tabs, 1);
-
-        tree.click(disabled_header);
-        assert_eq!(selected.get(), 0);
-
-        tree.press_key(Key::Tab, Modifiers::NONE);
-        tree.press_key(Key::ArrowRight, Modifiers::NONE);
-        assert_eq!(selected.get(), 2);
-
-        let info = tree.accessibility_node(disabled_header);
-        assert_eq!(info.role(), fern_core::accesskit::Role::Tab);
-        assert!(
-            !info
-                .actions()
-                .contains(&fern_core::accesskit::Action::Click)
-        );
-    }
-
-    #[test]
-    fn content_is_positioned_below_tab_strip() {
-        // Int UI: no Divider child between the tab bar and the content —
-        // the TabBar paints its own 1 dp bottom separator. The VStack now
-        // has exactly two children: the TabBar and the content Expand.
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let tabs = tree.add(
-            TabWidget::new(selected)
-                .tab_literal("Overview", FixedLeaf(120.0, 48.0))
-                .tab_literal("Details", FixedLeaf(140.0, 52.0)),
-        );
-
-        tree.layout(SizeProposal::exact(480.0, 240.0));
-
-        let root = tree.child_widget(tabs, 0);
-        let tab_bar = tree.child_widget(root, 0);
-        let content_expand = tree.child_widget(root, 1);
-        let switcher = tree.child_widget(content_expand, 0);
-
-        let tab_bar_bounds = tree.bounds(tab_bar);
-        let switcher_bounds = tree.bounds(switcher);
-
-        assert!(switcher_bounds.y >= tab_bar_bounds.bottom() - 0.01);
-    }
-
-    #[test]
-    fn tab_bar_wraps_headers_in_horizontal_scroll_area() {
-        let selected = Signal::new(0_usize);
-        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
-        let tabs = tree.add(
-            TabWidget::new(selected)
-                .tab_literal("One", FixedLeaf(120.0, 48.0))
-                .tab_literal("Two", FixedLeaf(120.0, 48.0))
-                .tab_literal("Three", FixedLeaf(120.0, 48.0))
-                .tab_literal("Four", FixedLeaf(120.0, 48.0))
-                .tab_literal("Five", FixedLeaf(120.0, 48.0)),
-        );
-
-        tree.layout(SizeProposal::exact(220.0, 240.0));
-
-        let root = tree.child_widget(tabs, 0);
-        let tab_bar = tree.child_widget(root, 0);
-        let row = tree.child_widget(tab_bar, 0);
-        let expand = tree.child_widget(row, 0);
-        let scroll = tree.child_widget(expand, 0);
-        let info = tree.accessibility_node(scroll);
-
-        assert_eq!(info.role(), fern_core::accesskit::Role::ScrollView);
+    /// TabWidget memoizes the WidgetIds of its static-tab panes,
+    /// dynamic-tab panes (keyed by [`TabId`]), and bar slots across
+    /// rebuilds — internal mutable state (focus, scroll, animation,
+    /// rich-text editor history, …) survives sibling mutations
+    /// (dynamic-model push / remove / reorder, locale or theme
+    /// changes that retitle live tabs). Without this opt-in, the
+    /// framework's default `destroy_subtree` step on rebuild would
+    /// reap those memoized panes and the user would see static-tab
+    /// content vanish the first time they opened or closed a
+    /// dynamic tab.
+    fn preserves_children_on_rebuild(&self) -> bool {
+        true
     }
 }
+
+// ─── Once-per-process developer warning ─────────────────────────────
+
+/// Print a developer-aid warning the first time a cross-boundary
+/// reorder is rejected by the default handler. Suppressed on
+/// subsequent calls so high-frequency drag events don't spam stderr.
+fn warn_cross_boundary_reorder_once(from: usize, to: usize, static_count: usize) {
+    use std::sync::Once;
+    static WARNED: Once = Once::new();
+    WARNED.call_once(|| {
+        eprintln!(
+            "[fern-widgets::tab_widget] default on_reorder rejected a \
+             cross-boundary move (from={from}, to={to}, \
+             static_count={static_count}). Install an explicit \
+             `on_reorder(...)` handler if you want to interleave \
+             static and dynamic tabs."
+        );
+    });
+}
+
+// ─── TabPane (internal content-pane wrapper) ────────────────────────
+
+/// Wraps each tab's content widget so the `Switcher` can attach a
+/// stable accessibility name (the tab's title) and the framework's
+/// dormancy bookkeeping (`controls` relation, `is_visible` flag)
+/// has a consistent target.
+#[derive(Debug)]
+struct TabPane {
+    handle: TabHandle,
+    child_id: Option<WidgetId>,
+    pending_child: Option<Box<dyn Widget>>,
+}
+
+impl TabPane {
+    fn new(handle: TabHandle, content: Box<dyn Widget>) -> Self {
+        Self {
+            handle,
+            child_id: None,
+            pending_child: Some(content),
+        }
+    }
+}
+
+impl Widget for TabPane {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        if let Some(child) = self.pending_child.take() {
+            self.child_id = Some(ctx.add_boxed(child));
+        }
+        self.child_id.into_iter().collect()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> LayoutResponse {
+        self.child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(fern_core::accesskit::Role::TabPanel);
+        if let Some(ref title) = self.handle.info.title {
+            let resolved: String = title.clone().into();
+            builder.set_name(&resolved);
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
+}
+
+// ─── AliasWidget: thin wrapper exposing a pre-registered widget id ──
+
+/// One-shot wrapper that "absorbs" a pre-registered `WidgetId` on
+/// first build, returning it as the wrapper's only child. Used by
+/// [`TabWidget::static_tab_id`] to bridge the
+/// `fern!` DSL's element-valued-slot pattern (which pre-registers
+/// the inner widget and hands the parent its id) into the factory
+/// shape `static_tab_factory` expects.
+#[derive(Debug)]
+struct AliasWidget {
+    target: Option<WidgetId>,
+    child_id: Option<WidgetId>,
+}
+
+impl Widget for AliasWidget {
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        if let Some(id) = self.target.take() {
+            self.child_id = Some(id);
+        }
+        self.child_id.into_iter().collect()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> LayoutResponse {
+        self.child_id
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child_id.into_iter().collect()
+    }
+}
+
+// Suppress unused-import warning (Size flows through Switcher's
+// children/place_children machinery).
+#[allow(dead_code)]
+const _: fn() = || {
+    let _ = Size::new(0.0, 0.0);
+};

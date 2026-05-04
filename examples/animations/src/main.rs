@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use fern_ui::core::app_event::AppEvent;
 use fern_ui::prelude::*;
-use fern_ui::widgets::{HStack, ProgressBar, TabWidget, TextWidget, VStack};
+use fern_ui::widgets::{HStack, ProgressBar, TabId, TabInfo, TabWidget, TextWidget, VStack};
 
 /// External `AppEvent` payload — the 5 s sleeper thread sends one to
 /// the UI thread, which downcasts and flips the tab signal.
@@ -38,7 +38,13 @@ fn main() {
     // Shared tab-selection signal. Created outside the root builder
     // so the optional app-event handler can flip it from the 5 s
     // sleeper thread's reply without reaching into the tree.
-    let selected: Signal<usize> = Signal::new(0_usize);
+    //
+    // Two stable tab ids the root will assign to its two static
+    // tabs. Captured here so the 5-second sleeper can flip the
+    // selection by id without depending on internal indices.
+    let animated_tab = TabId::fresh();
+    let static_tab = TabId::fresh();
+    let selected: Signal<Option<TabId>> = Signal::new(Some(animated_tab));
     let selected_for_root = selected.clone();
 
     let mut builder = FernAppBuilder::new()
@@ -47,7 +53,13 @@ fn main() {
             WindowConfig::new()
                 .title("FernUI — Animations Drain Test")
                 .size(640, 420)
-                .root(move |tree, _state| tree.add(AnimationsRoot::new(selected_for_root))),
+                .root(move |tree, _state| {
+                    tree.add(AnimationsRoot::new(
+                        selected_for_root,
+                        animated_tab,
+                        static_tab,
+                    ))
+                }),
         );
 
     if switch_after_5s {
@@ -58,7 +70,7 @@ fn main() {
                     && payload.downcast_ref::<SwitchToStaticTab>().is_some()
                 {
                     eprintln!("animations: --5s-tab elapsed; switching to Static tab");
-                    selected_for_handler.set(1);
+                    selected_for_handler.set(Some(static_tab));
                 }
             })
             .on_ready(|proxy| {
@@ -78,14 +90,18 @@ fn main() {
 
 #[derive(Debug)]
 struct AnimationsRoot {
-    selected: Signal<usize>,
+    selected: Signal<Option<TabId>>,
+    animated_tab: TabId,
+    static_tab: TabId,
     root_child_id: Option<WidgetId>,
 }
 
 impl AnimationsRoot {
-    fn new(selected: Signal<usize>) -> Self {
+    fn new(selected: Signal<Option<TabId>>, animated_tab: TabId, static_tab: TabId) -> Self {
         Self {
             selected,
+            animated_tab,
+            static_tab,
             root_child_id: None,
         }
     }
@@ -93,10 +109,20 @@ impl AnimationsRoot {
 
 impl Widget for AnimationsRoot {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // Allocate the static tabs with the pre-shared ids so the
+        // app-event handler can flip selection by id.
         let tabs = ctx.add(
             TabWidget::new(self.selected.clone())
-                .tab_literal("Animated", animated_page())
-                .tab_literal("Static", static_page()),
+                .static_tab_with_id(
+                    self.animated_tab,
+                    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Animated")),
+                    animated_page(),
+                )
+                .static_tab_with_id(
+                    self.static_tab,
+                    TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Static")),
+                    static_page(),
+                ),
         );
         self.root_child_id = Some(tabs);
         vec![tabs]

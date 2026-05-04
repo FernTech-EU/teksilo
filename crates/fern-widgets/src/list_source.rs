@@ -19,6 +19,11 @@ pub(crate) struct ListSource<T: 'static> {
     /// Only populated when backed by `ListModel` — external sources can't
     /// reorder in place.
     pub(crate) move_item_fn: Option<Rc<dyn Fn(usize, usize)>>,
+    /// Only populated when backed by `ListModel` — external sources
+    /// can't remove items in place. Used by [`TabBar<T>`] to provide
+    /// a default close-tab behavior when the caller doesn't pass an
+    /// explicit `on_close` handler.
+    pub(crate) remove_item_fn: Option<Rc<dyn Fn(usize)>>,
 }
 
 impl<T: 'static> ListSource<T> {
@@ -27,11 +32,17 @@ impl<T: 'static> ListSource<T> {
         let m2 = model.clone();
         let m3 = model.clone();
         let m4 = model.clone();
+        let m5 = model.clone();
         Self {
             len_fn: Rc::new(move || m1.len()),
             with_item_fn: Rc::new(move |index, f| m2.with_item(index, |item| f(item))),
             observe_fn: Rc::new(move |f| m3.observe_changes(move |c| f(c))),
             move_item_fn: Some(Rc::new(move |from, to| m4.move_item(from, to))),
+            remove_item_fn: Some(Rc::new(move |index| {
+                if index < m5.len() {
+                    let _ = m5.remove(index);
+                }
+            })),
         }
     }
 
@@ -45,6 +56,7 @@ impl<T: 'static> ListSource<T> {
             with_item_fn: Rc::new(move |index, f| s2.with_item(index, |item| f(item))),
             observe_fn: Rc::new(move |f| s3.observe_changes(move |c| f(c))),
             move_item_fn: None,
+            remove_item_fn: None,
         }
     }
 
@@ -67,6 +79,7 @@ impl<T: 'static> ListSource<T> {
             with_item_fn: Rc::new(move |index, f| item_at(index).as_ref().map(|item| f(item))),
             observe_fn,
             move_item_fn: None,
+            remove_item_fn: None,
         }
     }
 

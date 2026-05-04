@@ -234,7 +234,7 @@ pub struct TabStyle {
 impl Default for TabStyle {
     fn default() -> Self {
         Self {
-            editor_tab_height: 30.0,
+            editor_tab_height: 50.0,
             tool_window_tab_height: 28.0,
             padding_horizontal: 12.0,
             underline_active: 3.0,

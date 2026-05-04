@@ -20,7 +20,7 @@ use fern_ui::data::{ListModel, SelectionMode, SelectionModel, TreeModel};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
     Button, ButtonVariant, Card, HStack, ListView, Padding, Panel, RectWidget, Repeater, Spacer,
-    TabWidget, TextWidget, TreeView, VStack, ZStack,
+    TabId, TabInfo, TabWidget, TextWidget, TreeView, VStack, ZStack,
 };
 
 // ---------------------------------------------------------------------------
@@ -337,7 +337,7 @@ impl Root {
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let theme = ctx.theme_signal().get();
-        let selected_tab = ctx.signal(0_usize);
+        let selected_tab: Signal<Option<TabId>> = ctx.signal(None);
 
         let repeater_tab = self.build_repeater_tab(&theme);
         let listview_tab = self.build_listview_tab(&theme);
@@ -346,9 +346,18 @@ impl Widget for Root {
         let root = ctx.add(
             Panel::new().child(
                 TabWidget::new(selected_tab)
-                    .tab_literal("Repeater", repeater_tab)
-                    .tab_literal("ListView", listview_tab)
-                    .tab_literal("TreeView", treeview_tab),
+                    .static_tab(
+                        TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("Repeater")),
+                        repeater_tab,
+                    )
+                    .static_tab(
+                        TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("ListView")),
+                        listview_tab,
+                    )
+                    .static_tab(
+                        TabInfo::new().title(fern_ui::i18n::LocalizedString::literal("TreeView")),
+                        treeview_tab,
+                    ),
             ),
         );
 

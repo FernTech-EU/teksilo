@@ -218,18 +218,22 @@ fn empty_filler() -> impl Widget + 'static {
 /// Build the inspector panel's content. Toolbar above a `TabWidget`
 /// with nine tabs, all inside a `Panel`.
 fn build_panel(state: InspectorState) -> impl Widget + 'static {
-    let tabs = TabWidget::new(state.active_tab.clone())
+    use fern_widgets::TabInfo;
+    fn ti(label: &'static str) -> TabInfo {
+        TabInfo::new().title(fern_i18n::LocalizedString::literal(label))
+    }
+    let tabs = TabWidget::new(state.active_tab_id.clone())
         // Tree tab is self-scrolling (it owns its own ScrollArea so it
         // can drive scroll-into-view when the picker selects a widget).
-        .tab_literal("Tree", fill_width(TreeTab::new(state.clone())))
-        .tab_literal("Properties", fill_width(scrollable_tab(PropertiesTab::new(state.clone()))))
-        .tab_literal("Accessibility", fill_width(scrollable_tab(A11yTab::new(state.clone()))))
-        .tab_literal("Theme", fill_width(scrollable_tab(ThemeTab::new(state.clone()))))
-        .tab_literal("Locale", fill_width(scrollable_tab(LocaleTab::new(state.clone()))))
-        .tab_literal("Focus", fill_width(scrollable_tab(FocusTab::new(state.clone()))))
-        .tab_literal("Shortcuts", fill_width(scrollable_tab(ShortcutsTab::new(state.clone()))))
-        .tab_literal("Overlays", fill_width(scrollable_tab(OverlaysTab::new(state.clone()))))
-        .tab_literal("Models", fill_width(scrollable_tab(DataModelsTab::new(state.clone()))));
+        .static_tab(ti("Tree"), fill_width(TreeTab::new(state.clone())))
+        .static_tab(ti("Properties"), fill_width(scrollable_tab(PropertiesTab::new(state.clone()))))
+        .static_tab(ti("Accessibility"), fill_width(scrollable_tab(A11yTab::new(state.clone()))))
+        .static_tab(ti("Theme"), fill_width(scrollable_tab(ThemeTab::new(state.clone()))))
+        .static_tab(ti("Locale"), fill_width(scrollable_tab(LocaleTab::new(state.clone()))))
+        .static_tab(ti("Focus"), fill_width(scrollable_tab(FocusTab::new(state.clone()))))
+        .static_tab(ti("Shortcuts"), fill_width(scrollable_tab(ShortcutsTab::new(state.clone()))))
+        .static_tab(ti("Overlays"), fill_width(scrollable_tab(OverlaysTab::new(state.clone()))))
+        .static_tab(ti("Models"), fill_width(scrollable_tab(DataModelsTab::new(state.clone()))));
 
     let toolbar = build_toolbar(state.clone());
 

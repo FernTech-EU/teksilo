@@ -146,7 +146,10 @@ pub use spin_box::{ButtonLayout as SpinButtonLayout, SpinBox, SpinValue, StepTyp
 pub use split_button::SplitButton;
 pub use split_view::SplitView;
 pub use status_bar::StatusBar;
-pub use tab_widget::{TabItem, TabWidget};
+pub use tab_widget::{
+    ContextMenuFactory, IconFactory as TabIconFactory, StaticContentFactory, TabBar,
+    TabBarOrientation, TabDelegate, TabHandle, TabId, TabInfo, TabSizing, TabWidget, STATIC_KIND,
+};
 pub use tool_box::{ToolBox, ToolBoxItem};
 #[cfg(feature = "rich-text")]
 pub use text_input::{TextInput, ValidationState};

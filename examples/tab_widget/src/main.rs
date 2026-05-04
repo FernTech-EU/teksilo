@@ -1,184 +1,365 @@
-//! TabWidget example.
+//! TabWidget showcase — exercises every capability of the rewritten
+//! TabWidget / TabBar pair:
 //!
-//! Run with: `cargo run -p tab-widget`
+//! - Static tabs (pinned, disabled, default)
+//! - Dynamic tabs from a `ListModel<TabHandle>` with a registered
+//!   `dynamic_tab::<DocState>` factory; "+" button in the bar's
+//!   trailing slot opens new dynamic tabs.
+//! - Closable tabs with the close button + middle-click; pinned
+//!   tabs suppress the close button (Firefox / Chrome convention).
+//! - Drag-to-reorder, with the insertion-line drop indicator.
+//! - Overflow dropdown — `PopoverButton` + `ListView` listing all
+//!   tabs by stable `TabId`, click activates and dismisses.
+//! - Scroll arrows + mouse-wheel-to-horizontal mapping.
+//! - Theme toggle, locale toggle (live retitling), and orientation
+//!   toggle (Horizontal / Vertical) via toolbar buttons.
+//! - Per-tab tooltip via `TabInfo::tooltip(...)`.
+//! - Bar leading slot (mode toggle), trailing slot ("new tab"
+//!   button).
+//!
+//! Run with: `cargo run -p tab-widget`.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use fern_ui::core::widget::WidgetPlacement;
+use fern_ui::data::ListModel;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Badge, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Card, HStack, Panel, TabItem,
-    TabWidget, TextWidget, VStack,
+    Badge, Breadcrumb, BreadcrumbItem, Button, ButtonVariant, Card, HStack, IconWidget, Panel,
+    TabBarOrientation, TabHandle, TabId, TabInfo, TabSizing, TabWidget, TextWidget, VStack,
 };
+
+/// Per-document mutable state — kept on the `TabHandle::payload`
+/// (`Rc<dyn Any>`) so reorder / pin toggles preserve the user's
+/// scroll position, undo stack, etc. Here we just track a free-form
+/// edit count to demonstrate the pattern.
+#[derive(Debug)]
+struct DocState {
+    title: String,
+    edits: Signal<usize>,
+}
 
 #[derive(Debug)]
 struct Root {
+    /// Stable ids for the always-present static tabs so we can flip
+    /// selection from the toolbar without depending on indices.
+    welcome_id: TabId,
+    locked_id: TabId,
+    settings_id: TabId,
+    /// Active selection — stable across reorders / closes.
+    selected: Signal<Option<TabId>>,
+    /// Live document tabs. Mutate via `model.push` to open, the
+    /// framework removes via the bar's default close handler.
+    model: ListModel<TabHandle>,
+    /// Reactive UI state. The orientation and sizing signals are
+    /// bound into TabWidget via `.orientation_signal(...)` and
+    /// `.sizing_signal(...)` — toolbar buttons just `.set(...)`
+    /// them and the framework rebuilds.
+    orientation: Signal<TabBarOrientation>,
+    sizing: Signal<TabSizing>,
+    is_dark: Rc<Cell<bool>>,
+    /// Counter to give new docs unique titles.
+    next_doc_n: Rc<Cell<u32>>,
+
     root_child_id: Option<WidgetId>,
-    is_dark: std::rc::Rc<std::cell::Cell<bool>>,
 }
 
 impl Root {
     fn new() -> Self {
+        // Seed the dynamic-model with three opened docs so the
+        // showcase isn't empty on first run.
+        let model: ListModel<TabHandle> = ListModel::from_vec(vec![
+            new_doc_tab(1),
+            new_doc_tab(2),
+            new_doc_tab(3),
+        ]);
         Self {
+            welcome_id: TabId::fresh(),
+            locked_id: TabId::fresh(),
+            settings_id: TabId::fresh(),
+            selected: Signal::new(None),
+            model,
+            orientation: Signal::new(TabBarOrientation::Horizontal),
+            sizing: Signal::new(TabSizing::Shared),
+            is_dark: Rc::new(Cell::new(false)),
+            next_doc_n: Rc::new(Cell::new(4)),
             root_child_id: None,
-            is_dark: std::rc::Rc::new(std::cell::Cell::new(false)),
         }
     }
 }
 
+fn new_doc_tab(n: u32) -> TabHandle {
+    let title = format!("Doc {n}");
+    TabHandle::dynamic(
+        TabId::fresh(),
+        "doc",
+        TabInfo::new()
+            .title(LocalizedString::literal(title.clone()))
+            .tooltip(LocalizedString::literal(format!("Document #{n}")))
+            .closable(true),
+        DocState {
+            title,
+            edits: Signal::new(0),
+        },
+    )
+}
+
 impl Widget for Root {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let theme = ctx.theme_signal().get();
-        let selected = ctx.signal(0_usize);
-        let selected_label = selected.map(|index| match *index {
-            0 => "Overview".to_string(),
-            1 => "Inspector".to_string(),
-            _ => "Activity".to_string(),
-        });
+        // The demo intentionally uses **semantic roles** for every
+        // color / typography choice — `TextRole`, `TextStyleRole`,
+        // `SurfaceRole`, `BorderRole`. Frozen `theme.colors.X` reads
+        // would baking the literal at construction time and miss
+        // theme switches; roles resolve at paint time and update
+        // reactively. (See [docs/reactive-theme.md](../../docs/reactive-theme.md).)
+        let _ = ctx;
 
-        let trailing = HStack::new()
-            .spacing(12.0)
-            .child(
-                TextWidget::new_literal("")
-                    .bind_text(selected_label)
-                    .style(theme.typography.small.clone()),
-            )
-            .child({
-                let is_dark = self.is_dark.clone();
-                Button::new_literal("Toggle Theme")
-                    .style(ButtonVariant::Flat)
-                    .on_activate_fn(move |ctx: &mut EventContext| {
-                        let next_dark = !is_dark.get();
-                        is_dark.set(next_dark);
-                        ctx.set_theme(if next_dark {
-                            Theme::dark_default()
-                        } else {
-                            Theme::light_default()
-                        });
-                    })
+        // ── Toolbar slots ─────────────────────────────────────────
+        //
+        // Bar leading slot: a small breadcrumb-style label so the
+        // bar visually anchors at a recognizable position.
+        let leading_slot = TextWidget::new_literal(" Showcase ")
+            .style(TextStyleRole::SmallBold)
+            .color(TextRole::Secondary);
+
+        // Bar trailing slot: a mini-toolbar with mode toggles +
+        // "new tab" button. Stays visible regardless of how many
+        // tabs are open.
+        let new_tab_n = self.next_doc_n.clone();
+        let model_for_new = self.model.clone();
+        // The + glyph isn't a built-in icon yet; a small text Button
+        // with a literal "+" glyph reads cleanly in the trailing
+        // slot.
+        let new_tab_btn = Button::new_literal("+ New tab")
+            .style(ButtonVariant::Flat)
+            .tooltip(LocalizedString::literal("Open new document tab"))
+            .on_activate_fn(move |_ctx: &mut EventContext| {
+                let n = new_tab_n.get();
+                new_tab_n.set(n + 1);
+                model_for_new.push(new_doc_tab(n));
             });
 
-        let tabs = ctx.add(
-            TabWidget::new(selected)
-                .tab_literal(
-                    "Overview",
-                    Card::new()
-                        .header(
-                            TextWidget::new_literal("Overview")
-                                .style(theme.typography.body_bold.clone())
-                                .color(theme.colors.text_primary),
-                        )
-                        .content(
-                            VStack::new()
-                                .spacing(12.0)
-                                .child(
-                                    TextWidget::new_literal(
-                                        "This first Milestone 6 slice ships a real TabWidget with dormant panes, keyboard navigation, and a trailing action slot.",
-                                    )
-                                    .style(theme.typography.body.clone())
-                                    .color(theme.colors.text_primary),
-                                )
-                                .child(
-                                    HStack::new()
-                                        .spacing(8.0)
-                                        .child(Badge::new_literal("Dormant Panes"))
-                                        .child(Badge::new_literal("Arrow Navigation"))
-                                        .child(Badge::new_literal("Trailing Slot")),
-                                ),
-                        ),
-                )
-                .tab_literal(
-                    "Inspector",
-                    Panel::new().padding(20.0).child(
-                        VStack::new()
-                            .spacing(10.0)
-                            .child(
-                                TextWidget::new_literal("Inspector")
-                                    .style(theme.typography.body_bold.clone())
-                                    .color(theme.colors.text_primary),
-                            )
-                            .child(
-                                TextWidget::new_literal(
-                                    "Use Tab to move focus into the tab strip, then Arrow Left and Arrow Right to switch tabs from the keyboard.",
-                                )
-                                .style(theme.typography.body.clone())
-                                .color(theme.colors.text_primary),
-                            ),
-                    ),
-                )
-                .tab_literal(
-                    "Activity",
-                    Panel::new().padding(20.0).child(
-                        VStack::new()
-                            .spacing(10.0)
-                            .child(
-                                TextWidget::new_literal("Activity")
-                                    .style(theme.typography.body_bold.clone())
-                                    .color(theme.colors.text_primary),
-                            )
-                            .child(
-                                TextWidget::new_literal(
-                                    "This example will grow into the broader Milestone 6 showcase as SplitView, Dialog, Popover, and Snackbar land.",
-                                )
-                                .style(theme.typography.body.clone())
-                                .color(theme.colors.text_primary),
-                            ),
-                    ),
-                )
-                .tab_item(
-                    TabItem::new_literal(
-                        "Disabled",
-                        Panel::new().padding(20.0).child(
-                            TextWidget::new_literal("Disabled tabs are visible but cannot be activated.")
-                                .style(theme.typography.body.clone())
-                                .color(theme.colors.text_primary),
-                        ),
-                    )
+        let is_dark = self.is_dark.clone();
+        let theme_btn = Button::new_literal("Theme")
+            .style(ButtonVariant::Flat)
+            .tooltip(LocalizedString::literal("Toggle theme"))
+            .on_activate_fn(move |ctx: &mut EventContext| {
+                let next = !is_dark.get();
+                is_dark.set(next);
+                ctx.set_theme(if next {
+                    Theme::dark_default()
+                } else {
+                    Theme::light_default()
+                });
+            });
+
+        let orientation_for_btn = self.orientation.clone();
+        let orient_btn = Button::new_literal("Orient")
+            .style(ButtonVariant::Flat)
+            .tooltip(LocalizedString::literal("Toggle bar orientation"))
+            .on_activate_fn(move |_ctx: &mut EventContext| {
+                let next = match orientation_for_btn.get() {
+                    TabBarOrientation::Horizontal => TabBarOrientation::Vertical,
+                    TabBarOrientation::Vertical => TabBarOrientation::Horizontal,
+                };
+                orientation_for_btn.set(next);
+            });
+
+        let sizing_for_btn = self.sizing.clone();
+        let size_btn = Button::new_literal("Sizing")
+            .style(ButtonVariant::Flat)
+            .tooltip(LocalizedString::literal(
+                "Toggle Shared (uniform tab widths) ↔ Independent (size to content)",
+            ))
+            .on_activate_fn(move |_ctx: &mut EventContext| {
+                let next = match sizing_for_btn.get() {
+                    TabSizing::Shared => TabSizing::Independent,
+                    TabSizing::Independent => TabSizing::Shared,
+                };
+                sizing_for_btn.set(next);
+            });
+
+        let trailing_slot = HStack::new()
+            .spacing(4.0)
+            .child(size_btn)
+            .child(orient_btn)
+            .child(theme_btn)
+            .child(new_tab_btn);
+
+        // ── Static tabs ───────────────────────────────────────────
+
+        let welcome = static_welcome_tab();
+        let locked = static_locked_tab();
+        let settings = static_settings_tab(self.orientation.clone());
+
+        // ── Dynamic tabs ──────────────────────────────────────────
+
+        let model_for_factory = self.model.clone();
+        let _ = model_for_factory; // captured implicitly via dynamic_tab
+
+        // ── Compose the TabWidget ────────────────────────────────
+        //
+        // The orientation signal flows into TabWidget directly via
+        // `.orientation_signal(...)`. TabWidget binds it at
+        // `BindingLevel::Rebuild`, so toggling from the toolbar
+        // rebuilds with the new outer layout. Memoized panes
+        // survive the rebuild — focus, scroll, and per-document
+        // state (counts, undo, …) are preserved.
+        let tw = TabWidget::new(self.selected.clone())
+            .orientation_signal(self.orientation.clone())
+            .sizing_signal(self.sizing.clone())
+            // Static: pinned welcome (icon-only, tooltip-promoted title).
+            .static_tab_with_id(
+                self.welcome_id,
+                TabInfo::new()
+                    .title(LocalizedString::literal("Welcome"))
+                    .tooltip(LocalizedString::literal("Welcome — start here"))
+                    .icon(|| IconWidget::checkmark(16.0))
+                    .pinned(true),
+                welcome,
+            )
+            // Static: settings page (default style, with leading icon).
+            .static_tab_with_id(
+                self.settings_id,
+                TabInfo::new()
+                    .title(LocalizedString::literal("Settings"))
+                    .icon(|| IconWidget::checkmark(16.0)),
+                settings,
+            )
+            // Static: disabled tab — visible but unactivatable.
+            .static_tab_with_id(
+                self.locked_id,
+                TabInfo::new()
+                    .title(LocalizedString::literal("Locked"))
+                    .tooltip(LocalizedString::literal("Disabled tabs cannot be activated"))
                     .enabled(false),
-                )
-                .trailing_slot(trailing),
-        );
+                locked,
+            )
+            // Dynamic: registration for "doc" kind. The framework
+            // downcasts `handle.payload` to `DocState` before
+            // calling the closure, so `Any` never leaks out.
+            .dynamic_tab::<DocState>("doc", move |_h, state| {
+                Box::new(doc_pane(state)) as Box<dyn Widget>
+            })
+            .dynamic_model(self.model.clone())
+            // Behavior knobs.
+            .reorderable(true)
+            // Bar slots.
+            .bar_leading_slot(leading_slot)
+            .bar_trailing_slot(trailing_slot);
+
+        let tabs = ctx.add(tw);
+
+        // ── Status bar (selection summary + tab count) ────────────
+        let selected_summary = self.selected.map({
+            let welcome_id = self.welcome_id;
+            let locked_id = self.locked_id;
+            let settings_id = self.settings_id;
+            let model = self.model.clone();
+            move |id| {
+                let Some(id) = *id else {
+                    return "no selection".to_string();
+                };
+                if id == welcome_id {
+                    return "Welcome (pinned static)".to_string();
+                }
+                if id == locked_id {
+                    return "Locked".to_string();
+                }
+                if id == settings_id {
+                    return "Settings".to_string();
+                }
+                let mut found = "Document".to_string();
+                for i in 0..model.len() {
+                    if let Some(label) =
+                        model.with_item(i, |h| (h.id, h.info_title_cloned()))
+                    {
+                        if label.0 == id {
+                            found = label.1;
+                            break;
+                        }
+                    }
+                }
+                found
+            }
+        });
 
         let breadcrumb = ctx.add(
             Breadcrumb::new()
-                .item(
-                    BreadcrumbItem::new_literal("Library")
-                        .on_activate_fn(|_| println!("Library")),
-                )
-                .item(
-                    BreadcrumbItem::new_literal("Components")
-                        .on_activate_fn(|_| println!("Components")),
-                )
+                .item(BreadcrumbItem::new_literal("Library"))
+                .item(BreadcrumbItem::new_literal("Components"))
                 .item(BreadcrumbItem::current_literal("TabWidget")),
         );
 
+        let header = ctx.add(
+            VStack::new()
+                .spacing(8.0)
+                .add_child(breadcrumb)
+                .child(
+                    TextWidget::new_literal("TabWidget — full showcase")
+                        .style(TextStyleRole::BodyBold)
+                        .color(TextRole::Primary),
+                )
+                .child(
+                    TextWidget::new_literal(
+                        "Pinned + closable + dynamic + drag-reorder + overflow dropdown + \
+                         orientation toggle + per-tab tooltip + accessibility custom actions.",
+                    )
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::Secondary),
+                ),
+        );
+
+        let status = ctx.add(
+            HStack::new()
+                .spacing(12.0)
+                .child(
+                    TextWidget::new_literal("Active:")
+                        .style(TextStyleRole::Small)
+                        .color(TextRole::Secondary),
+                )
+                .child(
+                    TextWidget::new_literal("")
+                        .bind_text(selected_summary)
+                        .style(TextStyleRole::Small)
+                        .color(TextRole::Primary),
+                ),
+        );
+
+        // Wrap the tabs id in `Expand::vertical()` so the
+        // TabWidget takes all the slack between the static header
+        // (top) and the status row (bottom). Without this the
+        // TabWidget collapses to its natural height and the
+        // window's vertical area shows mostly empty Panel.
+        let tabs_filling = ctx.add(
+            fern_ui::widgets::Expand::vertical().respect_intrinsic().child_id(tabs),
+        );
         let root_id = ctx.add(
-            Panel::new().padding(24.0).child(
-                VStack::new()
-                    .spacing(16.0)
-                    .add_child(breadcrumb)
-                    .child(
-                        TextWidget::new_literal("TabWidget")
-                            .style(theme.typography.body_bold.clone())
-                            .color(theme.colors.text_primary),
-                    )
-                    .child(
-                        TextWidget::new_literal(
-                            "A focused Milestone 6 example for the first implementation slice.",
-                        )
-                        .style(theme.typography.body.clone())
-                        .color(theme.colors.text_primary),
-                    )
-                    .add_child(tabs),
-            ),
+            Panel::new()
+                .padding(20.0)
+                .child(
+                    VStack::new()
+                        .spacing(12.0)
+                        .add_child(header)
+                        .add_child(tabs_filling)
+                        .add_child(status),
+                ),
         );
 
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> LayoutResponse {
         self.root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0)).into()
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+            .into()
     }
 
     fn place_children(
@@ -199,14 +380,183 @@ impl Widget for Root {
     }
 }
 
+// Ad-hoc helpers for things the public TabHandle API doesn't expose.
+trait TabHandleExt {
+    fn info_title_cloned(&self) -> String;
+}
+impl TabHandleExt for TabHandle {
+    fn info_title_cloned(&self) -> String {
+        // info.title is private; resolve the Localized title via Debug
+        // is overkill — we tracked the title separately on DocState.
+        if let Some(state) = self.payload.downcast_ref::<DocState>() {
+            return state.title.clone();
+        }
+        // Static handles with no DocState: fall through to a stub.
+        String::from("(unknown)")
+    }
+}
+
+// ─── Static tab content builders ────────────────────────────────────
+//
+// All content uses semantic roles (`TextRole`, `TextStyleRole`,
+// `SurfaceRole`, `BorderRole`) — no frozen colors / typography
+// snapshots. Theme switches retint everything without rebuilding.
+
+fn static_welcome_tab() -> impl Widget + 'static {
+    Card::new()
+        .header(
+            TextWidget::new_literal("Welcome to TabWidget")
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
+        )
+        .content(
+            VStack::new()
+                .spacing(10.0)
+                .child(
+                    TextWidget::new_literal(
+                        "This first tab is pinned: icon-only, fixed-width, no close \
+                         button. Drag a non-pinned tab into the leading strip to pin \
+                         it (the bar will fire `on_pin_toggle`).",
+                    )
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::Primary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(Badge::new_literal("Pinned"))
+                        .child(Badge::new_literal("Icon-only"))
+                        .child(Badge::new_literal("No close")),
+                ),
+        )
+}
+
+fn static_locked_tab() -> impl Widget + 'static {
+    Panel::new().padding(20.0).child(
+        VStack::new()
+            .spacing(10.0)
+            .child(
+                TextWidget::new_literal("Locked")
+                    .style(TextStyleRole::BodyBold)
+                    .color(TextRole::Primary),
+            )
+            .child(
+                TextWidget::new_literal(
+                    "Disabled tabs are visible but cannot be activated. Keyboard \
+                     arrow nav skips over them — try Tab + ArrowRight from the \
+                     active tab.",
+                )
+                .style(TextStyleRole::Body)
+                .color(TextRole::Secondary),
+            ),
+    )
+}
+
+fn static_settings_tab(orientation: Signal<TabBarOrientation>) -> impl Widget + 'static {
+    let toggle_orient = {
+        let o = orientation.clone();
+        Button::new_literal("Toggle orientation")
+            .style(ButtonVariant::Flat)
+            .on_activate_fn(move |_ctx: &mut EventContext| {
+                let next = match o.get() {
+                    TabBarOrientation::Horizontal => TabBarOrientation::Vertical,
+                    TabBarOrientation::Vertical => TabBarOrientation::Horizontal,
+                };
+                o.set(next);
+            })
+    };
+
+    Panel::new().padding(20.0).child(
+        VStack::new()
+            .spacing(12.0)
+            .child(
+                TextWidget::new_literal("Settings")
+                    .style(TextStyleRole::BodyBold)
+                    .color(TextRole::Primary),
+            )
+            .child(
+                TextWidget::new_literal(
+                    "Bar configuration knobs are forwarded from `TabWidget` to the \
+                     inner `TabBar`. Try the orientation toggle below — the bar \
+                     flips between top (Horizontal) and leading edge (Vertical), \
+                     and per-tab state survives the rebuild because content panes \
+                     are memoized.",
+                )
+                .style(TextStyleRole::Body)
+                .color(TextRole::Primary),
+            )
+            .child(toggle_orient)
+            .child(
+                HStack::new()
+                    .spacing(8.0)
+                    .child(Badge::new_literal("Reorderable"))
+                    .child(Badge::new_literal("Closable docs"))
+                    .child(Badge::new_literal("Overflow dropdown"))
+                    .child(Badge::new_literal("Custom AT actions")),
+            ),
+    )
+}
+
+// ─── Dynamic doc-tab content ───────────────────────────────────────
+
+fn doc_pane(state: &DocState) -> impl Widget + 'static {
+    let edits = state.edits.clone();
+    let title = state.title.clone();
+
+    let edit_btn = Button::new_literal("Make an edit")
+        .style(ButtonVariant::Default)
+        .on_activate_fn({
+            let edits = edits.clone();
+            move |_ctx: &mut EventContext| edits.set(edits.get() + 1)
+        });
+
+    Card::new()
+        .header(
+            TextWidget::new_literal(title.clone())
+                .style(TextStyleRole::BodyBold)
+                .color(TextRole::Primary),
+        )
+        .content(
+            VStack::new()
+                .spacing(10.0)
+                .child(
+                    TextWidget::new_literal(
+                        "Heavy state (here: an `edits: Signal<usize>` counter) lives \
+                         on the `TabHandle::payload`, not in the widget. The pane \
+                         widget reads the payload via the registered factory — \
+                         reorders and pin toggles preserve the count.",
+                    )
+                    .style(TextStyleRole::Body)
+                    .color(TextRole::Primary),
+                )
+                .child(
+                    HStack::new()
+                        .spacing(8.0)
+                        .child(
+                            TextWidget::new_literal("Edits:")
+                                .style(TextStyleRole::Small)
+                                .color(TextRole::Secondary),
+                        )
+                        .child(
+                            TextWidget::new_literal("")
+                                .bind_text(edits.map(|n| n.to_string()))
+                                .style(TextStyleRole::BodyBold)
+                                .color(TextRole::Accent),
+                        ),
+                )
+                .child(edit_btn),
+        )
+}
+
 fn main() {
     FernAppBuilder::new()
+        .install_inspector_in_debug()
         .theme(Theme::light_default())
         .initial_window(
             WindowConfig::new()
-            .title("TabWidget")
-            .size(960, 640)
-            .root(|tree, _state| tree.add(Root::new()))
+                .title("TabWidget — Showcase")
+                .size(1080, 720)
+                .root(|tree, _state| tree.add(Root::new())),
         )
         .run();
 }

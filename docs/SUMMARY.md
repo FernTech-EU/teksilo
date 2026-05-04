@@ -77,6 +77,9 @@ directory; in-progress design work lives separately under [plans/](plans/).
 - [table-view.md](table-view.md) — virtualized `TableView` and `TreeTable`
   (multi-column, sort/filter, drag-resize, drag-reorder, full keyboard
   navigation).
+- [tab-widget.md](tab-widget.md) — `TabBar<T>` and `TabWidget` (static +
+  dynamic tabs, `Signal<Option<TabId>>` selection, pinned tabs, drag
+  reorder, overflow dropdown, horizontal + vertical orientations).
 - [charts.md](charts.md) — `BarChart` / `LineChart` / `PieChart`
   (shared axis / palette / legend / tooltip infrastructure).
 - [fern-scene.md](fern-scene.md) — the pannable, zoomable scene viewport

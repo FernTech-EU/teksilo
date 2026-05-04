@@ -10,6 +10,14 @@ use fern_core::widget_id::WidgetId;
 
 use crate::primitives::ZStack;
 
+/// One pending entry inside a Switcher: either a freshly-built widget
+/// to register on next build, or a pre-registered widget id that
+/// already lives in the arena.
+enum PendingPage {
+    Deferred(Box<dyn Widget>),
+    Id(WidgetId),
+}
+
 /// A container that shows exactly one child at a time, driven by a
 /// `Signal<usize>` index. Internally a ZStack where each child has a
 /// `visible_when` binding derived from `selected.map(|i| i == index)`.
@@ -23,7 +31,7 @@ use crate::primitives::ZStack;
 /// ```
 pub struct Switcher {
     selected: Signal<usize>,
-    deferred_children: Vec<Box<dyn Widget>>,
+    deferred_children: Vec<PendingPage>,
     root_child_id: Option<WidgetId>,
     /// Optional external buffer populated during `build()` with each
     /// child's `WidgetId` in insertion order. Callers that need to
@@ -59,20 +67,33 @@ impl Switcher {
 
     /// Add a child page.
     pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.deferred_children.push(Box::new(widget));
+        self.deferred_children
+            .push(PendingPage::Deferred(Box::new(widget)));
         self
     }
 
     /// Add a pre-boxed child page.
     pub fn child_boxed(mut self, widget: Box<dyn Widget>) -> Self {
-        self.deferred_children.push(widget);
+        self.deferred_children.push(PendingPage::Deferred(widget));
+        self
+    }
+
+    /// Add a child page by its already-allocated `WidgetId`. Use when
+    /// the page widget was registered earlier (e.g. once on the
+    /// caller's first build) and should persist across the caller's
+    /// subsequent rebuilds without being recreated. The Switcher
+    /// rebinds the page's `visible_when` to its new index slot on
+    /// each build.
+    pub fn child_id(mut self, id: WidgetId) -> Self {
+        self.deferred_children.push(PendingPage::Id(id));
         self
     }
 
     /// Add multiple child pages from an iterator.
     pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
         for widget in iter {
-            self.deferred_children.push(Box::new(widget));
+            self.deferred_children
+                .push(PendingPage::Deferred(Box::new(widget)));
         }
         self
     }
@@ -95,8 +116,11 @@ impl Widget for Switcher {
 
         // Add each child to the tree and bind visibility to the selected index
         let mut zstack = ZStack::new();
-        for (i, child_widget) in children.into_iter().enumerate() {
-            let child_id = ctx.add_boxed(child_widget);
+        for (i, page) in children.into_iter().enumerate() {
+            let child_id = match page {
+                PendingPage::Deferred(w) => ctx.add_boxed(w),
+                PendingPage::Id(id) => id,
+            };
             if let Some(ref out) = self.child_ids_out {
                 out.borrow_mut().push(child_id);
             }

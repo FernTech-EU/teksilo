@@ -168,6 +168,26 @@ impl IconWidget {
         Self::from_path(path, size)
     }
 
+    /// A left-pointing chevron (◀) at the given size.
+    pub fn chevron_left(size: f32) -> Self {
+        let mut path = Path::new();
+        let s = size;
+        path.move_to(Point::new(s * 0.65, s * 0.25));
+        path.line_to(Point::new(s * 0.35, s * 0.5));
+        path.line_to(Point::new(s * 0.65, s * 0.75));
+        Self::from_path(path, size)
+    }
+
+    /// An upward-pointing chevron (▲) at the given size.
+    pub fn chevron_up(size: f32) -> Self {
+        let mut path = Path::new();
+        let s = size;
+        path.move_to(Point::new(s * 0.25, s * 0.65));
+        path.line_to(Point::new(s * 0.5, s * 0.35));
+        path.line_to(Point::new(s * 0.75, s * 0.65));
+        Self::from_path(path, size)
+    }
+
     /// Create an icon from an SVG string. Parses the SVG and extracts
     /// geometry, ignoring any colors in the SVG. Display size defaults
     /// to the SVG's viewBox dimensions; use [`icon_size`](Self::icon_size)

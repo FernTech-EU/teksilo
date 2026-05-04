@@ -230,6 +230,21 @@ impl ScrollArea {
         &self.scroll_x
     }
 
+    /// Maximum vertical scroll offset for the current content
+    /// (`content_height − viewport_height`, or 0 when content fits).
+    /// External callers bind to this for "is there more to scroll?"
+    /// chrome (e.g. trailing scroll-arrow visibility).
+    pub fn max_scroll_y_signal(&self) -> &Signal<f32> {
+        &self.max_scroll_y
+    }
+
+    /// Maximum horizontal scroll offset for the current content.
+    /// External callers bind to this for "is there more to scroll?"
+    /// chrome (e.g. trailing scroll-arrow visibility on a tab bar).
+    pub fn max_scroll_x_signal(&self) -> &Signal<f32> {
+        &self.max_scroll_x
+    }
+
     fn clamp_and_set_scroll(&self) {
         let max_y = self.max_scroll_y.get();
         let max_x = self.max_scroll_x.get();

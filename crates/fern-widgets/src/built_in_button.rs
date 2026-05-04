@@ -76,6 +76,12 @@ pub struct BuiltInButton {
     enabled: bool,
     size: BuiltInButtonSize,
     action: Option<ActionFactory>,
+    /// Whether the button takes keyboard focus on Tab navigation.
+    /// `true` (default): focusable when enabled. `false`: never
+    /// focusable — used for the close-button-inside-a-tab pattern
+    /// (Firefox / Chrome convention: Tab moves between *tabs*, not
+    /// onto each tab's close button).
+    focusable: bool,
 
     // Toggle support (visibility_toggle use case)
     toggled: Option<Signal<bool>>,
@@ -95,11 +101,23 @@ impl BuiltInButton {
             enabled: true,
             size: BuiltInButtonSize::Default,
             action: None,
+            focusable: true,
             toggled: None,
             toggled_icon: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
+    }
+
+    /// Whether the button takes keyboard focus. Default `true` —
+    /// the button is focusable when enabled. Set to `false` for
+    /// embedded-control patterns where the parent owns focus and
+    /// keyboard interaction goes through the parent (e.g. the
+    /// close button inside a tab header — Tab moves between tabs,
+    /// not onto their close buttons).
+    pub fn focusable(mut self, on: bool) -> Self {
+        self.focusable = on;
+        self
     }
 
     /// Attach a tooltip that appears after a hover delay.
@@ -460,7 +478,7 @@ impl fern_core::widget::Widget for BuiltInButton {
                     }
                 }
             })
-            .focusable(enabled)
+            .focusable(self.focusable && enabled)
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);

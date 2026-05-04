@@ -151,6 +151,27 @@ pub struct InspectorState {
     /// panel registers (Tree / Properties / Accessibility / Theme /
     /// Locale / Focus / Shortcuts / Overlays / Models — slots 0..9).
     pub active_tab: Signal<usize>,
+    /// Stable [`TabId`](fern_widgets::TabId) for each of the
+    /// `NUM_TABS` panel tabs, allocated once at construction. The
+    /// `TabWidget` selection signal speaks in `Option<TabId>`; this
+    /// vector is the index ↔ id translation table for keyboard
+    /// navigation, persistence, and the `active_tab` ↔
+    /// `active_tab_id` bridge.
+    pub tab_ids: Vec<fern_widgets::TabId>,
+    /// `TabWidget`-shaped projection of [`active_tab`](Self::active_tab).
+    /// Bridged to `active_tab` by paired observers installed in
+    /// [`InspectorState::new`]; reads / writes flow either way and
+    /// the bridge stays alive for the lifetime of the
+    /// [`InspectorState`] (the observer handles are stored in
+    /// `_active_tab_bridge`).
+    pub active_tab_id: Signal<Option<fern_widgets::TabId>>,
+    /// Lifetime anchor for the `active_tab` ↔ `active_tab_id`
+    /// observers. Wrapped in `Rc<Vec<...>>` so [`InspectorState`]
+    /// stays `Clone` (the inspector duplicates the state across the
+    /// many tab widgets that read it). All clones share the same
+    /// observer registrations; the registrations detach when the
+    /// last clone is dropped.
+    _active_tab_bridge: std::rc::Rc<Vec<fern_core::ObserverHandle>>,
     /// Currently selected row in the Data Models tab. Drives which
     /// registered model's contents are shown in the dump area. `None`
     /// falls back to the most recently registered model.
@@ -225,6 +246,44 @@ pub(crate) const MAX_PANEL_HEIGHT: f32 = 720.0;
 
 impl InspectorState {
     pub(crate) fn new(initial_open: bool) -> Self {
+        let active_tab: Signal<usize> = Signal::new(0);
+        let tab_ids: Vec<fern_widgets::TabId> =
+            (0..NUM_TABS).map(|_| fern_widgets::TabId::fresh()).collect();
+        let active_tab_id: Signal<Option<fern_widgets::TabId>> =
+            Signal::new(Some(tab_ids[0]));
+
+        // Index → id observer: when the index signal changes (keyboard
+        // nav / persistence load), update the id signal so the
+        // `TabWidget` adopts the new selection.
+        let bridge1 = {
+            let id_sig = active_tab_id.clone();
+            let ids = tab_ids.clone();
+            active_tab.observe(move |i| {
+                if let Some(&id) = ids.get(*i) {
+                    if id_sig.get() != Some(id) {
+                        id_sig.set(Some(id));
+                    }
+                }
+            })
+        };
+
+        // Id → index observer: when the user clicks a tab in the bar,
+        // the `TabWidget` writes a new id; reflect that into the
+        // index signal so keyboard nav / persistence stay in sync.
+        let bridge2 = {
+            let idx_sig = active_tab.clone();
+            let ids = tab_ids.clone();
+            active_tab_id.observe(move |maybe_id| {
+                if let Some(id) = maybe_id {
+                    if let Some(i) = ids.iter().position(|x| x == id) {
+                        if idx_sig.get() != i {
+                            idx_sig.set(i);
+                        }
+                    }
+                }
+            })
+        };
+
         Self {
             open: Signal::new(initial_open),
             selected_id: Signal::new(None),
@@ -239,7 +298,10 @@ impl InspectorState {
             overlay_mode: Signal::new(OverlayMode::SelectionOnly),
             overlay_opacity: Signal::new(0.7),
             bounds_snapshot: Signal::new(Vec::new()),
-            active_tab: Signal::new(0),
+            active_tab,
+            tab_ids,
+            active_tab_id,
+            _active_tab_bridge: std::rc::Rc::new(vec![bridge1, bridge2]),
             selected_model_index: Signal::new(None),
             pending_models_click_y: Signal::new(None),
             hover_id: Signal::new(None),
