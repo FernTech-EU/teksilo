@@ -83,17 +83,31 @@ impl Widget for InspectorShell {
         let bounds_tracker = BoundsTracker::new(state.clone()).event_pass_through(true);
         let pick_resolver = PickResolver::new(state.clone()).event_pass_through(true);
 
-        // Picker overlay — only when picker_mode is true. Modeled via
-        // a Switcher (0 = empty, 1 = picker overlay).
-        let picker_index = state.picker_mode.map(|active| if *active { 1usize } else { 0 });
-        let picker_switcher = fern_widgets::primitives::Switcher::new(picker_index)
-            .child(empty_filler())
-            .child(PickerOverlay::new(state.clone()));
+        // Picker overlay — only active when picker_mode is true.
+        //
+        // We deliberately do NOT use a `Switcher { empty_filler,
+        // PickerOverlay }` here: the outer ZStack centers any 0×0
+        // child at the window center, and `Rect::contains` is
+        // inclusive on every side, so a 0×0 rect at the center point
+        // claims the center click and prevents it from reaching the
+        // user widgets behind. Using `visible_when` directly leaves
+        // the overlay dormant (hit-test skips it via `is_active`)
+        // when picker mode is off.
+        let picker_overlay_id = ctx.add(PickerOverlay::new(state.clone()));
+        ctx.visible_when(picker_overlay_id, state.picker_mode.clone());
+        // Initial state: park dormant immediately so the very first
+        // hit-test (which can run before layout's
+        // `process_state_changes` has had a chance to evaluate
+        // `visible_state`) doesn't see the picker overlay as a
+        // full-window click sponge.
+        if !state.picker_mode.get() {
+            ctx.set_dormant(picker_overlay_id);
+        }
 
         let z = ZStack::new()
             .add_child(self.user_root_id)
             .child(highlight)
-            .child(picker_switcher);
+            .add_child(picker_overlay_id);
 
         // Slot for the inspector panel + its top-edge resize handle.
         // The Switcher gates the whole block on `state.open`: closed

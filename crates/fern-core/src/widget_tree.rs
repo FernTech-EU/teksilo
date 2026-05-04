@@ -1645,6 +1645,19 @@ impl WidgetTree {
                         node.node_focusable = handler_set.focusable;
                         node.node_tab_index = handler_set.tab_index;
                         node.node_cursor = handler_set.cursor;
+                        // `clips_children` and `event_pass_through` are
+                        // node-level flags on `WidgetNode` — they must
+                        // be mirrored here too. Without this an
+                        // `Inner::new().event_pass_through(true)` chain
+                        // silently no-ops (the flag stays at default
+                        // `false`), and any widget wrapped with it
+                        // catches every pointer event in its bounds.
+                        if let Some(clips) = handler_set.clips_children {
+                            node.clips_children = clips;
+                        }
+                        if let Some(pass_through) = handler_set.event_pass_through {
+                            node.event_pass_through = pass_through;
+                        }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
                         }
@@ -1749,6 +1762,12 @@ impl WidgetTree {
                         node.node_focusable = handler_set.focusable;
                         node.node_tab_index = handler_set.tab_index;
                         node.node_cursor = handler_set.cursor;
+                        if let Some(clips) = handler_set.clips_children {
+                            node.clips_children = clips;
+                        }
+                        if let Some(pass_through) = handler_set.event_pass_through {
+                            node.event_pass_through = pass_through;
+                        }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
                         }

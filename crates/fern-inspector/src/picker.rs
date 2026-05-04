@@ -67,7 +67,15 @@ impl Widget for PickerOverlay {
     }
 
     fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        proposal.resolve(0.0, 0.0).into()
+        // Take the full proposed area so we sit on top of the entire
+        // user-root subregion and capture pointer events anywhere in
+        // it. With unspecified proposals (intrinsic queries from
+        // ZStack) we still report 0 so we don't inflate the parent's
+        // size — that's only relevant when picker mode is off, in
+        // which case `visible_when` keeps us dormant anyway.
+        let w = proposal.width.unwrap_or(0.0);
+        let h = proposal.height.unwrap_or(0.0);
+        fern_canvas::Size::new(w, h).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {

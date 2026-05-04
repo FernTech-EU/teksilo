@@ -8,6 +8,8 @@
 
 #[cfg(debug_assertions)]
 mod highlight;
+#[cfg(all(debug_assertions, test))]
+mod integration_tests;
 #[cfg(debug_assertions)]
 mod keyboard;
 #[cfg(debug_assertions)]
