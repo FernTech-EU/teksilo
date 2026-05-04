@@ -56,9 +56,10 @@ fn main() {
     let _yes: Holder = fern!(
         Holder {
             if is_logged_in {
-                    YesBanner
-                } else {
-                    NoBanner("sign in please"
+                YesBanner
+            } else {
+                NoBanner("sign in please")
+            }
         }
     );
 
@@ -66,9 +67,10 @@ fn main() {
     let _no: Holder = fern!(
         Holder {
             if is_logged_in {
-                    YesBanner
-                } else {
-                    NoBanner("sign in please"
+                YesBanner
+            } else {
+                NoBanner("sign in please")
+            }
         }
     );
 }
