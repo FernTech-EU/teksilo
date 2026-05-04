@@ -657,6 +657,16 @@ impl<'ops> EventContext<'ops> {
         self.app_context.as_ref().and_then(|ctx| ctx.app_state::<T>())
     }
 
+    /// Borrow the [`AppEventPoster`](crate::AppEventPoster) installed
+    /// by the framework. Used by integrations that need to post
+    /// typed payloads back to the UI loop from a worker thread
+    /// (`fern_platform::file_dialog`'s `RfdAsyncBackend`, future
+    /// async-result features). Returns `None` for hand-constructed
+    /// `EventContext`s in tests.
+    pub fn poster(&self) -> Option<&std::sync::Arc<dyn crate::AppEventPoster>> {
+        self.app_context.as_ref().and_then(|ctx| ctx.poster())
+    }
+
     /// Ask the tree to pump one more frame after this handler returns.
     /// Use from event handlers that kick off per-frame work (pending
     /// document events to drain, drag-select auto-scroll, caret blink
@@ -855,6 +865,18 @@ impl<'ops> EventContext<'ops> {
         if let Some(ops) = self.window_ops.as_deref_mut() {
             ops.close_window_by_id(id);
         }
+    }
+
+    /// Resolve the platform parent handle of the window currently
+    /// dispatching the event. Used by native-dialog integrations
+    /// (`fern_platform::file_dialog`) to parent OS dialogs to the
+    /// originating FernUI window.
+    ///
+    /// Returns `None` when called from a standalone `WidgetTree` (no
+    /// app-level [`WindowOps`] sink), or when the platform refuses to
+    /// surface a handle (rare; mostly during teardown).
+    pub fn parent_window_handle(&self) -> Option<crate::raw_handle::ParentHandle> {
+        self.window_ops.as_deref()?.current_parent_handle()
     }
 
     /// Request a cursor icon change.

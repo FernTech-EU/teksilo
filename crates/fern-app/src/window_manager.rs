@@ -549,6 +549,22 @@ impl WindowManager {
 
     /// Close a window by its FernWindowId.
     pub fn close_window(&mut self, fern_id: FernWindowId) {
+        // Purge any pending file-dialog callbacks owned by the
+        // soon-to-close window before its tree is dropped — see
+        // `fern_platform::file_dialog::FileDialogHandle::purge_window`.
+        // A worker-thread future that resolves after this point will
+        // still arrive at the dispatcher; deliver finds no pending
+        // entry and silently drops.
+        #[cfg(feature = "file-dialog")]
+        {
+            if let Some(handle) = self
+                .app_context_template
+                .as_ref()
+                .and_then(|t| t.app_state::<fern_platform::file_dialog::FileDialogHandle>())
+            {
+                handle.purge_window(fern_id);
+            }
+        }
         if let Some(winit_id) = self.fern_to_winit.remove(&fern_id) {
             if let Some(managed) = self.windows.remove(&winit_id) {
                 if let Some(sid) = managed.string_id.as_deref() {
@@ -936,9 +952,12 @@ pub struct WindowOpsImpl<'a> {
     /// modal whose parent is the current window can still attach.
     #[cfg(not(target_os = "macos"))]
     current_handle: Option<winit::raw_window_handle::RawWindowHandle>,
-    /// macOS equivalent — the `Arc<Window>` of the current window
-    /// (needed for `addChildWindow:ordered:`).
-    #[cfg(target_os = "macos")]
+    /// `Arc<Window>` of the current (dispatching) window. On macOS
+    /// it is needed for `addChildWindow:ordered:`. On every platform
+    /// it backs `current_parent_handle()` so native-dialog
+    /// integrations can extract both window and display handles even
+    /// while the dispatching window is temporarily out of
+    /// `WindowManager::windows`.
     current_window_arc: Option<std::sync::Arc<winit::window::Window>>,
 }
 
@@ -950,9 +969,7 @@ impl<'a> WindowOpsImpl<'a> {
         #[cfg(not(target_os = "macos"))] current_handle: Option<
             winit::raw_window_handle::RawWindowHandle,
         >,
-        #[cfg(target_os = "macos")] current_window_arc: Option<
-            std::sync::Arc<winit::window::Window>,
-        >,
+        current_window_arc: Option<std::sync::Arc<winit::window::Window>>,
     ) -> Self {
         Self {
             wm,
@@ -960,7 +977,6 @@ impl<'a> WindowOpsImpl<'a> {
             current_id,
             #[cfg(not(target_os = "macos"))]
             current_handle,
-            #[cfg(target_os = "macos")]
             current_window_arc,
         }
     }
@@ -1006,6 +1022,14 @@ impl fern_core::WindowOps for WindowOpsImpl<'_> {
 
     fn close_window_by_id(&mut self, id: FernWindowId) {
         self.wm.queue_close(id);
+    }
+
+    fn current_parent_handle(&self) -> Option<fern_core::raw_handle::ParentHandle> {
+        // Always extract from `current_window_arc` because the
+        // dispatching window is temporarily out of `wm.windows_map()`
+        // during event delivery.
+        let arc = self.current_window_arc.as_ref()?;
+        fern_core::raw_handle::ParentHandle::from_window(arc.as_ref())
     }
 }
 

@@ -19,6 +19,7 @@ default = [
     "text",
     "i18n",
     "inspector",
+    "file-dialog",
     "fonts-arabic",
     "fonts-hebrew",
 ]
@@ -39,6 +40,17 @@ inspector = ["dep:fern-inspector", "rich-text"]
 # editor silently no-ops clipboard commands (they are filtered at the
 # command level; `arboard` is not pulled into the build).
 clipboard = ["fern-app/clipboard"]
+
+# Native file dialogs via `rfd`, with `RfdAsyncBackend` auto-installable
+# through `FernAppBuilder::install_file_dialog`. On by default — the
+# extra binary cost is small and the pattern (open / save / pick folder)
+# is core to most desktop apps. Apps that want only the trait surface
+# (e.g. to ship a custom backend) opt in to the leaner `file-dialog-trait`.
+file-dialog = ["fern-app/rfd-backend"]
+# Just the trait surface, mock backend, and `EventContextFileDialogExt`
+# extension trait — no rfd, no async-std. For apps that bring their own
+# backend.
+file-dialog-trait = ["fern-app/file-dialog"]
 
 # Font bundle features — forwarded to `fern-text`'s own feature set
 # via the `fern-text?/...` optional-dep syntax. The `?` means the

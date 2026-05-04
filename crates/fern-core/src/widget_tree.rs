@@ -352,6 +352,38 @@ impl WidgetTree {
             .with_window_context(ops, self.window_state.clone())
     }
 
+    /// Run a closure with a fresh [`EventContext`] anchored at this
+    /// tree, then collect any pending operations queued through the
+    /// context (intents, modal requests, frame requests, idle
+    /// callbacks…) so they take effect on the next event-loop tick.
+    ///
+    /// Used by the `fern-app` event-loop dispatcher to deliver
+    /// async-result callbacks (file dialogs, future background
+    /// tasks) on the main thread with full handler-equivalent
+    /// semantics. There is no source widget for app-level events,
+    /// so intents are anchored at the tree's first root id (or
+    /// silently dropped when the tree is empty).
+    pub fn run_with_event_context<F>(
+        &mut self,
+        ops: &mut dyn crate::window::WindowOps,
+        f: F,
+    )
+    where
+        F: FnOnce(&mut crate::widget::EventContext),
+    {
+        let mut ctx = self.make_event_context(ops);
+        f(&mut ctx);
+        let anchor = self.arena.roots().first().copied();
+        if let Some(anchor_id) = anchor {
+            self.collect_from_ctx(ctx, anchor_id);
+        } else {
+            // Empty tree — nothing to anchor intents on. Drop ctx;
+            // its only side effects (frame requests, cursor) are
+            // not meaningful for an empty tree.
+            drop(ctx);
+        }
+    }
+
     /// Attach the [`WindowState`](crate::window::WindowState) for this
     /// tree's hosting window. Called by `WindowManager::create_window`.
     pub fn set_window_state(&mut self, state: crate::window::WindowState) {

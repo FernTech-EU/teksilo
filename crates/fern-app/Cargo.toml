@@ -15,6 +15,14 @@ text = ["dep:fern-text"]
 # during `FernAppBuilder::run`. Widgets pick it up via
 # `EventContext::app_state::<ClipboardHandle>()`.
 clipboard = ["fern-platform/clipboard"]
+# Activates the FileDialog trait surface. Apps that ship a custom or
+# mock backend enable this. The window-close hook in `WindowManager`
+# uses it to purge pending callbacks owned by the closing window.
+file-dialog = ["fern-platform/file-dialog"]
+# Adds the `rfd`-backed implementation plus
+# `FernAppBuilder::install_file_dialog` which auto-registers an
+# `RfdAsyncBackend`. Implies `file-dialog`.
+rfd-backend = ["file-dialog", "fern-platform/rfd-backend"]
 
 [dependencies]
 fern-core = { workspace = true }

@@ -19,6 +19,7 @@ pub mod idle;
 pub mod intent;
 pub mod modal;
 pub mod overlay;
+pub mod raw_handle;
 pub mod shortcut;
 pub mod signal;
 pub mod telemetry;
@@ -62,6 +63,7 @@ pub use modal::{
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
+pub use raw_handle::ParentHandle;
 pub use action::{Action, ActionBuilder, ActionHandler};
 pub use intent::{Intent, IntentKind, IntentResponse};
 pub use shortcut::{

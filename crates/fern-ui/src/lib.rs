@@ -112,4 +112,11 @@ pub mod prelude {
     // don't pull in the dep.
     #[cfg(feature = "inspector")]
     pub use fern_inspector::FernAppBuilderInspectorExt;
+
+    // Native file dialogs. The extension trait brings
+    // `ctx.pick_file(...)`, `ctx.save_file(...)`, etc. into scope.
+    #[cfg(any(feature = "file-dialog", feature = "file-dialog-trait"))]
+    pub use fern_platform::file_dialog::{
+        EventContextFileDialogExt, FileDialogHandle, FileDialogRequest, FileDialogResult,
+    };
 }

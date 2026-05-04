@@ -13,6 +13,7 @@ fern-canvas = { workspace = true }
 accesskit = { workspace = true }
 slotmap = "1"
 serde = { workspace = true }
+raw-window-handle = "0.6"
 
 [dev-dependencies]
 accesskit_consumer = "0.35.0"

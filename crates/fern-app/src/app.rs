@@ -570,7 +570,6 @@ impl FernAppHandler {
             .window_handle()
             .ok()
             .map(|h| h.as_raw());
-        #[cfg(target_os = "macos")]
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -580,13 +579,108 @@ impl FernAppHandler {
                 current_id,
                 #[cfg(not(target_os = "macos"))]
                 current_handle,
-                #[cfg(target_os = "macos")]
                 current_arc,
             );
             current.tree.dispatch_event_with_ops(event, &mut ops);
         }
 
         self.wm.reinsert_managed(window_id, current);
+    }
+
+    /// Try to route an `AppEvent::External` payload as a
+    /// [`FileDialogEventPayload`](fern_platform::file_dialog::FileDialogEventPayload).
+    /// Returns `Ok(())` if the payload matched and was delivered to
+    /// the originating window's tree, `Err(payload)` to hand the
+    /// box back for fallthrough to other downcast attempts.
+    ///
+    /// Routing details:
+    /// - Resolves `payload.window_id_owner` to the matching winit
+    ///   `WindowId` via `WindowManager::fern_to_winit_map`.
+    /// - Temporarily takes the window out of `WindowManager::windows`
+    ///   (matches the `dispatch_in_window` re-entry pattern) so
+    ///   `open_window` / other ops calls inside the result callback
+    ///   can run.
+    /// - Builds a `WidgetTree::run_with_event_context` closure that
+    ///   pops the pending callback from `FileDialogHandle` and
+    ///   invokes it.
+    /// - On any miss (no matching window, no handle in app-state,
+    ///   already-purged callback) the result is silently dropped —
+    ///   no panic, no leaked callback.
+    #[cfg_attr(not(feature = "file-dialog"), allow(unused_variables))]
+    fn try_route_file_dialog_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        #[cfg(feature = "file-dialog")]
+        {
+            use fern_platform::file_dialog::{FileDialogEventPayload, FileDialogHandle};
+
+            let payload = match payload.downcast::<FileDialogEventPayload>() {
+                Ok(boxed) => *boxed,
+                Err(other) => return Err(other),
+            };
+
+            // Find the originating window.
+            let target_winit = self
+                .wm
+                .fern_to_winit_map()
+                .get(&payload.window_id_owner)
+                .copied();
+            let Some(winit_id) = target_winit else {
+                // Window already torn down — drop silently.
+                return Ok(());
+            };
+
+            // Pull the FileDialogHandle out of the shared app context
+            // template. Same Rc held by every window's tree, so this
+            // does not fight take_managed below.
+            let handle = self
+                .wm
+                .app_context_template()
+                .and_then(|t| t.app_state::<FileDialogHandle>().cloned());
+            let Some(handle) = handle else {
+                // Application did not install a FileDialogHandle —
+                // shouldn't happen if a payload was dispatched, but
+                // drop silently rather than panic.
+                return Ok(());
+            };
+
+            let Some(mut current) = self.wm.take_managed(winit_id) else {
+                return Ok(());
+            };
+            let current_id = current.fern_id;
+
+            #[cfg(not(target_os = "macos"))]
+            let current_handle = current
+                .platform_window
+                .window()
+                .window_handle()
+                .ok()
+                .map(|h| h.as_raw());
+            let current_arc = Some(current.platform_window.window_arc());
+
+            {
+                let mut ops = crate::window_manager::WindowOpsImpl::new(
+                    &mut self.wm,
+                    event_loop,
+                    current_id,
+                    #[cfg(not(target_os = "macos"))]
+                    current_handle,
+                    current_arc,
+                );
+                current
+                    .tree
+                    .run_with_event_context(&mut ops, |ctx| handle.deliver(payload, ctx));
+            }
+
+            self.wm.reinsert_managed(winit_id, current);
+            Ok(())
+        }
+        #[cfg(not(feature = "file-dialog"))]
+        {
+            Err(payload)
+        }
     }
 
     /// Tick gestures on every window with a real `WindowOps` sink so
@@ -609,7 +703,6 @@ impl FernAppHandler {
             .window_handle()
             .ok()
             .map(|h| h.as_raw());
-        #[cfg(target_os = "macos")]
         let current_arc = Some(current.platform_window.window_arc());
 
         {
@@ -619,7 +712,6 @@ impl FernAppHandler {
                 current_id,
                 #[cfg(not(target_os = "macos"))]
                 current_handle,
-                #[cfg(target_os = "macos")]
                 current_arc,
             );
             current.tree.tick_gestures_with_ops(now, &mut ops);
@@ -684,7 +776,6 @@ impl FernAppHandler {
             .window_handle()
             .ok()
             .map(|h| h.as_raw());
-        #[cfg(target_os = "macos")]
         let current_arc = Some(current.platform_window.window_arc());
 
         if let Some(trace) = &mut self.idle_trace {
@@ -708,7 +799,6 @@ impl FernAppHandler {
                 current_id,
                 #[cfg(not(target_os = "macos"))]
                 current_handle,
-                #[cfg(target_os = "macos")]
                 current_arc.clone(),
             );
             current.tree.layout_with_ops(proposal, &mut ops);
@@ -724,7 +814,6 @@ impl FernAppHandler {
                 current_id,
                 #[cfg(not(target_os = "macos"))]
                 current_handle,
-                #[cfg(target_os = "macos")]
                 current_arc.clone(),
             );
             current.tree.render_with_ops(&mut ops)
@@ -754,7 +843,6 @@ impl FernAppHandler {
                     current_id,
                     #[cfg(not(target_os = "macos"))]
                     current_handle,
-                    #[cfg(target_os = "macos")]
                     current_arc.clone(),
                 );
                 frame = managed.tree.render_with_ops(&mut ops);
@@ -1139,12 +1227,20 @@ impl ApplicationHandler<AppEvent> for FernAppHandler {
             }
             // Title-bar hosts route their `close()` through this variant so
             // the operation hops back onto the main thread before touching
-            // `WindowManager` (see `title_bar_host.rs`). Unrecognized payloads
-            // are ignored — application-authored `send_external` payloads can
-            // coexist with framework-internal ones.
+            // `WindowManager` (see `title_bar_host.rs`). File-dialog
+            // backends post their results through the same variant. The
+            // arm tries each known payload type in turn; unrecognized
+            // payloads are ignored — application-authored `send_external`
+            // payloads can coexist with framework-internal ones.
             AppEvent::External(payload) => {
-                if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
-                    self.wm.queue_close(req.fern_id);
+                match self.try_route_file_dialog_payload(payload, event_loop) {
+                    // File-dialog payload was consumed.
+                    Ok(()) => {}
+                    Err(payload) => {
+                        if let Some(req) = payload.downcast_ref::<CloseWindowRequest>() {
+                            self.wm.queue_close(req.fern_id);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -1241,6 +1337,10 @@ impl AppEventPoster for WinitAppEventPoster {
         event: Box<dyn std::any::Any + Send>,
     ) {
         self.proxy.post_subscription_event(sub_id, event);
+    }
+
+    fn post_external(&self, payload: Box<dyn std::any::Any + Send>) {
+        let _ = self.proxy.inner.send_event(AppEvent::External(payload));
     }
 }
 
@@ -1436,6 +1536,26 @@ impl FernAppBuilder {
     pub fn app_state<T: 'static>(mut self, value: T) -> Self {
         self.app_state_registry
             .insert(TypeId::of::<T>(), Box::new(value));
+        self
+    }
+
+    /// Install the rfd-backed native file-dialog service. Registers a
+    /// [`FileDialogHandle`](fern_platform::file_dialog::FileDialogHandle)
+    /// wrapping an
+    /// [`RfdAsyncBackend`](fern_platform::file_dialog::RfdAsyncBackend)
+    /// into the app-state registry. Reachable from any handler via
+    /// `ctx.app_state::<FileDialogHandle>()`, or — with
+    /// `use fern_platform::file_dialog::EventContextFileDialogExt;` —
+    /// directly via `ctx.pick_file(req, |result, ctx| ...)`.
+    ///
+    /// Apps that ship a custom or mock backend bypass this and call
+    /// `.app_state(FileDialogHandle::new(my_backend))` directly.
+    #[cfg(feature = "rfd-backend")]
+    pub fn install_file_dialog(mut self) -> Self {
+        use fern_platform::file_dialog::{FileDialogHandle, RfdAsyncBackend};
+        let handle = FileDialogHandle::new(RfdAsyncBackend::new());
+        self.app_state_registry
+            .insert(TypeId::of::<FileDialogHandle>(), Box::new(handle));
         self
     }
 
@@ -1800,27 +1920,24 @@ impl FernAppBuilder {
                 .insert(TypeId::of::<ClipboardHandle>(), Box::new(handle));
         }
 
-        // If an event source OR an app-state registry is present, build
-        // the per-tree app context that carries them. This single context
-        // is shared with every window the WindowManager creates.
-        let has_app_state = !self.app_state_registry.is_empty();
-        let app_context_template = if self.event_source.is_some() || has_app_state {
-            let base = match self.event_source {
-                Some(adapter) => {
-                    let poster: std::sync::Arc<dyn AppEventPoster> =
-                        std::sync::Arc::new(WinitAppEventPoster {
-                            proxy: proxy.clone(),
-                        });
-                    TreeAppContext::with_source_and_poster(adapter, poster)
-                }
-                None => TreeAppContext::empty(),
-            };
-            Some(std::rc::Rc::new(
-                base.with_app_state(self.app_state_registry),
-            ))
-        } else {
-            None
+        // Always build the per-tree app context — the poster is cheap
+        // and lets background-work integrations (file dialogs, future
+        // async-result features) reach the event loop without forcing
+        // an event-source registration. Apps without an event source,
+        // app-state registry, or background-work feature simply pay an
+        // unused Arc<AppEventPoster> per tree.
+        let poster: std::sync::Arc<dyn AppEventPoster> =
+            std::sync::Arc::new(WinitAppEventPoster {
+                proxy: proxy.clone(),
+            });
+        let base = match self.event_source {
+            Some(adapter) => TreeAppContext::with_source_and_poster(adapter, poster.clone()),
+            None => TreeAppContext::empty(),
         };
+        let app_context_template = Some(std::rc::Rc::new(
+            base.with_app_state(self.app_state_registry)
+                .with_poster(poster),
+        ));
 
         if let Some(on_ready) = self.on_ready {
             on_ready(proxy.clone());
