@@ -88,8 +88,8 @@ button) to take focus, then:
 |---|---|
 | **P** | Toggle the picker tool (same as the toolbar **Pick** button). |
 | **B** | Cycle bounds overlay: `Off → Sel → All → Off`. |
-| **T** | Switch to the next tab. |
-| **Shift+T** | Switch to the previous tab. |
+| **Ctrl+Tab** | Switch to the next tab. |
+| **Ctrl+Shift+Tab** | Switch to the previous tab. |
 | **Esc** | If picker mode is active, stop picking. Otherwise close the panel. |
 
 All five share the framework-reserved `__fern_inspector.*` prefix and

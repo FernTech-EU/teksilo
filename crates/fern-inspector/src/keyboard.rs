@@ -69,12 +69,12 @@ impl Widget for PanelShortcutHost {
                 .build(),
         );
 
-        // ── Next tab (T) ──────────────────────────────────────────
+        // ── Next tab (Ctrl+Tab) ───────────────────────────────────
         let st = self.state.clone();
         ctx.register_shortcut(
             Shortcut::new("__fern_inspector.tab_next")
                 .name("Next Tab")
-                .primary(KeyStroke::new(Key::T, Modifiers::empty()))
+                .primary(KeyStroke::ctrl(Key::Tab))
                 .on_activate(move |_ks, _c| {
                     let cur = st.active_tab.get();
                     st.active_tab.set((cur + 1) % NUM_TABS);
@@ -83,12 +83,12 @@ impl Widget for PanelShortcutHost {
                 .build(),
         );
 
-        // ── Previous tab (Shift+T) ────────────────────────────────
+        // ── Previous tab (Ctrl+Shift+Tab) ─────────────────────────
         let st = self.state.clone();
         ctx.register_shortcut(
             Shortcut::new("__fern_inspector.tab_prev")
                 .name("Previous Tab")
-                .primary(KeyStroke::new(Key::T, Modifiers::SHIFT))
+                .primary(KeyStroke::ctrl_shift(Key::Tab))
                 .on_activate(move |_ks, _c| {
                     let cur = st.active_tab.get();
                     st.active_tab
