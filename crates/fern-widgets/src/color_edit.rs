@@ -258,6 +258,12 @@ impl Widget for ColorEdit {
         let alpha_enabled = self.alpha_enabled;
         let style_snapshot = ctx.theme_signal().get().components.color_picker;
 
+        // Snapshot of the bound color at popover-open time. Cancel
+        // restores this; Done leaves the picker's writes intact. The
+        // initial value seeds the snapshot for the first open before
+        // the open-transition effect has a chance to refresh it.
+        let snapshot = ctx.signal(value.get());
+
         // ── Build the picker (handed to PopoverButton as content) ──
         let mut picker = ColorPicker::new(value.clone())
             .alpha_enabled(alpha_enabled)
@@ -266,6 +272,21 @@ impl Widget for ColorEdit {
             .show_hsv_spinners(self.show_hsv_spinners)
             .show_hex_input(self.show_hex_input)
             .swatch_columns(self.swatch_columns)
+            .show_footer(true)
+            .on_done(|ctx_evt| {
+                ctx_evt.dismiss_all_overlays();
+            })
+            .on_cancel({
+                let value = value.clone();
+                let snapshot = snapshot.clone();
+                move |ctx_evt| {
+                    let prior = snapshot.get();
+                    if value.get() != prior {
+                        value.set(prior);
+                    }
+                    ctx_evt.dismiss_all_overlays();
+                }
+            })
             .enabled(self.enabled);
         if let Some(s) = self.swatches.clone() {
             picker = picker.swatches(s);
@@ -336,11 +357,32 @@ impl Widget for ColorEdit {
         }
 
         // ── Wrap in PopoverButton ──
-        let mut pb = PopoverButton::new(trigger)
+        let pb = PopoverButton::new(trigger)
             .content(picker)
             .placement(self.placement.clone())
             .dismiss_behavior(self.dismiss_behavior.clone());
 
+        // Refresh the cancel-snapshot whenever the popover transitions
+        // to open. This must run BEFORE the user has a chance to
+        // mutate the value through the picker — `open_signal()` flips
+        // synchronously inside the activate handler, before any drag
+        // events reach the canvas / strips, so the snapshot captures
+        // the value that was bound at the moment of open.
+        {
+            let open_signal = pb.open_signal();
+            let snapshot = snapshot.clone();
+            let value = value.clone();
+            ctx.effect(&open_signal, move |opened| {
+                if *opened {
+                    let current = value.get();
+                    if snapshot.get() != current {
+                        snapshot.set(current);
+                    }
+                }
+            });
+        }
+
+        let mut pb = pb;
         if let Some(cb) = self.on_open.take() {
             pb = pb.on_open(move || cb());
         }

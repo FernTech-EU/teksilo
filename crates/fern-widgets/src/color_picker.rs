@@ -58,8 +58,10 @@ use self::hsv_canvas::HsvCanvas;
 use self::hue_strip::HueStrip;
 use self::state::ColorComponents;
 use self::swatch_grid::SwatchGrid;
+use crate::button::{Button, ButtonVariant};
 use crate::hex_color_input::HexColorInput;
-use crate::primitives::{HStack, Padding, TextWidget, VStack};
+use crate::panel::Panel;
+use crate::primitives::{HStack, Spacer, TextWidget, VStack};
 use crate::spin_box::SpinBox;
 
 pub use self::swatch::ColorSwatch;
@@ -130,6 +132,9 @@ pub struct ColorPicker {
     show_hex_input: bool,
     show_preview: bool,
     show_swatches: bool,
+    show_footer: bool,
+    on_done: Option<Rc<dyn Fn(&mut EventContext)>>,
+    on_cancel: Option<Rc<dyn Fn(&mut EventContext)>>,
     swatches: Vec<Color>,
     swatches_signal: Option<Signal<Vec<Color>>>,
     swatch_columns: usize,
@@ -174,6 +179,9 @@ impl ColorPicker {
             show_hex_input: true,
             show_preview: true,
             show_swatches: true,
+            show_footer: false,
+            on_done: None,
+            on_cancel: None,
             swatches: DEFAULT_SWATCHES.to_vec(),
             swatches_signal: None,
             swatch_columns: 6,
@@ -227,6 +235,40 @@ impl ColorPicker {
 
     pub fn show_swatches(mut self, s: bool) -> Self {
         self.show_swatches = s;
+        self
+    }
+
+    /// Show a Done / Cancel footer at the bottom of the picker.
+    /// Default `false` for embedded use (the bound signal is the
+    /// commit channel — there is no "uncommitted" state). Wrappers
+    /// that present the picker as a popover (e.g. [`ColorEdit`])
+    /// flip this to `true` so the user has explicit accept / dismiss
+    /// affordances; the buttons fire [`Self::on_done`] /
+    /// [`Self::on_cancel`] respectively.
+    pub fn show_footer(mut self, s: bool) -> Self {
+        self.show_footer = s;
+        self
+    }
+
+    /// Callback fired when the user activates the footer's Done
+    /// button. The picker has already been writing through to the
+    /// bound signal as the user dragged / typed, so Done's job is
+    /// purely to dismiss the surrounding surface (popover, sheet,
+    /// dialog). Only meaningful when `show_footer(true)`.
+    pub fn on_done(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_done = Some(Rc::new(f));
+        self
+    }
+
+    /// Callback fired when the user activates the footer's Cancel
+    /// button. The picker itself does **not** restore any value —
+    /// that's the caller's responsibility (e.g. ColorEdit captures a
+    /// snapshot at popover-open time and writes it back here). The
+    /// callback's typical implementation is
+    /// `value.set(snapshot.get()); ctx.dismiss_all_overlays();`.
+    /// Only meaningful when `show_footer(true)`.
+    pub fn on_cancel(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_cancel = Some(Rc::new(f));
         self
     }
 
@@ -492,14 +534,56 @@ impl Widget for ColorPicker {
             None
         };
 
+        // Footer row (Cancel + Spacer + Done) — only when show_footer
+        // is set. Built once per layout. The buttons fire user-supplied
+        // callbacks; the picker doesn't dismiss anything itself (it
+        // doesn't own the surrounding surface).
+        let footer_row: Option<HStack> = if self.show_footer {
+            let mut row = HStack::new()
+                .spacing(style_snapshot.gap)
+                .child(Spacer::new());
+            if let Some(cb) = self.on_cancel.clone() {
+                let cancel_btn = Button::new(resolve_message_widget(
+                    "color-picker-cancel-label",
+                    &[],
+                ))
+                .style(ButtonVariant::Regular)
+                .enabled(enabled)
+                .on_activate_fn(move |ctx_evt| cb(ctx_evt));
+                row = row.child(cancel_btn);
+            }
+            if let Some(cb) = self.on_done.clone() {
+                let done_btn = Button::new(resolve_message_widget(
+                    "color-picker-done-label",
+                    &[],
+                ))
+                .style(ButtonVariant::Default)
+                .enabled(enabled)
+                .on_activate_fn(move |ctx_evt| cb(ctx_evt));
+                row = row.child(done_btn);
+            }
+            Some(row)
+        } else {
+            None
+        };
+
         // ── Compose by layout ──
-        let root_id = match layout {
+        // Each layout produces a `VStack` of rows; we then wrap the
+        // VStack in a `Panel` so the picker reads as a self-contained
+        // surface (border + background + corner radius). Without the
+        // Panel, embedding the picker as the content of an
+        // `OverlayRequest` produces a transparent popup — the
+        // overlay system doesn't paint a default surface.
+        let body = match layout {
             ColorPickerLayout::Compact => {
                 let mut col = VStack::new().spacing(style_snapshot.gap).child(top_row);
                 if let Some(hex) = compact_hex_widget {
                     col = col.child(hex);
                 }
-                ctx.add(Padding::uniform(style_snapshot.padding).child(col))
+                if let Some(footer) = footer_row {
+                    col = col.child(footer);
+                }
+                col
             }
             ColorPickerLayout::Standard => {
                 let mut col = VStack::new().spacing(style_snapshot.gap).child(top_row);
@@ -513,12 +597,12 @@ impl Widget for ColorPicker {
                 if let Some(grid) = swatch_grid_widget {
                     col = col.child(grid);
                 }
-                ctx.add(Padding::uniform(style_snapshot.padding).child(col))
+                if let Some(footer) = footer_row {
+                    col = col.child(footer);
+                }
+                col
             }
             ColorPickerLayout::Wide => {
-                // Wide: top row on the left + a side column on the right
-                // containing preview + hex + spinners. Swatches at the
-                // bottom span both columns.
                 let mut side_col = VStack::new().spacing(style_snapshot.gap).child(preview_row);
                 if let Some(rgb) = rgb_row {
                     side_col = side_col.child(rgb);
@@ -534,9 +618,18 @@ impl Widget for ColorPicker {
                 if let Some(grid) = swatch_grid_widget {
                     col = col.child(grid);
                 }
-                ctx.add(Padding::uniform(style_snapshot.padding).child(col))
+                if let Some(footer) = footer_row {
+                    col = col.child(footer);
+                }
+                col
             }
         };
+        let root_id = ctx.add(
+            Panel::new()
+                .padding(style_snapshot.padding)
+                .border_width(1.0)
+                .child(body),
+        );
         self.root_child_id = Some(root_id);
 
         // Bind the value signal so the wrapper's accessibility() re-runs

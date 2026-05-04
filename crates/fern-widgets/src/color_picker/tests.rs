@@ -364,3 +364,72 @@ fn color_edit_clicking_trigger_opens_popover() {
     let after = tree.accessibility_node(trigger);
     assert!(after.is_expanded(), "click opens popover (set_expanded=true)");
 }
+
+#[test]
+fn color_picker_footer_invokes_done_callback() {
+    // show_footer adds a Done button; clicking it must fire the
+    // user-supplied on_done callback. We check by counting calls in
+    // a shared cell.
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let value = Signal::new(Color::RED);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let calls = Rc::new(Cell::new(0_u32));
+    let calls_for_picker = calls.clone();
+    let picker_id = tree.add(
+        ColorPicker::new(value)
+            .layout(ColorPickerLayout::Compact)
+            .show_footer(true)
+            .on_done(move |_ctx| {
+                calls_for_picker.set(calls_for_picker.get() + 1);
+            }),
+    );
+    tree.layout(SizeProposal::exact(400.0, 400.0));
+    tree.render();
+
+    // Find the Done button by its label and click it.
+    let done_id = tree
+        // No I18nManager is installed in the test environment, so
+        // resolve_message_widget returns the literal Fluent key.
+        .find_by_label("color-picker-done-label")
+        .expect("Done button must exist when show_footer(true)");
+    let _ = picker_id;
+    tree.click(done_id);
+    assert_eq!(calls.get(), 1, "on_done must fire once per Done click");
+}
+
+#[test]
+fn color_edit_cancel_restores_value_to_open_time_snapshot() {
+    // Open the popover with value=RED, mutate value externally to
+    // simulate a drag, then click Cancel — value should snap back to
+    // the value that was bound at popover-open time (RED).
+    use crate::color_edit::ColorEdit;
+    let value = Signal::new(Color::RED);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(ColorEdit::new(value.clone()));
+    tree.layout(SizeProposal::exact(200.0, 40.0));
+    tree.render();
+
+    let trigger = tree
+        .first_focusable_descendant(id)
+        .expect("ColorEdit trigger must exist");
+    tree.click(trigger);
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    // Simulate the user dragging the HSV canvas — the picker writes
+    // through to the bound signal continuously.
+    value.set(Color::from_hex("#00FF00"));
+    assert_eq!(value.get(), Color::from_hex("#00FF00"));
+
+    let cancel_id = tree
+        .find_by_label("color-picker-cancel-label")
+        .expect("Cancel button must exist when show_footer(true)");
+    tree.click(cancel_id);
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    assert_eq!(
+        value.get(),
+        Color::RED,
+        "cancel should restore the value the bound signal had at popover-open time",
+    );
+}
