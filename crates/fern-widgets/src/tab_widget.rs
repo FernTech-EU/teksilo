@@ -762,14 +762,7 @@ impl Widget for TabWidget {
         // Content sits flush under the tab bar — the TabBar paints its own
         // 1 dp bottom separator, and selected tabs overpaint that with
         // their 3 dp underline. No inset, no extra divider.
-        // Tab content area must claim BOTH axes: full panel width
-        // (so per-tab content fills the bounds, not just its natural
-        // width) AND full panel height (slack below the tab bar). Use
-        // `respect_intrinsic` so that when a parent queries us with an
-        // unspecified proposal (e.g. an HStack on the cross axis), we
-        // fall back to the switcher's intrinsic instead of reporting 0.
-        let content_id =
-            ctx.add(Expand::new().respect_intrinsic().child_id(switcher_id));
+        let content_id = ctx.add(Expand::vertical().child_id(switcher_id));
 
         let root_id = ctx.add(
             VStack::new()

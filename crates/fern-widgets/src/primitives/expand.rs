@@ -21,6 +21,24 @@ use fern_tokens::Alignment;
 /// Use `.flex(n)` to change the ratio (e.g. 1:2 by pairing `flex(1)` with
 /// `flex(2)`). Use `.align_child(...)` to opt out of fill and align the
 /// child at its natural size within the claimed bounds.
+///
+/// **`horizontal()` / `vertical()` semantics.** The named axis is the one
+/// the wrapper *competes for slack on*. Both sizing and flex behavior
+/// follow from that:
+///
+/// - **Sizing:** when the parent binds an axis (`proposal.{axis} = Some`),
+///   the wrapper claims that axis regardless of its name. So
+///   `Expand::vertical(child)` inside a `VStack` (which binds width and
+///   leaves height open) fills the VStack's full width AND distributes
+///   vertical slack via flex. Cross-axis collapse to child intrinsic only
+///   happens when the parent left that axis open too.
+///
+/// - **Flex contribution:** the wrapper reports its `flex` weight only on
+///   axes the parent is distributing (i.e. left open). `Expand::horizontal()`
+///   inside a `VStack` reports `flex = 0` on the open vertical axis, so it
+///   does NOT compete for vertical slack with siblings — it just claims
+///   the cross-axis width and sits at its child's intrinsic height. Symmetric
+///   for `Expand::vertical()` inside an `HStack`.
 #[derive(Debug)]
 pub struct Expand {
     child_id: Option<WidgetId>,
@@ -52,7 +70,11 @@ impl Expand {
         }
     }
 
-    /// Expand on the horizontal axis only.
+    /// Compete for slack on the horizontal axis only. Inside an `HStack`,
+    /// distributes flex on width while claiming bound height as-is. Inside
+    /// a `VStack` (which binds width and distributes height), claims the
+    /// VStack's full width but reports `flex = 0` so it doesn't steal
+    /// vertical slack from siblings — height stays at child intrinsic.
     pub fn horizontal() -> Self {
         Self {
             child_id: None,
@@ -65,7 +87,11 @@ impl Expand {
         }
     }
 
-    /// Expand on the vertical axis only.
+    /// Compete for slack on the vertical axis only. Inside a `VStack`,
+    /// distributes flex on height while claiming bound width as-is. Inside
+    /// an `HStack` (which binds height and distributes width), claims the
+    /// HStack's full height but reports `flex = 0` so it doesn't steal
+    /// horizontal slack from siblings — width stays at child intrinsic.
     pub fn vertical() -> Self {
         Self {
             child_id: None,
@@ -147,12 +173,25 @@ impl Widget for Expand {
             .and_then(|id| ctx.child_size(id, SizeProposal::unspecified()))
             .unwrap_or(Size::ZERO);
 
-        // On a flex axis, the wanted size is either:
-        //   - 0 (default, zero-basis): give us pure slack.
-        //   - child's natural size (auto-basis): respect the wrapped child
-        //     as a floor; parent adds slack on top.
-        // If the parent gave us a concrete proposal on that axis, claim it
-        // (this matters for non-stack parents — ZStack, Padding, FixedSize).
+        // Two separate concerns:
+        //
+        // 1. **Sizing.** Whether we *can* fill an axis depends on whether
+        //    the parent bound it. If `proposal.{axis}` is `Some(_)`, the
+        //    parent is offering exact space — claim it on every axis,
+        //    regardless of `horizontal` / `vertical` (otherwise an
+        //    `Expand::vertical` inside a `VStack` would collapse on the
+        //    cross axis to its child's intrinsic width). When the parent
+        //    leaves an axis open (`None`), we want pure slack on flex
+        //    axes (basis 0) or child's natural size as a floor when
+        //    `respect_intrinsic` is set.
+        //
+        // 2. **Flex contribution.** A wrapper should only ask for slack
+        //    on its *named* axis: `Expand::horizontal()` in a `VStack`
+        //    must NOT compete for the VStack's vertical slack, otherwise
+        //    a horizontal-fill wrapper would steal vertical space from
+        //    siblings. The parent's distributing axis is whichever side
+        //    of the proposal it left open. So we report `self.flex` only
+        //    when the open axis matches one of our named axes.
         let basis_w = if self.respect_intrinsic {
             child_size.width
         } else {
@@ -163,18 +202,32 @@ impl Widget for Expand {
         } else {
             0.0
         };
+        let w = match proposal.width {
+            Some(pw) => pw,
+            None if self.horizontal => basis_w,
+            None => child_size.width,
+        };
+        let h = match proposal.height {
+            Some(ph) => ph,
+            None if self.vertical => basis_h,
+            None => child_size.height,
+        };
 
-        let w = if self.horizontal {
-            proposal.width.unwrap_or(basis_w)
-        } else {
-            child_size.width
+        // Flex axis logic: a parent stack distributes slack on the axis
+        // it left open in the proposal. Only contribute flex on an axis
+        // where (a) the parent is distributing (proposal=None on it),
+        // and (b) we want to expand on that axis. When both axes are
+        // bound or both are unspecified, report the full flex weight —
+        // the value is moot in non-stack contexts and the unspecified
+        // case happens during intrinsic measurement where the caller
+        // wants to know our "would-be" flex.
+        let flex = match (proposal.width, proposal.height) {
+            (None, Some(_)) if !self.horizontal => 0.0,
+            (Some(_), None) if !self.vertical => 0.0,
+            _ => self.flex,
         };
-        let h = if self.vertical {
-            proposal.height.unwrap_or(basis_h)
-        } else {
-            child_size.height
-        };
-        LayoutResponse::flexible(Size::new(w, h), self.flex)
+
+        LayoutResponse::flexible(Size::new(w, h), flex)
     }
 
     fn place_children(
