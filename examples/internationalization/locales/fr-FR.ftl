@@ -16,3 +16,11 @@ trailing-button = Fin
 status-en = Affichage en anglais
 status-fr = Affichage en français
 status-ar = Affichage en arabe
+
+# Vitrine du formatage selon la locale.
+formatting-heading = Formatage selon la locale
+bundle-currency-row = Total (bundle) : { NUMBER($price, style: "currency", currency: "EUR") }
+bundle-date-row = Aujourd'hui (bundle) : { DATETIME($ts, dateStyle: "long") }
+cart-summary = { $count } articles à { NUMBER($price) } pièce
+price-label = Prix :
+count-label = Quantité :

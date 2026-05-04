@@ -2567,6 +2567,7 @@ name = "internationalization"
 version = "0.1.0"
 dependencies = [
  "fern-ui",
+ "jiff",
 ]
 
 [[package]]

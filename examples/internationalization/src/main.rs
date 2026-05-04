@@ -28,6 +28,9 @@
 //! story is stable.
 
 use fern_ui::core::widget::WidgetPlacement;
+use fern_ui::i18n::{
+    DateStyle, FernDateTime, FernDateTimeFormatter, NumberFormatter, tr_signal,
+};
 use fern_ui::prelude::*;
 use fern_ui::widgets::{Button, ButtonVariant, HStack, Panel, TextWidget, VStack};
 
@@ -38,6 +41,15 @@ use fern_ui::widgets::{Button, ButtonVariant, HStack, Panel, TextWidget, VStack}
 #[derive(Debug)]
 struct Root {
     user_name: String,
+    /// Persistent reactive state for the formatting showcase. Lives on the
+    /// widget struct (not inside `build()`) so + / − button clicks survive
+    /// the composite rebuild that locale-switches trigger.
+    price: Signal<f64>,
+    count: Signal<i64>,
+    /// Static "today" used for the date demos. Real apps would derive this
+    /// from `jiff::Zoned::now()` and refresh on a timer; we use a fixed
+    /// value to keep the example deterministic.
+    today: jiff::civil::DateTime,
     root_child_id: Option<WidgetId>,
 }
 
@@ -45,6 +57,9 @@ impl Root {
     fn new() -> Self {
         Self {
             user_name: "Alice".to_string(),
+            price: Signal::new(1234.56),
+            count: Signal::new(3),
+            today: jiff::civil::date(2026, 5, 4).at(14, 35, 0, 0),
             root_child_id: None,
         }
     }
@@ -147,6 +162,138 @@ impl Widget for Root {
                 .add_child(trailing_btn),
         );
 
+        // ====== Locale-aware formatting showcase ======
+        //
+        // Demonstrates the four `fern-i18n` formatting paths against a
+        // single `Signal<f64> price` + `Signal<i64> count`:
+        //
+        //   1. Bundle-side `NUMBER()` / `DATETIME()` inside `.ftl` —
+        //      `bundle_currency_row` and `bundle_date_row` keys carry
+        //      the formatting calls. These rows update on **locale**
+        //      flips (composite rebuild re-evaluates `tr!`); they do
+        //      NOT react to the price/count signals because `tr!`
+        //      captures arguments by value.
+        //
+        //   2. Signal-side `NumberFormatter` — three rows (decimal,
+        //      currency, percent) bound directly to `Signal<f64>`,
+        //      reactive to **both** value changes and locale flips.
+        //
+        //   3. Signal-side `FernDateTimeFormatter` — bound to a
+        //      `Signal<jiff::civil::DateTime>`. Same reactivity model.
+        //
+        //   4. `tr_signal!` — translated message with `Signal<T>` args
+        //      interpolated reactively. Re-renders on count, price,
+        //      AND locale changes. The correct path for "I want a
+        //      Signal<T> *inside* a translated sentence."
+
+        let formatting_heading = ctx.add(
+            TextWidget::new(tr!(formatting_heading()))
+                .style(theme.typography.body_bold.clone())
+                .color(theme.colors.text_primary),
+        );
+
+        // ---- Bundle-side rows (locale-reactive only) ----
+        let bundle_currency = ctx.add(
+            TextWidget::new(tr!(bundle_currency_row(price = self.price.get())))
+                .style(theme.typography.body.clone())
+                .color(theme.colors.text_primary),
+        );
+        let bundle_date = ctx.add(
+            TextWidget::new(tr!(bundle_date_row(ts = FernDateTime::from(self.today))))
+                .style(theme.typography.body.clone())
+                .color(theme.colors.text_primary),
+        );
+
+        // ---- Signal-side rows (value- AND locale-reactive) ----
+        let decimal_value = NumberFormatter::new()
+            .fraction_digits(2, 2)
+            .format(self.price.clone());
+        let currency_value = NumberFormatter::new()
+            .currency(per_locale_currency(ctx))
+            .fraction_digits(2, 2)
+            .format(self.price.clone());
+        // Derive a 0..1 ratio from the price so the percent row has
+        // something natural to display. Caps at 100 % so very large
+        // prices don't push it off-screen.
+        let ratio = self
+            .price
+            .map(|p| (p / 2000.0).clamp(0.0, 1.0));
+        let percent_value = NumberFormatter::new()
+            .percent()
+            .fraction_digits(0, 1)
+            .format(ratio);
+        let date_value = FernDateTimeFormatter::new()
+            .date_style(DateStyle::Long)
+            .format(self.today);
+
+        let signal_decimal_row = formatting_row(ctx, &theme, "Decimal:", decimal_value);
+        let signal_currency_row = formatting_row(ctx, &theme, "Currency:", currency_value);
+        let signal_percent_row = formatting_row(ctx, &theme, "Percent:", percent_value);
+        let signal_date_row = formatting_row(ctx, &theme, "Date:", date_value);
+
+        // ---- tr_signal! row (everything-reactive) ----
+        let cart_summary_signal: Signal<String> = tr_signal!(cart_summary(
+            count = self.count,
+            price = self.price,
+        ));
+        let cart_summary_text = ctx.add(
+            TextWidget::new_literal("")
+                .bind_text(cart_summary_signal)
+                .style(theme.typography.body_bold.clone())
+                .color(theme.colors.text_primary),
+        );
+
+        // ---- Controls: ± price and ± count ----
+        let price_label = ctx.add(
+            TextWidget::new(tr!(price_label()))
+                .style(theme.typography.body.clone())
+                .color(theme.colors.text_secondary),
+        );
+        let price_minus = ctx.add(
+            Button::new_literal("− 100").style(ButtonVariant::Regular).on_activate_fn({
+                let price = self.price.clone();
+                move |_| price.set(price.get() - 100.0)
+            }),
+        );
+        let price_plus = ctx.add(
+            Button::new_literal("+ 100").style(ButtonVariant::Regular).on_activate_fn({
+                let price = self.price.clone();
+                move |_| price.set(price.get() + 100.0)
+            }),
+        );
+        let price_controls = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .add_child(price_label)
+                .add_child(price_minus)
+                .add_child(price_plus),
+        );
+
+        let count_label = ctx.add(
+            TextWidget::new(tr!(count_label()))
+                .style(theme.typography.body.clone())
+                .color(theme.colors.text_secondary),
+        );
+        let count_minus = ctx.add(
+            Button::new_literal("− 1").style(ButtonVariant::Regular).on_activate_fn({
+                let count = self.count.clone();
+                move |_| count.set((count.get() - 1).max(0))
+            }),
+        );
+        let count_plus = ctx.add(
+            Button::new_literal("+ 1").style(ButtonVariant::Regular).on_activate_fn({
+                let count = self.count.clone();
+                move |_| count.set(count.get() + 1)
+            }),
+        );
+        let count_controls = ctx.add(
+            HStack::new()
+                .spacing(8.0)
+                .add_child(count_label)
+                .add_child(count_minus)
+                .add_child(count_plus),
+        );
+
         let column = ctx.add(
             VStack::new()
                 .spacing(16.0)
@@ -155,7 +302,17 @@ impl Widget for Root {
                 .add_child(body)
                 .add_child(direction_note)
                 .add_child(language_row)
-                .add_child(direction_row),
+                .add_child(direction_row)
+                .add_child(formatting_heading)
+                .add_child(bundle_currency)
+                .add_child(bundle_date)
+                .add_child(signal_decimal_row)
+                .add_child(signal_currency_row)
+                .add_child(signal_percent_row)
+                .add_child(signal_date_row)
+                .add_child(cart_summary_text)
+                .add_child(price_controls)
+                .add_child(count_controls),
         );
 
         let root_id = ctx.add(Panel::new().padding(24.0).child_id(column));
@@ -184,6 +341,52 @@ impl Widget for Root {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+}
+
+/// One row of the formatting showcase: a literal English label paired
+/// with a `Signal<String>` that the Number/DateTime formatters produced.
+/// Pulled out as a helper because four rows share the same layout.
+fn formatting_row(
+    ctx: &mut BuildContext,
+    theme: &fern_ui::tokens::Theme,
+    label: &'static str,
+    value: Signal<String>,
+) -> WidgetId {
+    let label_widget = ctx.add(
+        TextWidget::new_literal(label)
+            .style(theme.typography.body.clone())
+            .color(theme.colors.text_secondary),
+    );
+    let value_widget = ctx.add(
+        TextWidget::new_literal("")
+            .bind_text(value)
+            .style(theme.typography.body.clone())
+            .color(theme.colors.text_primary),
+    );
+    ctx.add(
+        HStack::new()
+            .spacing(8.0)
+            .add_child(label_widget)
+            .add_child(value_widget),
+    )
+}
+
+/// Pick a locale-appropriate currency code for the Signal-side currency
+/// demo. Matches the `bundle-currency-row` choice in each `.ftl` so the
+/// bundle-side and Signal-side rows display the same currency for the
+/// same active locale — translators choose the natural currency for
+/// their market.
+fn per_locale_currency(_ctx: &mut BuildContext) -> &'static str {
+    let lang = fern_ui::i18n::current_locale()
+        .map(|s| s.get().to_string())
+        .unwrap_or_else(|| "en-US".to_string());
+    if lang.starts_with("fr") {
+        "EUR"
+    } else if lang.starts_with("ar") {
+        "SAR"
+    } else {
+        "USD"
     }
 }
 

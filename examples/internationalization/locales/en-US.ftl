@@ -17,3 +17,15 @@ trailing-button = Trailing
 status-en = Showing English
 status-fr = Showing French
 status-ar = Showing Arabic
+
+# Locale-aware formatting showcase. Demonstrates the four pieces wired
+# by `fern-i18n`: bundle-side `NUMBER()` / `DATETIME()` (this file's
+# `bundle-currency-row` and `bundle-date-row`), the Signal-side
+# `NumberFormatter` / `FernDateTimeFormatter` (no .ftl keys needed),
+# and `tr_signal!` (this file's `cart-summary`).
+formatting-heading = Locale-aware formatting
+bundle-currency-row = Total (bundle): { NUMBER($price, style: "currency", currency: "USD") }
+bundle-date-row = Today (bundle): { DATETIME($ts, dateStyle: "long") }
+cart-summary = { $count } items at { NUMBER($price) } each
+price-label = Price:
+count-label = Count:

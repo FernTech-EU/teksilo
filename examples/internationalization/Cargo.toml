@@ -8,3 +8,4 @@ publish = false
 
 [dependencies]
 fern-ui = { workspace = true, features = ["fonts-arabic"] }
+jiff = { workspace = true }

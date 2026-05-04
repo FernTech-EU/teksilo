@@ -17,3 +17,11 @@ trailing-button = النهاية
 status-en = عرض الإنجليزية
 status-fr = عرض الفرنسية
 status-ar = عرض العربية
+
+# عرض تنسيق الأرقام والتواريخ حسب اللغة
+formatting-heading = تنسيق الأرقام والتواريخ حسب اللغة
+bundle-currency-row = الإجمالي: { NUMBER($price, style: "currency", currency: "SAR") }
+bundle-date-row = اليوم: { DATETIME($ts, dateStyle: "long") }
+cart-summary = { $count } عنصرًا بسعر { NUMBER($price) } لكل وحدة
+price-label = السعر:
+count-label = العدد:
