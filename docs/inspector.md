@@ -86,8 +86,8 @@ button) to take focus, then:
 
 | Key | Action |
 |---|---|
-| **P** | Toggle the picker tool (same as the toolbar **Pick** button). |
-| **B** | Cycle bounds overlay: `Off → Sel → All → Off`. |
+| **Ctrl+P** | Toggle the picker tool (same as the toolbar **Pick** button). |
+| **Ctrl+B** | Cycle bounds overlay: `Off → Sel → All → Off`. |
 | **Ctrl+Tab** | Switch to the next tab. |
 | **Ctrl+Shift+Tab** | Switch to the previous tab. |
 | **Esc** | If picker mode is active, stop picking. Otherwise close the panel. |

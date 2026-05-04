@@ -43,12 +43,12 @@ impl std::fmt::Debug for PanelShortcutHost {
 
 impl Widget for PanelShortcutHost {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // ── Pick (P) ──────────────────────────────────────────────
+        // ── Pick (Ctrl+P) ─────────────────────────────────────────
         let st = self.state.clone();
         ctx.register_shortcut(
             Shortcut::new("__fern_inspector.pick")
                 .name("Toggle Picker")
-                .primary(KeyStroke::new(Key::P, Modifiers::empty()))
+                .primary(KeyStroke::ctrl(Key::P))
                 .on_activate(move |_ks, _c| {
                     st.picker_mode.set(!st.picker_mode.get());
                     Intent::new("__fern_inspector.pick")
@@ -56,12 +56,12 @@ impl Widget for PanelShortcutHost {
                 .build(),
         );
 
-        // ── Bounds cycle (B) ──────────────────────────────────────
+        // ── Bounds cycle (Ctrl+B) ─────────────────────────────────
         let st = self.state.clone();
         ctx.register_shortcut(
             Shortcut::new("__fern_inspector.bounds_cycle")
                 .name("Cycle Bounds Overlay")
-                .primary(KeyStroke::new(Key::B, Modifiers::empty()))
+                .primary(KeyStroke::ctrl(Key::B))
                 .on_activate(move |_ks, _c| {
                     st.overlay_mode.set(st.overlay_mode.get().next());
                     Intent::new("__fern_inspector.bounds_cycle")
