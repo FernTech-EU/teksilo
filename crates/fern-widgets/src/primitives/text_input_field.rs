@@ -606,6 +606,16 @@ impl Widget for TextInputField {
         // caret ends up at the end of the inserted text (cursor
         // behavior is documented in
         // `text_document::TextCursor::insert_text`).
+        //
+        // `insert_text` only enqueues a `ContentsChanged` document
+        // event — `tick()` drains it on the next frame and propagates
+        // the new text to `text_signal`. Frames are demand-driven, so
+        // we ping `frame_request` here to guarantee a tick runs even
+        // when the external writer (e.g. an HSV-canvas drag feeding a
+        // spinner / hex bridge) is the only thing changing on screen.
+        // Without it, the document stays in sync with the bound signal
+        // but the visible glyphs lag until something else (focus, a
+        // keystroke, an animation frame) wakes the loop.
         {
             let ext = self.text.clone();
             let state_for_sync = shared_state.clone();
@@ -615,6 +625,9 @@ impl Widget for TextInputField {
                 if current != *new_text {
                     st.cursor.select(SelectionType::Document);
                     let _ = st.cursor.insert_text(new_text);
+                    if let Some(handle) = &st.frame_request {
+                        handle.set(true);
+                    }
                 }
             });
         }
