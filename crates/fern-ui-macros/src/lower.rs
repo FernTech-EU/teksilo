@@ -334,7 +334,7 @@ fn count_if_arms(if_expr: &FernIf) -> (usize, bool) {
                 count += 1;
                 cursor = &nested.else_branch;
             }
-            FernElse::Element(_) => {
+            FernElse::Element { .. } => {
                 count += 1;
                 has_final_else = true;
                 break;
@@ -369,7 +369,7 @@ fn lower_if_chain_as_branch(
             )?;
             quote!(else #else_expr)
         }
-        Some(FernElse::Element(element)) => {
+        Some(FernElse::Element { element, .. }) => {
             let variant = branch_variant(arm_count, arm_index + 1);
             let element_expr = lower_element(element, ctx_tok, hoisted)?;
             quote! { else { #branch_path::#variant(#element_expr) } }

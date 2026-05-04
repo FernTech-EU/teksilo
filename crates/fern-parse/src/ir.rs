@@ -96,17 +96,28 @@ pub struct FernIf {
     pub then: FernElement,
     pub else_branch: Option<Box<FernElse>>,
     pub span: Span,
+    /// Span of the `}` that closes this if's `then` block. Held by every
+    /// `FernIf` (including else-if recursion) so consumers can compute
+    /// the rightmost byte of an if-chain. Inner `FernElement`s carry no
+    /// braces of their own — the structural form owns them.
+    pub body_close: Span,
 }
 
 pub enum FernElse {
     ElseIf(FernIf),
-    Element(FernElement),
+    Element {
+        element: FernElement,
+        /// Span of the `}` that closes the trailing `else { ... }` block.
+        body_close: Span,
+    },
 }
 
 pub struct FernMatch {
     pub scrutinee: Expr,
     pub arms: Vec<FernMatchArm>,
     pub span: Span,
+    /// Span of the `}` that closes the match block.
+    pub body_close: Span,
 }
 
 pub struct FernMatchArm {
@@ -121,6 +132,8 @@ pub struct FernFor {
     pub lets: Vec<Local>,
     pub element: FernElement,
     pub span: Span,
+    /// Span of the `}` that closes the for block.
+    pub body_close: Span,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -382,25 +382,38 @@ fn fern_if_token_stream(if_: &FernIf) -> TokenStream {
     let mut ts = TokenStream::new();
     if_.cond.to_tokens(&mut ts);
     element_to_tokens(&if_.then, &mut ts);
+    push_anchor(&mut ts, if_.body_close, "__bc");
     if let Some(b) = &if_.else_branch {
         match &**b {
             FernElse::ElseIf(nested) => fern_if_to_tokens(nested, &mut ts),
-            FernElse::Element(el) => element_to_tokens(el, &mut ts),
+            FernElse::Element {
+                element,
+                body_close,
+            } => {
+                element_to_tokens(element, &mut ts);
+                push_anchor(&mut ts, *body_close, "__bc");
+            }
         }
     }
     // Anchor the `if` keyword span too.
-    use proc_macro2::{Ident, TokenTree};
-    ts.extend(std::iter::once(TokenTree::Ident(Ident::new("if", if_.span))));
+    push_anchor(&mut ts, if_.span, "if");
     ts
 }
 
 fn fern_if_to_tokens(if_: &FernIf, ts: &mut TokenStream) {
     if_.cond.to_tokens(ts);
     element_to_tokens(&if_.then, ts);
+    push_anchor(ts, if_.body_close, "__bc");
     if let Some(b) = &if_.else_branch {
         match &**b {
             FernElse::ElseIf(nested) => fern_if_to_tokens(nested, ts),
-            FernElse::Element(el) => element_to_tokens(el, ts),
+            FernElse::Element {
+                element,
+                body_close,
+            } => {
+                element_to_tokens(element, ts);
+                push_anchor(ts, *body_close, "__bc");
+            }
         }
     }
 }
@@ -415,10 +428,8 @@ fn fern_match_token_stream(m: &FernMatch) -> TokenStream {
         }
         element_to_tokens(&arm.element, &mut ts);
     }
-    use proc_macro2::{Ident, TokenTree};
-    ts.extend(std::iter::once(TokenTree::Ident(Ident::new(
-        "match", m.span,
-    ))));
+    push_anchor(&mut ts, m.span, "match");
+    push_anchor(&mut ts, m.body_close, "__bc");
     ts
 }
 
@@ -430,9 +441,17 @@ fn fern_for_token_stream(f: &FernFor) -> TokenStream {
         l.to_tokens(&mut ts);
     }
     element_to_tokens(&f.element, &mut ts);
-    use proc_macro2::{Ident, TokenTree};
-    ts.extend(std::iter::once(TokenTree::Ident(Ident::new("for", f.span))));
+    push_anchor(&mut ts, f.span, "for");
+    push_anchor(&mut ts, f.body_close, "__bc");
     ts
+}
+
+/// Anchor a span into a TokenStream so `ts_byte_range` accounts for it.
+/// The emitted ident is never printed — it only contributes its byte
+/// range to the union computed by `walk_extents`.
+fn push_anchor(ts: &mut TokenStream, span: proc_macro2::Span, name: &str) {
+    use proc_macro2::{Ident, TokenTree};
+    ts.extend(std::iter::once(TokenTree::Ident(Ident::new(name, span))));
 }
 
 fn element_to_tokens(e: &FernElement, ts: &mut TokenStream) {

@@ -115,3 +115,77 @@ fn already_formatted_is_unchanged() {
         "VStack {\n    spacing: 8.0\n    Button(\"ok\") {\n        on_activate_fn: cb\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }
+
+// Regression: the synthesized TokenStream for structural forms must
+// reach past the form's closing `}`. Earlier versions stopped at the
+// last element's last token and silently truncated the trailing `)`,
+// `,`, and `}` characters during a verbatim source slice.
+
+#[test]
+fn if_no_else_preserves_closing_brace() {
+    let src = r#"VStack { if cond { Banner("x") } }"#;
+    let out = fmt(src);
+    assert!(
+        out.contains(r#"if cond { Banner("x") }"#),
+        "expected if-form intact, got:\n{out}"
+    );
+}
+
+#[test]
+fn if_else_preserves_else_block_closing_brace() {
+    let src = r#"VStack { if flag { YesBanner } else { NoBanner("hi") } }"#;
+    let out = fmt(src);
+    assert!(
+        out.contains(r#"NoBanner("hi")"#) && out.contains("} else {"),
+        "expected else block intact, got:\n{out}"
+    );
+    // The structural form must end with `}` before the parent's `}`.
+    assert!(
+        out.contains("NoBanner(\"hi\") }") || out.contains("NoBanner(\"hi\")\n            }"),
+        "expected else-block close-brace preserved, got:\n{out}"
+    );
+}
+
+#[test]
+fn match_preserves_arm_and_block_closing_braces() {
+    let src = "Holder { match s { S::A => One, S::B(x) => Two(x.clone()), } }";
+    let out = fmt(src);
+    assert!(
+        out.contains("S::B(x) => Two(x.clone())"),
+        "expected last arm intact, got:\n{out}"
+    );
+    // Last arm's constructor `)` and the match block's `}` must survive.
+    assert!(
+        out.contains("Two(x.clone()),") || out.contains("Two(x.clone())\n"),
+        "expected last arm closing intact, got:\n{out}"
+    );
+    assert!(
+        out.matches('}').count() >= 2,
+        "expected match `}}` and parent `}}`, got:\n{out}"
+    );
+}
+
+#[test]
+fn for_loop_preserves_closing_braces() {
+    let src = "VLike { for item in items.iter() { ListItem(item) { tag: 1 } } }";
+    let out = fmt(src);
+    assert!(
+        out.contains("ListItem(item)") && out.contains("tag: 1"),
+        "expected for-body intact, got:\n{out}"
+    );
+    // Inner element body `}`, for block `}`, parent `}` — three closing braces.
+    assert!(
+        out.matches('}').count() >= 3,
+        "expected three closing braces, got:\n{out}"
+    );
+}
+
+#[test]
+fn else_if_chain_preserves_innermost_close() {
+    let src = "Holder { if a { A } else if b { B } else { C(\"tail\") } }";
+    let out = fmt(src);
+    assert!(
+        out.contains("else if b") && out.contains("C(\"tail\")"),
+        "expected else-if chain intact, got:\n{out}"
+    );
+}

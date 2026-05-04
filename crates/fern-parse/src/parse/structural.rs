@@ -26,7 +26,7 @@ fn parse_if_tail(input: ParseStream, span: proc_macro2::Span) -> Result<FernIf> 
     let cond = Expr::parse_without_eager_brace(input)?;
 
     let then_content;
-    let _brace = syn::braced!(then_content in input);
+    let then_brace = syn::braced!(then_content in input);
     let then = parse_element(&then_content)?;
     if !then_content.is_empty() {
         return Err(diag::error(
@@ -34,6 +34,7 @@ fn parse_if_tail(input: ParseStream, span: proc_macro2::Span) -> Result<FernIf> 
             "if-body must contain exactly one element — wrap multiple in a container like VStack",
         ));
     }
+    let body_close = then_brace.span.close();
 
     let else_branch = if input.peek(Token![else]) {
         let _else_token: Token![else] = input.parse()?;
@@ -43,7 +44,7 @@ fn parse_if_tail(input: ParseStream, span: proc_macro2::Span) -> Result<FernIf> 
             Some(Box::new(FernElse::ElseIf(next)))
         } else {
             let else_content;
-            let _brace = syn::braced!(else_content in input);
+            let else_brace = syn::braced!(else_content in input);
             let element = parse_element(&else_content)?;
             if !else_content.is_empty() {
                 return Err(diag::error(
@@ -51,7 +52,10 @@ fn parse_if_tail(input: ParseStream, span: proc_macro2::Span) -> Result<FernIf> 
                     "else-body must contain exactly one element",
                 ));
             }
-            Some(Box::new(FernElse::Element(element)))
+            Some(Box::new(FernElse::Element {
+                element,
+                body_close: else_brace.span.close(),
+            }))
         }
     } else {
         None
@@ -62,6 +66,7 @@ fn parse_if_tail(input: ParseStream, span: proc_macro2::Span) -> Result<FernIf> 
         then,
         else_branch,
         span,
+        body_close,
     })
 }
 
@@ -71,7 +76,7 @@ pub(crate) fn parse_match(input: ParseStream) -> Result<FernMatch> {
     let scrutinee = Expr::parse_without_eager_brace(input)?;
 
     let content;
-    let _brace = syn::braced!(content in input);
+    let brace = syn::braced!(content in input);
     let mut arms = Vec::new();
     while !content.is_empty() {
         arms.push(parse_match_arm(&content)?);
@@ -81,6 +86,7 @@ pub(crate) fn parse_match(input: ParseStream) -> Result<FernMatch> {
         scrutinee,
         arms,
         span,
+        body_close: brace.span.close(),
     })
 }
 
@@ -114,7 +120,7 @@ pub(crate) fn parse_for(input: ParseStream) -> Result<FernFor> {
     let iter = Expr::parse_without_eager_brace(input)?;
 
     let content;
-    let _brace = syn::braced!(content in input);
+    let brace = syn::braced!(content in input);
 
     let mut lets = Vec::new();
     while content.peek(Token![let]) {
@@ -144,6 +150,7 @@ pub(crate) fn parse_for(input: ParseStream) -> Result<FernFor> {
         lets,
         element,
         span,
+        body_close: brace.span.close(),
     })
 }
 
