@@ -611,6 +611,44 @@ mod tests {
     }
 
     #[test]
+    fn linear_gradient_endpoints_are_rect_local_not_absolute() {
+        // Regression for the HSV-canvas bug: the gradient endpoints
+        // are normalized by the rect's width/height (`encode_paint_data`
+        // doesn't see the rect origin), so callers MUST pass them in
+        // rect-local coordinates. A rect at non-origin with rect-local
+        // endpoints (0,0)→(0,h) must encode to start_uv=(0,0) and
+        // end_uv=(0,1) — full gradient sampling across the rect.
+        // Passing absolute coords would shift the endpoints away and
+        // visibly squash the gradient.
+        let shape = ShapeQuad {
+            screen: [50.0, 100.0, 200.0, 200.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+            shape: ShapeKind::RoundedRect,
+            stroke_width: 0.0,
+            corner_radii: [0.0; 4],
+            paint_data: PaintData::LinearGradient {
+                start: [0.0, 0.0],
+                end: [0.0, 200.0],
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::new(0.0, 0.0, 0.0, 0.0),
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLACK,
+                    },
+                ],
+            },
+        };
+        let verts = SdfVertex::from_shape_quad(&shape, 1.0);
+        assert!((verts[0].gradient_geo[0]).abs() < 1e-5, "start_uv.x");
+        assert!((verts[0].gradient_geo[1]).abs() < 1e-5, "start_uv.y");
+        assert!((verts[0].gradient_geo[2]).abs() < 1e-5, "end_uv.x");
+        assert!((verts[0].gradient_geo[3] - 1.0).abs() < 1e-5, "end_uv.y");
+    }
+
+    #[test]
     fn generate_indices_for_multiple_quads() {
         let indices = generate_quad_indices(2);
         assert_eq!(indices.len(), 12);

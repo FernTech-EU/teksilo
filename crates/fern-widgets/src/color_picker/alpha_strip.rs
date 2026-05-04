@@ -269,17 +269,19 @@ impl Widget for AlphaStrip {
         );
 
         // Gradient overlay — current color from transparent to opaque
-        // along the primary axis.
+        // along the primary axis. `Paint::LinearGradient` endpoints
+        // are rect-local (origin at the rect's top-left); see
+        // `Paint::LinearGradient` docs for the rationale.
         let opaque = self.current_color.get().with_alpha(1.0);
         let transparent = opaque.with_alpha(0.0);
         let (start, end) = match self.orientation {
             Orientation::Vertical => (
-                Point::new(bounds.x, bounds.y),
-                Point::new(bounds.x, bounds.y + bounds.height),
+                Point::new(0.0, 0.0),
+                Point::new(0.0, bounds.height),
             ),
             Orientation::Horizontal => (
-                Point::new(bounds.x, bounds.y),
-                Point::new(bounds.x + bounds.width, bounds.y),
+                Point::new(0.0, 0.0),
+                Point::new(bounds.width, 0.0),
             ),
         };
         canvas.fill_rounded_rect(

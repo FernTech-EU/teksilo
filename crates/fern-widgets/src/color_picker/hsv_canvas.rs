@@ -180,12 +180,15 @@ impl Widget for HsvCanvas {
         canvas.fill_rounded_rect(bounds, radius, base);
 
         // Layer 2: white → transparent (saturation axis, left → right).
+        // `Paint::LinearGradient` endpoints are rect-local (origin at
+        // the rect's top-left, in pixels); see `Paint::LinearGradient`
+        // docs for the rationale.
         canvas.fill_rounded_rect(
             bounds,
             radius,
             Paint::LinearGradient {
-                start: Point::new(bounds.x, bounds.y),
-                end: Point::new(bounds.x + bounds.width, bounds.y),
+                start: Point::new(0.0, 0.0),
+                end: Point::new(bounds.width, 0.0),
                 stops: vec![
                     GradientStop {
                         offset: 0.0,
@@ -204,8 +207,8 @@ impl Widget for HsvCanvas {
             bounds,
             radius,
             Paint::LinearGradient {
-                start: Point::new(bounds.x, bounds.y),
-                end: Point::new(bounds.x, bounds.y + bounds.height),
+                start: Point::new(0.0, 0.0),
+                end: Point::new(0.0, bounds.height),
                 stops: vec![
                     GradientStop {
                         offset: 0.0,

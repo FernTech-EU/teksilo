@@ -6,6 +6,19 @@ use crate::geometry::Point;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Paint {
     Solid(Color),
+    /// Linear gradient between two points in **rect-local** pixel
+    /// coordinates: `(0, 0)` is the top-left of the filled rect,
+    /// `(width, height)` is the bottom-right. **Not** absolute window
+    /// coordinates — passing `bounds.x + bounds.width` would shift
+    /// the gradient endpoints away from the rect when the rect is
+    /// positioned anywhere other than the origin (or a scrolled
+    /// child whose bounds change with the scroll offset), causing
+    /// the visible gradient to drift / clip / squash.
+    ///
+    /// Conventional axis endpoints, for a rect of size `(w, h)`:
+    /// - Horizontal left→right: `start = (0, 0), end = (w, 0)`.
+    /// - Vertical top→bottom:   `start = (0, 0), end = (0, h)`.
+    /// - Diagonal:              `start = (0, 0), end = (w, h)`.
     LinearGradient {
         start: Point,
         end: Point,
