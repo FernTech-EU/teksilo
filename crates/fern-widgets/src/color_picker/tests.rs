@@ -298,16 +298,19 @@ fn color_edit_builds_nullable() {
 
 #[test]
 fn color_edit_emits_button_role() {
-    // The trigger declares Role::Button + HasPopup::Dialog inside its
-    // accessibility() impl. AccessibilityInfo only exposes role() + a
-    // few flags, so HasPopup itself isn't observable through this query
-    // surface — the role check confirms the wiring is in place.
+    // ColorEdit composes a Button (via PopoverButton) — the
+    // Role::Button declaration lives on the inner trigger, not on
+    // ColorEdit's own arena node. Walk to the first focusable
+    // descendant to find the trigger and check its role.
     use crate::color_edit::ColorEdit;
     let value = Signal::new(Color::from_hex("#3584E4"));
     let mut tree = WidgetTree::new().with_theme(Theme::light_default());
     let id = tree.add(ColorEdit::new(value));
     tree.layout(SizeProposal::exact(200.0, 40.0));
-    let node = tree.accessibility_node(id);
+    let trigger = tree
+        .first_focusable_descendant(id)
+        .expect("ColorEdit must expose a focusable trigger");
+    let node = tree.accessibility_node(trigger);
     assert_eq!(node.role(), Role::Button);
 }
 
@@ -348,12 +351,16 @@ fn color_edit_clicking_trigger_opens_popover() {
     tree.layout(SizeProposal::exact(200.0, 40.0));
     tree.render(); // cache bounds for tap
 
-    // Initially the trigger advertises is_expanded=false.
-    let before = tree.accessibility_node(id);
+    // The trigger Button (focusable descendant of ColorEdit) is the
+    // node that carries the disclosure state.
+    let trigger = tree
+        .first_focusable_descendant(id)
+        .expect("ColorEdit must expose a focusable trigger");
+    let before = tree.accessibility_node(trigger);
     assert!(!before.is_expanded(), "popover starts closed");
 
-    tree.click(id);
+    tree.click(trigger);
     tree.layout(SizeProposal::exact(800.0, 600.0));
-    let after = tree.accessibility_node(id);
+    let after = tree.accessibility_node(trigger);
     assert!(after.is_expanded(), "click opens popover (set_expanded=true)");
 }

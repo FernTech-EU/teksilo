@@ -14,7 +14,6 @@ use fern_core::accesskit::{Action, Role};
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::focus::FocusOrigin;
-use fern_core::signal::Signal;
 use fern_core::widget::{
     CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
@@ -28,8 +27,14 @@ use super::alpha_strip::paint_checkerboard;
 type ActivateFn = Rc<dyn Fn(&mut EventContext)>;
 
 /// Single-cell color swatch.
+///
+/// The displayed color is a `Prop<Color>` — pass a `Color` for a
+/// static palette entry (the common case in `SwatchGrid`) or a
+/// `Signal<Color>` for a live preview that re-paints when the bound
+/// value changes (used by `ColorPicker`'s current-color preview and
+/// `ColorEdit`'s trigger).
 pub struct ColorSwatch {
-    color: Color,
+    color: fern_core::signal::Prop<Color>,
     selected: bool,
     label: Option<LocalizedString>,
     size: Option<f32>,
@@ -40,9 +45,9 @@ pub struct ColorSwatch {
 }
 
 impl ColorSwatch {
-    pub fn new(color: Color) -> Self {
+    pub fn new(color: impl Into<fern_core::signal::Prop<Color>>) -> Self {
         Self {
-            color,
+            color: color.into(),
             selected: false,
             label: None,
             size: None,
@@ -87,7 +92,7 @@ impl ColorSwatch {
 impl std::fmt::Debug for ColorSwatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ColorSwatch")
-            .field("color", &self.color)
+            .field("color", &self.color.get())
             .field("selected", &self.selected)
             .field("enabled", &self.enabled)
             .finish_non_exhaustive()
@@ -145,6 +150,23 @@ impl Widget for ColorSwatch {
         }
 
         ctx.apply_self_handlers(handlers);
+
+        // Reactive: when `color` is bound to a Signal, re-paint and
+        // refresh the AT color value whenever it changes. Static
+        // colors register nothing (Prop::Static).
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        self.color.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::AccessibilityOnly,
+        );
+        self.color.register_if_bound(
+            self_id,
+            registry,
+            fern_core::binding::BindingLevel::RepaintOnly,
+        );
+
         Vec::new()
     }
 
@@ -157,9 +179,10 @@ impl Widget for ColorSwatch {
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let style = ctx.theme.components.color_picker;
         let radius = CornerRadius::uniform(self.corner_radius.unwrap_or(style.swatch_corner_radius));
+        let color = self.color.get();
 
         // Checkerboard underlay if the swatch is partly transparent.
-        if self.color.a() < 1.0 {
+        if color.a() < 1.0 {
             paint_checkerboard(
                 canvas,
                 bounds,
@@ -169,7 +192,7 @@ impl Widget for ColorSwatch {
             );
         }
 
-        canvas.fill_rounded_rect(bounds, radius, self.color);
+        canvas.fill_rounded_rect(bounds, radius, color);
 
         // Selection ring.
         if self.selected {
@@ -207,8 +230,9 @@ impl Widget for ColorSwatch {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::ColorWell);
-        builder.set_color_value(self.color);
-        let hex = self.color.to_hex_upper(self.color.a() < 1.0);
+        let color = self.color.get();
+        builder.set_color_value(color);
+        let hex = color.to_hex_upper(color.a() < 1.0);
         let name = match &self.label {
             Some(ls) => ls.resolve_now(),
             None => resolve_message_widget(

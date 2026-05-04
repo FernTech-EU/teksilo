@@ -2,53 +2,49 @@
 //! a popover containing a [`ColorPicker`].
 //!
 //! Direct analog of [`DateEdit`](crate::date_edit::DateEdit). The
-//! trigger renders a small `ColorSwatch` plus an optional hex readout
-//! plus an optional chevron, inside a focusable bordered frame. Click,
-//! Enter, Space, or Alt+Down opens the popover; Escape or click-outside
-//! closes it. The inner picker writes through the same bound
-//! `Signal<Color>`, so external observers see live updates as the user
-//! drags within the popover (no commit step).
+//! trigger is a [`Button`] with a reactive [`ColorSwatch`] in its
+//! leading slot, the current hex as the label, and an optional
+//! chevron in its trailing slot. Click, Enter, Space, or Alt+Down
+//! opens the popover; Escape or click-outside closes it. The inner
+//! picker writes through the same bound `Signal<Color>`, so external
+//! observers see live updates as the user drags within the popover
+//! (no commit step).
 //!
-//! Overlay wiring mirrors DateEdit verbatim: the picker is added in
-//! `build()` and immediately marked dormant via `ctx.set_dormant(...)`,
-//! then woken via `ctx_evt.activate(...)` + `ctx_evt.show_overlay(...)`
-//! when the trigger fires. The dismiss callback flips a `popover_open`
-//! signal back to `false` so accessibility's `set_expanded(...)` stays
-//! truthful and the trigger button's visual state matches.
+//! Built on [`PopoverButton`](crate::popover_button::PopoverButton):
+//! the overlay wiring (dormant content + show / dismiss + AT
+//! `has_popup` + `expanded`) lives there. This file is just the
+//! ColorEdit-specific assembly — picker config pass-through, the
+//! reactive trigger, and the nullable-binding bridge.
 //!
 //! # Accessibility
 //!
-//! Trigger: [`Role::Button`](accesskit::Role::Button) with
-//! `set_color_value(...)`, `set_value(hex)`, `set_has_popup(Dialog)`,
-//! and `set_expanded(popover_open)`. Default name resolves to
-//! "Color #RRGGBB" via the `color-edit-trigger-name` Fluent key (apps
-//! override via `.label(...)`).
+//! The trigger declares [`Role::Button`](accesskit::Role::Button)
+//! (via Button), [`HasPopup::Dialog`](accesskit::HasPopup::Dialog)
+//! (via PopoverButton), and tracks the popover open state through
+//! `set_expanded`. The label binds reactively to the hex value so
+//! AT name updates as the picker mutates the bound color.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
-use fern_canvas::{Canvas, Rect, SizeProposal};
+use fern_canvas::{Rect, SizeProposal};
 use fern_core::accessibility::AccessNodeBuilder;
-use fern_core::accesskit::{Action, HasPopup, Role};
 use fern_core::build_context::BuildContext;
-use fern_core::event::{EventResponse, Key, WidgetEvent};
-use fern_core::focus::FocusOrigin;
-use fern_core::overlay::{
-    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
-};
+use fern_core::overlay::{DismissBehavior, OverlayPlacement};
 use fern_core::signal::Signal;
 use fern_core::widget::{
-    CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+    LayoutContext, LayoutResponse, Widget, WidgetPlacement,
 };
-use fern_core::widget_builder::HandlerSet;
+use fern_core::widget_builder::WidgetBuilder;
 use fern_core::widget_id::WidgetId;
 use fern_i18n::{LocalizedString, resolve_message_widget};
-use fern_tokens::{Color, CornerRadius};
+use fern_tokens::Color;
 
+use crate::button::Button;
 use crate::color_picker::{ColorPicker, ColorPickerLayout, ColorSwatch};
-use crate::primitives::{HStack, IconWidget, Padding, TextWidget};
+use crate::popover_button::PopoverButton;
+use crate::primitives::IconWidget;
 
-type OnVoid = Rc<dyn Fn(&mut EventContext)>;
+type OnVoid = Rc<dyn Fn()>;
 
 #[derive(Clone)]
 enum ColorBinding {
@@ -64,13 +60,6 @@ impl ColorBinding {
         match self {
             Self::Required(s) => s.clone(),
             Self::Nullable { proxy, .. } => proxy.clone(),
-        }
-    }
-
-    fn external_is_some(&self) -> bool {
-        match self {
-            Self::Required(_) => true,
-            Self::Nullable { source, .. } => source.get().is_some(),
         }
     }
 }
@@ -105,10 +94,6 @@ pub struct ColorEdit {
     on_close: Option<OnVoid>,
 
     // Internal state.
-    popover_open: Signal<bool>,
-    focused_within: Signal<bool>,
-    focus_origin: Rc<Cell<Option<FocusOrigin>>>,
-    picker_id: Option<WidgetId>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -152,10 +137,6 @@ impl ColorEdit {
             enabled: true,
             on_open: None,
             on_close: None,
-            popover_open: Signal::new(false),
-            focused_within: Signal::new(false),
-            focus_origin: Rc::new(Cell::new(None)),
-            picker_id: None,
             root_child_id: None,
         }
     }
@@ -235,12 +216,12 @@ impl ColorEdit {
         self
     }
 
-    pub fn on_open(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+    pub fn on_open(mut self, f: impl Fn() + 'static) -> Self {
         self.on_open = Some(Rc::new(f));
         self
     }
 
-    pub fn on_close(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+    pub fn on_close(mut self, f: impl Fn() + 'static) -> Self {
         self.on_close = Some(Rc::new(f));
         self
     }
@@ -248,7 +229,11 @@ impl ColorEdit {
 
 impl Widget for ColorEdit {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // ── Bridge nullable binding ↔ proxy (mirror ColorPicker) ──
+        // Bridge nullable binding ↔ proxy. The picker writes the
+        // proxy; we mirror that to the source as Some(c). External
+        // changes to source flow back into proxy. Empty (None) state
+        // is purely visual on the trigger — there is no in-trigger
+        // "clear" affordance (apps compose a separate Clear button).
         if let ColorBinding::Nullable { source, proxy } = &self.binding {
             {
                 let proxy = proxy.clone();
@@ -270,12 +255,10 @@ impl Widget for ColorEdit {
         }
 
         let value = self.binding.proxy();
-        let style_snapshot = ctx.theme_signal().get().components.color_picker;
         let alpha_enabled = self.alpha_enabled;
-        let enabled = self.enabled;
-        let popover_open = self.popover_open.clone();
+        let style_snapshot = ctx.theme_signal().get().components.color_picker;
 
-        // ── Pre-build the picker (dormant) ──
+        // ── Build the picker (handed to PopoverButton as content) ──
         let mut picker = ColorPicker::new(value.clone())
             .alpha_enabled(alpha_enabled)
             .layout(self.picker_layout)
@@ -283,165 +266,91 @@ impl Widget for ColorEdit {
             .show_hsv_spinners(self.show_hsv_spinners)
             .show_hex_input(self.show_hex_input)
             .swatch_columns(self.swatch_columns)
-            .enabled(enabled);
+            .enabled(self.enabled);
         if let Some(s) = self.swatches.clone() {
             picker = picker.swatches(s);
         }
         if let Some(s) = self.swatches_signal.clone() {
             picker = picker.swatches_signal(s);
         }
-        let picker_id = ctx.add(picker);
-        ctx.set_dormant(picker_id);
-        self.picker_id = Some(picker_id);
 
-        // ── Trigger ──
-        // The trigger is the entire ColorEdit footprint: a swatch +
-        // optional hex + optional chevron, inside a focusable bordered
-        // frame. We render the frame ourselves in paint(); the children
-        // are arranged by an inner HStack we add as the only structural
-        // child.
-        let preview_color = value.get();
+        // ── Build the trigger ──
         let swatch_size = self
             .trigger_swatch_size
             .unwrap_or(style_snapshot.preview_height);
 
-        let swatch_widget = ColorSwatch::new(preview_color)
+        // ColorSwatch accepts `impl Into<Prop<Color>>` — pass the
+        // bound signal so it re-paints whenever the picker mutates
+        // the value. `.access_hidden(true)` so the swatch's own
+        // ColorWell role doesn't appear as a redundant child of the
+        // trigger Button's Role::Button.
+        let swatch = ColorSwatch::new(value.clone())
             .size(swatch_size)
             .corner_radius(style_snapshot.preview_corner_radius)
-            // Disable the swatch's own a11y so the trigger frame owns
-            // the Role::Button + color value declaration.
-            .enabled(false);
+            .enabled(false)
+            .access_hidden(true);
 
-        let mut row = HStack::new()
-            .spacing(8.0)
-            .child(swatch_widget);
-
-        if self.show_hex_in_trigger && self.binding.external_is_some() {
-            let hex = value.get().to_hex_upper(self.alpha_enabled);
-            row = row.child(TextWidget::new(hex));
-        } else if !self.binding.external_is_some() {
-            // Nullable + None: render the localized empty-placeholder
-            // glyph (default "—", overridable per locale).
-            row = row.child(TextWidget::new(resolve_message_widget(
-                "color-edit-trigger-empty-placeholder",
-                &[],
-            )));
-        }
-
-        if self.show_chevron {
-            row = row.child(IconWidget::chevron_down(12.0));
-        }
-
-        let trigger_inner = Padding::uniform(6.0).child(row);
-        let trigger_id = ctx.add(trigger_inner);
-        self.root_child_id = Some(trigger_id);
-
-        // ── Trigger handlers ──
-        let dismiss_cb: OverlayDismissCallback = {
-            let popover_open = popover_open.clone();
-            let on_close = self.on_close.clone();
-            Rc::new(move || {
-                popover_open.set(false);
-                let _ = on_close.as_ref();
-            })
-        };
-
-        let self_ref = ctx.self_id();
-        let placement = self.placement.clone();
-        let dismiss_behavior = self.dismiss_behavior.clone();
-        let on_open = self.on_open.clone();
-        let activate: OnVoid = {
-            let popover_open = popover_open.clone();
-            let dismiss_cb = dismiss_cb.clone();
-            Rc::new(move |ctx_evt: &mut EventContext| {
-                if popover_open.get() {
-                    popover_open.set(false);
-                    ctx_evt.dismiss_all_overlays();
+        // Reactive hex / placeholder for the Button label. For the
+        // nullable variant, None → localized "—" placeholder; Some →
+        // formatted hex. For the required variant, just formatted hex.
+        let label_signal = match &self.binding {
+            ColorBinding::Required(s) => {
+                let alpha = alpha_enabled;
+                if self.show_hex_in_trigger {
+                    s.map(move |c| c.to_hex_upper(alpha))
                 } else {
-                    popover_open.set(true);
-                    ctx_evt.activate(picker_id);
-                    ctx_evt.show_overlay(OverlayRequest {
-                        content_id: picker_id,
-                        anchor: self_ref,
-                        placement: placement.clone(),
-                        dismiss: dismiss_behavior.clone(),
-                        layer: OverlayLayer::InTree,
-                        parent_overlay: None,
-                        on_dismiss: Some(dismiss_cb.clone()),
-                        fade_duration: None,
-                    });
-                    ctx_evt.request_focus(picker_id);
-                    if let Some(cb) = on_open.as_ref() {
-                        cb(ctx_evt);
-                    }
+                    s.map(|_| String::new())
                 }
-            })
+            }
+            ColorBinding::Nullable { source, .. } => {
+                let alpha = alpha_enabled;
+                let show_hex = self.show_hex_in_trigger;
+                source.map(move |opt| match opt {
+                    Some(c) if show_hex => c.to_hex_upper(alpha),
+                    Some(_) => String::new(),
+                    None => resolve_message_widget(
+                        "color-edit-trigger-empty-placeholder",
+                        &[],
+                    ),
+                })
+            }
         };
 
-        let mut handlers = HandlerSet::new()
-            .focusable(enabled)
-            .focus_within(self.focused_within.clone())
-            .cursor(CursorIcon::Pointer);
+        // App-supplied `.label(...)` replaces the entire visible text
+        // (and therefore the AT name) with a static localized string.
+        // Apps that want their custom label PLUS a visible swatch can
+        // pair `.label(...)` with `.show_hex_in_trigger(false)`. When
+        // no label is set, the bound hex signal feeds the Button label
+        // — every value mutation refreshes the visible text and the
+        // AT name reactively via Button's `bind_label` plumbing.
+        let trigger = if let Some(ls) = self.label.take() {
+            Button::new_literal(ls.resolve_now())
+        } else {
+            Button::new_literal("").bind_label(label_signal)
+        };
+        let mut trigger = trigger.enabled(self.enabled).leading(swatch);
+        if self.show_chevron {
+            trigger = trigger.trailing(
+                IconWidget::chevron_down(12.0).access_hidden(true),
+            );
+        }
 
-        {
-            let activate = activate.clone();
-            handlers = handlers.on_tap(move |_pos, ctx_evt| {
-                if !enabled {
-                    return;
-                }
-                activate(ctx_evt);
-            });
-        }
-        {
-            let activate = activate.clone();
-            handlers = handlers.on_key(move |event, ctx_evt| {
-                if !enabled {
-                    return EventResponse::Ignored;
-                }
-                let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
-                    return EventResponse::Ignored;
-                };
-                match key {
-                    Key::Enter | Key::Space => {
-                        activate(ctx_evt);
-                        EventResponse::Handled
-                    }
-                    Key::ArrowDown if modifiers.alt() => {
-                        activate(ctx_evt);
-                        EventResponse::Handled
-                    }
-                    _ => EventResponse::Ignored,
-                }
-            });
-        }
-        {
-            let activate = activate.clone();
-            handlers = handlers.on_access_action(move |action, ctx_evt| match action {
-                Action::Click => {
-                    activate(ctx_evt);
-                    EventResponse::Handled
-                }
-                _ => EventResponse::Ignored,
-            });
-        }
-        {
-            let focus_origin = self.focus_origin.clone();
-            handlers = handlers.on_focus(move |gained, _ctx| {
-                focus_origin.set(if gained { Some(FocusOrigin::Keyboard) } else { None });
-            });
-        }
-        ctx.apply_self_handlers(handlers);
+        // ── Wrap in PopoverButton ──
+        let mut pb = PopoverButton::new(trigger)
+            .content(picker)
+            .placement(self.placement.clone())
+            .dismiss_behavior(self.dismiss_behavior.clone());
 
-        // Bind value + popover_open at AccessibilityOnly so the trigger's
-        // a11y node refreshes its color_value / set_value / set_expanded
-        // when the bound color changes or the popover toggles.
-        let self_id = ctx.self_id();
-        let registry = ctx.binding_registry();
-        value.bind_to(self_id, registry, fern_core::binding::BindingLevel::AccessibilityOnly);
-        self.popover_open
-            .bind_to(self_id, registry, fern_core::binding::BindingLevel::AccessibilityOnly);
+        if let Some(cb) = self.on_open.take() {
+            pb = pb.on_open(move || cb());
+        }
+        if let Some(cb) = self.on_close.take() {
+            pb = pb.on_close(move || cb());
+        }
 
-        vec![trigger_id]
+        let pb_id = ctx.add(pb);
+        self.root_child_id = Some(pb_id);
+        vec![pb_id]
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
@@ -470,65 +379,10 @@ impl Widget for ColorEdit {
         self.root_child_id.into_iter().collect()
     }
 
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        // Frame border + subtle background, matching the TextInput field
-        // chrome. The inner HStack child paints the swatch, hex, chevron.
-        let theme = &ctx.theme;
-        let radius = CornerRadius::uniform(theme.shape.radius_control);
-        let bg = if self.popover_open.get() {
-            theme.colors.surface_sunken
-        } else {
-            theme.colors.surface_content
-        };
-        canvas.fill_rounded_rect(bounds, radius, bg);
-        let border_color = if self.focused_within.get() {
-            theme.colors.focus_ring
-        } else {
-            theme.colors.border
-        };
-        let border_width = if self.focused_within.get() {
-            theme.shape.focus_ring_width
-        } else {
-            1.0
-        };
-        canvas.stroke_rounded_rect(bounds, radius, border_color, border_width);
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(Role::Button);
-        let current = self.binding.proxy().get();
-        let hex = current.to_hex_upper(self.alpha_enabled);
-
-        // Default name: localized "Color #RRGGBB" (or "Color, none" when nullable+empty).
-        let name = match &self.label {
-            Some(ls) => ls.resolve_now(),
-            None => {
-                if !self.binding.external_is_some() {
-                    resolve_message_widget("color-edit-trigger-name-empty", &[])
-                } else {
-                    resolve_message_widget(
-                        "color-edit-trigger-name",
-                        &[("hex", hex.clone().into())],
-                    )
-                }
-            }
-        };
-        builder.set_name(name);
-
-        // Color value advertised even on a Button — AccessKit allows
-        // color_value on any node and macOS VoiceOver announces it
-        // appropriately.
-        if self.binding.external_is_some() {
-            builder.set_color_value(current);
-            builder.set_value(hex);
-        }
-        builder.set_has_popup(HasPopup::Dialog);
-        builder.set_expanded(self.popover_open.get());
-        if !self.enabled {
-            builder.set_disabled();
-        }
-        builder.add_action(Action::Click);
-        builder.add_action(Action::Focus);
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // Transparent — the inner Button (via PopoverButton) declares
+        // Role::Button + has_popup + expanded + name. Adding anything
+        // here would create a duplicate AT element above the trigger.
     }
 }
 

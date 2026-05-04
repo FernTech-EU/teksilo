@@ -381,9 +381,8 @@ impl Widget for ColorPicker {
         // Preview + hex row
         let mut preview_row = HStack::new().spacing(style_snapshot.gap);
         if self.show_preview {
-            let preview_color = value.get();
             preview_row = preview_row.child(
-                ColorSwatch::new(preview_color)
+                ColorSwatch::new(value.clone())
                     .size(style_snapshot.preview_height)
                     .corner_radius(style_snapshot.preview_corner_radius)
                     .label(resolve_message_widget("color-picker-current-color-label", &[])),
