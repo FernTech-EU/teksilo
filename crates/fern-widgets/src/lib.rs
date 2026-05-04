@@ -34,6 +34,7 @@ pub mod message_box;
 pub(crate) mod overlay_trigger;
 pub mod panel;
 pub mod popover;
+pub mod popover_button;
 pub mod primitives;
 pub mod privacy_settings;
 pub mod progress_bar;
@@ -115,6 +116,7 @@ pub use message_box::{
 };
 pub use panel::Panel;
 pub use popover::Popover;
+pub use popover_button::PopoverButton;
 pub use primitives::{
     AspectRatio, Center, Divider, Expand, FixedSize, FormLayout, Grid, HStack, IconWidget, ImageFit,
     ImageWidget, MasonryLayout, MaxSize, MinSize,

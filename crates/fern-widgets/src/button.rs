@@ -13,7 +13,7 @@ use fern_core::accessibility::AccessNodeBuilder;
 use fern_core::build_context::BuildContext;
 use fern_core::event::{EventResponse, Key, WidgetEvent};
 use fern_core::signal::Signal;
-use fern_core::widget::{CursorIcon, EventContext, LayoutContext, WidgetPlacement};
+use fern_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use fern_core::widget_builder::HandlerSet;
 use fern_core::widget_id::WidgetId;
 use fern_tokens::{BorderRole, Color, ColorTokens, CornerRadius, SurfaceRole, TextRole};
@@ -113,6 +113,18 @@ pub struct Button {
     /// disclosure trigger for a popup (menu, dialog, listbox, etc.).
     /// Surfaced via `set_has_popup` in `accessibility()`.
     has_popup: Option<fern_core::accesskit::HasPopup>,
+    /// Arbitrary widget rendered to the leading edge of the button's
+    /// content (left in LTR, right in RTL). Composes with `.icon(...)`:
+    /// the order is `[leading_slot, icon+label, trailing_slot]`. Slot
+    /// widgets paint and report a11y on their own — Button does not
+    /// retint them and does not auto-suppress their AT roles. Apps
+    /// whose slot widgets would otherwise pollute the AT tree
+    /// (e.g. ColorSwatch with `Role::ColorWell`) should pass
+    /// `widget.access_hidden(true)` so the Button's
+    /// `Role::Button` stays the single declared role.
+    leading: Option<Box<dyn Widget>>,
+    /// Same shape as `leading`, rendered to the trailing edge.
+    trailing: Option<Box<dyn Widget>>,
     /// Optional signal reporting whether the button's popup is
     /// currently visible. Surfaced via `set_expanded` in
     /// `accessibility()`. Used alongside `has_popup` for the
@@ -146,6 +158,8 @@ impl Button {
             rich_tooltip_source: None,
             has_popup: None,
             expanded_signal: None,
+            leading: None,
+            trailing: None,
             interaction: Signal::new(InteractionState::Idle),
             root_child_id: None,
         }
@@ -260,6 +274,34 @@ impl Button {
     /// meaningful alongside `.has_popup(...)`.
     pub fn expanded_when(mut self, signal: Signal<bool>) -> Self {
         self.expanded_signal = Some(signal);
+        self
+    }
+
+    /// Insert a widget at the leading edge of the button's content
+    /// (left in LTR, right in RTL). Composes with `.icon(...)`: the
+    /// final order is `[leading_slot, icon+label, trailing_slot]`,
+    /// separated by `button_style.icon_label_gap`. Single-slot —
+    /// calling `.leading(...)` again replaces the previous slot.
+    /// Stack multiple widgets with an explicit `HStack`.
+    ///
+    /// The slot widget paints itself and emits its own a11y. Button
+    /// does **not** retint it (so e.g. a `ColorSwatch` keeps its own
+    /// color through every interaction state). If the slot widget
+    /// declares an AT role of its own — `ColorSwatch` is the canonical
+    /// case (`Role::ColorWell`) — pass `widget.access_hidden(true)`
+    /// so the trigger reads as a single Button node instead of a
+    /// Button containing a redundant ColorWell child.
+    pub fn leading(mut self, widget: impl Widget + 'static) -> Self {
+        self.leading = Some(Box::new(widget));
+        self
+    }
+
+    /// Same as [`leading`](Self::leading) but at the trailing edge
+    /// (right in LTR, left in RTL). Common uses: chevron-down hint
+    /// on disclosure triggers, clear-X on search fields, status
+    /// badges on segmented control segments.
+    pub fn trailing(mut self, widget: impl Widget + 'static) -> Self {
+        self.trailing = Some(Box::new(widget));
         self
     }
 
@@ -473,6 +515,28 @@ impl fern_core::widget::Widget for Button {
                         .add_child(icon_id),
                 )
             }
+        };
+
+        // If leading or trailing slots are set, wrap the icon+label
+        // content in an HStack: `[leading?, content, trailing?]`. When
+        // both slots are absent, the wrap is skipped — the original
+        // content node goes straight into the padding, keeping the
+        // node count identical to the pre-slot Button for the common
+        // case.
+        let content_id = if self.leading.is_some() || self.trailing.is_some() {
+            let mut row = HStack::new().spacing(button_style.icon_label_gap);
+            if let Some(leading) = self.leading.take() {
+                let id = ctx.add_boxed(leading);
+                row = row.add_child(id);
+            }
+            row = row.add_child(content_id);
+            if let Some(trailing) = self.trailing.take() {
+                let id = ctx.add_boxed(trailing);
+                row = row.add_child(id);
+            }
+            ctx.add(row)
+        } else {
+            content_id
         };
 
         let padding = Padding::symmetric(
@@ -772,6 +836,72 @@ mod tests {
             .find(|(nid, _)| *nid == target)
             .expect("button node after relabel");
         assert_eq!(node.label().unwrap_or_default(), "2026");
+    }
+
+    #[test]
+    fn slots_widen_button_to_accommodate_their_intrinsic_size() {
+        // A button with leading + trailing slots reports a wider
+        // intrinsic size than the same button without slots — proves
+        // the slots actually entered the layout pass. Layout uses
+        // `unspecified()` so each button reports its intrinsic width
+        // rather than getting stretched to a parent proposal. Both
+        // sides also clear the theme's `min_width` (~72dp) which
+        // would otherwise mask the slot contribution on the plain
+        // button.
+        use crate::primitives::MinSize;
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let plain = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+        let with_slots = tree.add(
+            Button::new_literal("X")
+                .leading(MinSize::new(120.0, 12.0))
+                .trailing(MinSize::new(120.0, 12.0))
+                .on_activate_fn(|_| {}),
+        );
+        tree.layout(SizeProposal::unspecified());
+        let plain_w = tree.bounds(plain).width;
+        let slot_w = tree.bounds(with_slots).width;
+        assert!(
+            slot_w >= plain_w + 200.0,
+            "expected slot button to be at least 200dp wider than plain (plain={plain_w}, slot={slot_w})",
+        );
+    }
+
+    #[cfg(feature = "rich-text")]
+    #[test]
+    fn hidden_slot_marks_swatch_node_as_at_hidden() {
+        // ColorSwatch declares `Role::ColorWell`. Dropped raw into a
+        // Button slot it would appear as a redundant ColorWell child
+        // under the Button's node. `.access_hidden(true)` is the
+        // documented escape hatch — confirm the swatch's AT node
+        // carries the hidden flag (AT readers skip nodes flagged
+        // hidden, even though the node still exists in the tree).
+        use crate::color_picker::ColorSwatch;
+        use fern_core::accessibility::widget_id_to_node_id;
+        use fern_core::accesskit::Role;
+        use fern_core::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let id = tree.add(
+            Button::new_literal("Pick")
+                .leading(ColorSwatch::new(Color::RED).access_hidden(true))
+                .on_activate_fn(|_| {}),
+        );
+        tree.layout(SizeProposal::exact(300.0, 80.0));
+        let target = widget_id_to_node_id(id);
+        let update = tree.sync_accessibility();
+        let (_, btn_node) = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == target)
+            .expect("button node");
+        assert_eq!(btn_node.role(), Role::Button);
+        let color_well_visible = update
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == Role::ColorWell && !n.is_hidden());
+        assert!(
+            !color_well_visible,
+            "hidden swatch should not emit a non-hidden ColorWell node",
+        );
     }
 }
 
