@@ -203,6 +203,38 @@ fn tab_content_fills_panel_width() {
         any_full_width(&tree, panel_slot_id, 800.0),
         "no panel descendant fills the full 800px window width"
     );
+
+    // Find the deepest "tall" descendant under the panel slot
+    // (height > 100 px, i.e. a content region, not a control or row).
+    // With the previous `Expand::vertical(switcher)` bug in
+    // TabWidget, the active tab's content shrank to its natural width
+    // (~200–300 px even inside an 800 px panel). The deepest tall
+    // widget should approach the panel's inner width (~776 px after
+    // the Panel's 12 px padding on each side).
+    fn deepest_tall(
+        tree: &WidgetTree,
+        id: WidgetId,
+        depth: u32,
+    ) -> Option<(WidgetId, fern_canvas::Rect, u32)> {
+        let b = tree.bounds(id);
+        let mut best = (b.height > 100.0).then(|| (id, b, depth));
+        for k in tree.children(id) {
+            if let Some(nested) = deepest_tall(tree, k, depth + 1) {
+                if best.as_ref().is_none_or(|(_, _, d)| nested.2 > *d) {
+                    best = Some(nested);
+                }
+            }
+        }
+        best
+    }
+    let (_, deepest_bounds, _) =
+        deepest_tall(&tree, panel_slot_id, 0).expect("panel must contain a tall widget");
+    assert!(
+        deepest_bounds.width >= 700.0,
+        "deepest content region inside the 800 px panel only reaches {:.0} px wide; \
+         TabWidget's content slot is not claiming full width",
+        deepest_bounds.width
+    );
 }
 
 #[test]

@@ -329,14 +329,9 @@ fn scrollable_tab(content: impl Widget + 'static) -> impl Widget + 'static {
 }
 
 /// Wrap a tab content widget so it claims the full proposed width
-/// regardless of its natural size. Needed because `TabWidget`
-/// internally uses `Expand::vertical(switcher)` for its content
-/// area, and `Expand::vertical` reports its child's intrinsic width
-/// (zero for leaf tabs that return `proposal.resolve(0, h)`),
-/// causing the inner `VStack` to size the content slot to the tab
-/// bar's width. Wrapping each tab in `Expand::horizontal().flex(0)`
-/// makes each tab itself report the full proposal width without
-/// claiming height-slack from any ancestor stack.
+/// regardless of its natural size. Without this, narrow leaves
+/// (`TextInput`, `ComboBox`) would render at their intrinsic width
+/// rather than spanning the panel.
 fn fill_width(content: impl Widget + 'static) -> impl Widget + 'static {
     Expand::horizontal().flex(0.0).child(content)
 }
