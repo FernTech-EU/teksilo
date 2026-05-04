@@ -313,6 +313,14 @@ impl<'a> Printer<'a> {
 
     /// Emit a verbatim source slice with multi-line dedent + reindent
     /// to the current body depth.
+    ///
+    /// The slice's min-indent line (typically the closing `}` of a
+    /// structural form or closure) anchors at `self.indent` — the same
+    /// column the form's keyword sits at on the line `write_indent`
+    /// already laid down. Deeper lines (arms / bodies) end up at
+    /// `self.indent + their relative depth`, preserving the source's
+    /// internal indentation hierarchy. Round-trip stable: a re-format
+    /// produces a slice with the same leading whitespace pattern.
     fn write_verbatim_multiline(&mut self, ts: &TokenStream) {
         let Some(range) = ts_byte_range(ts) else {
             return;
@@ -322,7 +330,7 @@ impl<'a> Printer<'a> {
             self.write(slice);
             return;
         }
-        let cont_indent = INDENT.repeat(self.indent + 1);
+        let cont_indent = INDENT.repeat(self.indent);
         let lines: Vec<&str> = slice.split('\n').collect();
         // First line emitted as-is (we're already at the current column).
         self.write(lines[0]);
@@ -334,11 +342,8 @@ impl<'a> Printer<'a> {
             .min()
             .unwrap_or(0);
         // Dedent each non-first line by min_indent and prepend cont_indent.
-        // We don't special-case lines starting with `}` — doing so produces
-        // visually nicer output for closures but breaks idempotence as the
-        // relative indent of the brace shifts each pass. Uniform dedent +
-        // reindent is mechanical and round-trip stable; users who want
-        // tighter brace alignment inside expression values can hand-fix.
+        // We don't special-case lines starting with `}` — uniform dedent
+        // + reindent is mechanical and round-trip stable.
         for line in &lines[1..] {
             self.newline();
             if line.trim().is_empty() {

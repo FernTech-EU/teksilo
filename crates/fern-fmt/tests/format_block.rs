@@ -189,3 +189,37 @@ fn else_if_chain_preserves_innermost_close() {
         "expected else-if chain intact, got:\n{out}"
     );
 }
+
+// Regression: continuation lines inside a multiline verbatim slice
+// (structural form bodies, closures, `rust { }` blocks) must align to
+// `self.indent`, not `self.indent + 1`. The min-indent line in the
+// slice — typically the closing `}` — anchors at the form's keyword
+// column. An earlier off-by-one shifted everything inside one extra
+// level deeper than the surrounding source.
+
+#[test]
+fn match_canonical_indent_is_stable() {
+    let canonical =
+        "Holder {\n    match state {\n        State::A => OneArm,\n        State::B(x) => TwoArm(x.clone()),\n    }\n}";
+    assert_eq!(fmt(canonical), canonical);
+}
+
+#[test]
+fn if_else_canonical_indent_is_stable() {
+    let canonical =
+        "Holder {\n    if cond {\n        YesBanner\n    } else {\n        NoBanner(\"hi\")\n    }\n}";
+    assert_eq!(fmt(canonical), canonical);
+}
+
+#[test]
+fn for_canonical_indent_is_stable() {
+    let canonical = "VLike {\n    for item in items {\n        ListItem(item)\n    }\n}";
+    assert_eq!(fmt(canonical), canonical);
+}
+
+#[test]
+fn closure_canonical_indent_is_stable() {
+    let canonical =
+        "Button {\n    on_activate: |ctx| {\n        ctx.send(X);\n    }\n}";
+    assert_eq!(fmt(canonical), canonical);
+}

@@ -41,9 +41,9 @@ fn main() {
     let t: Triggerable = fern!(
         Triggerable {
             on_tap: move || {
-                    c.set(c.get() + 1);
-                    c.get()
-                }
+                c.set(c.get() + 1);
+                c.get()
+            }
         }
     );
     let handler = t.handler.expect("on_tap was attached");
