@@ -48,18 +48,25 @@ impl Widget for ResizeHandle {
                     button: PointerButton::Primary,
                     ..
                 } => {
-                    state.panel_drag_anchor_y.set(Some(position.y));
+                    // `position` is window-local. Snapshot both the
+                    // anchor window-y and the panel's height at the
+                    // press moment — every PointerMove computes a
+                    // *total* delta against these, never deltas
+                    // against the live (already-updated) height.
+                    state
+                        .panel_drag_anchor
+                        .set(Some((position.y, state.panel_height.get())));
                     ctx.capture_pointer();
                     EventResponse::Handled
                 }
                 WidgetEvent::PointerMove { position } => {
-                    if let Some(anchor) = state.panel_drag_anchor_y.get() {
-                        // delta = anchor - cursor_local_y. Positive when
-                        // the cursor moved UP relative to the handle —
-                        // we grow the panel by that amount so the
-                        // handle's top edge follows the cursor.
-                        let delta = anchor - position.y;
-                        let new_height = (state.panel_height.get() + delta)
+                    if let Some((anchor_y, start_h)) = state.panel_drag_anchor.get() {
+                        // Cursor moved UP from anchor → grow the
+                        // panel by that amount; cursor moved DOWN →
+                        // shrink. Total height is always derived from
+                        // `start_h`, so the handle's top edge tracks
+                        // the cursor 1:1.
+                        let new_height = (start_h + (anchor_y - position.y))
                             .clamp(MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT);
                         if (new_height - state.panel_height.get()).abs() > f32::EPSILON {
                             state.panel_height.set(new_height);
@@ -70,8 +77,8 @@ impl Widget for ResizeHandle {
                     }
                 }
                 WidgetEvent::PointerUp { .. } => {
-                    if state.panel_drag_anchor_y.get().is_some() {
-                        state.panel_drag_anchor_y.set(None);
+                    if state.panel_drag_anchor.get().is_some() {
+                        state.panel_drag_anchor.set(None);
                         ctx.release_pointer();
                         EventResponse::Handled
                     } else {

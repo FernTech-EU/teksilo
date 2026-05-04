@@ -7,8 +7,6 @@
 //! without `#[cfg]` lines.
 
 #[cfg(debug_assertions)]
-mod fill_width_fixed_height;
-#[cfg(debug_assertions)]
 mod highlight;
 #[cfg(all(debug_assertions, test))]
 mod integration_tests;

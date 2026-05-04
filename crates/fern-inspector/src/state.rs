@@ -150,13 +150,16 @@ pub struct InspectorState {
     /// filter. The tab compares each widget's last-segment type name
     /// case-insensitively against this string.
     pub tree_filter: Signal<String>,
-    /// Panel-resize drag anchor: the widget-local y-coordinate inside
-    /// the resize handle where the user originally pressed. The handle
-    /// uses this as a fixed reference so its top-edge tracks the
-    /// cursor exactly under live layout — `delta = anchor - position.y`
-    /// applied to `panel_height` each `PointerMove`. `None` when no
-    /// drag is in flight.
-    pub(crate) panel_drag_anchor_y: Signal<Option<f32>>,
+    /// Panel-resize drag anchor — `(anchor_window_y, start_height)`
+    /// captured at PointerDown. The handler sets `panel_height =
+    /// start_height + (anchor_window_y - position.y)` on every
+    /// `PointerMove` so total height tracks the cursor's total
+    /// displacement from the initial click. Storing only the anchor
+    /// (without `start_height`) is wrong because `position` in
+    /// `WidgetEvent::PointerMove` is window-local — repeated moves
+    /// accumulate against the *live* height instead of the start
+    /// height, multiplying the user's drag.
+    pub(crate) panel_drag_anchor: Signal<Option<(f32, f32)>>,
     /// Pre-formatted dump of the Properties tab's current rows
     /// (including the full multi-line Debug repr). Refreshed by the
     /// Properties leaf in `layout_response`; consumed by the Copy
@@ -207,7 +210,7 @@ impl InspectorState {
             band_snapshot: Signal::new(Vec::new()),
             panel_height: Signal::new(DEFAULT_PANEL_HEIGHT),
             tree_filter: Signal::new(String::new()),
-            panel_drag_anchor_y: Signal::new(None),
+            panel_drag_anchor: Signal::new(None),
             properties_dump: Signal::new(String::new()),
             properties_context_value: Signal::new(String::new()),
             properties_context_key: Signal::new(String::new()),

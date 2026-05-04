@@ -31,7 +31,6 @@ use fern_core::widget_id::WidgetId;
 use fern_widgets::primitives::{Expand, FixedSize, HStack, Padding, VStack, ZStack};
 use fern_widgets::{Button, Panel, SegmentedControl, Slider, TabWidget};
 
-use crate::fill_width_fixed_height::FillWidthFixedHeight;
 use crate::highlight::{BoundsTracker, HighlightLayer};
 use crate::keyboard::PanelShortcutHost;
 use crate::picker::{PickResolver, PickerOverlay};
@@ -120,21 +119,28 @@ impl Widget for InspectorShell {
         // subtree — single-letter chords don't hijack typing in the
         // user app's text inputs.
         // Inner panel content (ResizeHandle + panel body). Each piece
-        // is wrapped in `FillWidthFixedHeight` so the ResizeHandle and
-        // panel body both stretch the full window width — `FixedSize`
-        // alone reports its child's natural width which leaves the
-        // right side of the window blank.
+        // is wrapped in `Expand::horizontal().flex(0)` + `FixedSize`
+        // so the wrapper claims the parent's full-width proposal
+        // (which `FixedSize` alone wouldn't — it reports the child's
+        // natural width when no `bind_width` is set). `flex(0)` opts
+        // out of the parent VStack's height-slack distribution so we
+        // don't compete with the user-root's `Expand(flex=1)`.
         let panel_inner = PanelShortcutHost::new(state.clone(), build_panel(state.clone()));
-        let resize_handle_height = Signal::new(crate::resize_handle::HANDLE_HEIGHT);
         let panel_block = VStack::new()
-            .child(FillWidthFixedHeight::new(
-                resize_handle_height,
-                ResizeHandle::new(state.clone()),
-            ))
-            .child(FillWidthFixedHeight::new(
-                state.panel_height.clone(),
-                panel_inner,
-            ));
+            .child(
+                Expand::horizontal().flex(0.0).child(
+                    FixedSize::new()
+                        .bind_height(Signal::new(crate::resize_handle::HANDLE_HEIGHT))
+                        .child(ResizeHandle::new(state.clone())),
+                ),
+            )
+            .child(
+                Expand::horizontal().flex(0.0).child(
+                    FixedSize::new()
+                        .bind_height(state.panel_height.clone())
+                        .child(panel_inner),
+                ),
+            );
         let panel_index = state.open.map(|open| if *open { 1usize } else { 0 });
         let panel_switcher = fern_widgets::primitives::Switcher::new(panel_index)
             .child(empty_filler())
@@ -158,7 +164,13 @@ impl Widget for InspectorShell {
             .child(Expand::new().flex(1.0).child(z))
             .child(bounds_tracker)
             .child(pick_resolver)
-            .child(FillWidthFixedHeight::new(height_signal, panel_switcher));
+            .child(
+                Expand::horizontal().flex(0.0).child(
+                    FixedSize::new()
+                        .bind_height(height_signal)
+                        .child(panel_switcher),
+                ),
+            );
 
         let root = ctx.add(stack);
         self.root_child_id = Some(root);
@@ -199,15 +211,15 @@ fn build_panel(state: InspectorState) -> impl Widget + 'static {
     let tabs = TabWidget::new(state.active_tab.clone())
         // Tree tab is self-scrolling (it owns its own ScrollArea so it
         // can drive scroll-into-view when the picker selects a widget).
-        .tab_literal("Tree", TreeTab::new(state.clone()))
-        .tab_literal("Properties", scrollable_tab(PropertiesTab::new(state.clone())))
-        .tab_literal("Accessibility", scrollable_tab(A11yTab::new(state.clone())))
-        .tab_literal("Theme", scrollable_tab(ThemeTab::new(state.clone())))
-        .tab_literal("Locale", scrollable_tab(LocaleTab::new(state.clone())))
-        .tab_literal("Focus", scrollable_tab(FocusTab::new(state.clone())))
-        .tab_literal("Shortcuts", scrollable_tab(ShortcutsTab::new(state.clone())))
-        .tab_literal("Overlays", scrollable_tab(OverlaysTab::new(state.clone())))
-        .tab_literal("Models", scrollable_tab(DataModelsTab::new(state.clone())));
+        .tab_literal("Tree", fill_width(TreeTab::new(state.clone())))
+        .tab_literal("Properties", fill_width(scrollable_tab(PropertiesTab::new(state.clone()))))
+        .tab_literal("Accessibility", fill_width(scrollable_tab(A11yTab::new(state.clone()))))
+        .tab_literal("Theme", fill_width(scrollable_tab(ThemeTab::new(state.clone()))))
+        .tab_literal("Locale", fill_width(scrollable_tab(LocaleTab::new(state.clone()))))
+        .tab_literal("Focus", fill_width(scrollable_tab(FocusTab::new(state.clone()))))
+        .tab_literal("Shortcuts", fill_width(scrollable_tab(ShortcutsTab::new(state.clone()))))
+        .tab_literal("Overlays", fill_width(scrollable_tab(OverlaysTab::new(state.clone()))))
+        .tab_literal("Models", fill_width(scrollable_tab(DataModelsTab::new(state.clone()))));
 
     let toolbar = build_toolbar(state.clone());
 
@@ -314,4 +326,17 @@ fn index_to_overlay_mode(idx: usize) -> OverlayMode {
 /// instead of overflowing the panel.
 fn scrollable_tab(content: impl Widget + 'static) -> impl Widget + 'static {
     fern_widgets::ScrollArea::new().child(content)
+}
+
+/// Wrap a tab content widget so it claims the full proposed width
+/// regardless of its natural size. Needed because `TabWidget`
+/// internally uses `Expand::vertical(switcher)` for its content
+/// area, and `Expand::vertical` reports its child's intrinsic width
+/// (zero for leaf tabs that return `proposal.resolve(0, h)`),
+/// causing the inner `VStack` to size the content slot to the tab
+/// bar's width. Wrapping each tab in `Expand::horizontal().flex(0)`
+/// makes each tab itself report the full proposal width without
+/// claiming height-slack from any ancestor stack.
+fn fill_width(content: impl Widget + 'static) -> impl Widget + 'static {
+    Expand::horizontal().flex(0.0).child(content)
 }

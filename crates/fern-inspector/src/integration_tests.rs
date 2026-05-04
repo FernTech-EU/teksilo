@@ -13,6 +13,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use fern_canvas::{Point, SizeProposal};
+use fern_core::widget_id::WidgetId;
 use fern_core::widget_tree::WidgetTree;
 use fern_tokens::Theme;
 use fern_widgets::Button;
@@ -142,6 +143,139 @@ fn panel_fills_window_width_when_open() {
         "panel slot should have non-zero height when open: {:?}",
         panel_bounds
     );
+}
+
+#[test]
+fn tab_content_fills_panel_width() {
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+    let state = InspectorState::new(true);
+    let shell_id = tree.add(InspectorShell::new(button, state.clone()));
+    let mut ids = state.user_root_ids.get();
+    ids.push(button);
+    state.user_root_ids.set(ids);
+    let _ = shell_id;
+
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    // Walk down to find a TabWidget content area. We don't have IDs
+    // for them, so just walk the deepest descendant under the panel
+    // slot and assert any leaf widget there spans the full window
+    // width.
+    fn deepest_full_height_descendant(
+        tree: &WidgetTree,
+        id: WidgetId,
+        depth: u32,
+    ) -> (WidgetId, fern_canvas::Rect, u32) {
+        let kids = tree.children(id);
+        let mut best = (id, tree.bounds(id), depth);
+        for k in kids {
+            let nested = deepest_full_height_descendant(tree, k, depth + 1);
+            if nested.2 > best.2 {
+                best = nested;
+            }
+        }
+        best
+    }
+
+    let shell_kids = tree.children(shell_id);
+    let panel_slot_id = *tree.children(shell_kids[0]).last().unwrap();
+    let (deepest, deepest_bounds, _) = deepest_full_height_descendant(&tree, panel_slot_id, 0);
+    eprintln!("deepest panel descendant {:?} bounds {:?}", deepest, deepest_bounds);
+
+    // Inspect the panel-content area: walk all panel descendants and
+    // verify *some* widget reaches the full window width. If everything
+    // is narrow, the panel body is being sized to natural content
+    // width — the bug we're guarding against.
+    fn any_full_width(tree: &WidgetTree, id: WidgetId, target_w: f32) -> bool {
+        if (tree.bounds(id).width - target_w).abs() < 0.5 {
+            return true;
+        }
+        for k in tree.children(id) {
+            if any_full_width(tree, k, target_w) {
+                return true;
+            }
+        }
+        false
+    }
+
+    assert!(
+        any_full_width(&tree, panel_slot_id, 800.0),
+        "no panel descendant fills the full 800px window width"
+    );
+}
+
+#[test]
+fn panel_resize_handle_tracks_cursor_one_to_one() {
+    use fern_core::event::PointerButton;
+
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let button = tree.add(Button::new_literal("X").on_activate_fn(|_| {}));
+    let state = InspectorState::new(true);
+    let shell_id = tree.add(InspectorShell::new(button, state.clone()));
+    let mut ids = state.user_root_ids.get();
+    ids.push(button);
+    state.user_root_ids.set(ids);
+    let _ = shell_id;
+
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    let start_height = state.panel_height.get();
+
+    // Click on the resize handle. Find it by walking down to the
+    // last child of the outer VStack's panel-slot and following the
+    // first descendant chain (handle is the first child of
+    // panel_block VStack).
+    let shell_kids = tree.children(shell_id);
+    let outer_vstack = shell_kids[0];
+    let panel_slot = *tree.children(outer_vstack).last().unwrap();
+    // panel_slot → Expand → FixedSize → panel_switcher → ZStack →
+    // panel_block → VStack → first child = handle wrapper. Just walk
+    // first-children until we find a leaf with a small height.
+    fn find_handle(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
+        let bounds = tree.bounds(id);
+        // Resize handle is exactly HANDLE_HEIGHT tall and full width.
+        if (bounds.height - 6.0).abs() < 0.5 && bounds.width > 100.0 {
+            return Some(id);
+        }
+        for c in tree.children(id) {
+            if let Some(id) = find_handle(tree, c) {
+                return Some(id);
+            }
+        }
+        None
+    }
+    let handle = find_handle(&tree, panel_slot).expect("resize handle");
+    let handle_bounds = tree.bounds(handle);
+    let click_y = handle_bounds.y + handle_bounds.height / 2.0;
+    let click = Point::new(handle_bounds.x + 50.0, click_y);
+
+    tree.pointer_move(click);
+    tree.pointer_down_button(click, PointerButton::Primary);
+
+    // Drag up by 40 px in window coords. Panel should grow by 40.
+    let drag_to = Point::new(click.x, click.y - 40.0);
+    tree.pointer_move(drag_to);
+    let after_one_move = state.panel_height.get();
+    assert!(
+        (after_one_move - (start_height + 40.0)).abs() < 0.5,
+        "after dragging up 40px panel should grow by 40, got start={} now={}",
+        start_height,
+        after_one_move
+    );
+
+    // Drag up another 30 px (cursor at click.y - 70). Panel should
+    // be start + 70, NOT after_one_move + 70 (the bug we're guarding).
+    let drag_to_2 = Point::new(click.x, click.y - 70.0);
+    tree.pointer_move(drag_to_2);
+    let after_two_moves = state.panel_height.get();
+    assert!(
+        (after_two_moves - (start_height + 70.0)).abs() < 0.5,
+        "after dragging to total -70px panel should be start+70, got start={} now={}",
+        start_height,
+        after_two_moves
+    );
+
+    tree.pointer_up_button(drag_to_2, PointerButton::Primary);
 }
 
 #[test]
