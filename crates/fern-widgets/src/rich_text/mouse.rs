@@ -198,7 +198,7 @@ pub(super) fn handle_scroll(
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    let WidgetEvent::Scroll { delta } = event else {
+    let WidgetEvent::Scroll { delta, .. } = event else {
         return EventResponse::Ignored;
     };
     // Match `ScrollArea`'s sign convention: `delta.y` is the scroll

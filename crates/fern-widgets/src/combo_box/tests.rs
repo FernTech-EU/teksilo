@@ -626,6 +626,7 @@ fn virtualized_combo_reveals_new_rows_on_scroll() {
             x: 0.0,
             y: 15_000.0,
         },
+        modifiers: Default::default(),
     });
     tree.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -804,6 +805,7 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
             x: 0.0,
             y: 1_000.0,
         },
+        modifiers: Default::default(),
     });
     tree.layout(SizeProposal::exact(300.0, 600.0));
 
@@ -821,6 +823,7 @@ fn wheel_keeps_targeting_list_after_scroll_driven_rebuild() {
             x: 0.0,
             y: 2_000.0,
         },
+        modifiers: Default::default(),
     });
     tree.layout(SizeProposal::exact(300.0, 600.0));
     let after = materialized_range(&tree, 100..200);

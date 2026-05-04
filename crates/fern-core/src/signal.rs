@@ -403,6 +403,63 @@ impl<T: Clone + 'static> Signal<T> {
         }
     }
 
+    /// Like [`map`](Self::map), but the resulting derived signal
+    /// presents a **single** combined `DerivedSource` to binding
+    /// registrations instead of one per upstream root.
+    ///
+    /// For animation-driven multi-axis signals — e.g. a
+    /// `pan_x.zip3(pan_y, zoom).zip(rotation)` view transform that
+    /// flips all four sources on every animation tick — this collapses
+    /// the per-tick binding work from O(N) to O(1) without changing
+    /// dirty-tracking semantics: the composite source is dirty when
+    /// any underlying source is, and clearing the composite clears
+    /// every underlying source.
+    ///
+    /// Use only when the derived signal's value depends on **all**
+    /// upstream sources being read together (a compose function);
+    /// when only one upstream changes per frame, [`map`](Self::map) is
+    /// equivalent and cheaper.
+    pub fn map_coalesced<U: Clone + 'static>(
+        &self,
+        f: impl Fn(&T) -> U + 'static,
+    ) -> Signal<U> {
+        let compute = self.as_compute();
+        let underlying = self.as_sources();
+        if underlying.len() <= 1 {
+            // One source already — no coalescing benefit; delegate
+            // to plain map to avoid an extra indirection.
+            return self.map(f);
+        }
+        // The token anchors a unique heap address used as `source_id`.
+        // Each closure captures a clone so the Rc lives as long as the
+        // resulting signal's source vec.
+        let token: Rc<()> = Rc::new(());
+        let source_id = Rc::as_ptr(&token) as *const () as usize;
+        let dirty_token = token.clone();
+        let dirty_underlying = underlying.clone();
+        let clear_token = token;
+        let clear_underlying = underlying;
+        let coalesced = DerivedSource {
+            dirty: Rc::new(move || {
+                let _keep = &dirty_token;
+                dirty_underlying.iter().any(|s| (s.dirty)())
+            }),
+            clear: Rc::new(move || {
+                let _keep = &clear_token;
+                for s in &clear_underlying {
+                    (s.clear)();
+                }
+            }),
+            source_id,
+        };
+        Signal {
+            kind: SignalKind::Derived {
+                compute: Rc::new(move || f(&compute())),
+                sources: vec![coalesced],
+            },
+        }
+    }
+
     /// Borrow a compute closure that reads this signal's current value.
     /// For mutable signals this clones the inner cell's value; for
     /// derived signals it clones the parent compute `Rc`.
@@ -1188,4 +1245,42 @@ mod tests {
         assert!(!s.has_pending_animation());
     }
 
+    #[test]
+    fn map_coalesced_collapses_multi_source_to_one_binding() {
+        // A 4-source zip projects through map_coalesced; the
+        // resulting derived signal exposes a single combined
+        // DerivedSource. Verifies the source-count collapse.
+        let a = Signal::new(1u32);
+        let b = Signal::new(2u32);
+        let c = Signal::new(3u32);
+        let d = Signal::new(4u32);
+        let composite = a
+            .zip3(&b, &c)
+            .zip(&d)
+            .map_coalesced(|((x, y, z), w)| *x + *y + *z + *w);
+        // Plain `map` would produce 4 sources; `map_coalesced` 1.
+        assert_eq!(composite.as_sources().len(), 1);
+        assert_eq!(composite.get(), 10);
+        // Dirtying any underlying source flips the composite's
+        // dirty bit; clearing the composite clears all underlying.
+        assert!(!composite.is_dirty());
+        a.set(10);
+        assert!(composite.is_dirty());
+        composite.clear_dirty();
+        assert!(!composite.is_dirty());
+        assert!(!a.is_dirty());
+        // Setting another underlying after clear should re-dirty.
+        c.set(30);
+        assert!(composite.is_dirty());
+    }
+
+    #[test]
+    fn map_coalesced_with_single_source_delegates_to_map() {
+        // No coalescing benefit when there's only one source —
+        // `map_coalesced` is equivalent to `map`.
+        let a = Signal::new(7u32);
+        let derived = a.map_coalesced(|v| *v * 2);
+        assert_eq!(derived.get(), 14);
+        assert_eq!(derived.as_sources().len(), 1);
+    }
 }

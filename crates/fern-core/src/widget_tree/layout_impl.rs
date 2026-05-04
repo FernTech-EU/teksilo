@@ -125,6 +125,22 @@ impl WidgetTree {
         // drop any focus/hover state whose target is no longer valid so we
         // don't dispatch to dead widgets on the next event.
         self.revalidate_interaction_state(&mut *ops);
+        // A rebuild's `build()` may arm new animations (looping or
+        // one-shot) by calling `signal.animate_to(...)` /
+        // `animate_looping(...)` — these set `pending` on the signal
+        // but don't enter the scheduler until `process_pending_animations`
+        // runs again. The early-frame `process_pending_animations`
+        // (`layout_impl::layout_with_ops`) already ran *before* this
+        // rebuild, so without this second drain the animation would
+        // wait for the next frame; if the rebuild also cancelled
+        // existing scheduler entries (`cancel_by_widget` is called by
+        // `rebuild_single_widget`), the scheduler ends up empty, no
+        // frame deadline is set, and the freshly-armed animation
+        // *never* gets picked up — the user sees animations freeze
+        // after any state-driven rebuild that re-arms them
+        // (e.g. SceneView's drag-end rebuild re-arming PulsingDot
+        // loopers via `register_bindings`).
+        self.process_pending_animations();
     }
 
     /// Run the layout pass with the given size proposal, using

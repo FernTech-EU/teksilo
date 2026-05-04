@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find /home/cyril/Devel/fern-ui:*)"
+      "Bash(find /home/cyril/Devel/fern-ui:*)",
+      "Bash(cargo test *)",
+      "Bash(cargo build *)",
+      "Bash(cargo check *)",
+      "Bash(rtk grep *)"
     ]
   }
 }

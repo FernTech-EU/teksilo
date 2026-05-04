@@ -1748,8 +1748,31 @@ impl WidgetTree {
         if !self.arena.is_active(id) || Some(id) == exclude {
             return None;
         }
+        // If this node carries a `set_transform` scope, the render walker
+        // pushes that transform onto its stack around this node's own paint
+        // AND its subtree. Hit-testing must mirror that composition: the
+        // input point arrives in this node's parent-effective space; apply
+        // this node's transform inverse once, then both the node's own
+        // bounds test and the recursion into children operate in the new
+        // local space. Identity transforms (and missing transform_prop) are
+        // skipped so the hot path stays scalar.
+        let local_point = match self
+            .arena
+            .get(id)
+            .and_then(|n| n.transform_prop.as_ref())
+            .map(|p| p.get())
+            .filter(|t| !t.is_identity())
+        {
+            Some(t) => match t.inverse() {
+                Some(inv) => inv.apply_point(point),
+                // A degenerate transform (collapsed axis) hides the entire
+                // subtree visually; mirror that for hit-testing.
+                None => return None,
+            },
+            None => point,
+        };
         let bounds = self.arena.bounds(id);
-        if !bounds.contains(point) {
+        if !bounds.contains(local_point) {
             return None;
         }
         let pass_through = self
@@ -1759,7 +1782,7 @@ impl WidgetTree {
             .unwrap_or(false);
         let children = self.arena.children(id).to_vec();
         for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive_excluding(child, point, exclude) {
+            if let Some(hit) = self.hit_test_recursive_excluding(child, local_point, exclude) {
                 return Some(hit);
             }
         }
@@ -1867,6 +1890,7 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 25.0));
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: crate::event::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+            modifiers: Default::default(),
         });
     }
 
@@ -3342,6 +3366,7 @@ mod tests {
         // stale hover from before the drag started).
         tree.dispatch_event(WidgetEvent::Scroll {
             delta: crate::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+            modifiers: Default::default(),
         });
         assert_eq!(
             scroll_count.get(),
@@ -4251,5 +4276,148 @@ mod tests {
             tree.shortcut_registry().get_default("scoped.thing").is_none(),
             "destroying the owner must unregister its shortcut"
         );
+    }
+
+    // --- Transform-aware hit-testing -------------------------------------
+    //
+    // `set_transform` scopes are paint-only: the renderer pushes the
+    // transform around the subtree, so the visually-displayed area is
+    // shifted relative to `arena.bounds(id)`. Hit-testing must inverse-
+    // transform the screen-space input point as it descends through each
+    // transform scope so that a click on the visually-rendered area lands
+    // on the correct widget. Pre-fix, screen-space `bounds.contains(point)`
+    // returned the *pre-transform* widget for in-bounds-pre-transform
+    // points and missed the visually-shifted hit area entirely.
+
+    #[test]
+    fn hit_test_through_translate_scope() {
+        use crate::test_widgets::StackWidget;
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new());
+        let parent = tree.add(StackWidget::new().add_child(child));
+        // Visually shift the entire subtree right by 100px.
+        tree.set_transform(parent, fern_canvas::Transform2D::translate(100.0, 0.0));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // (50, 25) is inside the *pre-transform* bounds but the widget is
+        // visually painted at x=100..200; a click at (50, 25) lands on
+        // empty space.
+        assert_eq!(
+            tree.hit_test(Point::new(50.0, 25.0)),
+            None,
+            "pre-transform area is not visually populated and must not hit"
+        );
+        // (150, 25) is inside the visually-rendered area (post-translate).
+        assert_eq!(
+            tree.hit_test(Point::new(150.0, 25.0)),
+            Some(child),
+            "visually-rendered area must hit the child"
+        );
+        // Off everything.
+        assert_eq!(tree.hit_test(Point::new(250.0, 25.0)), None);
+    }
+
+    #[test]
+    fn hit_test_through_scale_scope() {
+        use crate::test_widgets::StackWidget;
+        let mut tree = WidgetTree::new();
+        let child = tree.add(FillWidget::new());
+        let parent = tree.add(StackWidget::new().add_child(child));
+        // Halve the visual size: pre-transform bounds (0,0,100,50) →
+        // visually (0,0,50,25).
+        tree.set_transform(parent, fern_canvas::Transform2D::scale(0.5, 0.5));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        // Inside the visual area.
+        assert_eq!(tree.hit_test(Point::new(25.0, 12.0)), Some(child));
+        // Outside the visual area but inside the pre-transform bounds.
+        // Without the fix this would (incorrectly) hit the child.
+        assert_eq!(
+            tree.hit_test(Point::new(75.0, 25.0)),
+            None,
+            "scaled-out region must not hit"
+        );
+    }
+
+    #[test]
+    fn hit_test_through_nested_transforms_compose() {
+        use crate::test_widgets::StackWidget;
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new());
+        let inner = tree.add(StackWidget::new().add_child(leaf));
+        let outer = tree.add(StackWidget::new().add_child(inner));
+        // Outer translates by (100, 0); inner additionally scales by 2.
+        // Effective at leaf = scale(2,2).then(translate(100,0)) — the
+        // renderer composes deepest-first (see `effective_transform`).
+        tree.set_transform(outer, fern_canvas::Transform2D::translate(100.0, 0.0));
+        tree.set_transform(inner, fern_canvas::Transform2D::scale(2.0, 2.0));
+        tree.layout(SizeProposal::exact(50.0, 25.0));
+
+        // Leaf-local (0, 0) → scale → (0, 0) → translate → (100, 0).
+        // Leaf-local (50, 25) → scale → (100, 50) → translate → (200, 50).
+        // So the visual hit area is x in [100, 200], y in [0, 50].
+        assert_eq!(tree.hit_test(Point::new(150.0, 25.0)), Some(leaf));
+        assert_eq!(tree.hit_test(Point::new(50.0, 25.0)), None);
+        assert_eq!(tree.hit_test(Point::new(250.0, 25.0)), None);
+    }
+
+    #[test]
+    fn hit_test_identity_transform_unchanged() {
+        // Sanity: an identity transform must not perturb the existing
+        // hit-test behavior. Guards against accidental over-application
+        // of inversion on the hot path.
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(FillWidget::new());
+        tree.set_transform(widget, fern_canvas::Transform2D::IDENTITY);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.hit_test(Point::new(50.0, 25.0)), Some(widget));
+    }
+
+    #[test]
+    fn arena_effective_transform_composes_ancestors() {
+        // `arena.effective_transform(id)` must equal the renderer's
+        // transform-stack top by the time it begins painting `id` —
+        // i.e. mapping `id`'s pre-transform local point to screen space.
+        // The renderer's `PushTransform` handler composes as
+        // `device_t.then(prev_top)` (see `fern-render/src/renderer.rs`),
+        // so the *innermost* transform applies first to a local point.
+        // For ancestors [outer, inner] both with transforms, this means
+        // effective = inner.then(outer), NOT outer.then(inner).
+        // fern-scene relies on this to project scene-coord bounds to
+        // screen space when emitting AT nodes for view-transformed items.
+        use crate::test_widgets::StackWidget;
+        let mut tree = WidgetTree::new();
+        let leaf = tree.add(FillWidget::new());
+        let inner = tree.add(StackWidget::new().add_child(leaf));
+        let outer = tree.add(StackWidget::new().add_child(inner));
+        tree.set_transform(outer, fern_canvas::Transform2D::translate(100.0, 0.0));
+        tree.set_transform(inner, fern_canvas::Transform2D::scale(2.0, 2.0));
+        tree.layout(SizeProposal::exact(50.0, 25.0));
+
+        let eff = tree.arena.effective_transform(leaf);
+        let expected = fern_canvas::Transform2D::scale(2.0, 2.0)
+            .then(&fern_canvas::Transform2D::translate(100.0, 0.0));
+        for (a, b) in eff.m.iter().zip(expected.m.iter()) {
+            assert!(
+                (a - b).abs() < 1e-5,
+                "effective_transform mismatch: got {:?}, want {:?}",
+                eff.m,
+                expected.m
+            );
+        }
+
+        // Concrete-point check that pins the composition order without
+        // relying on matrix equality alone: a leaf-local point at the
+        // bounds origin (0, 0) should land at screen (100, 0) — scale
+        // first (still (0,0)), then translate by 100 in x. With the
+        // wrong composition order it would land at (200, 0).
+        let screen_origin = eff.apply_point(Point::new(0.0, 0.0));
+        assert!((screen_origin.x - 100.0).abs() < 1e-5);
+        assert!((screen_origin.y - 0.0).abs() < 1e-5);
+        // Far corner: leaf-local (50, 25) → scale → (100, 50) → translate
+        // by 100 in x → (200, 50).
+        let screen_corner = eff.apply_point(Point::new(50.0, 25.0));
+        assert!((screen_corner.x - 200.0).abs() < 1e-5);
+        assert!((screen_corner.y - 50.0).abs() < 1e-5);
     }
 }

@@ -381,6 +381,48 @@ impl WidgetArena {
             .unwrap_or(fern_canvas::Rect::ZERO)
     }
 
+    /// The accumulated 2D affine transform that maps `id`'s pre-transform
+    /// local-space points to screen space — equivalent to the renderer's
+    /// `transform_stack` top by the time it begins painting `id`. Used by
+    /// hit-testing and any consumer that needs to project a node's
+    /// pre-transform bounds into screen space (e.g. fern-scene's a11y
+    /// bounds projection of view-transformed scene items).
+    ///
+    /// **Composition order.** Mirrors `crates/fern-render/src/renderer.rs`'s
+    /// `PushTransform` handling: each push composes as
+    /// `new_top = device_t.then(prev_top)`, so the deepest (innermost)
+    /// transform is applied **first** to a local point and outer ancestors
+    /// compose afterward. Walking root→leaf, each ancestor's
+    /// `transform_prop` is folded in via `t.then(effective)` (NOT
+    /// `effective.then(t)`).
+    ///
+    /// Returns `Transform2D::IDENTITY` if no ancestor sets a non-identity
+    /// transform, which is the common case (90%+ of widgets).
+    pub fn effective_transform(&self, id: WidgetId) -> fern_canvas::Transform2D {
+        // Collect leaf→root, then iterate root→leaf. Composition is
+        // `t_new.then(effective_so_far)` so the outer ancestor is applied
+        // *after* the deeper push — matching the renderer's stack semantic
+        // (`device_t.then(prev_top)` at PushTransform).
+        let mut chain: Vec<WidgetId> = Vec::new();
+        let mut current = Some(id);
+        while let Some(c) = current {
+            chain.push(c);
+            current = self.parent(c);
+        }
+        let mut effective = fern_canvas::Transform2D::IDENTITY;
+        for node_id in chain.iter().rev() {
+            if let Some(node) = self.nodes.get(*node_id)
+                && let Some(p) = node.transform_prop.as_ref()
+            {
+                let t = p.get();
+                if !t.is_identity() {
+                    effective = t.then(&effective);
+                }
+            }
+        }
+        effective
+    }
+
     /// Get all root-level widget IDs (widgets with no parent).
     pub fn roots(&self) -> Vec<WidgetId> {
         if self.roots_dirty {
@@ -456,14 +498,36 @@ impl WidgetArena {
         if !self.is_active(id) || Some(id) == exclude {
             return None;
         }
+        // If this node carries a `set_transform` scope, the render walker
+        // pushes that transform onto its stack around this node's own
+        // paint AND its subtree. Hit-testing must mirror that composition:
+        // the input point arrives in this node's parent-effective space;
+        // apply this node's transform inverse once, then both the node's
+        // own bounds test and the recursion into children operate in the
+        // new local space. Identity transforms (and missing transform_prop)
+        // are skipped so the hot path stays scalar.
+        let local_point = match self
+            .get(id)
+            .and_then(|n| n.transform_prop.as_ref())
+            .map(|p| p.get())
+            .filter(|t| !t.is_identity())
+        {
+            Some(t) => match t.inverse() {
+                Some(inv) => inv.apply_point(point),
+                // A degenerate transform (collapsed axis) hides the
+                // entire subtree visually; mirror that for hit-testing.
+                None => return None,
+            },
+            None => point,
+        };
         let bounds = self.bounds(id);
-        if !bounds.contains(point) {
+        if !bounds.contains(local_point) {
             return None;
         }
         let pass_through = self.get(id).map(|n| n.event_pass_through).unwrap_or(false);
         let children: Vec<WidgetId> = self.children(id).to_vec();
         for &child in children.iter().rev() {
-            if let Some(hit) = self.hit_test_recursive(child, point, exclude) {
+            if let Some(hit) = self.hit_test_recursive(child, local_point, exclude) {
                 return Some(hit);
             }
         }

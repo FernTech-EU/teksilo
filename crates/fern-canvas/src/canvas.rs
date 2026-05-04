@@ -701,6 +701,24 @@ impl Canvas {
         self.frame.draw_order.push(DrawCommand::SetTransform(new));
     }
 
+    /// Compose `t` **beneath** the current transform on the stack so
+    /// subsequent draws use `t` first, then the existing transform.
+    /// Mathematically: `new = current ∘ t` — i.e. a point `p` drawn
+    /// after this call lands at `current(t(p))`. This is the
+    /// "pre-multiply" semantic, opposite of [`Canvas::translate`],
+    /// which post-multiplies in output space. Use this when you want
+    /// to add a transform that operates in the **local** coordinates
+    /// of the about-to-be-drawn content (e.g. pushing a per-item
+    /// scene-graph transform whose input is item-local coords).
+    pub fn apply_transform(&mut self, t: Transform2D) {
+        let current = self.current_transform();
+        let new = t.then(&current);
+        if let Some(top) = self.transform_stack.last_mut() {
+            *top = new;
+        }
+        self.frame.draw_order.push(DrawCommand::SetTransform(new));
+    }
+
     /// Get the current transform.
     pub fn current_transform(&self) -> Transform2D {
         self.transform_stack

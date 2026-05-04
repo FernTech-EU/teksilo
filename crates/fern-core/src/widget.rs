@@ -299,6 +299,66 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// Declare this widget's accessibility identity.
     fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
 
+    /// Whether this widget wants the AT walker to consult its
+    /// [`a11y_redirect_descendant`](Self::a11y_redirect_descendant)
+    /// hook for *every* descendant during AT tree emission, not
+    /// just its direct arena children.
+    ///
+    /// Returning `true` opts this widget into ancestor-chain
+    /// queries: as the walker iterates each descendant's parent
+    /// to decide where the descendant's `NodeId` lands in the AT
+    /// tree, it walks up the arena from that parent and asks
+    /// every ancestor with this flag set. First `Some(_)` wins
+    /// (closest ancestor takes priority — same precedence as a
+    /// CSS-like cascade).
+    ///
+    /// Returning `false` (the default) makes the walker pay the
+    /// O(depth) ancestor walk only for trees that genuinely need
+    /// it. Only opt in if your widget actively places
+    /// non-direct-child descendant `NodeId`s in its own
+    /// `accessibility()` emission — `fern_scene::SceneView` is
+    /// the canonical example.
+    ///
+    /// Default: `false`.
+    fn wants_descendant_redirects(&self) -> bool {
+        false
+    }
+
+    /// Optional redirection hook for AT-tree placement of a child.
+    ///
+    /// The accessibility walker calls this on the immediate arena
+    /// parent of each child — and, if the parent
+    /// [`wants_descendant_redirects`](Self::wants_descendant_redirects)
+    /// returns `false`, on every opt-in ancestor walking up the
+    /// arena from that parent. First `Some(_)` wins, scanned
+    /// bottom-up (closest ancestor takes priority). Returning
+    /// `Some(_)` tells the walker that this widget has *already*
+    /// placed `descendant`'s `NodeId` somewhere else (typically
+    /// under a synthetic node it emitted in its own
+    /// `accessibility()` call), and the walker should NOT add it
+    /// to its arena parent's children list.
+    ///
+    /// The returned `NodeId` is informational — it identifies the
+    /// new logical parent in case the walker wants to bookkeep
+    /// (e.g., dedupe). The walker does not validate that
+    /// `descendant`'s NodeId is actually in that target's children
+    /// list; it is the implementing widget's responsibility to
+    /// have placed it there during its `accessibility()` emission
+    /// (e.g. via `AccessNodeBuilder::attach_scene_child_under`).
+    ///
+    /// Used by `fern_scene::SceneView` to graft heavyweight
+    /// `Widget` items into an app-declared logical AT tree (Phase
+    /// 5b). Other layered containers can adopt the same pattern.
+    ///
+    /// Default: `None` — no redirection.
+    fn a11y_redirect_descendant(
+        &self,
+        _self_id: WidgetId,
+        _descendant: WidgetId,
+    ) -> Option<accesskit::NodeId> {
+        None
+    }
+
     /// Suggest an accessible title to an enclosing container that
     /// wraps this widget as content — typically a modal / dialog
     /// shell that wants to propagate the inner content's visible
@@ -350,8 +410,49 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         None
     }
 
+    /// Mutable counterpart of [`as_any`](Self::as_any). Default
+    /// returns `None`; widgets that want to expose mutable state to
+    /// tests (e.g. so a test can mutate a `Scene` inside a
+    /// `SceneView` post-layout) override with `Some(self)`. Should
+    /// follow the same opt-in pattern as `as_any`: only widgets
+    /// that opt into `&` introspection should opt into `&mut`.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
+
     /// Whether this widget clips its children to its bounds.
     fn clips_children(&self) -> bool {
+        false
+    }
+
+    /// Whether `rebuild_single_widget` should **preserve** existing
+    /// children (skip the destroy-subtree-then-rebuild dance) when
+    /// re-running this widget's `build()`.
+    ///
+    /// Default `false` — rebuild is a "tear down and reconstruct"
+    /// operation, the right semantic for data-driven widgets like
+    /// `Repeater` / `ListView` where every rebuild constructs fresh
+    /// children from current model state.
+    ///
+    /// Override to `true` for widgets whose children are stable
+    /// across rebuilds — they were created once at first build via
+    /// `ctx.add` / `ctx.add_boxed`, and subsequent rebuilds just
+    /// re-push the same `WidgetId`s. `SceneView` is the canonical
+    /// example: heavyweight scene widgets are materialised on first
+    /// build from `Scene::add_widget` pending entries; subsequent
+    /// rebuilds (triggered to drain pending drag-to-move / marquee
+    /// commits) MUST keep those widgets attached or the user sees
+    /// the cards / nested SceneView "disappear" on every drag end.
+    ///
+    /// When `true`, `build()` is responsible for returning a
+    /// children vec that contains every `WidgetId` it wants to
+    /// keep attached — the framework still updates the parent's
+    /// `children` field from that return value, so any IDs not in
+    /// the returned vec are orphaned (still in the arena, no
+    /// parent), exactly as if `false`. The opt-in only skips the
+    /// active `destroy_subtree` step that would tear them down
+    /// and unmount their state.
+    fn preserves_children_on_rebuild(&self) -> bool {
         false
     }
 

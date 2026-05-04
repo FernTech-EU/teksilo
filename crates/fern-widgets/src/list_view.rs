@@ -1202,6 +1202,7 @@ mod tests {
         // Scroll down by 1500px (50 items * 30px)
         tree.dispatch_event(fern_core::event::WidgetEvent::Scroll {
             delta: fern_core::event::ScrollDelta::Pixels { x: 0.0, y: 1500.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
@@ -1465,6 +1466,7 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
         tree.dispatch_event(fern_core::event::WidgetEvent::Scroll {
             delta: fern_core::event::ScrollDelta::Pixels { x: 0.0, y: 60.0 },
+            modifiers: Default::default(),
         });
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
