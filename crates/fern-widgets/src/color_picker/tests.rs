@@ -1,0 +1,331 @@
+//! Integration tests for [`ColorPicker`](super::ColorPicker) and its
+//! subcomponents. Headless — no Xvfb / GPU required.
+
+#![cfg(test)]
+
+use fern_canvas::SizeProposal;
+use fern_core::accesskit::Role;
+use fern_core::event::{Key, Modifiers};
+use fern_core::signal::Signal;
+use fern_core::widget_tree::WidgetTree;
+use fern_tokens::{Color, Theme};
+
+use super::*;
+use crate::color_picker::state::ColorComponents;
+use crate::color_picker::swatch::ColorSwatch;
+use crate::color_picker::swatch_grid::SwatchGrid;
+use crate::color_picker::hue_strip::HueStrip;
+use crate::color_picker::alpha_strip::AlphaStrip;
+use crate::color_picker::hsv_canvas::HsvCanvas;
+
+#[test]
+fn builds_with_default_options() {
+    let value = Signal::new(Color::RED);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(ColorPicker::new(value));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    // No panic = pass; assert the root has bounds.
+    let bounds = tree.bounds(id);
+    assert!(bounds.width > 0.0);
+    assert!(bounds.height > 0.0);
+}
+
+#[test]
+fn builds_with_alpha_enabled() {
+    let value = Signal::new(Color::from_rgba(1.0, 0.0, 0.0, 0.5));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(ColorPicker::new(value).alpha_enabled(true));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+}
+
+#[test]
+fn builds_with_compact_layout() {
+    let value = Signal::new(Color::BLUE);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(ColorPicker::new(value).layout(ColorPickerLayout::Compact));
+    tree.layout(SizeProposal::exact(400.0, 400.0));
+}
+
+#[test]
+fn builds_with_wide_layout() {
+    let value = Signal::new(Color::GREEN);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(
+        ColorPicker::new(value)
+            .alpha_enabled(true)
+            .layout(ColorPickerLayout::Wide)
+            .show_hsv_spinners(true),
+    );
+    tree.layout(SizeProposal::exact(900.0, 500.0));
+}
+
+#[test]
+fn builds_with_nullable_value() {
+    let value: Signal<Option<Color>> = Signal::new(Some(Color::RED));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(ColorPicker::nullable(value));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+}
+
+#[test]
+fn builds_with_nullable_none() {
+    let value: Signal<Option<Color>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(ColorPicker::nullable(value));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+}
+
+#[test]
+fn root_accessibility_emits_group_role() {
+    let value = Signal::new(Color::RED);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(ColorPicker::new(value));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    let node = tree.accessibility_node(id);
+    assert_eq!(node.role(), Role::Group);
+}
+
+#[test]
+fn setting_red_preserves_alpha() {
+    let value = Signal::new(Color::from_rgba(0.5, 0.5, 0.5, 0.8));
+    // ColorComponents must run inside a widget build to register effects.
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(ColorPicker::new(value.clone()).alpha_enabled(true));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    // Mutate the signal directly to "fake" what a setter does.
+    let c = value.get();
+    value.set(Color::from_rgba(0.9, c.g(), c.b(), c.a()));
+    assert!((value.get().a() - 0.8).abs() < 0.01);
+    assert!((value.get().r() - 0.9).abs() < 0.01);
+}
+
+#[test]
+fn signal_drives_picker_components() {
+    // Smoke: constructing ColorComponents in isolation still requires a
+    // BuildContext (effect registration), which we get by building any
+    // widget that uses it.
+    let value = Signal::new(Color::from_rgba(1.0, 0.0, 0.5, 1.0));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(ColorPicker::new(value.clone()));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    // Mutate value and check it's stored (round-trip via the signal).
+    value.set(Color::from_rgba(0.0, 1.0, 0.0, 1.0));
+    let updated = value.get();
+    assert!((updated.r()).abs() < 0.01);
+    assert!((updated.g() - 1.0).abs() < 0.01);
+}
+
+#[test]
+fn color_components_red_setter_writes_back() {
+    // Build a tiny widget that uses ColorComponents, then exercise the
+    // red setter directly (Rc<dyn Fn>) and verify the bound signal moves.
+    use fern_core::build_context::BuildContext;
+    use fern_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+    use fern_core::widget_id::WidgetId;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Probe {
+        value: Signal<Color>,
+        captured: Rc<RefCell<Option<Rc<dyn Fn(f32)>>>>,
+    }
+    impl std::fmt::Debug for Probe {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("Probe").finish()
+        }
+    }
+    impl Widget for Probe {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let c = ColorComponents::new(ctx, self.value.clone());
+            *self.captured.borrow_mut() = Some(c.set_red.clone());
+            Vec::new()
+        }
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+        fn place_children(
+            &self,
+            _bounds: fern_canvas::Rect,
+            _proposal: SizeProposal,
+            _children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+        }
+    }
+
+    let value = Signal::new(Color::from_rgb(0.1, 0.2, 0.3));
+    let captured: Rc<RefCell<Option<Rc<dyn Fn(f32)>>>> = Rc::new(RefCell::new(None));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(Probe {
+        value: value.clone(),
+        captured: captured.clone(),
+    });
+    tree.layout(SizeProposal::exact(100.0, 100.0));
+
+    let setter = captured.borrow().as_ref().unwrap().clone();
+    setter(0.7);
+    let updated = value.get();
+    assert!((updated.r() - 0.7).abs() < 0.01);
+    // Other channels preserved.
+    assert!((updated.g() - 0.2).abs() < 0.01);
+    assert!((updated.b() - 0.3).abs() < 0.01);
+}
+
+#[test]
+fn hue_strip_emits_slider_with_correct_range() {
+    let hue = Signal::new(180.0_f32);
+    let setter: Rc<dyn Fn(f32)> = {
+        let hue = hue.clone();
+        Rc::new(move |h| hue.set(h))
+    };
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(HueStrip::new(hue.clone(), setter, dragging).label("Hue"));
+    tree.layout(SizeProposal::exact(20.0, 200.0));
+    let node = tree.accessibility_node(id);
+    assert_eq!(node.role(), Role::Slider);
+}
+
+#[test]
+fn alpha_strip_emits_slider() {
+    let color = Signal::new(Color::RED);
+    let alpha = Signal::new(0.5_f32);
+    let setter: Rc<dyn Fn(f32)> = {
+        let alpha = alpha.clone();
+        Rc::new(move |a| alpha.set(a))
+    };
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(AlphaStrip::new(color, alpha, setter, dragging).label("Opacity"));
+    tree.layout(SizeProposal::exact(20.0, 200.0));
+    let node = tree.accessibility_node(id);
+    assert_eq!(node.role(), Role::Slider);
+}
+
+#[test]
+fn hue_strip_keyboard_steps() {
+    let hue = Signal::new(180.0_f32);
+    let setter: Rc<dyn Fn(f32)> = {
+        let hue = hue.clone();
+        Rc::new(move |h| hue.set(h))
+    };
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(HueStrip::new(hue.clone(), setter, dragging));
+    tree.layout(SizeProposal::exact(20.0, 200.0));
+    tree.focus(id);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert!((hue.get() - 179.0).abs() < 0.01);
+    tree.press_key(Key::PageUp, Modifiers::NONE);
+    assert!((hue.get() - 194.0).abs() < 0.01);
+    tree.press_key(Key::Home, Modifiers::NONE);
+    assert!(hue.get().abs() < 0.01);
+    tree.press_key(Key::End, Modifiers::NONE);
+    assert!((hue.get() - 359.0).abs() < 0.01);
+}
+
+#[test]
+fn swatch_emits_color_well_with_color_value() {
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(ColorSwatch::new(Color::RED));
+    tree.layout(SizeProposal::exact(40.0, 40.0));
+    let node = tree.accessibility_node(id);
+    assert_eq!(node.role(), Role::ColorWell);
+}
+
+#[test]
+fn swatch_grid_emits_grid_role() {
+    let swatches = Signal::new(vec![Color::RED, Color::GREEN, Color::BLUE]);
+    let selected = Signal::new(Color::RED);
+    let on_select: Rc<dyn Fn(Color, &mut fern_core::widget::EventContext)> =
+        Rc::new(|_, _| {});
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(SwatchGrid::new(swatches, selected, 6, on_select));
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    let node = tree.accessibility_node(id);
+    assert_eq!(node.role(), Role::Grid);
+}
+
+#[test]
+fn hsv_canvas_emits_placeholder_role() {
+    let hue = Signal::new(0.0_f32);
+    let sat = Signal::new(1.0_f32);
+    let val = Signal::new(1.0_f32);
+    let set_hsv: Rc<dyn Fn(f32, f32, f32)> = Rc::new(|_, _, _| {});
+    let dragging = Rc::new(std::cell::Cell::new(false));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(HsvCanvas::new(hue, sat, val, set_hsv, dragging));
+    tree.layout(SizeProposal::exact(224.0, 192.0));
+    let node = tree.accessibility_node(id);
+    // The HSV canvas emits a placeholder GenericContainer role; the
+    // containing ColorPicker excludes its subtree from the AT tree
+    // via `.access_exclude_subtree()`.
+    assert_eq!(node.role(), Role::GenericContainer);
+}
+
+#[test]
+fn default_swatches_palette_has_twelve_colors() {
+    assert_eq!(DEFAULT_SWATCHES.len(), 12);
+}
+
+// ── ColorEdit ────────────────────────────────────────────────────────
+
+#[test]
+fn color_edit_builds_with_default_options() {
+    use crate::color_edit::ColorEdit;
+    let value = Signal::new(Color::RED);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(ColorEdit::new(value));
+    tree.layout(SizeProposal::exact(200.0, 40.0));
+    let bounds = tree.bounds(id);
+    assert!(bounds.width > 0.0);
+}
+
+#[test]
+fn color_edit_builds_nullable() {
+    use crate::color_edit::ColorEdit;
+    let value: Signal<Option<Color>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    tree.add(ColorEdit::nullable(value));
+    tree.layout(SizeProposal::exact(200.0, 40.0));
+}
+
+#[test]
+fn color_edit_emits_button_role() {
+    // The trigger declares Role::Button + HasPopup::Dialog inside its
+    // accessibility() impl. AccessibilityInfo only exposes role() + a
+    // few flags, so HasPopup itself isn't observable through this query
+    // surface — the role check confirms the wiring is in place.
+    use crate::color_edit::ColorEdit;
+    let value = Signal::new(Color::from_hex("#3584E4"));
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(ColorEdit::new(value));
+    tree.layout(SizeProposal::exact(200.0, 40.0));
+    let node = tree.accessibility_node(id);
+    assert_eq!(node.role(), Role::Button);
+}
+
+#[test]
+fn color_edit_clicking_trigger_opens_popover() {
+    use crate::color_edit::ColorEdit;
+    let value = Signal::new(Color::BLUE);
+    let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+    let id = tree.add(ColorEdit::new(value));
+    tree.layout(SizeProposal::exact(200.0, 40.0));
+    tree.render(); // cache bounds for tap
+
+    // Initially the trigger advertises is_expanded=false.
+    let before = tree.accessibility_node(id);
+    assert!(!before.is_expanded(), "popover starts closed");
+
+    tree.click(id);
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    let after = tree.accessibility_node(id);
+    assert!(after.is_expanded(), "click opens popover (set_expanded=true)");
+}

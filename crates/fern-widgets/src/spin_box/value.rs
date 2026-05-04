@@ -20,6 +20,7 @@ mod sealed {
     pub trait Sealed {}
     impl Sealed for i32 {}
     impl Sealed for i64 {}
+    impl Sealed for u8 {}
     impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for usize {}
@@ -150,6 +151,7 @@ macro_rules! impl_spin_value_int {
 
 impl_spin_value_int!(i32, signed = true);
 impl_spin_value_int!(i64, signed = true);
+impl_spin_value_int!(u8, signed = false);
 impl_spin_value_int!(u32, signed = false);
 impl_spin_value_int!(u64, signed = false);
 impl_spin_value_int!(usize, signed = false);
@@ -278,5 +280,19 @@ mod tests {
         assert_eq!((42_i32).clamp_value(0, 100), 42);
         assert_eq!((150_i32).clamp_value(0, 100), 100);
         assert_eq!((-5_i32).clamp_value(0, 100), 0);
+    }
+
+    #[test]
+    fn u8_round_trip() {
+        assert_eq!(<u8 as SpinValue>::parse("0"), Some(0));
+        assert_eq!(<u8 as SpinValue>::parse("128"), Some(128));
+        assert_eq!(<u8 as SpinValue>::parse("255"), Some(255));
+        assert_eq!(<u8 as SpinValue>::parse("256"), None); // overflow
+        assert_eq!(<u8 as SpinValue>::parse("-1"), None);
+        assert!(!<u8 as SpinValue>::is_valid_input_char('-'));
+        assert_eq!((255_u8).format(0), "255");
+        assert_eq!(SpinValue::saturating_add(250_u8, 10_u8), u8::MAX);
+        assert_eq!(SpinValue::saturating_sub(5_u8, 10_u8), u8::MIN);
+        assert!(<u8 as SpinValue>::is_integer());
     }
 }

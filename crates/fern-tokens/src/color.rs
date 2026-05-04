@@ -146,6 +146,87 @@ impl Color {
         self.mix(Color::new(1.0, 1.0, 1.0, self.a), amount)
     }
 
+    /// Format as `#RRGGBB` (uppercase). With `include_alpha = true`, returns
+    /// `#RRGGBBAA`. Channels are quantized to 8-bit by rounding `f32 * 255.0`.
+    /// Inverse of [`Color::from_hex`] modulo quantization.
+    pub fn to_hex_upper(&self, include_alpha: bool) -> String {
+        let r = (self.r * 255.0).round().clamp(0.0, 255.0) as u8;
+        let g = (self.g * 255.0).round().clamp(0.0, 255.0) as u8;
+        let b = (self.b * 255.0).round().clamp(0.0, 255.0) as u8;
+        if include_alpha {
+            let a = (self.a * 255.0).round().clamp(0.0, 255.0) as u8;
+            format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a)
+        } else {
+            format!("#{:02X}{:02X}{:02X}", r, g, b)
+        }
+    }
+
+    /// Lowercase variant of [`Color::to_hex_upper`].
+    pub fn to_hex_lower(&self, include_alpha: bool) -> String {
+        self.to_hex_upper(include_alpha).to_lowercase()
+    }
+
+    /// Convert sRGB to HSV. Returns `(hue 0..360, saturation 0..1, value 0..1)`.
+    /// Hue is undefined when saturation is `0` (gray); returns `0.0` by convention
+    /// so round-trips on grays are stable.
+    pub fn to_hsv(&self) -> (f32, f32, f32) {
+        let max = self.r.max(self.g).max(self.b);
+        let min = self.r.min(self.g).min(self.b);
+        let delta = max - min;
+
+        let h = if delta < 1e-6 {
+            0.0
+        } else if (max - self.r).abs() < 1e-6 {
+            60.0 * (((self.g - self.b) / delta).rem_euclid(6.0))
+        } else if (max - self.g).abs() < 1e-6 {
+            60.0 * ((self.b - self.r) / delta + 2.0)
+        } else {
+            60.0 * ((self.r - self.g) / delta + 4.0)
+        };
+        let h = if h < 0.0 { h + 360.0 } else { h };
+
+        let s = if max < 1e-6 { 0.0 } else { delta / max };
+        let v = max;
+
+        (h, s, v)
+    }
+
+    /// Convert sRGB-with-alpha to HSV-with-alpha.
+    /// `(hue 0..360, saturation 0..1, value 0..1, alpha 0..1)`.
+    pub fn to_hsva(&self) -> (f32, f32, f32, f32) {
+        let (h, s, v) = self.to_hsv();
+        (h, s, v, self.a)
+    }
+
+    /// Build a Color from HSV. Hue is wrapped modulo 360 (handles negative
+    /// values too); saturation and value are clamped to `0..=1`. Alpha is `1.0`.
+    pub fn from_hsv(h: f32, s: f32, v: f32) -> Self {
+        Self::from_hsva(h, s, v, 1.0)
+    }
+
+    /// Build a Color from HSV-with-alpha. Same wrapping/clamping rules as
+    /// [`Color::from_hsv`]; alpha is also clamped to `0..=1`.
+    pub fn from_hsva(h: f32, s: f32, v: f32, a: f32) -> Self {
+        let h = h.rem_euclid(360.0);
+        let s = s.clamp(0.0, 1.0);
+        let v = v.clamp(0.0, 1.0);
+        let a = a.clamp(0.0, 1.0);
+
+        let c = v * s;
+        let h_prime = h / 60.0;
+        let x = c * (1.0 - (h_prime.rem_euclid(2.0) - 1.0).abs());
+        let (r1, g1, b1) = match h_prime as i32 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        let m = v - c;
+        Self::from_rgba(r1 + m, g1 + m, b1 + m, a)
+    }
+
     /// Compute the relative luminance (WCAG 2.x formula).
     /// Returns a value in 0.0..=1.0 where 0 is black and 1 is white.
     pub fn relative_luminance(self) -> f32 {
@@ -320,5 +401,114 @@ mod tests {
         assert!(Color::WHITE.relative_luminance() > light.relative_luminance());
         assert!(light.relative_luminance() > dark.relative_luminance());
         assert!(dark.relative_luminance() > Color::BLACK.relative_luminance());
+    }
+
+    #[test]
+    fn hsv_roundtrip_primary_colors() {
+        for color in &[Color::RED, Color::GREEN, Color::BLUE] {
+            let (h, s, v) = color.to_hsv();
+            let back = Color::from_hsv(h, s, v);
+            assert!((back.r() - color.r()).abs() < 0.01, "r mismatch for {color:?}");
+            assert!((back.g() - color.g()).abs() < 0.01, "g mismatch for {color:?}");
+            assert!((back.b() - color.b()).abs() < 0.01, "b mismatch for {color:?}");
+        }
+    }
+
+    #[test]
+    fn hsv_roundtrip_secondary_colors() {
+        let yellow = Color::from_rgb(1.0, 1.0, 0.0);
+        let cyan = Color::from_rgb(0.0, 1.0, 1.0);
+        let magenta = Color::from_rgb(1.0, 0.0, 1.0);
+        for color in &[yellow, cyan, magenta] {
+            let (h, s, v) = color.to_hsv();
+            let back = Color::from_hsv(h, s, v);
+            assert!((back.r() - color.r()).abs() < 0.01);
+            assert!((back.g() - color.g()).abs() < 0.01);
+            assert!((back.b() - color.b()).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn hsv_gray_zero_saturation() {
+        let gray = Color::from_rgb(0.5, 0.5, 0.5);
+        let (h, s, v) = gray.to_hsv();
+        assert_eq!(h, 0.0);
+        assert!(s.abs() < 1e-6);
+        assert!((v - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hsv_white_full_value_zero_saturation() {
+        let (_h, s, v) = Color::WHITE.to_hsv();
+        assert!(s.abs() < 1e-6);
+        assert!((v - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hsv_black_zero_value() {
+        let (_h, _s, v) = Color::BLACK.to_hsv();
+        assert!(v.abs() < 1e-6);
+    }
+
+    #[test]
+    fn from_hsv_wraps_positive_hue() {
+        let a = Color::from_hsv(370.0, 1.0, 1.0);
+        let b = Color::from_hsv(10.0, 1.0, 1.0);
+        assert!((a.r() - b.r()).abs() < 0.01);
+        assert!((a.g() - b.g()).abs() < 0.01);
+        assert!((a.b() - b.b()).abs() < 0.01);
+    }
+
+    #[test]
+    fn from_hsv_wraps_negative_hue() {
+        let a = Color::from_hsv(-10.0, 1.0, 1.0);
+        let b = Color::from_hsv(350.0, 1.0, 1.0);
+        assert!((a.r() - b.r()).abs() < 0.01);
+        assert!((a.g() - b.g()).abs() < 0.01);
+        assert!((a.b() - b.b()).abs() < 0.01);
+    }
+
+    #[test]
+    fn from_hsv_clamps_saturation_value() {
+        // Out-of-range S/V should clamp, not panic, and produce a valid color
+        let c = Color::from_hsv(0.0, 1.5, 1.5);
+        assert!((c.r() - 1.0).abs() < 0.01);
+        assert!(c.g().abs() < 0.01);
+        assert!(c.b().abs() < 0.01);
+    }
+
+    #[test]
+    fn hsva_alpha_roundtrip() {
+        let c = Color::from_rgba(1.0, 0.0, 0.0, 0.5);
+        let (h, s, v, a) = c.to_hsva();
+        let back = Color::from_hsva(h, s, v, a);
+        assert!((back.a() - 0.5).abs() < 1e-6);
+        assert!((back.r() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn to_hex_upper_no_alpha() {
+        assert_eq!(Color::RED.to_hex_upper(false), "#FF0000");
+        assert_eq!(Color::WHITE.to_hex_upper(false), "#FFFFFF");
+        assert_eq!(Color::BLACK.to_hex_upper(false), "#000000");
+    }
+
+    #[test]
+    fn to_hex_upper_with_alpha() {
+        let c = Color::from_rgba(1.0, 0.0, 0.0, 0.5);
+        // 0.5 * 255 = 127.5 → rounds to 128 = 0x80
+        assert_eq!(c.to_hex_upper(true), "#FF000080");
+    }
+
+    #[test]
+    fn to_hex_lower_matches_uppercase() {
+        let c = Color::from_hex("#3584E4");
+        assert_eq!(c.to_hex_lower(false), "#3584e4");
+    }
+
+    #[test]
+    fn to_hex_roundtrips_through_from_hex() {
+        let c = Color::from_hex("#3584E4");
+        assert_eq!(Color::from_hex(&c.to_hex_upper(false)), c);
     }
 }

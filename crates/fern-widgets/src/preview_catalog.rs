@@ -1696,3 +1696,148 @@ fn _touch_imports() {
     let _ = Center::new();
 }
 
+// =========================================================================
+// Color picker family (HexColorInput, ColorPicker, ColorEdit)
+// =========================================================================
+// Gated behind `rich-text` because the widgets themselves are.
+
+#[cfg(feature = "rich-text")]
+mod color_family {
+    use super::*;
+    use crate::{ColorEdit, ColorPicker, ColorPickerLayout, HexColorInput};
+    use fern_tokens::Color;
+
+    impl WidgetCatalog for HexColorInput {
+        fn id() -> &'static str {
+            "hex-color-input"
+        }
+        fn group() -> &'static str {
+            "Color"
+        }
+        fn display_name() -> &'static str {
+            "HexColorInput"
+        }
+        fn knobs() -> KnobSpec {
+            KnobSpec::new()
+        }
+        fn variants() -> Vec<PreviewVariant> {
+            fn default_var() -> Box<dyn Widget> {
+                Box::new(HexColorInput::new(Signal::new(Color::from_hex("#3584E4"))))
+            }
+            fn alpha_var() -> Box<dyn Widget> {
+                Box::new(
+                    HexColorInput::new(Signal::new(Color::from_rgba(1.0, 0.5, 0.0, 0.6)))
+                        .alpha_enabled(true),
+                )
+            }
+            vec![
+                PreviewVariant::scenario("default", default_var),
+                PreviewVariant::scenario("with-alpha", alpha_var),
+            ]
+        }
+        fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+            scenario_for::<Self>(variant)
+        }
+    }
+    register_widget_catalog_at!(
+        "crates/fern-widgets/src/hex_color_input.rs",
+        HexColorInput
+    );
+
+    impl WidgetCatalog for ColorPicker {
+        fn id() -> &'static str {
+            "color-picker"
+        }
+        fn group() -> &'static str {
+            "Color"
+        }
+        fn display_name() -> &'static str {
+            "ColorPicker"
+        }
+        fn knobs() -> KnobSpec {
+            KnobSpec::new()
+        }
+        fn variants() -> Vec<PreviewVariant> {
+            fn default_var() -> Box<dyn Widget> {
+                Box::new(ColorPicker::new(Signal::new(Color::from_hex("#3584E4"))))
+            }
+            fn with_alpha() -> Box<dyn Widget> {
+                Box::new(
+                    ColorPicker::new(Signal::new(Color::from_rgba(0.21, 0.66, 0.40, 0.5)))
+                        .alpha_enabled(true),
+                )
+            }
+            fn compact() -> Box<dyn Widget> {
+                Box::new(
+                    ColorPicker::new(Signal::new(Color::from_hex("#E91E63")))
+                        .layout(ColorPickerLayout::Compact),
+                )
+            }
+            fn wide() -> Box<dyn Widget> {
+                Box::new(
+                    ColorPicker::new(Signal::new(Color::from_hex("#FF9800")))
+                        .alpha_enabled(true)
+                        .layout(ColorPickerLayout::Wide)
+                        .show_hsv_spinners(true),
+                )
+            }
+            vec![
+                PreviewVariant::scenario("default", default_var),
+                PreviewVariant::scenario("with-alpha", with_alpha),
+                PreviewVariant::scenario("compact", compact),
+                PreviewVariant::scenario("wide", wide),
+            ]
+        }
+        fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+            scenario_for::<Self>(variant)
+        }
+    }
+    register_widget_catalog_at!("crates/fern-widgets/src/color_picker.rs", ColorPicker);
+
+    impl WidgetCatalog for ColorEdit {
+        fn id() -> &'static str {
+            "color-edit"
+        }
+        fn group() -> &'static str {
+            "Color"
+        }
+        fn display_name() -> &'static str {
+            "ColorEdit"
+        }
+        fn knobs() -> KnobSpec {
+            KnobSpec::new()
+        }
+        fn variants() -> Vec<PreviewVariant> {
+            fn default_var() -> Box<dyn Widget> {
+                Box::new(ColorEdit::new(Signal::new(Color::from_hex("#3584E4"))))
+            }
+            fn with_alpha() -> Box<dyn Widget> {
+                Box::new(
+                    ColorEdit::new(Signal::new(Color::from_rgba(0.92, 0.27, 0.18, 0.6)))
+                        .alpha_enabled(true),
+                )
+            }
+            fn no_hex_in_trigger() -> Box<dyn Widget> {
+                Box::new(
+                    ColorEdit::new(Signal::new(Color::from_hex("#9C27B0")))
+                        .show_hex_in_trigger(false),
+                )
+            }
+            fn nullable_var() -> Box<dyn Widget> {
+                let v: Signal<Option<Color>> = Signal::new(None);
+                Box::new(ColorEdit::nullable(v))
+            }
+            vec![
+                PreviewVariant::scenario("default", default_var),
+                PreviewVariant::scenario("with-alpha", with_alpha),
+                PreviewVariant::scenario("no-hex-in-trigger", no_hex_in_trigger),
+                PreviewVariant::scenario("nullable", nullable_var),
+            ]
+        }
+        fn build(variant: &str, _knobs: &KnobValues) -> Box<dyn Widget> {
+            scenario_for::<Self>(variant)
+        }
+    }
+    register_widget_catalog_at!("crates/fern-widgets/src/color_edit.rs", ColorEdit);
+}
+

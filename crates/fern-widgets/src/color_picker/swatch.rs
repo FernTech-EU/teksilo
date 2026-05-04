@@ -1,0 +1,247 @@
+//! `ColorSwatch` — single clickable color cell with `Role::ColorWell`.
+//!
+//! Public widget so apps can compose their own swatch rows / palettes
+//! outside of the bundled [`SwatchGrid`](super::swatch_grid::SwatchGrid).
+//! Renders an optional checkerboard underlay when `color.a() < 1.0` so
+//! transparent swatches read correctly.
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+use fern_canvas::{Canvas, Rect, Size, SizeProposal};
+use fern_core::accessibility::AccessNodeBuilder;
+use fern_core::accesskit::{Action, Role};
+use fern_core::build_context::BuildContext;
+use fern_core::event::{EventResponse, Key, WidgetEvent};
+use fern_core::focus::FocusOrigin;
+use fern_core::signal::Signal;
+use fern_core::widget::{
+    CursorIcon, EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+};
+use fern_core::widget_builder::HandlerSet;
+use fern_core::widget_id::WidgetId;
+use fern_i18n::{LocalizedString, resolve_message_widget};
+use fern_tokens::{Color, CornerRadius};
+
+use super::alpha_strip::paint_checkerboard;
+
+type ActivateFn = Rc<dyn Fn(&mut EventContext)>;
+
+/// Single-cell color swatch.
+pub struct ColorSwatch {
+    color: Color,
+    selected: bool,
+    label: Option<LocalizedString>,
+    size: Option<f32>,
+    corner_radius: Option<f32>,
+    enabled: bool,
+    on_activate: Option<ActivateFn>,
+    focus_origin: Rc<Cell<Option<FocusOrigin>>>,
+}
+
+impl ColorSwatch {
+    pub fn new(color: Color) -> Self {
+        Self {
+            color,
+            selected: false,
+            label: None,
+            size: None,
+            corner_radius: None,
+            enabled: true,
+            on_activate: None,
+            focus_origin: Rc::new(Cell::new(None)),
+        }
+    }
+
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    pub fn size(mut self, size: f32) -> Self {
+        self.size = Some(size.max(0.0));
+        self
+    }
+
+    pub fn corner_radius(mut self, r: f32) -> Self {
+        self.corner_radius = Some(r.max(0.0));
+        self
+    }
+
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn on_activate_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_activate = Some(Rc::new(f));
+        self
+    }
+}
+
+impl std::fmt::Debug for ColorSwatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColorSwatch")
+            .field("color", &self.color)
+            .field("selected", &self.selected)
+            .field("enabled", &self.enabled)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Widget for ColorSwatch {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let enabled = self.enabled;
+        let on_activate = self.on_activate.clone();
+        let mut handlers = HandlerSet::new()
+            .focusable(enabled)
+            .cursor(CursorIcon::Pointer);
+
+        if let Some(cb) = on_activate.clone() {
+            handlers = handlers.on_tap(move |_pos, ctx_evt| {
+                if !enabled {
+                    return;
+                }
+                cb(ctx_evt);
+            });
+        }
+        if let Some(cb) = on_activate.clone() {
+            handlers = handlers.on_key(move |event, ctx_evt| {
+                if !enabled {
+                    return EventResponse::Ignored;
+                }
+                let WidgetEvent::KeyDown { key, .. } = event else {
+                    return EventResponse::Ignored;
+                };
+                match key {
+                    Key::Enter | Key::Space => {
+                        cb(ctx_evt);
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
+                }
+            });
+        }
+        if let Some(cb) = on_activate {
+            handlers = handlers.on_access_action(move |action, ctx_evt| match action {
+                Action::Click => {
+                    cb(ctx_evt);
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            });
+        }
+
+        {
+            let focus_origin = self.focus_origin.clone();
+            handlers = handlers.on_focus(move |gained, _ctx| {
+                focus_origin.set(if gained { Some(FocusOrigin::Keyboard) } else { None });
+            });
+        }
+
+        ctx.apply_self_handlers(handlers);
+        Vec::new()
+    }
+
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let style = ctx.theme.components.color_picker;
+        let size = self.size.unwrap_or(style.swatch_size);
+        Size::new(size, size).into()
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let style = ctx.theme.components.color_picker;
+        let radius = CornerRadius::uniform(self.corner_radius.unwrap_or(style.swatch_corner_radius));
+
+        // Checkerboard underlay if the swatch is partly transparent.
+        if self.color.a() < 1.0 {
+            paint_checkerboard(
+                canvas,
+                bounds,
+                style.checker_cell,
+                style.checker_color_a,
+                style.checker_color_b,
+            );
+        }
+
+        canvas.fill_rounded_rect(bounds, radius, self.color);
+
+        // Selection ring.
+        if self.selected {
+            canvas.stroke_rounded_rect(
+                bounds,
+                radius,
+                ctx.theme.colors.accent,
+                style.swatch_selected_stroke_width,
+            );
+        } else {
+            // Always draw a hairline border so light swatches don't
+            // disappear into a light surface.
+            canvas.stroke_rounded_rect(bounds, radius, ctx.theme.colors.border, 1.0);
+        }
+
+        // Focus ring (keyboard).
+        if self.focus_origin.get() == Some(FocusOrigin::Keyboard) {
+            let offset = ctx.theme.shape.focus_ring_offset;
+            let half = ctx.theme.shape.focus_ring_width * 0.5;
+            let inset = offset + half;
+            let ring = Rect::new(
+                bounds.x - inset,
+                bounds.y - inset,
+                bounds.width + inset * 2.0,
+                bounds.height + inset * 2.0,
+            );
+            canvas.stroke_rounded_rect(
+                ring,
+                CornerRadius::uniform(self.corner_radius.unwrap_or(style.swatch_corner_radius) + inset),
+                ctx.theme.colors.focus_ring,
+                ctx.theme.shape.focus_ring_width,
+            );
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(Role::ColorWell);
+        builder.set_color_value(self.color);
+        let hex = self.color.to_hex_upper(self.color.a() < 1.0);
+        let name = match &self.label {
+            Some(ls) => ls.resolve_now(),
+            None => resolve_message_widget(
+                "color-picker-swatch-label",
+                &[("hex", hex.clone().into())],
+            ),
+        };
+        let display = if self.selected {
+            let suffix = resolve_message_widget("color-picker-swatch-selected-suffix", &[]);
+            format!("{}{}", name, suffix)
+        } else {
+            name
+        };
+        builder.set_name(display);
+        builder.set_value(hex);
+        if self.selected {
+            builder.set_selected(true);
+        }
+        if !self.enabled {
+            builder.set_disabled();
+        }
+        builder.add_action(Action::Click);
+        builder.add_action(Action::Focus);
+    }
+
+    fn place_children(
+        &self,
+        _bounds: Rect,
+        _proposal: SizeProposal,
+        _children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+    }
+}
+
+

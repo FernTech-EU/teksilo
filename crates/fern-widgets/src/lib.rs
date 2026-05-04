@@ -45,6 +45,12 @@ pub mod rich_text;
 pub mod scroll_area;
 #[cfg(feature = "rich-text")]
 pub mod text_input;
+#[cfg(feature = "rich-text")]
+pub mod hex_color_input;
+#[cfg(feature = "rich-text")]
+pub mod color_picker;
+#[cfg(feature = "rich-text")]
+pub mod color_edit;
 pub mod scroll_bar;
 pub mod keystroke_format;
 pub mod segmented_control;
@@ -142,6 +148,14 @@ pub use tab_widget::{TabItem, TabWidget};
 pub use tool_box::{ToolBox, ToolBoxItem};
 #[cfg(feature = "rich-text")]
 pub use text_input::{TextInput, ValidationState};
+#[cfg(feature = "rich-text")]
+pub use hex_color_input::HexColorInput;
+#[cfg(feature = "rich-text")]
+pub use color_picker::{
+    ColorPicker, ColorPickerLayout, ColorSwatch, DEFAULT_SWATCHES,
+};
+#[cfg(feature = "rich-text")]
+pub use color_edit::ColorEdit;
 pub use title_bar::{DragRegion, ResizeStrip, TitleBar, WindowControls, WindowFrame};
 pub use toggle::Toggle;
 pub use toolbar::Toolbar;

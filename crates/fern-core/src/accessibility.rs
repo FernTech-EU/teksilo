@@ -180,6 +180,19 @@ impl AccessNodeBuilder {
         self.value = Some(v);
     }
 
+    /// Advertise a color value on this node — typically paired with
+    /// [`accesskit::Role::ColorWell`]. Takes a `fern_tokens::Color` (f32
+    /// channels) and quantizes to AccessKit's 8-bit `Color` representation.
+    pub fn set_color_value(&mut self, color: fern_tokens::Color) {
+        let ak = accesskit::Color {
+            red: (color.r() * 255.0).round().clamp(0.0, 255.0) as u8,
+            green: (color.g() * 255.0).round().clamp(0.0, 255.0) as u8,
+            blue: (color.b() * 255.0).round().clamp(0.0, 255.0) as u8,
+            alpha: (color.a() * 255.0).round().clamp(0.0, 255.0) as u8,
+        };
+        self.inner.set_color_value(ak);
+    }
+
     pub fn set_description(&mut self, description: impl Into<String>) {
         self.inner.set_description(description.into());
     }

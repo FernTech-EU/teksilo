@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::Color;
+
 // ─── Form controls ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -1043,6 +1045,110 @@ impl Default for TimeEditStyle {
     }
 }
 
+/// `ColorPicker` — composite color selector (HSV canvas + hue/alpha
+/// strips + RGB/HSV spinners + hex input + swatch grid + preview).
+///
+/// All sizes are theme defaults; the picker is otherwise self-laid-out
+/// per `ColorPickerLayout` (Compact / Standard / Wide). Indicator colors
+/// are absolute (white / dark) so the HSV-canvas indicator stays visible
+/// against any hue/value combination, regardless of theme. Checkerboard
+/// colors are deliberately neutral so transparent swatches read clearly
+/// against either light or dark surrounding chrome.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColorPickerStyle {
+    /// HSV (saturation × value) canvas dimensions.
+    pub canvas_width: f32,
+    pub canvas_height: f32,
+    pub canvas_corner_radius: f32,
+
+    /// 1D hue and alpha strips (vertical orientation in default layouts).
+    pub strip_thickness: f32,
+    pub strip_length: f32,
+    pub strip_corner_radius: f32,
+
+    /// HSV-canvas indicator: a double-ring (white outer, dark inner) so it
+    /// stays visible on every hue × value combination.
+    pub indicator_radius: f32,
+    pub indicator_outer_stroke_width: f32,
+    pub indicator_inner_stroke_width: f32,
+    pub indicator_outer_color: Color,
+    pub indicator_inner_color: Color,
+
+    /// Strip thumb (the bar across hue/alpha sliders).
+    pub strip_thumb_width: f32,
+    pub strip_thumb_height: f32,
+    pub strip_thumb_corner_radius: f32,
+
+    /// Outer padding inside the picker frame and inter-section gap.
+    pub padding: f32,
+    pub gap: f32,
+
+    /// Preset swatch cells.
+    pub swatch_size: f32,
+    pub swatch_spacing: f32,
+    pub swatch_corner_radius: f32,
+    pub swatch_selected_stroke_width: f32,
+
+    /// Checkerboard pattern (alpha visualization on swatches and the
+    /// alpha strip background).
+    pub checker_cell: f32,
+    pub checker_color_a: Color,
+    pub checker_color_b: Color,
+
+    /// Current-color preview swatch (inside the picker, distinct from the
+    /// individual ColorSwatch sizes).
+    pub preview_width: f32,
+    pub preview_height: f32,
+    pub preview_corner_radius: f32,
+
+    /// RGB / HSV spinner cell width and hex-input field width.
+    pub spinner_field_width: f32,
+    pub hex_field_width: f32,
+}
+
+impl Default for ColorPickerStyle {
+    fn default() -> Self {
+        Self {
+            canvas_width: 224.0,
+            canvas_height: 192.0,
+            canvas_corner_radius: 4.0,
+
+            strip_thickness: 14.0,
+            strip_length: 192.0,
+            strip_corner_radius: 4.0,
+
+            indicator_radius: 7.0,
+            indicator_outer_stroke_width: 1.5,
+            indicator_inner_stroke_width: 1.0,
+            indicator_outer_color: Color::WHITE,
+            indicator_inner_color: Color::new(0.0, 0.0, 0.0, 0.6),
+
+            strip_thumb_width: 18.0,
+            strip_thumb_height: 8.0,
+            strip_thumb_corner_radius: 2.0,
+
+            padding: 12.0,
+            gap: 10.0,
+
+            swatch_size: 22.0,
+            swatch_spacing: 6.0,
+            swatch_corner_radius: 4.0,
+            swatch_selected_stroke_width: 2.0,
+
+            checker_cell: 6.0,
+            checker_color_a: Color::new(0.78, 0.78, 0.78, 1.0),
+            checker_color_b: Color::WHITE,
+
+            preview_width: 64.0,
+            preview_height: 28.0,
+            preview_corner_radius: 4.0,
+
+            spinner_field_width: 56.0,
+            hex_field_width: 96.0,
+        }
+    }
+}
+
 // ─── Aggregate ──────────────────────────────────────────────────────────────
 
 /// All per-component style structs, owned by the [`crate::theme::Theme`].
@@ -1088,4 +1194,5 @@ pub struct ComponentStyles {
     pub calendar: CalendarStyle,
     pub date_edit: DateEditStyle,
     pub time_edit: TimeEditStyle,
+    pub color_picker: ColorPickerStyle,
 }
