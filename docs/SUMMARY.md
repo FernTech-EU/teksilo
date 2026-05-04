@@ -14,6 +14,10 @@ directory; in-progress design work lives separately under [plans/](plans/).
 
 ## Authoring widgets
 
+- [layout-primitives.md](layout-primitives.md) — `HStack` / `VStack` /
+  `ZStack`, `Grid`, `Wrap`, `MasonryLayout`, `FormLayout`, `Switcher`,
+  and the size wrappers (`Expand`, `FixedSize`, `MinSize`, `MaxSize`,
+  `AspectRatio`, `Center`, `Padding`, `Spacer`, `Divider`).
 - [events-and-gestures.md](events-and-gestures.md) — preview/bubble dispatch,
   attached handlers (`.on_tap`, `.on_hover`, …), `on_key_preview`,
   `focus_within` / `hover_within`, gesture recognizers.
