@@ -6,3 +6,10 @@ greeting = Hello, World!
 welcome = Hello, { $name }!
 count-items = You have { $count } items.
 farewell = Goodbye!
+
+# Format-integration test fixtures. Used by tests/format_integration.rs.
+price-display = The price is { NUMBER($v) }
+cart-total = Total: { NUMBER($price, style: "currency", currency: "USD") }
+percent-done = { NUMBER($ratio, style: "percent") } complete
+last-saved = Last saved on { DATETIME($ts, dateStyle: "long") }
+cart-summary = { $count } items at { NUMBER($price) } each

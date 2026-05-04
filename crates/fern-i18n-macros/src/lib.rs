@@ -58,7 +58,7 @@ use syn::{Expr, Ident, Result, Token, parse_macro_input, spanned::Spanned};
 /// through the active `I18nManager`'s application bundle.
 #[proc_macro]
 pub fn tr(input: TokenStream) -> TokenStream {
-    tr_impl(input, SourceKind::App)
+    tr_impl(input, SourceKind::App, /* signal */ false)
 }
 
 /// Compile-time-validating translation macro for framework-internal
@@ -66,7 +66,26 @@ pub fn tr(input: TokenStream) -> TokenStream {
 /// runtime. Only used inside `fern-widgets` (architecture §12.13).
 #[proc_macro]
 pub fn tr_widget(input: TokenStream) -> TokenStream {
-    tr_impl(input, SourceKind::Widget)
+    tr_impl(input, SourceKind::Widget, /* signal */ false)
+}
+
+/// Reactive variant of `tr!` for the `Signal<T>`-inside-translated-sentence
+/// case. Every named argument expression must evaluate to a `Signal<T>`
+/// where `T: Clone + 'static + Into<FluentValue<'static>>`. Returns a
+/// `Signal<String>` that re-renders on (any arg change ∪ locale change ∪
+/// `.ftl` hot reload).
+///
+/// Use `tr!` for fully-static-arg call sites; this macro is for the
+/// reactive case.
+#[proc_macro]
+pub fn tr_signal(input: TokenStream) -> TokenStream {
+    tr_impl(input, SourceKind::App, /* signal */ true)
+}
+
+/// Reactive variant of `tr_widget!`. Same arg shape as `tr_signal!`.
+#[proc_macro]
+pub fn tr_signal_widget(input: TokenStream) -> TokenStream {
+    tr_impl(input, SourceKind::Widget, /* signal */ true)
 }
 
 #[derive(Clone, Copy)]
@@ -642,7 +661,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
 // Core expansion
 // ---------------------------------------------------------------------------
 
-fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
+fn tr_impl(input: TokenStream, kind: SourceKind, signal: bool) -> TokenStream {
     let call = parse_macro_input!(input as TrCall);
 
     let source_info = match resolve_source() {
@@ -749,21 +768,36 @@ fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
         })
         .collect();
 
-    // Per-arg let bindings (moving each expression into the closure's
-    // captured environment) plus per-arg name literals for the runtime
-    // `FluentValue` slice.
+    // Per-arg let bindings. In `tr!` mode the let stores the expression
+    // by-value (consistent with the historical behaviour). In
+    // `tr_signal!` mode we wrap with `.clone()` so the caller's `Signal`
+    // handle survives — `(expr).clone()` is method-call syntax that
+    // auto-refs, so a bare ident remains borrowed instead of moved.
     let mut arg_let_bindings: Vec<TokenStream2> = Vec::new();
-    let mut arg_slice_entries: Vec<TokenStream2> = Vec::new();
+    let mut arg_slice_entries_static: Vec<TokenStream2> = Vec::new();
+    let mut arg_slice_entries_signal: Vec<TokenStream2> = Vec::new();
+    let mut arg_idents: Vec<Ident> = Vec::new();
     for arg in &call.args {
         let binding_ident = &arg.name;
         let value_expr = &arg.value;
         let name_lit = proc_macro2::Literal::string(&arg.name.to_string());
-        arg_let_bindings.push(quote_spanned! { value_expr.span() =>
-            let #binding_ident = { #value_expr };
-        });
-        arg_slice_entries.push(quote! {
+        let binding = if signal {
+            quote_spanned! { value_expr.span() =>
+                let #binding_ident = (#value_expr).clone();
+            }
+        } else {
+            quote_spanned! { value_expr.span() =>
+                let #binding_ident = { #value_expr };
+            }
+        };
+        arg_let_bindings.push(binding);
+        arg_slice_entries_static.push(quote! {
             (#name_lit, #i18n_root::FluentValue::from(#binding_ident.clone()))
         });
+        arg_slice_entries_signal.push(quote! {
+            (#name_lit, #i18n_root::FluentValue::from(#binding_ident.get()))
+        });
+        arg_idents.push(binding_ident.clone());
     }
 
     // Fallback handling: when the macro expansion runs without an
@@ -773,9 +807,17 @@ fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
     // `{ $var }` substitutions — the macro reconstructs the source
     // language text from the pre-parsed `FallbackPart` list, pulling
     // each variable's value from the closure's captured bindings via
-    // `ToString`. Patterns that use selectors, plural rules, function
-    // calls, or message references bail out at parse time and fall
-    // back to returning the key as a placeholder.
+    // `ToString`. In `tr_signal!` mode the captured bindings are
+    // `Signal<T>` so we read `.get()` first; in `tr!` mode we use the
+    // value directly. Patterns that use selectors, plural rules,
+    // function calls, or message references bail out at parse time
+    // and fall back to returning the key as a placeholder.
+    let arg_slice_entries: &[TokenStream2] = if signal {
+        &arg_slice_entries_signal
+    } else {
+        &arg_slice_entries_static
+    };
+
     let fallback_body = match fallback_parts {
         Some(parts) => {
             let mut fallback_stmts: Vec<TokenStream2> = Vec::new();
@@ -792,9 +834,14 @@ fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
                             &var_name,
                             proc_macro2::Span::call_site(),
                         );
+                        let value_expr = if signal {
+                            quote! { &#ident.get() }
+                        } else {
+                            quote! { &#ident }
+                        };
                         fallback_stmts.push(quote! {
                             __fern_fallback.push_str(
-                                &::std::string::ToString::to_string(&#ident),
+                                &::std::string::ToString::to_string(#value_expr),
                             );
                         });
                     }
@@ -817,21 +864,88 @@ fn tr_impl(input: TokenStream, kind: SourceKind) -> TokenStream {
         },
     };
 
-    let expanded = quote! {
-        {
-            // Force cargo to track every source `.ftl` file that
-            // contributed to the key map. `include_bytes!` is a
-            // compiler builtin that registers the path as a build
-            // dependency — when any file changes, cargo rebuilds the
-            // containing crate. The constants are discarded.
-            #(#watch_stmts)*
-
-            #i18n_root::localized({
-                #(#arg_let_bindings)*
-                move || {
-                    #fallback_body
+    let expanded = if signal {
+        // Reactive lowering: `Signal<String>` subscribed to every arg
+        // signal plus the version signal. Re-runs the resolver via a
+        // shared `Rc<dyn Fn>` whenever any dependency fires.
+        let arg_subscribes: Vec<TokenStream2> = arg_idents
+            .iter()
+            .map(|ident| {
+                quote! {
+                    {
+                        let __fern_resolver_arg = ::std::rc::Rc::clone(&__fern_resolver);
+                        let __fern_weak_arg = __fern_weak.clone();
+                        let __fern_h = #ident.observe(move |_| {
+                            if let Some(__t) = __fern_weak_arg.upgrade() {
+                                __t.set((__fern_resolver_arg)());
+                            }
+                        });
+                        __fern_out.attach_keepalive(__fern_h);
+                    }
                 }
             })
+            .collect();
+
+        // Each arg signal is captured by clone into the resolver
+        // closure so the closure can be cloned into N+1 observers.
+        let arg_clones_for_resolver: Vec<TokenStream2> = arg_idents
+            .iter()
+            .map(|ident| quote! { let #ident = #ident.clone(); })
+            .collect();
+
+        quote! {
+            {
+                #(#watch_stmts)*
+
+                // Bring `observe`, `attach_keepalive`, `downgrade` into
+                // scope as inherent methods on `Signal`.
+                #(#arg_let_bindings)*
+
+                let __fern_resolver: ::std::rc::Rc<dyn ::std::ops::Fn() -> ::std::string::String> = {
+                    #(#arg_clones_for_resolver)*
+                    ::std::rc::Rc::new(move || {
+                        #fallback_body
+                    })
+                };
+
+                let __fern_out = #i18n_root::Signal::new((__fern_resolver)());
+                let __fern_weak = __fern_out
+                    .downgrade()
+                    .expect("Signal::new returns mutable; downgrade cannot fail");
+
+                if let Some(__fern_ver) = #i18n_root::current_version_signal() {
+                    let __fern_resolver_ver = ::std::rc::Rc::clone(&__fern_resolver);
+                    let __fern_weak_ver = __fern_weak.clone();
+                    let __fern_handle_ver = __fern_ver.observe(move |_| {
+                        if let Some(__t) = __fern_weak_ver.upgrade() {
+                            __t.set((__fern_resolver_ver)());
+                        }
+                    });
+                    __fern_out.attach_keepalive(__fern_handle_ver);
+                }
+
+                #(#arg_subscribes)*
+
+                __fern_out
+            }
+        }
+    } else {
+        quote! {
+            {
+                // Force cargo to track every source `.ftl` file that
+                // contributed to the key map. `include_bytes!` is a
+                // compiler builtin that registers the path as a build
+                // dependency — when any file changes, cargo rebuilds the
+                // containing crate. The constants are discarded.
+                #(#watch_stmts)*
+
+                #i18n_root::localized({
+                    #(#arg_let_bindings)*
+                    move || {
+                        #fallback_body
+                    }
+                })
+            }
         }
     };
 

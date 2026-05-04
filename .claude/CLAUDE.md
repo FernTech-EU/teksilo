@@ -92,8 +92,16 @@ fern-widgets         ~56 widgets + ~21 layout primitives (Button, ListView, Tree
 fern-charts          BarChart, LineChart, PieChart (pie + donut, with center slot). Sits at the same tier
                      as fern-widgets — no dep on widgets. See docs/plans/charts-plan.md.
 fern-text            TextBackend impl via text-typeset (external path dep)
-fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher
-fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by fern-i18n)
+fern-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher.
+                     Also locale-aware formatters: NumberFormatter / FernDateTimeFormatter
+                     (Signal<T> → Signal<String>), FernDateTime, plus a custom DATETIME() Fluent
+                     function and a `bundle.set_formatter` callback so `{ NUMBER(...) }` and
+                     `{ DATETIME(...) }` inside .ftl messages render correctly across locales.
+                     Built on icu_decimal + icu_datetime + icu_calendar + intl-memoizer.
+fern-i18n-macros     Compile-time tr! / tr_widget! proc macros (re-exported by fern-i18n).
+                     Also tr_signal! / tr_signal_widget! — reactive variants that accept
+                     Signal<T> args and return Signal<String> re-rendering on (any arg ∪
+                     locale ∪ hot-reload) change.
 fern-ui-macros       fern! DSL proc macro (re-exported by fern-ui as fern!)
 fern-render          wgpu renderer: rect/SDF/quad pipelines, atlas upload, path atlas
 fern-platform        winit + AccessKit adapter, event translation, clipboard, OS theme
@@ -498,6 +506,47 @@ Key rules:
 
 Full reference: [docs/settings.md](docs/settings.md). Working demo: [examples/recent_projects](examples/recent_projects/src/main.rs).
 
+## Locale-aware Formatting
+
+Numbers, dates, and times that change with the user's locale flow through one ICU4X-backed layer in `fern-i18n`. Two consumer paths share the same cache, so a UI mixing translated and untranslated displays stays internally consistent on `,` vs `.`, grouping, currency suffixes, etc.
+
+**Bundle-side path — `tr!` / `tr_signal!` messages.** `manager::configure_bundle` installs a `set_formatter` callback on every Fluent bundle and registers a custom `DATETIME()` function. So `{ NUMBER($v) }` and `{ DATETIME($ts, dateStyle: "long") }` inside `.ftl` messages render correctly across locales — no app-side wiring. Pass numeric args as ordinary `f64`/`i32`/etc.; pass datetimes as [`FernDateTime`](crates/fern-i18n/src/format.rs):
+
+```rust
+let dt: jiff::civil::DateTime = ...;
+tr!(last_saved(ts = FernDateTime::from(dt)))
+```
+
+**Signal-side path — non-translated displays.** `NumberFormatter` and `FernDateTimeFormatter` produce a `Signal<String>` from a value (static or `Signal<T>`-bound) plus the i18n manager's locale signal. Re-renders on either change. Used for SpinBox values, TableView cells, status bars, numeric inputs — anywhere the value isn't part of a translated sentence:
+
+```rust
+let display = NumberFormatter::new()
+    .currency("USD")
+    .fraction_digits(2, 2)
+    .format(price_signal);  // Signal<f64> → Signal<String>
+
+let when = FernDateTimeFormatter::new()
+    .date_style(DateStyle::Long)
+    .format(timestamp_signal);
+```
+
+`NumberStyle` is `Decimal | Percent | Currency`. `DateStyle` / `TimeStyle` are `Long | Medium | Short`. The Signal-side formatter builders are zero-arg `::new()` then chain options; there's no `BuildContext` argument — the formatter resolves the active locale via the same thread-local accessor `LocalizedString` uses.
+
+**`tr_signal!` / `tr_signal_widget!` — `Signal<T>` inside translated sentences.** When a reactive value belongs in the middle of a localized sentence (counters in messages, balances in alerts, timestamps in status lines), use `tr_signal!`. Every named arg must be a `Signal<T>`; the result is a `Signal<String>` that re-renders on any-arg / locale / `.ftl`-hot-reload change:
+
+```rust
+let count: Signal<i64> = ...;
+let price: Signal<f64> = ...;
+let label: Signal<String> = tr_signal!(cart_summary(count = count, price = price));
+// label re-renders on count.set(...), price.set(...), manager.set_locale(...), or hot reload
+```
+
+The macro auto-clones the `Signal<T>` arg expressions, so the caller's handles survive after the call. Compile-time `.ftl` validation works exactly like `tr!` — same `KeyMap` parser, same key-existence + arg-name checks.
+
+**ICU coverage and known limitations.** `Decimal` is fully ICU-correct (locale-aware grouping, digit shaping, signs). `Percent` multiplies by 100 and appends ASCII `%` (the locale-correct percent sign lives in unstable `icu_experimental`). `Currency` formats as decimal and appends the ISO-4217 code as a suffix (`"42,50 EUR"`); no symbol substitution or per-locale prefix/suffix positioning. Both percent and currency promote to full ICU once `icu_experimental` stabilises. `DateTime` is fully ICU-correct via `CompositeDateTimeFieldSet`.
+
+**Files:** [crates/fern-i18n/src/format.rs](crates/fern-i18n/src/format.rs) (Memoizable types, ICU bridge, `FernDateTime`, public formatter types, bundle callback, `DATETIME` function); [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs) `configure_bundle` (one helper, three call sites at the `FluentBundle::new` boundary); [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs) (`tr_signal!` / `tr_signal_widget!` lowering — branches off `tr_impl(input, kind, signal)`); [crates/fern-i18n/tests/format_integration.rs](crates/fern-i18n/tests/format_integration.rs) (end-to-end tests for both paths plus the macro).
+
 ## Three-Tier Rendering
 
 | Tier | Type | Used For |
@@ -567,7 +616,7 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - All ~21 layout primitives (including Grid, Wrap, AspectRatio, Switcher, MasonryLayout, FormLayout)
 - Accessibility (AccessKit integration at trait level + builder-level overrides: `.access_label`, `.access_description`, `.access_hidden`, `.access_role`, `.access_disabled`, `.access_controls`/`described_by`/`labelled_by`, `.access_live`, `.access_shortcut_id`/`access_shortcut_literal`, `.access_action`/`access_remove_action`/`access_custom_action`, `.access_exclude_subtree`/`access_merge_subtree`, `.access_customize` — see "Accessibility Overrides" above)
 - Animation system (`Signal<f32>::animate_to`, easing, per-frame scheduler)
-- Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal)
+- Internationalization (fern-i18n + fern-i18n-macros: Fluent-rs, `tr!`/`tr_widget!`, locale resolution, file watcher, RTL direction signal). Locale-aware formatting via `NumberFormatter` / `FernDateTimeFormatter` (`Signal<T>` → `Signal<String>`) and `FernDateTime` (jiff wrapper for the `DATETIME()` Fluent function). The framework auto-installs a `set_formatter` callback + custom `DATETIME` function on every bundle, so `{ NUMBER(...) }` / `{ DATETIME(...) }` inside `.ftl` messages render correctly across locales. Reactive `tr_signal!` / `tr_signal_widget!` macros bind `Signal<T>` arguments inside translated sentences and re-render on any-arg / locale / hot-reload change. Backed by ICU4X (`icu_decimal` / `icu_datetime` / `icu_calendar`); see "Locale-aware Formatting" below.
 - `fern!` DSL (fern-ui-macros: block-structured widget-tree syntax, desugars to V2 builder calls — see `docs/fern-macro-reference.md`)
 - Actions / Intents / Shortcuts (`Action`, `Intent`, `Shortcut`, `ShortcutRegistry`, `#[derive(IntentKind)]`, `ShortcutSettings` — rebindable keystrokes, typed-enum DTO bridge, source → root dispatch; see `docs/shortcut-intent-action.md`)
 - Ancestor key intercept (`.on_key_preview`) and subtree state signals (`.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)`) — strict-ancestors-only, see Event System above
@@ -609,7 +658,8 @@ Test widgets: `FillWidget` (minimal leaf), `StackWidget` (minimal container) —
 - TableView: [crates/fern-widgets/src/table_view.rs](crates/fern-widgets/src/table_view.rs) + submodules at [crates/fern-widgets/src/table_view/](crates/fern-widgets/src/table_view/) (`column.rs`, `selection.rs`, `a11y.rs`, `body.rs`, `header.rs`, `keyboard.rs`, `layout.rs`, `row_navigator.rs`, `tests.rs`). Demo: [examples/data_grid/src/main.rs](examples/data_grid/src/main.rs)
 - TreeTable: [crates/fern-widgets/src/tree_table.rs](crates/fern-widgets/src/tree_table.rs) (reuses table_view's column/header/keyboard modules; adds `TreeNavigator` + `TwistArrow`). Demo: [examples/tree_table/src/main.rs](examples/tree_table/src/main.rs)
 - i18n runtime: [crates/fern-i18n/src/manager.rs](crates/fern-i18n/src/manager.rs), [crates/fern-i18n/src/localized_string.rs](crates/fern-i18n/src/localized_string.rs)
-- i18n macros: [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs)
+- i18n locale-aware formatting: [crates/fern-i18n/src/format.rs](crates/fern-i18n/src/format.rs) (Memoizable types, ICU bridge, `FernDateTime` + `FluentType` impl, public `NumberFormatter` / `FernDateTimeFormatter`, bundle `set_formatter` callback, `DATETIME()` Fluent function). Bundle wiring: `configure_bundle` helper in [manager.rs](crates/fern-i18n/src/manager.rs). Tests: [crates/fern-i18n/tests/format_integration.rs](crates/fern-i18n/tests/format_integration.rs)
+- i18n macros: [crates/fern-i18n-macros/src/lib.rs](crates/fern-i18n-macros/src/lib.rs) (`tr!`, `tr_widget!`, `tr_signal!`, `tr_signal_widget!`)
 - fern! DSL macro: [crates/fern-ui-macros/src/](crates/fern-ui-macros/src/) (parse → IR → lower). Trybuild fixtures at [crates/fern-ui/tests/fern_ui/pass/](crates/fern-ui/tests/fern_ui/pass/)
 - fern! reference: [docs/fern-macro-reference.md](docs/fern-macro-reference.md) (user-facing), [docs/fern-language-spec-v3.md](docs/fern-language-spec-v3.md) (design spec)
 - Actions/Intents/Shortcuts: [crates/fern-core/src/action.rs](crates/fern-core/src/action.rs), [intent.rs](crates/fern-core/src/intent.rs), [shortcut.rs](crates/fern-core/src/shortcut.rs). `IntentKind` derive: [crates/fern-ui-macros/src/intent_kind.rs](crates/fern-ui-macros/src/intent_kind.rs). Settings widget: [crates/fern-widgets/src/shortcut_settings.rs](crates/fern-widgets/src/shortcut_settings.rs). Reference doc: [docs/shortcut-intent-action.md](docs/shortcut-intent-action.md)

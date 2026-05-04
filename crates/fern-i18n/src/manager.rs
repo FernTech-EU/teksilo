@@ -202,7 +202,7 @@ impl I18nManager {
         let resource =
             FluentResource::try_new(contents).map_err(|(_, errs)| ReloadError::Parse(errs))?;
         let mut bundle = FluentBundle::new(vec![locale.clone()]);
-        bundle.set_use_isolating(false);
+        configure_bundle(&mut bundle);
         bundle
             .add_resource(resource)
             .map_err(ReloadError::AddResource)?;
@@ -313,12 +313,33 @@ impl std::fmt::Display for ReloadError {
 
 impl std::error::Error for ReloadError {}
 
+/// Apply the framework-wide bundle configuration: turn off isolating
+/// directional marks (so we don't sprinkle U+2068/U+2069 around every
+/// interpolation), install our locale-aware number formatter, and
+/// register the `DATETIME()` Fluent function. Called from every site
+/// that creates a `FluentBundle` so all three bundle maps (app, widget,
+/// widget-overrides) share identical behaviour.
+fn configure_bundle(bundle: &mut FluentBundle<FluentResource>) {
+    bundle.set_use_isolating(false);
+    // `FluentBundle::new` does NOT auto-register Fluent's built-in
+    // functions; without this call `{ NUMBER($v) }` resolves to the
+    // literal `{NUMBER()}` placeholder. Upstream's `add_builtins`
+    // currently registers only `NUMBER` (DATETIME is a TODO over there).
+    if let Err(e) = bundle.add_builtins() {
+        eprintln!("fern-i18n: failed to register Fluent builtins: {e:?}");
+    }
+    bundle.set_formatter(Some(crate::format::fern_format_callback));
+    if let Err(e) = bundle.add_function("DATETIME", crate::format::datetime_function) {
+        eprintln!("fern-i18n: failed to register DATETIME function: {e:?}");
+    }
+}
+
 fn build_bundle_from_resources(
     locale: &LanguageIdentifier,
     resources: &[&'static str],
 ) -> FluentBundle<FluentResource> {
     let mut bundle = FluentBundle::new(vec![locale.clone()]);
-    bundle.set_use_isolating(false);
+    configure_bundle(&mut bundle);
     for src in resources {
         match FluentResource::try_new((*src).to_string()) {
             Ok(res) => {
@@ -336,7 +357,7 @@ fn build_bundle_from_resources(
 
 fn build_bundle_from_test_messages(entry: &TestLocaleEntry) -> FluentBundle<FluentResource> {
     let mut bundle = FluentBundle::new(vec![entry.locale.clone()]);
-    bundle.set_use_isolating(false);
+    configure_bundle(&mut bundle);
     let mut combined = String::new();
     for (k, v) in &entry.messages {
         combined.push_str(k);

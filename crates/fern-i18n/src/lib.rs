@@ -12,6 +12,7 @@
 pub mod config;
 pub mod direction;
 pub mod file_watcher;
+pub mod format;
 pub mod localized_string;
 pub mod manager;
 pub mod resolve;
@@ -31,9 +32,13 @@ pub mod thread_local;
 pub use config::I18nConfig;
 pub use direction::rtl_from_locale;
 pub use fern_core::environment::LayoutDirection;
-pub use fern_i18n_macros::{tr, tr_widget};
+pub use fern_core::signal::{Signal, WeakSignal};
+pub use fern_i18n_macros::{tr, tr_signal, tr_signal_widget, tr_widget};
 pub use file_watcher::{FtlFileWatcher, ReloadSink};
 pub use fluent_bundle::FluentValue;
+pub use format::{
+    DateStyle, FernDateTime, FernDateTimeFormatter, NumberFormatter, NumberStyle, TimeStyle,
+};
 pub use localized_string::{LocalizedString, localized};
 pub use manager::{I18nManager, LocaleSwitchOutcome, ReloadError};
 pub use resolve::{resolve_message, resolve_message_widget};
