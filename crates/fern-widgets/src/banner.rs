@@ -280,10 +280,22 @@ impl Widget for Banner {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> fern_core::widget::LayoutResponse {
-        self.root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
+        // Banners are a "fill width, hug height" surface. ZStack queries
+        // its children with `SizeProposal::unspecified`, so delegating
+        // straight to `child_size` would return the row's natural width
+        // and the banner would collapse to its content. Take the
+        // proposed width as the source of truth and use the inner
+        // height (computed against that width) for the visual.
+        let inner_proposal = SizeProposal {
+            width: proposal.width,
+            height: None,
+        };
+        let inner = self
+            .root_child_id
+            .and_then(|id| ctx.child_size(id, inner_proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
+        let width = proposal.width.unwrap_or(inner.width);
+        fern_canvas::Size::new(width, inner.height).into()
     }
 
     fn place_children(
@@ -352,6 +364,42 @@ mod tests {
         let info = tree.accessibility_node(id);
         assert_eq!(info.role(), fern_core::accesskit::Role::Status);
         assert_eq!(info.name(), Some("Heads up"));
+    }
+
+    #[test]
+    fn banner_fills_width_inside_vstack() {
+        // Regression: ZStack queries children with `unspecified` proposal,
+        // so a naive `child_size(root, proposal)` delegate makes Banner
+        // collapse to its content width inside a normal VStack parent.
+        // Banner's `layout_response` overrides the width to the proposal.
+        use crate::primitives::VStack;
+        let mut tree = WidgetTree::new().with_theme(Theme::light_default());
+        let banner = Banner::warning_literal("Unsaved changes")
+            .description_literal("Close will discard your edits.");
+        let stack_id = tree.add(VStack::new().spacing(8.0).child(banner));
+        tree.layout(SizeProposal {
+            width: Some(640.0),
+            height: None,
+        });
+
+        // Walk the VStack's first descendant Banner (Role::Status) and
+        // check its bounds.
+        let mut queue = vec![stack_id];
+        let mut banner_bounds = None;
+        while let Some(id) = queue.pop() {
+            let info = tree.accessibility_node(id);
+            if info.role() == fern_core::accesskit::Role::Status {
+                banner_bounds = Some(tree.bounds(id));
+                break;
+            }
+            queue.extend(tree.children(id));
+        }
+        let b = banner_bounds.expect("Banner should be in the tree under the VStack");
+        assert!(
+            (b.width - 640.0).abs() < 0.5,
+            "Banner inside VStack should span the proposed width 640 dp, got {}",
+            b.width
+        );
     }
 
     #[test]

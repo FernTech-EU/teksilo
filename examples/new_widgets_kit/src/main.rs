@@ -102,12 +102,55 @@ impl Root {
     }
 
     fn search_and_picker_section(&self, ctx: &mut BuildContext) -> WidgetId {
+        // Live readout of what's typed in the search field — shows the
+        // user that the bound signal updates on every keystroke.
+        let search_readout = TextWidget::new_literal("")
+            .bind_text(self.search_text.map(|s| {
+                if s.is_empty() {
+                    "Type to filter — text mirrors here as you type. Press Enter to submit."
+                        .to_string()
+                } else {
+                    format!("Filtering: \"{}\"", s)
+                }
+            }))
+            .color(TextRole::Secondary);
+
+        // Submit feedback line — flips to a confirmation when the user
+        // presses Enter. Reset by typing again.
+        let submit_count = ctx.signal(0_usize);
+        let submit_count_for_label = submit_count.clone();
+        let submit_readout = TextWidget::new_literal("")
+            .bind_text(submit_count_for_label.map(|n| {
+                if *n == 0 {
+                    String::new()
+                } else {
+                    format!("Submitted {n} time(s).")
+                }
+            }))
+            .style(TextStyleRole::Small)
+            .color(TextRole::Accent);
+
         let search = SearchField::new(self.search_text.clone())
-            .placeholder("Filter library…")
+            .placeholder("Filter library — type then press Enter")
             .on_submit_fn({
                 let s = self.search_text.clone();
-                move |_| println!("submit search: {:?}", s.get())
+                let count = submit_count.clone();
+                move |_| {
+                    println!("submit search: {:?}", s.get());
+                    count.set(count.get() + 1);
+                }
             });
+
+        // Live readout of the picker state.
+        let path_readout = TextWidget::new_literal("")
+            .bind_text(self.path_text.map(|p| {
+                if p.is_empty() {
+                    "No file picked yet — click the trailing Browse button.".to_string()
+                } else {
+                    format!("Picked: {}", p)
+                }
+            }))
+            .color(TextRole::Secondary);
 
         let picker = FilePickerField::new(self.path_text.clone())
             .kind(FilePickerKind::OpenFile)
@@ -121,30 +164,50 @@ impl Root {
                 .spacing(12.0)
                 .child(GroupHeader::new_literal("SearchField & FilePickerField"))
                 .child(search)
-                .child(picker),
+                .child(search_readout)
+                .child(submit_readout)
+                .child(picker)
+                .child(path_readout),
         )
     }
 
     fn input_dialog_section(&self, ctx: &mut BuildContext) -> WidgetId {
         let rename_text = self.rename_text.clone();
+        // Last action: "accepted: …" / "cancelled" / "" — gives clear
+        // feedback whether the modal accepted the rename or not.
+        let last_action = ctx.signal::<Option<bool>>(None);
+
         let preview = TextWidget::new_literal("")
             .bind_text(rename_text.map(|s| format!("Current name: {}", s)))
+            .style(TextStyleRole::BodyBold);
+
+        let action_readout = TextWidget::new_literal("")
+            .bind_text(last_action.map(|state| match state {
+                None => String::new(),
+                Some(true) => "Last result: accepted — name updated above.".to_string(),
+                Some(false) => "Last result: cancelled — name unchanged.".to_string(),
+            }))
             .color(TextRole::Secondary);
 
         let trigger = Button::new_literal("Rename…")
             .style(ButtonVariant::Regular)
             .on_activate_fn({
                 let rename_text = rename_text.clone();
+                let last_action = last_action.clone();
                 move |ctx| {
                     let rename_text = rename_text.clone();
+                    let last_action = last_action.clone();
                     use fern_ui::widgets::InputDialog;
                     InputDialog::new_literal("Rename document")
                         .prompt_literal("Enter the new file name:")
                         .default_text(rename_text.get())
                         .placeholder("filename.ext")
                         .on_result(move |result, _ctx| match result {
-                            Some(name) => rename_text.set(name),
-                            None => println!("Rename cancelled"),
+                            Some(name) => {
+                                rename_text.set(name);
+                                last_action.set(Some(true));
+                            }
+                            None => last_action.set(Some(false)),
                         })
                         .present(ctx);
                 }
@@ -152,9 +215,10 @@ impl Root {
 
         ctx.add(
             VStack::new()
-                .spacing(12.0)
+                .spacing(8.0)
                 .child(GroupHeader::new_literal("InputDialog"))
                 .child(preview)
+                .child(action_readout)
                 .child(HStack::new().child(trigger).child(Spacer::new())),
         )
     }
