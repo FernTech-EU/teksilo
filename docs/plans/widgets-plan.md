@@ -38,7 +38,22 @@ so they don't appear as gaps:
 Full primitive set ([primitives/](crates/fern-widgets/src/primitives/)):
 HStack, VStack, ZStack, Grid, Wrap, Center, Expand, AspectRatio, MinSize,
 MaxSize, FixedSize, Padding, Spacer, TrackSize, TextWidget, IconWidget,
-RectWidget, Divider, Switcher, FocusRing.
+RectWidget, Divider, Switcher, FocusRing, FormLayout, MasonryLayout,
+ImageWidget, ImageMask, ValidationStrip, TextInputField.
+
+Bonus widgets shipped that were not in the original gap list (so they
+don't get re-requested):
+[ValidationStrip](crates/fern-widgets/src/primitives/validation_strip.rs),
+[PopoverButton](crates/fern-widgets/src/popover_button.rs),
+[PrivacySettings](crates/fern-widgets/src/privacy_settings.rs),
+[ShortcutSettings](crates/fern-widgets/src/shortcut_settings.rs),
+[DateRangeEdit](crates/fern-widgets/src/date_range_edit.rs),
+[BuiltInButton](crates/fern-widgets/src/built_in_button.rs) (internal-use
+icon button embedded inside other widgets like TextInput's clear-X), and
+the full
+[animations/](crates/fern-widgets/src/animations/) wrapper family (Blur,
+Collapse, Crossfade, Cycle, Fade, Pulse, Rotate, Scale, Shake, Slide,
+SmoothSize).
 
 ---
 
@@ -78,37 +93,34 @@ Everything else in §27.1–27.9 ships. §27.10 (text editing) is postponed.
 The big ones — these are things users reasonably expect from a desktop toolkit
 and Qt offers them as `QFoo`.
 
-1. **TableView / TableWidget** — `QTableView` + `QTableWidget`. FernUI has
-   ListView and TreeView but no 2D grid view. Needed for any spreadsheet-like
-   data, inspector panes, settings tables. Depends on a `TableModel` data
-   source (analogous to the existing `ListModel` / `TreeModel`) and a new
-   `HeaderView` widget for sortable, resizable, reorderable columns. **Large
-   effort**, high value — this is the single biggest functional gap for
-   data-driven apps.
+1. **TableView / TableWidget** — `QTableView` + `QTableWidget`. **Shipped** as
+   [TableView](crates/fern-widgets/src/table_view.rs) (multi-column,
+   virtualized, sort/filter via `SortFilterListModel`, drag-resize +
+   drag-reorder of columns, pinned Leading/Trailing, cell-level + row-level
+   selection, full keyboard nav, edit hooks, row drag-drop reorder, full a11y
+   tree). [TreeTable](crates/fern-widgets/src/tree_table.rs) ships the
+   hierarchical variant.
 
-2. **HeaderView** — `QHeaderView`. Column header strip with click-to-sort,
-   drag-to-resize, drag-to-reorder, section visibility menu. Needed as
-   soon as Table lands, also usable as a standalone column header on top of
-   ListView when used in "details" (columns) mode.
+2. **HeaderView** — Absorbed into TableView's column model
+   ([table_view/column.rs](crates/fern-widgets/src/table_view/column.rs) +
+   [header.rs](crates/fern-widgets/src/table_view/header.rs)); not shipped as
+   a standalone widget and not planned to be — TableView and TreeTable cover
+   every real use case.
 
-3. **GroupBox** — `QGroupBox`. Titled frame around a cluster of controls,
-   optionally checkable (the title contains a checkbox that enables/disables
-   the whole group). Distinct from Panel: GroupBox draws the title
-   notched into the top border line. Common in preference dialogs and forms.
-   **Low effort.**
+3. **GroupBox** — **Shipped** as
+   [GroupBox](crates/fern-widgets/src/group_box.rs).
 
-4. **FormLayout** — `QFormLayout`. Two-column layout for label/field rows,
-   with configurable label alignment (right-aligned vs top, wrap or truncate)
-   and consistent baseline alignment across rows. Currently expressible as a
-   Grid + manual baseline tweaking, but a dedicated primitive encodes the
-   desktop form convention. **Medium effort.**
+4. **FormLayout** — **Shipped** as
+   [FormLayout](crates/fern-widgets/src/primitives/form_layout.rs).
 
 5. **ButtonGroup** — `QButtonGroup`. Coordinator (not a widget) that
    enforces mutual exclusion across a set of otherwise independent
    RadioButtons living in different parts of the tree. The existing
-   [RadioButton](crates/fern-widgets/src/radio_button.rs) uses a shared
-   `Signal<T>` which handles the common case, but a cross-subtree coordinator
-   makes the intent explicit and feeds a11y `set_member_of`.
+   [RadioButton](crates/fern-widgets/src/radio_button.rs) +
+   [RadioGroup](crates/fern-widgets/src/radio_group.rs) handle the
+   same-parent case via a shared `Signal<T>`; a cross-subtree coordinator
+   that feeds a11y `set_member_of` is still missing. **Low effort**, only
+   ship if a real use case appears.
 
 6. **Calendar widget** — `QCalendarWidget`. **Shipped** as
    [Calendar](crates/fern-widgets/src/calendar.rs). Month grid with
@@ -127,10 +139,11 @@ and Qt offers them as `QFoo`.
    `jiff` civil types via the `common::datetime` shared module. Demo:
    [datetime_pickers](examples/datetime_pickers/).
 
-7. **ColorPicker (swatch + HSV canvas)** — Qt bundles this inside
-   `QColorDialog`. The swatch grid and HSV triangle/wheel are standalone
-   widgets; only the hex field depends on text input. Ship the swatch and
-   HSV canvas now, wire up the hex cell later.
+7. **ColorPicker (swatch + HSV canvas)** — **Shipped** as
+   [ColorPicker](crates/fern-widgets/src/color_picker.rs) (with
+   `ColorPickerLayout`), [ColorEdit](crates/fern-widgets/src/color_edit.rs),
+   and [HexColorInput](crates/fern-widgets/src/hex_color_input.rs) — the hex
+   field landed alongside the rest. Gated behind the `rich-text` feature.
 
 8. **DockWidget + dock area** — `QDockWidget` + `QMainWindow`'s dock area.
    A panel that can be docked to any window edge, floated as a top-level
@@ -150,40 +163,32 @@ and Qt offers them as `QFoo`.
     (not an Accordion flag — the state-ownership and Int UI visual
     differences ruled that out; see the tool_box plan file for the reasoning).
 
-11. **DialogButtonBox** — `QDialogButtonBox`. Not Qt-only — every mature
-    desktop toolkit has the same concept under different names: GTK
-    `GtkDialog` action area, Cocoa `NSAlert` button arrangement, WinUI
-    `ContentDialog` primary/secondary/close. The reason it exists: dialog
-    button **ordering is platform-specific** (macOS puts the destructive
-    action on the left, Windows/Linux on the right; the "default" button
-    is highlighted differently on each platform; Tab order follows the
-    visual order). Today the existing
-    [Dialog](crates/fern-widgets/src/dialog.rs) probably ships an HStack
-    action bar where the developer hard-codes the order — which silently
-    looks wrong on macOS.
-
-    DialogButtonBox is a small helper that takes buttons by **semantic
-    role** (`Accept`, `Reject`, `Apply`, `Reset`, `Help`, `Save`, `Open`,
-    `Cancel`, `Close`, `Yes`, `No`, `Discard`, `RestoreDefaults`,
-    `Destructive`) rather than by position, and re-orders them per
-    `Theme::platform_convention()` (or however FernUI exposes the host
-    platform). It also wires the **default button** (Enter triggers
-    `Accept`/`Save`/`Yes`) and the **cancel button** (Escape triggers
-    `Reject`/`Cancel`/`Close`) automatically, plus the focus order. Not
-    overkill — this is the kind of small helper that prevents a class of
-    cross-platform polish bugs you don't notice until a macOS user
-    complains. **Low effort**, ships alongside any Dialog improvements.
+11. **DialogButtonBox** — Subsumed by
+    [MessageBox](crates/fern-widgets/src/message_box.rs), which exposes
+    `ButtonRole`, `StandardButton`, `MessageBoxButton`, `MessageBoxButtons`,
+    and `MessageBoxResult` — semantic-role buttons with platform-aware
+    ordering and default/cancel wiring. If plain
+    [Dialog](crates/fern-widgets/src/dialog.rs) needs the same convenience
+    for non-message use cases, lift the helper out of MessageBox; otherwise
+    consider this gap closed.
 
 ---
 
 ## Gap 3 — Int UI / Jewel additions (not in Qt)
 
-1. **IconButton / ActionButton** — Borderless square icon-only button, flat
-   until hover. Matches
-   [IconButtonStyle](crates/fern-tokens/src/components.rs#L42-L61) which
-   is already defined in tokens (sizes 22/24/30). A `ButtonStyle::Flat`
-   Button with icon-only works but wastes MinSize/padding budget and carries
-   label-layout overhead. **Low effort.**
+1. **IconButton / ActionButton** — **Covered by Button.**
+   [Button](crates/fern-widgets/src/button.rs) supports
+   `ButtonVariant::Flat` (borderless, transparent at idle, `surface_hover`
+   on hover) and `IconLocation::IconOnly` (icon with no label, no
+   label-layout overhead). The combination
+   `Button::new("").style(Flat).icon(icon, IconLocation::IconOnly)` is the
+   Int UI IconButton; the toolbar / inline pattern is already supported.
+   A separate widget is only worth shipping if profiling shows the unused
+   label slot is a real cost — currently no evidence it is. The
+   [BuiltInButton](crates/fern-widgets/src/built_in_button.rs) widget is an
+   internal-use icon button for embedding inside other widgets (TextInput's
+   clear-X, search affordances, etc.) — not a public top-level IconButton.
+   **Closed unless evidence forces a split.**
 
 2. **CircularProgressIndicator / Spinner** — **Shipped** as
    [Spinner](crates/fern-widgets/src/spinner.rs). Animated arc backed by
@@ -208,53 +213,24 @@ and Qt offers them as `QFoo`.
    Selectable, toggleable, or dismissable with trailing close icon. Used
    for tag lists, filter bars, multi-select display. **Low effort.**
 
-6. **Rich Tooltip (with sticky-on-dwell)** — Extend the existing 104-line
-   [Tooltip](crates/fern-widgets/src/tooltip.rs) (currently text-only,
-   no tests) to support title + body + shortcut hint + optional
-   link/action. The `tooltip_shortcut` token already exists at
-   [theme.rs:83](crates/fern-tokens/src/theme.rs#L83).
+6. **Rich Tooltip (with sticky-on-dwell)** — **Shipped.** The
+   [tooltip system](crates/fern-widgets/src/tooltip.rs) supports rich
+   content (title + body + inline markup + shortcut hint + "more"
+   disclosure), a `TooltipRegistry` for app-wide reusable tooltip entries,
+   inline `TooltipContent` for one-offs, sticky-dwell promotion (2 s of
+   continuous hover flips the overlay from `Role::Tooltip` to non-modal
+   `Role::Dialog` with click-outside / Escape dismissal), nested tooltips
+   over links inside sticky tooltips with cascading dismissal, and the
+   prefers-reduced-motion fallback. Surfaced on widgets via
+   `Button::rich_tooltip(key)` / `rich_tooltip_content(content)` and the
+   matching builder methods on other widgets.
 
-   **Sticky-dwell behavior.** After the tooltip has been visible for 2s of
-   continuous pointer dwell, it promotes itself to a "sticky" state:
-   - While dwelling, a small radial/linear fill indicator animates from 0
-     to 1 over the 2s window, visually counting down to the promotion.
-     The indicator sits in a corner of the tooltip so it doesn't crowd the
-     content. Uses `Signal<f32>::animate_to()` + `AnimationScheduler`.
-   - Once promoted, the tooltip no longer auto-dismisses on pointer-out.
-     It behaves like a Popover: `DismissBehavior::ClickOutside` takes over,
-     and the user must click elsewhere (or press Escape) to close it.
-   - Sticky tooltips can host a **"more" disclosure** — a trailing
-     Accordion (or the Disclosure-triangle primitive from Gap 3 item 8)
-     that expands to reveal a longer explanation, illustrations, or
-     additional links. Collapsed by default so the initial reveal stays
-     lightweight; the user opts in to the long form.
-   - **Nested tooltips.** Links inside a sticky tooltip are themselves
-     hoverable. Hovering a link inside a sticky tooltip opens a child
-     tooltip anchored to that link, which can itself become sticky after
-     its own 2s dwell, which can itself contain links that spawn further
-     nested tooltips — a cascade. Implementation hook: the existing
-     overlay system already supports parent→child overlay relationships
-     with cascading dismissal; reuse that. Closing a parent sticky
-     tooltip closes its entire nested chain. Escape closes the innermost
-     open tooltip first (onion-peel), matching the MenuBar/ContextMenu
-     cascade pattern.
-   - Non-sticky tooltips keep current behavior (show on hover-in, hide on
-     hover-out), so casual hovers don't get hijacked.
-   - Accessibility: while sticky, the tooltip's a11y role flips from
-     `Role::Tooltip` to `Role::Dialog` (non-modal) since it now behaves
-     like a persistent panel. The "more" disclosure declares
-     `set_expanded`.
-
-   **Effort:** low for base rich content, medium once sticky-dwell + dwell
-   indicator + dismiss coordination are wired in. State machine to design:
-   `Hidden → Hovering(elapsed) → Sticky → Hidden` with timers and click
-   dismissal.
-
-7. **TabStrip** — Bare strip of tab headers decoupled from the content
-   Switcher. Lets the header row drive arbitrary external state (e.g., an
-   open-file list) without being welded to a single Switcher child.
-   [TabWidget](crates/fern-widgets/src/tab_widget.rs) refactor: extract the
-   header HStack as TabStrip, rebuild TabWidget as `TabStrip + Switcher`.
+7. **TabStrip** — **Shipped** as
+   [`TabBar<T>`](crates/fern-widgets/src/tab_widget/bar.rs) — the public
+   `ListModel<T>` + `TabDelegate<T>`-driven header strip, usable
+   stand-alone when the content lives in a different panel or window.
+   `TabWidget` is the all-in-one `TabBar + Switcher` composition over
+   the same selection signal.
 
 8. **Disclosure triangle** — Standalone chevron toggle bound to `Signal<bool>`,
    with animated rotation. Accordion and TreeView each re-implement this
@@ -295,9 +271,7 @@ the size constraint family (MinSize/MaxSize/FixedSize), Padding/Spacer,
 TrackSize, plus Switcher for stacked content. A few standard layout
 primitives are still missing:
 
-1. **FormLayout** — already listed in Gap 2 item 4 as `QFormLayout`. Two
-   columns of label/field rows with consistent baseline alignment. The
-   single most common form-building primitive in Qt-style apps.
+1. **FormLayout** — **Shipped.** See Gap 2 item 4.
 
 2. **NavigationSplitView / TwoPane / ThreePane** — adaptive multi-pane
    shell layout (sidebar / content / detail). SwiftUI's
@@ -307,20 +281,16 @@ primitives are still missing:
    collapses panes into a stack with back-navigation; at wide widths it
    shows all panes side-by-side.
 
-3. **MasonryLayout** — variable-height grid that packs children into the
-   shortest column (Pinterest-style). Useful for image galleries, card
-   walls, snippet collections. Niche but cheap to implement once the
-   measurement pass is generalized.
-
-4. **AnchorLayout** — Qt's `QGraphicsAnchorLayout`-style anchored
-   positioning ("right of A, vertically centered with B"). Powerful but
-   conceptually heavy and overlaps with what HStack/VStack already cover.
-   **Skip unless a real use case shows up** — listing here only for
-   completeness against Qt.
+3. **MasonryLayout** — **Shipped** as
+   [MasonryLayout](crates/fern-widgets/src/primitives/masonry.rs).
+   Variable-height grid packing into the shortest column (Pinterest-style).
 
 The Border layout (north/south/east/west/center) from Java AWT is
 adequately expressed today as `VStack(top, HStack(left, center, right),
-bottom)` and doesn't need its own primitive.
+bottom)` and doesn't need its own primitive. **AnchorLayout**
+(Qt `QGraphicsAnchorLayout`) is intentionally out of scope — overlaps
+with HStack/VStack and adds conceptual weight no real use case has
+required.
 
 ---
 
@@ -329,16 +299,11 @@ bottom)` and doesn't need its own primitive.
 These don't fit cleanly under "widgets" or "layouts" and are easy to
 overlook in a catalog.
 
-1. **Image** — Display a static image (PNG, JPEG, WebP, optionally SVG
-   via the existing path rasterizer). The architecture doc §27 mentions
-   the rendering pipeline already exists (`Canvas::draw_image`,
-   `ImageManager`), but **no public Image widget surfaces it**. Avatar
-   (Gap 1) needs this; Banner can use it for hero icons; the existing
-   [RichTextView](crates/fern-widgets/src/) / `RichTextEditor` (when
-   they land) need it for inline images. Properties: source (path or
-   embedded bytes), fit mode (`Fit::Contain` / `Cover` / `Fill` / `None`),
-   alignment, optional corner radius and tint color. **Low effort** — the
-   underlying texture pipeline exists; this is a thin Widget impl over it.
+1. **Image** — **Shipped** as
+   [ImageWidget](crates/fern-widgets/src/primitives/image_widget.rs) (with
+   `ImageFit`) and the related
+   [ImageMask](crates/fern-widgets/src/primitives/image_mask.rs) primitive
+   (`ImageMaskShape`) used by Avatar and other masked-image patterns.
 
 2. **Charts (2D)** — **Shipped** as a dedicated
    [fern-charts](crates/fern-charts/src/) crate (sits at the same tier as
@@ -371,32 +336,19 @@ overlook in a catalog.
 These are not new widgets but loosen constraints on existing ones to enable
 modern composable patterns.
 
-1. **Composable MenuList** — Today
-   [MenuList](crates/fern-widgets/src/menu_list.rs) is documented as "a
-   vertical container for MenuItem and MenuSeparator widgets" and its
-   `.item()` method downcasts to `MenuItem`. Modern context menus mix
-   menu items with arbitrary controls inline:
-   - **Volume slider** in a system tray menu (macOS audio menu, Linux
-     pavucontrol)
-   - **Color swatch row** in a formatting context menu (Word, Pages,
-     Apple Notes)
-   - **Brightness slider, zoom row, font-size stepper** in editor menus
-   - **Search field** at the top of long menus (IntelliJ Find Action,
-     macOS Help menu)
-   - **Recently used files row**, **avatar/user header**, **mini chart
-     preview**, **inline checkbox group**
-
-   Relax MenuList to accept `impl Widget + 'static` children directly
-   (no `MenuItem` downcast), with a parallel `.item()` keeping the
-   typed-MenuItem path for the common case. Keyboard navigation
-   (Arrow Up/Down, Enter) needs to skip non-focusable children
-   gracefully — the existing `KeyboardHighlightWrapper` only highlights
-   `MenuItem` rows today; generalize it to "any child marked
-   `focusable(true)`." Accessibility: arbitrary children keep their own
-   role; the MenuList itself stays `Role::Menu`. **Medium effort** —
-   the layout side is trivial, the keyboard/focus generalization is
-   the real work. Unlocks Phase B widgets like in-menu Slider,
-   ColorPicker, search field.
+1. **Composable MenuList** — Layout side **shipped**:
+   [MenuList](crates/fern-widgets/src/menu_list.rs)'s `.item(...)`
+   already takes `impl Widget + 'static`, so arbitrary controls
+   (sliders, swatch rows, search fields, recent-file rows) compose
+   directly. **Still open**: keyboard / focus generalization for non-
+   `MenuItem` children — the `KeyboardHighlightWrapper` was originally
+   wired to `MenuItem` only; verify it skips non-focusable children
+   gracefully and that "any child marked `focusable(true)`" is
+   highlightable via Arrow Up/Down navigation. Accessibility: arbitrary
+   children keep their own role; MenuList itself stays `Role::Menu`.
+   **Low-to-medium effort** — layout is done, only the keyboard/focus
+   generalization remains, and it's a verification pass plus possibly a
+   small fix.
 
 2. **(Note on Popover)** — No change needed.
    [Popover](crates/fern-widgets/src/popover.rs) already accepts arbitrary
@@ -421,59 +373,63 @@ modern composable patterns.
 
 ---
 
-## Gap 4 — Postponed (text-input dependent)
+## Gap 4 — Text-input dependent
 
-These are blocked on the text input milestone. Listed here so the catalog is
-exhaustive and nothing is forgotten:
+The text input milestone has landed. Most of this gap is closed; the
+remaining items are listed under "Still open" below.
 
 ### The text family itself
 
-- **TextField** (Qt: `QLineEdit`) — single-line text input. Foundational.
-- **TextArea** (Qt: `QPlainTextEdit`) — multi-line plain text input.
-- **RichTextView** — §27.10.1. Read-only rich text with selection/copy, image
-  and link click. `[rich-text]` feature-gated; depends on text-typeset.
-- **RichTextEditor** — §27.10.1. Full editing surface with IME, formatting
-  commands, undo/redo. The most architecturally distinctive widget in
-  FernUI; detailed through §27.10.4.
+- **TextField** (`QLineEdit`) — **Shipped** as
+  [TextInput](crates/fern-widgets/src/text_input.rs) (with `ValidationState`)
+  on top of the
+  [TextInputField](crates/fern-widgets/src/primitives/text_input_field.rs)
+  primitive. Gated behind the `rich-text` feature.
+- **TextArea** (`QPlainTextEdit`) — Covered by
+  [RichTextEditor](crates/fern-widgets/src/rich_text.rs) running in plain
+  mode (`ScrollPolicy` configurable). No separate `TextArea` widget.
+- **RichTextView** — Covered by
+  [RichTextEditor](crates/fern-widgets/src/rich_text.rs) configured
+  read-only (selection/copy, image and link click). `rich-text` feature-gated.
+- **RichTextEditor** — **Shipped** as
+  [RichTextEditor](crates/fern-widgets/src/rich_text.rs). Full editing
+  surface with IME, formatting commands, undo/redo, intrinsic-mode sizing
+  via `.min_lines(n)` / `.max_lines(n)`.
 
 ### Widgets that embed a TextField
 
-- **SpinBox / DoubleSpinBox** — `QSpinBox`, `QDoubleSpinBox`. **Shipped** as
-  [SpinBox](crates/fern-widgets/src/spin_box.rs) (numeric stepper with
-  up/down buttons and an editable text cell). Demo:
+- **SpinBox / DoubleSpinBox** — **Shipped** as
+  [SpinBox](crates/fern-widgets/src/spin_box.rs) (with `WrapMode`,
+  `StepType`, `ButtonLayout`, `WheelMode`, `WidthPolicy`). Demo:
   [examples/spin_box](examples/spin_box/).
-- **DateEdit / TimeEdit / DateTimeEdit** — `QDateEdit`, `QTimeEdit`,
-  `QDateTimeEdit`. **Shipped** as
+- **DateEdit / TimeEdit / DateTimeEdit** — **Shipped** as
   [DateEdit](crates/fern-widgets/src/date_edit.rs),
   [TimeEdit](crates/fern-widgets/src/time_edit.rs), and
-  [DateTimeEdit](crates/fern-widgets/src/date_time_edit.rs). Each binds
-  to a nullable signal (`Signal<Option<Date>>` /
-  `Signal<Option<Time>>` / `Signal<Option<DateTime>>`) with a
-  `::required(...)` constructor for non-nullable callers. DateEdit
-  ships with a trailing calendar-icon trigger that opens the
-  Calendar widget as a popover (`OverlayPlacement::BelowPreferred`,
-  cascading dismissal, fade animation). All three honour
-  locale-derived format patterns (strftime subset) plus a
-  `format_pattern(...)` override; preview-pass arrow keys step the
-  value (DateEdit: ±1 day, Shift = ±7; TimeEdit: ±step_minutes,
-  Shift = ×10; PageUp/Down in either case). Accessibility uses the
-  dedicated AccessKit roles `Role::DateInput` / `Role::TimeInput` /
-  `Role::DateTimeInput`, `set_value` formatted as ISO, and
-  `HasPopup::Grid` on the calendar trigger button. Demo:
+  [DateTimeEdit](crates/fern-widgets/src/date_time_edit.rs). Bonus:
+  [DateRangeEdit](crates/fern-widgets/src/date_range_edit.rs) for two-date
+  ranges. Each binds to a nullable signal with a `::required(...)`
+  constructor; DateEdit ships with a trailing calendar-icon trigger that
+  opens the Calendar widget as a popover. Locale-derived format patterns,
+  preview-pass arrow keys, dedicated AccessKit roles. Demo:
   [datetime_pickers](examples/datetime_pickers/).
+- **HexColorField** — **Shipped** as
+  [HexColorInput](crates/fern-widgets/src/hex_color_input.rs); part of the
+  ColorPicker family (Gap 2 item 7).
+
+### Still open
+
 - **SearchField** — specialized TextField with magnifier icon, clear button,
-  history dropdown, optional scoped-search chips. IntelliJ's is distinctive.
+  history dropdown, optional scoped-search chips. Int UI's is distinctive.
 - **Path / FilePicker field** — TextField + browse button that opens a file
-  dialog. Needed by the settings UI.
-- **EditableComboBox** — ComboBox where the user can also type a freeform
-  value. Qt has `QComboBox::setEditable(true)`; Int UI has it as a separate
-  widget. Current [ComboBox](crates/fern-widgets/src/combo_box.rs) is
-  selection-only.
-- **FontComboBox** — `QFontComboBox`. ComboBox pre-populated with installed
-  font families, each rendered in its own font. Selection-only variant could
-  ship early; editable variant waits.
-- **InputDialog** — `QInputDialog`. Modal with a single input field.
-- **HexColorField** — the text input half of the ColorPicker (Gap 2 item 7).
+  dialog. Native file dialog backend already lands via
+  `EventContextFileDialogExt`; this is the matching field widget.
+- **EditableComboBox** — ComboBox with freeform typing. Current
+  [ComboBox](crates/fern-widgets/src/combo_box.rs) is selection-only.
+- **FontComboBox** — ComboBox pre-populated with installed font families,
+  each rendered in its own font.
+- **InputDialog** — `QInputDialog` equivalent. Modal with a single input
+  field. [MessageBox](crates/fern-widgets/src/message_box.rs) covers
+  buttons-only modals; this is the input variant.
 
 ---
 
@@ -497,26 +453,27 @@ Listed so they're consciously out of scope, not accidentally forgotten:
 
 ## Recommended phasing
 
-**Phase A — Trivial / low-effort wins.** **Image**, GroupHeader,
-Chip, IconButton, **SplitButton**, Disclosure triangle,
-Banner, Rich Tooltip extension, CommandLinkButton.
-(Spinner / CircularProgressIndicator has shipped — see Gap 3 item 2.
-Avatar has shipped — see Gap 1.)
-Each is days, not weeks, and each unlocks real visual polish.
+**Phase A — Remaining low-effort wins.** Chip, Banner, Disclosure triangle,
+CommandLinkButton. Each is days, not weeks, and each unlocks real visual
+polish. (Image, GroupHeader, IconButton-as-Button, SplitButton, Spinner,
+Avatar, and the Rich Tooltip extension have shipped.)
 
-**Phase B — Mid-effort desktop essentials.** GroupBox, FormLayout,
-ButtonGroup, Calendar widget, ColorPicker (sans hex field), TabStrip,
-Balloon notification, ToolBox (as Accordion variant), MasonryLayout.
+**Phase B — Remaining mid-effort essentials.** Balloon notification,
+ButtonGroup cross-subtree coordinator, composable-MenuList keyboard /
+focus generalization for non-`MenuItem` children. (TabStrip-as-`TabBar`,
+GroupBox, FormLayout, Calendar, ColorPicker, ToolBox, MasonryLayout have
+all shipped.)
 
-**Phase C — Large structural work.** TableView + HeaderView + TableModel;
-NavigationSplitView (adaptive multi-pane shell); DockWidget + dock-area
-layout subsystem. (The **fern-charts crate** — BarChart, LineChart,
-PieChart — has shipped; see Gap 3.6 item 2.) Each remaining item is a
-milestone, not a widget, and needs its own design pass before
-implementation.
+**Phase C — Remaining large structural work.** NavigationSplitView
+(adaptive multi-pane shell); DockWidget + dock-area layout subsystem.
+(TableView/TreeTable and the **fern-charts crate** have shipped; see
+Gap 2 item 1 and Gap 3.6 item 2.) Each remaining item is a milestone,
+not a widget, and needs its own design pass before implementation.
 
-**Phase D — Blocked on text input.** Entire Gap 4 list. Scheduled after the
-text input milestone lands.
+**Phase D — Remaining text-input-dependent.** SearchField, Path/FilePicker
+field, EditableComboBox, FontComboBox, InputDialog. (TextInput,
+RichTextEditor, SpinBox, DateEdit/TimeEdit/DateTimeEdit/DateRangeEdit,
+HexColorInput have all shipped.)
 
 ---
 
