@@ -54,7 +54,9 @@ pub struct FilePickerField {
     default_file_name: Option<String>,
     filters: Vec<FilterEntry>,
     on_pick: Option<Box<dyn Fn(&FileDialogResult, &mut EventContext)>>,
-    input: Option<TextInput>,
+    placeholder: Option<String>,
+    label: Option<String>,
+    enabled: bool,
     root_child_id: Option<WidgetId>,
 }
 
@@ -62,7 +64,6 @@ impl FilePickerField {
     /// Construct a `FilePickerField` bound to `text`. The visible string
     /// is updated on a successful pick; existing content is shown as-is.
     pub fn new(text: Signal<String>) -> Self {
-        let input = TextInput::new(text.clone());
         Self {
             text,
             kind: FilePickerKind::OpenFile,
@@ -71,7 +72,9 @@ impl FilePickerField {
             default_file_name: None,
             filters: Vec::new(),
             on_pick: None,
-            input: Some(input),
+            placeholder: None,
+            label: None,
+            enabled: true,
             root_child_id: None,
         }
     }
@@ -120,30 +123,22 @@ impl FilePickerField {
         self
     }
 
-    fn map_input(mut self, f: impl FnOnce(TextInput) -> TextInput) -> Self {
-        let inner = self
-            .input
-            .take()
-            .expect("FilePickerField input is consumed only once during build");
-        self.input = Some(f(inner));
+    /// Placeholder text shown when the field is empty.
+    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
+        self.placeholder = Some(text.into());
         self
     }
 
-    /// Override the placeholder text shown when the field is empty.
-    pub fn placeholder(self, text: impl Into<String>) -> Self {
-        let text = text.into();
-        self.map_input(|i| i.placeholder(text))
-    }
-
     /// Accessible name for the path field.
-    pub fn label(self, label: impl Into<String>) -> Self {
-        let label = label.into();
-        self.map_input(|i| i.label(label))
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     /// Disable / re-enable the field (and the browse button).
-    pub fn enabled(self, on: bool) -> Self {
-        self.map_input(|i| i.enabled(on))
+    pub fn enabled(mut self, on: bool) -> Self {
+        self.enabled = on;
+        self
     }
 }
 
@@ -186,22 +181,23 @@ fn build_request_owned(
 
 impl Widget for FilePickerField {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        if let Some(mut input) = self.input.take() {
-            // Snapshot dialog config + result writer; the closure
-            // can't borrow `self`.
-            let kind = self.kind;
-            let title = self.title.clone();
-            let starting_dir = self.starting_dir.clone();
-            let default_file_name = self.default_file_name.clone();
-            let filters = self.filters.clone();
-            // Convert Box<dyn Fn> into Rc<dyn Fn> once so the inner
-            // callback can be cloned into each per-tap result closure
-            // (which must be FnOnce).
-            let on_pick: Option<std::rc::Rc<dyn Fn(&FileDialogResult, &mut EventContext)>> =
-                self.on_pick.take().map(|b| std::rc::Rc::from(b));
-            let text_signal = self.text.clone();
+        // Snapshot dialog config + result writer for the Browse-button
+        // closure (which can't borrow `self`).
+        let kind = self.kind;
+        let title = self.title.clone();
+        let starting_dir = self.starting_dir.clone();
+        let default_file_name = self.default_file_name.clone();
+        let filters = self.filters.clone();
+        // Convert Box<dyn Fn> into Rc<dyn Fn> once so the inner
+        // callback can be cloned into each per-tap result closure
+        // (which must be FnOnce).
+        let on_pick: Option<std::rc::Rc<dyn Fn(&FileDialogResult, &mut EventContext)>> =
+            self.on_pick.take().map(std::rc::Rc::from);
+        let text_signal = self.text.clone();
 
-            let browse = BuiltInButton::browse().on_activate_fn(move |ctx| {
+        let browse = BuiltInButton::browse()
+            .enabled(self.enabled)
+            .on_activate_fn(move |ctx| {
                 let request = build_request_owned(
                     kind,
                     title.clone(),
@@ -223,9 +219,20 @@ impl Widget for FilePickerField {
                     FilePickerKind::SaveFile => ctx.save_file(request, result_cb),
                 };
             });
-            input = input.trailing_slot(browse);
-            self.root_child_id = Some(ctx.add(input));
+
+        // Build the TextInput inline (matching DateEdit / TimeEdit) —
+        // no Option<TextInput> storage, no map_input plumbing, just
+        // direct construction from the FilePickerField's own config.
+        let mut input = TextInput::new(self.text.clone())
+            .enabled(self.enabled)
+            .trailing_slot(browse);
+        if let Some(ph) = self.placeholder.clone() {
+            input = input.placeholder(ph);
         }
+        if let Some(label) = self.label.clone() {
+            input = input.label(label);
+        }
+        self.root_child_id = Some(ctx.add(input));
         self.children()
     }
 

@@ -176,29 +176,6 @@ impl SearchField {
         self.on_select = Some(Rc::new(f));
         self
     }
-
-    /// Drop down to a plain [`TextInput`] preset — no suggestions
-    /// popup. Already configured with the magnifier in the leading
-    /// slot and the clear button enabled.
-    pub fn into_input(self) -> TextInput {
-        self.build_text_input()
-    }
-
-    fn build_text_input(&self) -> TextInput {
-        let placeholder = self
-            .placeholder
-            .clone()
-            .unwrap_or_else(|| fern_i18n::tr_widget!(a11y_builtin_search()).resolve_now());
-        let mut input = TextInput::new(self.text.clone())
-            .placeholder(placeholder)
-            .show_clear_button(true)
-            .leading_slot(search_glyph())
-            .enabled(self.enabled);
-        if let Some(label) = &self.label {
-            input = input.label(label.clone());
-        }
-        input
-    }
 }
 
 impl std::fmt::Debug for SearchField {
@@ -226,6 +203,13 @@ impl Widget for SearchField {
         let dismissed: Signal<bool> = ctx.signal(false);
 
         // ── TextInput with submit hook ──────────────────────────────
+        // Built inline (matching DateEdit / TimeEdit / SpinBox) — no
+        // helper method or stored Option<TextInput>, just direct
+        // construction from the SearchField's own config fields.
+        let placeholder = self
+            .placeholder
+            .clone()
+            .unwrap_or_else(|| fern_i18n::tr_widget!(a11y_builtin_search()).resolve_now());
         let on_submit = self.on_submit.clone();
         let on_select = self.on_select.clone();
         let text_signal = self.text.clone();
@@ -233,25 +217,32 @@ impl Widget for SearchField {
         let suggestions_for_submit = suggestions.clone();
         let dismissed_for_submit = dismissed.clone();
 
-        let mut input = self.build_text_input();
-        input = input.on_submit_fn(move |ctx| {
-            let idx = highlighted_for_submit.get();
-            let list = suggestions_for_submit.get();
-            if let Some(i) = idx {
-                if let Some(value) = list.get(i).cloned() {
-                    text_signal.set(value.clone());
-                    if let Some(handler) = &on_select {
-                        handler(&value, ctx);
+        let mut input = TextInput::new(self.text.clone())
+            .placeholder(placeholder)
+            .show_clear_button(true)
+            .leading_slot(search_glyph())
+            .enabled(self.enabled)
+            .on_submit_fn(move |ctx| {
+                let idx = highlighted_for_submit.get();
+                let list = suggestions_for_submit.get();
+                if let Some(i) = idx {
+                    if let Some(value) = list.get(i).cloned() {
+                        text_signal.set(value.clone());
+                        if let Some(handler) = &on_select {
+                            handler(&value, ctx);
+                        }
+                        dismissed_for_submit.set(true);
+                        return;
                     }
-                    dismissed_for_submit.set(true);
-                    return;
                 }
-            }
-            if let Some(handler) = &on_submit {
-                handler(ctx);
-            }
-            dismissed_for_submit.set(true);
-        });
+                if let Some(handler) = &on_submit {
+                    handler(ctx);
+                }
+                dismissed_for_submit.set(true);
+            });
+        if let Some(label) = &self.label {
+            input = input.label(label.clone());
+        }
         let input_id = ctx.add(input);
 
         // ── Suggestions provider effect ─────────────────────────────

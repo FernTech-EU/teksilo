@@ -15,8 +15,9 @@
 use fern_ui::core::widget::WidgetPlacement;
 use fern_ui::prelude::*;
 use fern_ui::widgets::{
-    Banner, Button, ButtonVariant, Card, CommandLinkButton, FilePickerField, FilePickerKind,
-    GroupHeader, HStack, Panel, SearchField, Spacer, TextWidget, VStack,
+    Banner, Button, ButtonVariant, Card, Collapse, CommandLinkButton, FilePickerField,
+    FilePickerKind, GroupHeader, HStack, IconWidget, Panel, SearchField, Spacer, TextWidget,
+    VStack,
 };
 
 #[derive(Debug)]
@@ -70,12 +71,13 @@ impl Root {
                 move |_| s.set(false)
             });
 
-        let info_id = ctx.add(info_banner);
-        let warn_id = ctx.add(warn_banner);
-        let error_id = ctx.add(error_banner);
-        ctx.visible_when(info_id, info_visible);
-        ctx.visible_when(warn_id, warn_visible);
-        ctx.visible_when(error_id, error_visible);
+        // Wrap each banner in a Collapse so showing / dismissing
+        // animates the height instead of snapping. The Collapse's
+        // `expanded` signal is the same `Signal<bool>` we toggle from
+        // the dismiss / restore handlers.
+        let info_id = ctx.add(Collapse::new(info_visible).child(info_banner));
+        let warn_id = ctx.add(Collapse::new(warn_visible).child(warn_banner));
+        let error_id = ctx.add(Collapse::new(error_visible).child(error_banner));
 
         let restore = Button::new_literal("Restore banners")
             .style(ButtonVariant::Flat)
@@ -245,11 +247,21 @@ impl Root {
     }
 
     fn command_link_section(&self, _ctx: &mut BuildContext) -> impl Widget + 'static {
+        // Icon assets are embedded at compile time via the `res!`
+        // macro — same pattern as widget_catalog. The SVG bytes are
+        // inlined into the binary and parsed once into an SvgIcon
+        // resource; `IconWidget::from_svg_icon` then produces a fresh
+        // tintable IconWidget on each build call.
+        let save_icon = fern_ui::res!("resources/icons/save.svg");
+        let home_icon = fern_ui::res!("resources/icons/home.svg");
+
         let new_project = CommandLinkButton::new_literal("Create new project")
             .description_literal("Start with a blank workspace.")
+            .icon(IconWidget::from_svg_icon(save_icon))
             .on_activate_fn(|_| println!("New project clicked"));
         let open_project = CommandLinkButton::new_literal("Open existing project")
             .description_literal("Browse to a folder on disk.")
+            .icon(IconWidget::from_svg_icon(home_icon))
             .on_activate_fn(|_| println!("Open project clicked"));
 
         Card::new()
